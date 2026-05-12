@@ -1,0 +1,38 @@
+DEFAULT_TOOLS = [
+    # ── A2: Research tools ──
+    {"domain": "stock", "name": "get_stock_context", "risk": "low", "status": "enabled"},
+    {"domain": "market-data", "name": "get_daily_history", "risk": "low", "status": "enabled"},
+    {"domain": "intel", "name": "search_stock_intel", "risk": "medium", "status": "enabled"},
+    {"domain": "monitor", "name": "get_monitor_events", "risk": "low", "status": "enabled"},
+    {"domain": "monitor", "name": "get_monitor_rules", "risk": "low", "status": "enabled"},
+    {"domain": "monitor", "name": "evaluate_monitor_rules", "risk": "medium", "status": "enabled"},
+    {"domain": "strategy", "name": "list_strategies", "risk": "low", "status": "enabled"},
+    {"domain": "strategy", "name": "get_backtest_result", "risk": "low", "status": "enabled"},
+    {"domain": "report", "name": "list_report_templates", "risk": "low", "status": "enabled"},
+    {"domain": "report", "name": "generate_report", "risk": "medium", "status": "enabled"},
+    {"domain": "report", "name": "get_report_quality", "risk": "low", "status": "enabled"},
+    # ── A3: Portfolio & Risk tools ──
+    {"domain": "portfolio", "name": "get_portfolio_snapshot", "risk": "medium", "status": "enabled"},
+    {"domain": "risk", "name": "analyze_portfolio_risk", "risk": "medium", "status": "enabled"},
+    {"domain": "risk", "name": "get_active_risk_policy", "risk": "low", "status": "enabled"},
+    {"domain": "risk", "name": "list_risk_policies", "risk": "low", "status": "enabled"},
+    {"domain": "risk", "name": "evaluate_policy_risk", "risk": "medium", "status": "enabled"},
+    {"domain": "strategy", "name": "run_strategy_backtest", "risk": "medium", "status": "enabled"},
+    {"domain": "planner", "name": "list_pre_trade_reviews", "risk": "medium", "status": "enabled"},
+    {"domain": "execution", "name": "list_paper_orders", "risk": "medium", "status": "enabled"},
+    {"domain": "paper-portfolio", "name": "get_paper_portfolio", "risk": "medium", "status": "enabled"},
+    {"domain": "paper-portfolio", "name": "analyze_paper_performance", "risk": "medium", "status": "enabled"},
+    {"domain": "paper-portfolio", "name": "create_paper_portfolio_snapshot", "risk": "medium", "status": "enabled"},
+    {"domain": "decision-journal", "name": "list_decision_journal", "risk": "low", "status": "enabled"},
+    {"domain": "decision-journal", "name": "get_decision_journal_entry", "risk": "low", "status": "enabled"},
+    {"domain": "decision-journal", "name": "summarize_decision_outcomes", "risk": "low", "status": "enabled"},
+    {"domain": "review-inbox", "name": "list_review_inbox", "risk": "low", "status": "enabled"},
+    {"domain": "review-inbox", "name": "summarize_review_inbox", "risk": "low", "status": "enabled"},
+    # ── A4: Planner tools ──
+    {"domain": "planner", "name": "generate_draft_order", "risk": "high", "status": "enabled"},
+    {"domain": "planner", "name": "list_rebalance_drafts", "risk": "high", "status": "enabled"},
+    {"domain": "planner", "name": "get_rebalance_draft", "risk": "high", "status": "enabled"},
+    {"domain": "planner", "name": "create_pre_trade_review", "risk": "high", "status": "enabled"},
+    # ── A5: Execution (blocked) ──
+    {"domain": "execution", "name": "place_real_order", "risk": "blocked", "status": "blocked"},
+]

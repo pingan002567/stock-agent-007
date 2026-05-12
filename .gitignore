@@ -1,0 +1,64 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Node.js
+node_modules/
+frontend/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# System
+.DS_Store
+Thumbs.db
+
+# Data
+data/
+*.sqlite3
+*.db
+
+# Logs
+log/
+*.log
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Project specific
+.omx/
+.omo/
+.playwright-mcp/
+.sisyphus/
+.ac360/
+.opencode/
+.deer-flow/users/
+*.png
+ui-mockup.html
+chat-init-snapshot.md
+
+# CI/CD
+.github/workflows/
+
+# Config (may contain secrets)
+config.json
+opencode.json
+
+# Environment examples
+.env.example
+
+# Temporary files
+*.tmp
+*.bak
+test_research_page.py

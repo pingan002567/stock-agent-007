@@ -1,0 +1,1 @@
+"""Default local configuration."""

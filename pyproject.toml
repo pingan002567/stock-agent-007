@@ -1,0 +1,35 @@
+[project]
+name = "stock-agent-001"
+version = "0.1.0"
+description = "Single-user local AI Stock Workbench backend"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.30.0",
+  "pydantic>=2.8.0",
+  "openai>=2.37.0",
+  "deerflow-harness @ git+https://github.com/bytedance/deer-flow.git@main#subdirectory=backend/packages/harness",
+]
+
+[project.optional-dependencies]
+akshare = [
+  "akshare>=1.18.60",
+]
+yfinance = [
+  "yfinance>=0.2.0",
+]
+test = [
+  "pytest>=8.0.0",
+  "httpx>=0.27.0",
+]
+export = [
+  "fpdf2>=2.8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--assert=plain"
+markers = [
+  "deerflow: optional real embedded DeerFlow smoke checks",
+  "ai_regression: deterministic AI regression checks",
+]

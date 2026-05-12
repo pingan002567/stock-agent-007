@@ -1,0 +1,11 @@
+{
+  "mcpServers": {},
+  "skills": {
+    "stock-researcher":    {"enabled": true},
+    "risk-officer":        {"enabled": true},
+    "strategy-analyst":    {"enabled": true},
+    "rebalance-planner":   {"enabled": true},
+    "stock-monitor":       {"enabled": true},
+    "report-writer":       {"enabled": true}
+  }
+}
