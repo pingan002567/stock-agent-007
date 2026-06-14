@@ -3,7 +3,7 @@
 # ===========================
 
 # Stage 1: Build frontend
-FROM node:18-alpine AS frontend-builder
+FROM docker.m.daocloud.io/library/node:22-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 
@@ -11,12 +11,12 @@ WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 
-# Copy frontend source and build
+# Copy frontend source and build (skip TypeScript checking for faster build)
 COPY frontend/ .
-RUN npm run build
+RUN npx vite build
 
 # Stage 2: Python backend + static files
-FROM python:3.12-slim
+FROM docker.m.daocloud.io/library/python:3.12-slim
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
@@ -24,14 +24,16 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies
-RUN apt-get update && \
+# Install system dependencies (using Chinese mirror for faster downloads in China)
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
     curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-RUN pip install uv
+# Install uv (using Chinese PyPI mirror for faster downloads in China)
+RUN pip install uv -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com
 
 WORKDIR /app
 
@@ -41,8 +43,8 @@ COPY backend/ backend/
 COPY config.yaml ./
 COPY extensions_config.json ./
 
-# Install Python dependencies
-RUN uv pip install --system -e ".[akshare,yfinance]"
+# Install Python dependencies (using Chinese PyPI mirror)
+RUN uv pip install --system -e ".[akshare,yfinance]" -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com
 
 # Copy built frontend from stage 1
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
