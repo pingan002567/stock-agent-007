@@ -1,0 +1,67 @@
+# Git
+.git
+.gitignore
+
+# Python
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+dist
+build
+.pytest_cache
+
+# Node.js
+node_modules
+frontend/node_modules
+frontend/dist
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# System
+.DS_Store
+Thumbs.db
+
+# Data (will be mounted as volume)
+data/
+log/
+*.sqlite3
+*.db
+
+# Environment (will be mounted as volume)
+.env
+.env.local
+.env.*
+
+# Tools
+.ac360
+.omo
+.opencode
+.playwright-mcp
+.sisyphus
+
+# Documentation
+doc/
+docs/
+*.md
+!README.md
+
+# Scripts
+scripts/
+install.sh
+install.bat
+start.sh
+start.bat
+
+# Tests
+tests/
+frontend/e2e/
+frontend/src/test/
+
+# Mockup
+ui-mockup.html

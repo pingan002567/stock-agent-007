@@ -169,6 +169,57 @@ start.bat
 > - 需要预先安装 [Node.js 18+](https://nodejs.org/)
 > - 建议使用 CMD 或 PowerShell 运行，不建议使用 Git Bash（部分命令不兼容）
 
+### Docker 部署（推荐）
+
+无需安装 Python 和 Node.js，只需安装 Docker Desktop 即可一键运行。
+
+```bash
+# 1. 克隆项目
+git clone https://github.com/your-username/stock-agent-001.git
+cd stock-agent-001
+
+# 2. 配置 API Key
+cp .env.example .env
+vi .env  # 或用记事本打开，填入 OPENAI_API_KEY
+
+# 3. 启动服务
+docker-compose up -d
+
+# 4. 查看日志
+docker-compose logs -f
+
+# 5. 停止服务
+docker-compose down
+```
+
+**常用命令：**
+
+```bash
+# 重新构建并启动（代码更新后）
+docker-compose up -d --build
+
+# 查看运行状态
+docker-compose ps
+
+# 进入容器调试
+docker exec -it stock-agent bash
+
+# 清理数据重新开始
+docker-compose down -v
+docker-compose up -d
+```
+
+**Docker Desktop 安装：**
+- Windows: https://docs.docker.com/desktop/install/windows-install/
+- Mac: https://docs.docker.com/desktop/install/mac-install/
+- Linux: https://docs.docker.com/desktop/install/linux-install/
+
+> **Docker 部署优势：**
+> - 无需安装 Python、Node.js 等依赖
+> - 环境隔离，不影响本机
+> - 一键启动，适合生产部署
+> - 数据持久化（data/ 和 log/ 目录）
+
 ### 手动安装（所有平台）
 
 ```bash
@@ -202,10 +253,10 @@ cd frontend && npm run dev
 
 | 服务 | 地址 |
 |------|------|
-| **前端应用** | http://localhost:5173 |
+| **应用入口** | http://localhost:6666/app |
 | **后端 API** | http://localhost:6666 |
 | **API 文档** | http://localhost:6666/docs |
-| **生产模式** | http://localhost:6666/app (需先构建前端) |
+| **开发模式前端** | http://localhost:5173 (仅手动安装) |
 
 ---
 
