@@ -23,10 +23,24 @@ export async function fetchSessionMessages(sessionId: string, runId?: string): P
   return data.items || [];
 }
 
-export async function createSession(title: string): Promise<CopilotSession> {
+// Single-user local workbench: there is no per-session authority selector in
+// the UI yet, so all copilot traffic runs at this default level. Centralize the
+// value here instead of scattering the magic string across call sites.
+export const DEFAULT_AUTHORITY_LEVEL = "A4";
+
+export async function createSession(
+  title: string,
+  page: string = "overview",
+  symbol: string | null = null,
+): Promise<CopilotSession> {
   return api<CopilotSession>("/api/copilot/sessions", {
     method: "POST",
-    body: JSON.stringify({ title, current_page: "overview", anchor_symbol: "AAPL", authority_level: "A4" }),
+    body: JSON.stringify({
+      title,
+      current_page: page,
+      anchor_symbol: symbol,
+      authority_level: DEFAULT_AUTHORITY_LEVEL,
+    }),
   });
 }
 
@@ -60,7 +74,7 @@ export async function sendMessage(
         message,
         page,
         symbol,
-        authority_level: "A4",
+        authority_level: DEFAULT_AUTHORITY_LEVEL,
         client_message_id: `web-${Date.now()}`,
       }),
     }

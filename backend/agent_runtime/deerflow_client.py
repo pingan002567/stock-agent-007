@@ -260,9 +260,14 @@ class DeerFlowClientAdapter:
         runtime_config: dict[str, Any] | None = None,
     ) -> "DeerFlowClientAdapter":
         runtime_config = runtime_config or {}
+        
+        # 获取 API Key，忽略占位符值
+        env_api_key = os.getenv("OPENAI_API_KEY") or os.getenv("WORKBENCH_AI_API_KEY")
+        if env_api_key and env_api_key in ("your_api_key_here", "sk-xxx", "xxx"):
+            env_api_key = None
+        
         _resolved_api_key = (
-            os.getenv("OPENAI_API_KEY")
-            or os.getenv("WORKBENCH_AI_API_KEY")
+            env_api_key
             or runtime_config.get("api_key")
             or None
         )

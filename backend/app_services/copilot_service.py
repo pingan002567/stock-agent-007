@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -43,13 +45,30 @@ ESTIMATED_COST_PER_1K_TOKENS: dict[str, dict[str, float]] = {
 }
 
 
+# 内存中保留的会话轮次记忆数量上限（LRU 淘汰），防止单进程长跑无限增长。
+MAX_SESSION_STATES = 256
+
+
+def _resolve_rates(model_name: str | None) -> dict[str, float]:
+    """Match model name to a pricing entry.
+
+    Real model ids often carry date/variant suffixes (e.g. ``gpt-4o-2024-08-06``,
+    ``deepseek-chat-v2``), so fall back to a longest-prefix match before the
+    default rates instead of requiring an exact key.
+    """
+    name = (model_name or "").lower()
+    if name in ESTIMATED_COST_PER_1K_TOKENS:
+        return ESTIMATED_COST_PER_1K_TOKENS[name]
+    matches = [key for key in ESTIMATED_COST_PER_1K_TOKENS if name.startswith(key)]
+    if matches:
+        return ESTIMATED_COST_PER_1K_TOKENS[max(matches, key=len)]
+    return ESTIMATED_COST_PER_1K_TOKENS["gpt-4o-mini"]
+
+
 def _estimate_cost(
     input_tokens: int, output_tokens: int, model_name: str | None = None
 ) -> float:
-    rates = ESTIMATED_COST_PER_1K_TOKENS.get(
-        model_name or "",
-        ESTIMATED_COST_PER_1K_TOKENS["gpt-4o-mini"],
-    )
+    rates = _resolve_rates(model_name)
     input_cost = (input_tokens / 1000) * rates["input"]
     output_cost = (output_tokens / 1000) * rates["output"]
     return round(input_cost + output_cost, 6)
@@ -159,7 +178,9 @@ class CopilotService:
         Called after settings change so the runtime transitions from stub to
         embedded without a server restart.
         """
-        runtime_config = self.repo.get_config("runtime", {}).get("config", {})
+        # 兼容两种配置格式：直接在顶层或在 config 子键下
+        raw_config = self.repo.get_config("runtime", {})
+        runtime_config = raw_config.get("config", raw_config)
         new_adapter = DeerFlowClientAdapter.from_env(
             tool_bridge=self.deerflow.tool_bridge,
             runtime_config=runtime_config,
@@ -507,7 +528,11 @@ class CopilotService:
             raise KeyError(run_id)
 
         request = state.request
-        context = self.copilot_context_builder.build(
+        # 上下文构建是同步的 repo/provider I/O（_symbol_summary 可能命中数据源），直接在
+        # async 生成器里调用会阻塞事件循环、拖慢首字节并卡住其他并发请求。卸载到线程池。
+        # SQLite 连接以 check_same_thread=False 打开，这里均为只读查询，跨线程安全。
+        context = await asyncio.to_thread(
+            self.copilot_context_builder.build,
             page=request.page,
             symbol=request.symbol,
             intent=state.intent,
@@ -515,16 +540,22 @@ class CopilotService:
         session_state = self._get_or_create_session_state(state.session_id)
         if session_state.total_runs > 0:
             context["session_state"] = session_state.to_context()
-        
-        previous_tool_calls = self._get_previous_tool_calls(state.session_id, run_id)
+
+        previous_tool_calls = await asyncio.to_thread(
+            self._get_previous_tool_calls, state.session_id, run_id
+        )
         if previous_tool_calls:
             context["previous_tool_calls"] = previous_tool_calls
         
         runtime_context = {**context, "_authority_level": request.authority_level.value}
         resolved_task_id = task_id or state.task_id
-        last_report_result: Dict[str, Any] | None = None
-        last_draft_result: Dict[str, Any] | None = None
-        last_review_result: Dict[str, Any] | None = None
+        # 按工具名捕获最近一次有意义的结果，供 final 阶段回填。
+        # 单一累加器替代散落的硬编码 if 块（见 _capture_tool_result）。
+        captured: Dict[str, Dict[str, Any] | None] = {
+            "report": None,
+            "draft": None,
+            "review": None,
+        }
         tool_call_events: list[dict[str, Any]] = []
         tool_result_events: list[dict[str, Any]] = []
         final_seen = False
@@ -557,31 +588,11 @@ class CopilotService:
                 subagent_enabled=state.intent in {"rebalance_plan", "strategy_backtest"},
             ):
                 payload = event["payload"]
-                if (
-                    event["type"] == "tool_result"
-                    and payload.get("tool") == "generate_report"
-                ):
-                    result = payload.get("result")
-                    if (
-                        isinstance(result, dict)
-                        and result.get("status") != "needs_confirmation"
-                    ):
-                        last_report_result = result
-                if (
-                    event["type"] == "tool_result"
-                    and payload.get("tool") in ("generate_draft_order", "confirm_rebalance_draft")
-                ):
-                    result = payload.get("result")
-                    if isinstance(result, dict):
-                        last_draft_result = result
-                if (
-                    event["type"] == "tool_result"
-                    and payload.get("tool") == "create_pre_trade_review"
-                ):
-                    result = payload.get("result")
-                    if isinstance(result, dict):
-                        last_review_result = result
+                self._capture_tool_result(event, captured)
                 if event["type"] == "final":
+                    last_report_result = captured["report"]
+                    last_draft_result = captured["draft"]
+                    last_review_result = captured["review"]
                     try:
                         payload = self.result_normalizer.normalize_final(payload)
                         payload["skill_trace"] = state.skill_trace
@@ -783,27 +794,61 @@ class CopilotService:
             self._update_task_step(
                 resolved_task_id, "stream_crashed", 100, status="failed"
             )
-            error_msg = str(exc).lower()
-            if "401" in error_msg or "unauthorized" in error_msg:
-                ec = "auth_error"
-            elif "429" in error_msg or "rate limit" in error_msg:
-                ec = "rate_limit"
-            elif "timeout" in error_msg or "timed out" in error_msg:
-                ec = "timeout"
-            elif "tool" in error_msg or "execution" in error_msg:
-                ec = "tool_error"
-            elif "permission" in error_msg or "denied" in error_msg:
-                ec = "auth_error"
-            else:
-                ec = "stream_run"
             self._upsert_run_log(
                 run_id,
                 status="failed",
-                error_category=ec,
+                error_category=self._categorize_error(exc),
                 runtime_error=str(exc),
                 latency_ms=(time.monotonic() - _start_time) * 1000,
             )
         self._runs.pop(run_id, None)
+
+    @staticmethod
+    def _capture_tool_result(
+        event: dict[str, Any], captured: dict[str, dict[str, Any] | None]
+    ) -> None:
+        """Record the latest meaningful tool_result into ``captured`` for final enrichment.
+
+        Replaces three hardcoded per-tool if-blocks in stream_run. Behavior is
+        preserved exactly: report is only captured when not pending confirmation;
+        draft/review are captured whenever the result is a dict.
+        """
+        if event.get("type") != "tool_result":
+            return
+        payload = event.get("payload") or {}
+        result = payload.get("result")
+        if not isinstance(result, dict):
+            return
+        tool = payload.get("tool")
+        if tool == "generate_report":
+            if result.get("status") != "needs_confirmation":
+                captured["report"] = result
+        elif tool in ("generate_draft_order", "confirm_rebalance_draft"):
+            captured["draft"] = result
+        elif tool == "create_pre_trade_review":
+            captured["review"] = result
+
+    @staticmethod
+    def _categorize_error(exc: Exception) -> str:
+        """Map a stream-run exception to a coarse error category for the run log.
+
+        NOTE: this is heuristic substring matching on the exception text and is
+        locale/SDK-fragile (see review item #4); centralized here so it can be
+        unit-tested and later replaced by structured error codes from the
+        tool-bridge / adapter boundary.
+        """
+        error_msg = str(exc).lower()
+        if "401" in error_msg or "unauthorized" in error_msg:
+            return "auth_error"
+        if "429" in error_msg or "rate limit" in error_msg:
+            return "rate_limit"
+        if "timeout" in error_msg or "timed out" in error_msg:
+            return "timeout"
+        if "tool" in error_msg or "execution" in error_msg:
+            return "tool_error"
+        if "permission" in error_msg or "denied" in error_msg:
+            return "auth_error"
+        return "stream_run"
 
     def _ensure_session(self, request: CopilotRequest) -> CopilotSession:
         if request.session_id:
@@ -1198,11 +1243,15 @@ class CopilotService:
         return state
 
     def _get_or_create_session_state(self, session_id: str) -> SessionStateData:
-        if session_id not in self._session_states:
-            self._session_states[session_id] = SessionStateData(
-                active_drafts={}, active_reviews={}
-            )
-        return self._session_states[session_id]
+        # session_state 只是内存里的轮次记忆。原实现的 dict 只增不删，单进程长跑会无限膨胀。
+        # 这里做 LRU 上限淘汰：命中则移到末尾，新建超限则丢弃最久未用的会话。
+        state = self._session_states.pop(session_id, None)
+        if state is None:
+            state = SessionStateData(active_drafts={}, active_reviews={})
+            while len(self._session_states) >= MAX_SESSION_STATES:
+                self._session_states.pop(next(iter(self._session_states)))
+        self._session_states[session_id] = state
+        return state
 
     def _update_session_state(self, session_id: str, turn: TurnSummary) -> None:
         state = self._get_or_create_session_state(session_id)
@@ -1479,14 +1528,7 @@ class CopilotService:
         cost: float | None = None,
         latency_ms: float | None = None,
     ) -> None:
-        existing = next(
-            (
-                item
-                for item in self.runtime_observer.list_copilot_runs(limit=500)
-                if item.run_id == run_id
-            ),
-            None,
-        )
+        existing = self.runtime_observer.get_copilot_run_log(run_id)
         if not existing:
             return
         cost_val = cost if cost is not None else existing.cost

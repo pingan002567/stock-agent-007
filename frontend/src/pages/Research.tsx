@@ -459,8 +459,10 @@ export default function Research() {
                             <tr><th>日期</th><th>开盘</th><th>最高</th><th>最低</th><th>收盘</th><th>涨跌</th></tr>
                           </thead>
                           <tbody>
-                            {history.slice(0, 5).map((h) => {
-                              const prevClose = history.find(x => x.date === h.date)?.close;
+                            {history.slice(0, 5).map((h, idx) => {
+                              // 计算涨跌：当前收盘价 vs 前一天收盘价
+                              const prevItem = idx < history.length - 1 ? history[idx + 1] : null;
+                              const prevClose = prevItem?.close ?? h.open;
                               const change = prevClose ? ((h.close ?? 0) - prevClose) / prevClose * 100 : 0;
                               return (
                                 <tr key={h.date ?? h.day}>

@@ -3,6 +3,7 @@ import { apiGet } from "@/api/client";
 import { useAppState } from "@/hooks/useAppState";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, PanelSkeleton, KpiSkeleton } from "@/components/ui/Loading";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { inferMarket, marketMoney, pct, changeCls } from "@/utils/market";
 
 interface IndexInfo { code?: string; name?: string; last?: number; change_pct?: number; turnover?: number; market?: string }
@@ -21,6 +22,7 @@ export default function Market() {
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Populate from global cache once initial load completes
   useEffect(() => {
@@ -35,7 +37,7 @@ export default function Market() {
   }, [globalLoading, appDataCache]);
 
   const loadAll = useCallback(async () => {
-    setLoading(true); setError(null);
+    setRefreshing(true); setLoading(true); setError(null);
     try {
       const [mr, sd, tl] = await Promise.all([
         apiGet<MarketReview>("/api/market/review"),
@@ -43,7 +45,7 @@ export default function Market() {
         apiGet<{ items: TimelineEvent[] }>("/api/market/timeline").then((r) => r.items).catch(() => []),
       ]);
       setReview(mr); setSectors(sd); setTimeline(tl);
-    } catch (err) { setError(err instanceof Error ? err.message : "加载市场概览失败"); } finally { setLoading(false); }
+    } catch (err) { setError(err instanceof Error ? err.message : "加载市场概览失败"); } finally { setLoading(false); setRefreshing(false); }
   }, []);
 
   if (loading && !review) return (
@@ -71,7 +73,7 @@ export default function Market() {
               <p>实时追踪全球市场动态，分析板块轮动，发现投资机会。</p>
             </div>
             <div className="hero-actions">
-              <button className="primary" onClick={() => void loadAll()} disabled={loading} type="button">刷新数据</button>
+              <RefreshButton refreshing={refreshing} onClick={() => void loadAll()} />
             </div>
           </div>
           <div className="market-stats">
@@ -102,7 +104,7 @@ export default function Market() {
           </div>
         </div>
 
-        <div className="market-index">
+        <div className={`market-index ${refreshing ? 'refreshing-module' : ''}`}>
           {(review?.indices ?? []).slice(0, 4).map((idx) => (
             <div key={idx.code ?? idx.name} className="index-card">
               <div className="index-name">{idx.name}</div>
@@ -114,7 +116,7 @@ export default function Market() {
           ))}
         </div>
 
-        <div className="kpi-grid">
+        <div className={`kpi-grid ${refreshing ? 'refreshing-module' : ''}`}>
           <div className="kpi-card">
             <div className="kpi-header">
               <span className="kpi-label">成交额</span>
@@ -149,7 +151,7 @@ export default function Market() {
           </div>
         </div>
 
-        <div className="panel" style={{ marginBottom: 24 }}>
+        <div className={`panel ${refreshing ? 'refreshing-module' : ''}`} style={{ marginBottom: 24 }}>
           <div className="panel-header">
             <div className="panel-title">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -185,7 +187,7 @@ export default function Market() {
           </div>
         </div>
 
-        <div className="two-col">
+        <div className={`two-col ${refreshing ? 'refreshing-module' : ''}`}>
           <div className="panel">
             <div className="panel-header">
               <div className="panel-title">
@@ -252,7 +254,7 @@ export default function Market() {
         </div>
 
         {timeline.length > 0 && (
-          <div className="panel">
+          <div className={`panel ${refreshing ? 'refreshing-module' : ''}`}>
             <div className="panel-header">
               <div className="panel-title">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

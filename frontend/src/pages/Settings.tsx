@@ -8,6 +8,7 @@ import {
 } from "@/api/runtime";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, PanelSkeleton, KpiSkeleton } from "@/components/ui/Loading";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { useAppState } from "@/hooks/useAppState";
 
 /* ---------- Types ---------- */
@@ -382,16 +383,8 @@ function AiTab({
       await onSaveRuntimeConfig(payload);
       setApiKey("");
       setDirty(false);
-      // Reconnect so runtime picks up the new config
-      setReconnecting(true);
-      try {
-        const reconnectResult = await reconnectRuntime();
-        setTestResult(reconnectResult.agent_runtime?.degraded
-          ? { ok: false, error: (reconnectResult.agent_runtime?.degraded_reason as string) ?? "重连后运行时降级" }
-          : { ok: true, model: (reconnectResult.agent_runtime?.model_name as string) ?? (modelName || undefined) });
-      } finally {
-        setReconnecting(false);
-      }
+      // 后端会自动重连，显示成功状态
+      setTestResult({ ok: true, model: modelName || undefined });
     } catch (err) {
       window.alert(err instanceof Error ? err.message : "保存 AI 配置失败");
     } finally { setSaving(false); }
@@ -1191,7 +1184,7 @@ export default function Settings() {
               <p>管理 AI 模型、数据源、风控策略和系统参数。</p>
             </div>
             <div className="hero-actions">
-              <button className="primary" onClick={() => void loadAll()} disabled={loading} type="button">刷新配置</button>
+              <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
             </div>
           </div>
           <div className="market-stats">

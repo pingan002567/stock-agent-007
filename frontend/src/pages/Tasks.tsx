@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiGet } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, TableSkeleton, PanelSkeleton } from "@/components/ui/Loading";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Pagination } from "@/components/ui/Pagination";
 import { formatTimeAgo } from "@/utils/format";
 import { useAppState } from "@/hooks/useAppState";
@@ -59,7 +60,7 @@ export default function Tasks() {
               <p>监控 AI Agent 执行状态，追踪任务进度和工具调用。</p>
             </div>
             <div className="hero-actions">
-              <button className="primary" onClick={() => void loadAll()} disabled={loading} type="button">刷新任务</button>
+              <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
             </div>
           </div>
           <div className="market-stats">

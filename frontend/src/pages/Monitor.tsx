@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiPost, apiDelete } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, PanelSkeleton, KpiSkeleton, EmptyState } from "@/components/ui/Loading";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Pagination } from "@/components/ui/Pagination";
 import { formatTimeAgo } from "@/utils/format";
 
@@ -137,7 +138,7 @@ export default function Monitor() {
               </button>
               <button onClick={() => void handleStart()} type="button">启动盯盘</button>
               <button onClick={() => void handlePause()} type="button">暂停盯盘</button>
-              <button onClick={() => void loadAll()} disabled={loading} type="button">刷新</button>
+              <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
             </div>
           </div>
           <div className="market-stats">

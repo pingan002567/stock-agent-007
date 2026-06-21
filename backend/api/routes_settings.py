@@ -47,9 +47,11 @@ def get_settings(request: Request, services: AppServices = Depends(get_services)
             "paper_trading": "sandbox_only",
             "real_order": "blocked",
         },
-        "runtime_config": services.repo.get_config(
-            "runtime", {"config": DEFAULT_RUNTIME_CONFIG}
-        ).get("config", DEFAULT_RUNTIME_CONFIG),
+        # 兼容两种配置格式：直接在顶层或在 config 子键下
+        "runtime_config": (
+            services.repo.get_config("runtime", {}).get("config")
+            or services.repo.get_config("runtime", DEFAULT_RUNTIME_CONFIG)
+        ),
         "agent_runtime": services.copilot_service.deerflow.status().to_dict(),
         "data_provider": provider_router.status().to_dict(),
         "data_sources": services.repo.get_config("data_sources", DEFAULT_DATA_SOURCES),

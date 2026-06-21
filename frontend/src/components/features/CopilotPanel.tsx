@@ -5,6 +5,7 @@ import { parseCopilotEvent, EVENT_FINAL, EVENT_ERROR, EVENT_TOOL_CALL, EVENT_PAR
 import type { CopilotMessage } from "@/api/client";
 import { useCopilotChat } from "@/hooks/useCopilotChat";
 import { CopilotMessageItem } from "@/components/features/CopilotMessageItem";
+import { CopilotStreamingMessage } from "@/components/features/CopilotStreamingMessage";
 import { ContextCard } from "@/components/features/ContextCard";
 import { NextActions } from "@/components/features/NextActions";
 
@@ -109,7 +110,7 @@ export function CopilotPanel({ open, onToggle }: { open: boolean; onToggle: () =
   const {
     currentSession, sessions,
     messages,
-    sending, reasoningText, copiedId,
+    sending, streamMessage, copiedId,
     switchSession, handleNewSession, handleRenameSession, handleDeleteSession,
     handleSend: sendMessage, handleStop,
     handleCopy,
@@ -143,7 +144,7 @@ export function CopilotPanel({ open, onToggle }: { open: boolean; onToggle: () =
     el.style.height = Math.min(el.scrollHeight, 120) + "px";
   }, []);
 
-  useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
+  useEffect(() => { scrollToBottom(); }, [messages, streamMessage, scrollToBottom]);
 
   useEffect(() => {
     if (!sessionOpen) return;
@@ -379,31 +380,7 @@ export function CopilotPanel({ open, onToggle }: { open: boolean; onToggle: () =
 
           {messageElements}
 
-          {reasoningText && (
-            <div className="msg ai streaming">
-              <div className="msg-label">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z" fill="currentColor"/>
-                  <circle cx="12" cy="12" r="3"/>
-                </svg>
-                AI Copilot
-                <span style={{ fontSize: 10, color: "var(--blue)", marginLeft: "auto", display: "flex", alignItems: "center", gap: 4 }}>
-                  <span style={{ 
-                    width: 6, 
-                    height: 6, 
-                    borderRadius: "50%", 
-                    background: "var(--blue)",
-                    boxShadow: "0 0 8px var(--blue)",
-                    animation: "pulse 1s infinite"
-                  }} />
-                  推理中
-                </span>
-              </div>
-              <div style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>
-                {reasoningText}
-              </div>
-            </div>
-          )}
+          {streamMessage && <CopilotStreamingMessage streamMessage={streamMessage} />}
 
           <div ref={messagesEndRef} />
         </div>

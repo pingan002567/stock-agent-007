@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost, apiDelete } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, TableSkeleton, PanelSkeleton } from "@/components/ui/Loading";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { useAppState } from "@/hooks/useAppState";
 
 interface Strategy {
@@ -113,7 +114,7 @@ export default function Strategies() {
               <p>管理投资策略，运行回测，分析历史表现。</p>
             </div>
             <div className="hero-actions">
-              <button className="primary" onClick={() => void loadAll()} disabled={loading} type="button">刷新</button>
+              <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
               <button onClick={() => void handleAddStrategy()} disabled={addingStrategy} type="button">
                 {addingStrategy ? "添加中…" : "新增策略"}
               </button>

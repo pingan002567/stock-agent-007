@@ -43,7 +43,8 @@ def render_prompt_envelope(
     context: dict[str, Any],
 ) -> str:
     envelope = build_prompt_envelope(user_message=user_message, skill_trace=skill_trace, context=context)
-    return json.dumps(envelope, ensure_ascii=False, indent=2)
+    # 紧凑序列化：发给 LLM 的 prompt 不需要缩进/空格，indent=2 会白白消耗 token。
+    return json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
 
 
 def _trim_skill_trace(skill_trace: list[dict[str, Any]]) -> list[dict[str, Any]]:

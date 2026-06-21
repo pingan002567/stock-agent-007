@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { apiGet, apiPost } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, TableSkeleton, EmptyState } from "@/components/ui/Loading";
+import { RefreshButton, RefreshContainer } from "@/components/ui/RefreshButton";
 import { useAppState } from "@/hooks/useAppState";
 import { pct } from "@/utils/market";
 
@@ -500,7 +501,7 @@ export default function Holdings() {
               <button className="primary" disabled={scanning} onClick={() => void handleRiskScan()} type="button">
                 {scanning ? "扫描中…" : "风险扫描"}
               </button>
-              <button onClick={() => void loadAll()} disabled={loading} type="button">刷新数据</button>
+              <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
             </div>
           </div>
           <div className="market-stats">

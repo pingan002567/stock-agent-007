@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, TableSkeleton, PanelSkeleton } from "@/components/ui/Loading";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Pagination } from "@/components/ui/Pagination";
 import { formatTimeAgo } from "@/utils/format";
 import { useAppState } from "@/hooks/useAppState";
@@ -102,7 +103,7 @@ export default function Reports() {
               <button disabled={paperReportBusy} onClick={() => void handleGeneratePaperReport()} type="button">
                 {paperReportBusy ? "生成中…" : "生成复盘报告"}
               </button>
-              <button onClick={() => void loadAll()} disabled={loading} type="button">刷新</button>
+              <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
             </div>
           </div>
           <div className="market-stats">

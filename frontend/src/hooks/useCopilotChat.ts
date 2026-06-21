@@ -91,10 +91,11 @@ export function useCopilotChat() {
   const [sessions, setSessions] = useState<CopilotSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const currentSessionIdRef = useRef(currentSessionId);
-  currentSessionIdRef.current = currentSessionId;
+  useEffect(() => { currentSessionIdRef.current = currentSessionId; }, [currentSessionId]);
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
   const [sending, setSending] = useState(false);
   const [reasoningText, setReasoningText] = useState<string>("");
+  const [streamMessage, setStreamMessage] = useState<StreamMessage | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [toolOpen, setToolOpen] = useState<Set<string>>(new Set());
 
@@ -103,27 +104,32 @@ export function useCopilotChat() {
 
   const currentSession = sessions.find((s) => s.session_id === currentSessionId);
 
-  useEffect(() => { loadSessions(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => { refreshCopilotContext(); }, [currentScreen, stock, refreshCopilotContext]);
-
-  async function loadSessions() {
-    try {
-      const items = await fetchSessions();
-      setSessions(items);
-      if (items.length > 0 && !currentSessionId) {
-        setCurrentSessionId(items[0].session_id);
-        loadMessages(items[0].session_id);
-      }
-    } catch { /* empty */ }
-  }
-
-  async function loadMessages(sessionId: string, runId?: string) {
+  // memo 化：否则每次渲染重建，会让依赖它们的 handleSend 等 useCallback 全部失效
+  const loadMessages = useCallback(async (sessionId: string, runId?: string) => {
     try {
       const items = await fetchSessionMessages(sessionId, runId);
       setMessages(items);
     } catch { /* empty */ }
-  }
+  }, []);
+
+  const loadSessions = useCallback(async () => {
+    try {
+      const items = await fetchSessions();
+      setSessions(items);
+      // 用 ref 读取当前会话，避免把 currentSessionId 列进依赖而破坏 memo 稳定性
+      if (items.length > 0 && !currentSessionIdRef.current) {
+        setCurrentSessionId(items[0].session_id);
+        loadMessages(items[0].session_id);
+      }
+    } catch { /* empty */ }
+  }, [loadMessages]);
+
+  // 挂载时加载会话列表；loadSessions 为异步加载，setState 发生在 await 之后，
+  // 并非会触发级联渲染的同步 setState，这里属于规则的误报。
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadSessions(); }, [loadSessions]);
+
+  useEffect(() => { refreshCopilotContext(); }, [currentScreen, stock, refreshCopilotContext]);
 
   const switchSession = useCallback(async (id: string) => {
     if (id === currentSessionId) return;
@@ -133,25 +139,27 @@ export function useCopilotChat() {
     setCurrentSessionId(id);
     setMessages([]);
     setStreamingReasoningText("");
+    setStreamMessage(null);
     setCopilotStreaming(false);
     setSending(false);
     await loadMessages(id);
-  }, [currentSessionId, setCopilotStreaming, setStreamingReasoningText]);
+  }, [currentSessionId, loadMessages, setCopilotStreaming, setStreamingReasoningText]);
 
   const handleNewSession = useCallback(async () => {
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
     sendingRef.current = false;
     try {
-      const session = await createSession("新会话");
+      const session = await createSession("新会话", currentScreen, stock || null);
       setSessions((prev) => [session, ...prev]);
       setCurrentSessionId(session.session_id);
       setMessages([]);
       setStreamingReasoningText("");
+      setStreamMessage(null);
       setCopilotStreaming(false);
       setSending(false);
     } catch { /* empty */ }
-  }, [setCopilotStreaming, setStreamingReasoningText]);
+  }, [currentScreen, stock, setCopilotStreaming, setStreamingReasoningText]);
 
   const handleRenameSession = useCallback(async (sid: string, val: string) => {
     const trimmed = val.trim();
@@ -173,7 +181,7 @@ export function useCopilotChat() {
         if (next) await loadMessages(next.session_id);
       }
     } catch { /* empty */ }
-  }, [currentSessionId, sessions]);
+  }, [currentSessionId, sessions, loadMessages]);
 
   const handleSend = useCallback(async (input: string) => {
     const text = input.trim();
@@ -182,12 +190,21 @@ export function useCopilotChat() {
     setSending(true);
     setCopilotStreaming(true);
     setReasoningText("AI 正在思考...");
+    setStreamMessage({
+      runId: "",
+      phase: "reasoning",
+      reasoningText: "AI 正在思考...",
+      tools: [],
+      answerText: "",
+      finalPayload: null,
+      errorText: null,
+    });
 
     try {
       let sid = currentSessionId;
       if (!sid) {
         const existing = await fetchSessions();
-        const session = existing[0] ?? await createSession(`${stock} 对话`);
+        const session = existing[0] ?? await createSession(`${stock} 对话`, currentScreen, stock || null);
         sid = session.session_id;
         setCurrentSessionId(sid);
       }
@@ -204,15 +221,8 @@ export function useCopilotChat() {
         created_at: new Date().toISOString(),
         run_id: run.run_id,
       };
-      // 清理之前run的中间消息，保留用户消息和final_answer，然后追加新消息
-      setMessages((prev) => {
-        const cleaned = prev.filter((m) => {
-          if (m.kind === "user_message") return true;
-          if (m.kind === "final_answer") return true;
-          return false;
-        });
-        return [...cleaned, userMsg];
-      });
+      // 乐观追加用户消息；本轮结束后会用服务端持久化消息整体对齐（见 final 处理）
+      setMessages((prev) => [...prev, userMsg]);
 
       // 收集完整的流式数据
       let finalAnswerText = "";
@@ -235,13 +245,52 @@ export function useCopilotChat() {
         } catch { /* empty */ }
       });
 
-      // 收集partial_answer文本
+      // 推理过程：实时更新流式气泡的推理文本
+      es.addEventListener("reasoning", (streamEvent: Event) => {
+        try {
+          const data = JSON.parse((streamEvent as MessageEvent).data);
+          const p = (data?.payload || {}) as Record<string, unknown>;
+          const t = String(p.text || p.latest_text || p.phase || "");
+          if (t) setStreamMessage((prev) => prev ? { ...prev, phase: "reasoning", reasoningText: t } : prev);
+        } catch { /* empty */ }
+      });
+
+      // 工具调用开始：追加一张「进行中」工具卡
+      es.addEventListener("tool_call", (streamEvent: Event) => {
+        try {
+          const data = JSON.parse((streamEvent as MessageEvent).data);
+          const p = (data?.payload || {}) as Record<string, unknown>;
+          const callId = String(p.call_id || `${p.tool}-${Date.now()}`);
+          const name = String(p.tool || "tool");
+          setStreamMessage((prev) => {
+            if (!prev) return prev;
+            if (prev.tools.some((t) => t.callId === callId)) return prev;
+            return { ...prev, phase: "tools", tools: [...prev.tools, { callId, name, status: "running" }] };
+          });
+        } catch { /* empty */ }
+      });
+
+      // 工具调用返回：把对应工具卡标记为完成
+      es.addEventListener("tool_result", (streamEvent: Event) => {
+        try {
+          const data = JSON.parse((streamEvent as MessageEvent).data);
+          const p = (data?.payload || {}) as Record<string, unknown>;
+          const callId = String(p.call_id || "");
+          setStreamMessage((prev) => prev ? {
+            ...prev,
+            tools: prev.tools.map((t) => t.callId === callId ? { ...t, status: "done" } : t),
+          } : prev);
+        } catch { /* empty */ }
+      });
+
+      // 收集partial_answer文本，并实时流式显示
       es.addEventListener("partial_answer", (streamEvent: Event) => {
         try {
           const data = JSON.parse((streamEvent as MessageEvent).data);
           const t = (data?.payload?.text as string) || "";
           if (t) {
             finalAnswerText += t;
+            setStreamMessage((prev) => prev ? { ...prev, phase: "answering", answerText: prev.answerText + t } : prev);
           }
         } catch { /* empty */ }
       });
@@ -261,38 +310,54 @@ export function useCopilotChat() {
         es.close();
         eventSourceRef.current = null;
 
-        // 创建最终消息
-        if (finalAnswerText) {
-          const finalMsg: CopilotMessage = {
-            message_id: `msg-final-${run.run_id.slice(-8)}`,
-            session_id: sid,
-            role: "assistant",
-            kind: "final_answer",
-            text: finalAnswerText,
-            payload: finalPayload || {},
-            created_at: new Date().toISOString(),
-            run_id: run.run_id,
-          };
-          setMessages((prev) => [...prev, finalMsg]);
-        }
+        // 用户已切到别的会话：丢弃这条在途回调，避免把旧会话的结果串进当前视图
+        if (currentSessionIdRef.current !== sid) return;
+
+        // 先把流式气泡切到「完成」态，保留答案作为过渡，避免重载前闪空
+        setStreamMessage((prev) => prev ? { ...prev, phase: "final", answerText: finalAnswerText, finalPayload } : prev);
 
         setReasoningText("");
         setCopilotStreaming(false);
         setSending(false);
         sendingRef.current = false;
+
+        // 用服务端持久化消息整体对齐：含 tool_call/tool_result（→ 历史工具卡）与
+        // 真实 message_id，同时清掉流式气泡。setMessages 与 setStreamMessage 在同一回调里，
+        // React 自动批处理为单次渲染，不会出现答案重复或闪烁。
+        const sessionId = sid;
+        if (sessionId) {
+          fetchSessionMessages(sessionId)
+            .then((items) => { setMessages(items); setStreamMessage(null); })
+            .catch(() => { /* 重载失败则保留流式气泡，答案仍可见 */ });
+        } else {
+          setStreamMessage(null);
+        }
         loadSessions();
       });
 
       // 处理error事件
       es.addEventListener("error", (streamEvent: Event) => {
-        try {
-          const data = JSON.parse((streamEvent as MessageEvent).data);
-          errorText = String(data?.payload?.error || "stream error");
-        } catch { /* empty */ }
-        
+        // 浏览器原生 EventSource 在「连接层中断」时也会派发 error 事件，
+        // 这类事件不带 data。只有带 data 的才是服务端真正发出的业务错误，
+        // 否则误把一次网络抖动渲染成「错误: null」并杀掉整轮对话。
+        const raw = (streamEvent as MessageEvent).data;
+        if (raw === undefined || raw === null) {
+          errorText = "连接中断，请重新发送消息";
+        } else {
+          try {
+            const data = JSON.parse(raw);
+            errorText = String(data?.payload?.error || "stream error");
+          } catch {
+            errorText = "stream error";
+          }
+        }
+
         // 关闭EventSource
         es.close();
         eventSourceRef.current = null;
+
+        // 用户已切到别的会话：丢弃这条在途回调
+        if (currentSessionIdRef.current !== sid) return;
 
         // 创建错误消息
         const errorMsg: CopilotMessage = {
@@ -306,6 +371,7 @@ export function useCopilotChat() {
           run_id: run.run_id,
         };
         setMessages((prev) => [...prev, errorMsg]);
+        setStreamMessage(null);
 
         setReasoningText("");
         setCopilotStreaming(false);
@@ -326,6 +392,7 @@ export function useCopilotChat() {
     eventSourceRef.current = null;
     sendingRef.current = false;
     setReasoningText("");
+    setStreamMessage(null);
     setCopilotStreaming(false);
     setSending(false);
   }, [setCopilotStreaming]);
@@ -354,6 +421,7 @@ export function useCopilotChat() {
     messages,
     sending,
     reasoningText,
+    streamMessage,
     copiedId,
     toolOpen,
     loadSessions,

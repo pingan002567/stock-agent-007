@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { PageContainer } from "@/components/layout/PageContainer";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { apiGet, apiPost, apiDelete } from "@/api/client";
 
 interface Match {
@@ -276,7 +277,7 @@ export default function WorldCup() {
               <p>基于赔率分析的智能预测系统，发现价值投注机会。</p>
             </div>
             <div className="hero-actions">
-              <button className="primary" onClick={() => void loadMatches()} type="button">刷新数据</button>
+              <RefreshButton refreshing={loading} onClick={() => void loadMatches()} />
             </div>
           </div>
           <div className="market-stats">

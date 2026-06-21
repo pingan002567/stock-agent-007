@@ -7,7 +7,7 @@ interface Props {
 const PHASE_LABELS: Record<string, string> = {
   error: "出错",
   final: "完成",
-  answering: "正在分析",
+  answering: "生成回答",
   tools: "调用工具",
   reasoning: "推理中",
 };

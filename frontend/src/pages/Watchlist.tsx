@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiPost, apiDelete } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, TableSkeleton, EmptyState } from "@/components/ui/Loading";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { useAppState } from "@/hooks/useAppState";
 import { inferMarket, marketMoney, pct, changeCls } from "@/utils/market";
 
@@ -272,7 +273,7 @@ export default function Watchlist() {
               <p>管理您的自选股列表，实时追踪关注的股票动态。</p>
             </div>
             <div className="hero-actions">
-              <button className="primary" onClick={() => void loadAll()} disabled={loading} type="button">刷新数据</button>
+              <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
             </div>
           </div>
           <div className="market-stats">
