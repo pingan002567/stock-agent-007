@@ -633,15 +633,22 @@ def test_copilot_monitor_report_stream_includes_report_quality_and_disclaimer(
 
 
 def test_monitor_events_include_multiple_severities(tmp_path):
+    from backend.schemas import EventContext, now_iso
+
     client = make_client(tmp_path)
-    # Clear seed events so the fallback (monitor_tools.get_monitor_events,
-    # which includes "high" and "medium") is used instead.
     repo = client.app.state.services.repo
-    for event in repo.list_monitor_events(limit=100):
-        repo.conn.execute(
-            "DELETE FROM monitor_event WHERE event_id = ?", (event.event_id,)
-        )
+    # The user-facing events endpoint returns only real events (no synthetic
+    # fallback), so seed real high/medium events to assert multi-severity.
+    for event in repo.list_monitor_events(limit=200):
+        repo.conn.execute("DELETE FROM monitor_event WHERE event_id = ?", (event.event_id,))
     repo.conn.commit()
+    for sev in ("high", "medium"):
+        repo.save_monitor_event(
+            EventContext(
+                event_id=f"ev_{sev}", source="test", symbol="AAPL", title=f"{sev} event",
+                severity=sev, triggered_at=now_iso(), trigger_rule="manual_seed",
+            )
+        )
     events = client.get("/api/monitor/events")
     assert events.status_code == 200
     severities = {item["severity"] for item in events.json()["items"]}
@@ -691,7 +698,9 @@ def test_monitor_status_rules_evaluate_once_and_stream(tmp_path):
     assert overview["monitor_summary"]["event_count"] >= 1
     assert overview["monitor_summary"]["latest"]["rule_id"] == rule_id
 
-    with client.stream("GET", "/api/monitor/stream") as response:
+    # /stream defaults to a long-lived push stream; ?once=true yields a single
+    # snapshot and closes (the open-ended form can't be drained by TestClient).
+    with client.stream("GET", "/api/monitor/stream?once=true") as response:
         assert response.status_code == 200
         body = "".join(response.iter_text())
 

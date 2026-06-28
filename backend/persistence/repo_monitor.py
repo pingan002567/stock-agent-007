@@ -142,14 +142,9 @@ class MonitorRepoMixin:
             self.conn.commit()
         return event
 
-    def list_monitor_events(
-        self,
-        *,
-        symbol: str | None = None,
-        severity: str | None = None,
-        limit: int = 50,
-    ) -> List[EventContext]:
-        query = "SELECT * FROM monitor_event"
+    def _monitor_event_filter(
+        self, symbol: str | None, severity: str | None
+    ) -> tuple[str, list[Any]]:
         clauses: list[str] = []
         params: list[Any] = []
         if symbol is not None:
@@ -158,13 +153,36 @@ class MonitorRepoMixin:
         if severity is not None:
             clauses.append("severity = ?")
             params.append(severity)
-        if clauses:
-            query += " WHERE " + " AND ".join(clauses)
-        query += " ORDER BY triggered_at DESC, created_at DESC LIMIT ?"
-        params.append(limit)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        return where, params
+
+    def list_monitor_events(
+        self,
+        *,
+        symbol: str | None = None,
+        severity: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[EventContext]:
+        where, params = self._monitor_event_filter(symbol, severity)
+        query = (
+            "SELECT * FROM monitor_event" + where
+            + " ORDER BY triggered_at DESC, created_at DESC LIMIT ? OFFSET ?"
+        )
+        params = [*params, limit, max(0, offset)]
         with self._lock:
             rows = self.conn.execute(query, tuple(params)).fetchall()
         return [self._row_to_monitor_event(row) for row in rows]
+
+    def count_monitor_events(
+        self, *, symbol: str | None = None, severity: str | None = None
+    ) -> int:
+        where, params = self._monitor_event_filter(symbol, severity)
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) AS c FROM monitor_event" + where, tuple(params)
+            ).fetchone()
+        return int(row["c"]) if row else 0
 
     def has_monitor_events(self) -> bool:
         with self._lock:

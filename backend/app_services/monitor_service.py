@@ -25,6 +25,7 @@ from backend.stock_domain.provider_router import provider_router
 logger = logging.getLogger("monitor_service")
 
 DEFAULT_MONITOR_INTERVAL_SECONDS = 60
+DEFAULT_MONITOR_STREAM_SECONDS = 5
 
 
 def _utc_now() -> datetime:
@@ -50,6 +51,10 @@ class MonitorService:
         self.audit_service = audit_service
         self.risk_policy_service = risk_policy_service
         self._loop_task: asyncio.Task[None] | None = None
+        # Per-instance, persisted accuracy feedback (was a shared class-level
+        # dict that leaked across instances/tests and vanished on restart).
+        self._accuracy_log: dict[str, deque[bool]] = defaultdict(lambda: deque(maxlen=20))
+        self._load_accuracy_log()
 
     def get_status(self) -> MonitorStatus:
         persisted = self.repo.get_monitor_status()
@@ -99,11 +104,17 @@ class MonitorService:
         return deleted
 
     def evaluate_one_rule(
-        self, rule: MonitorRule, *, source: str, now: datetime, force: bool
+        self,
+        rule: MonitorRule,
+        *,
+        source: str,
+        now: datetime,
+        force: bool,
+        ctx_cache: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         result: dict[str, Any] = {"rule_id": rule.rule_id, "checked": 1, "matched": 0, "created": 0, "suppressed": 0, "errors": [], "event_ids": []}
         try:
-            matches = self._evaluate_rule(rule, source=source, now=now)
+            matches = self._evaluate_rule(rule, source=source, now=now, ctx_cache=ctx_cache)
         except Exception as exc:
             result["errors"].append({"rule_id": rule.rule_id, "error": str(exc)})
             return result
@@ -132,11 +143,17 @@ class MonitorService:
             "errors": [], "event_ids": [],
         }
         rules = [rule for rule in self.list_rules() if rule.enabled]
+        # Build each needed StockContext once per cycle and share it read-only
+        # across the parallel rule evaluations, so the same symbol isn't fetched
+        # repeatedly by price_change / combined / sector rules in one pass.
+        ctx_cache = self._prebuild_context_cache(rules)
         # Evaluate all rules in parallel using threads (I/O bound: provider calls)
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(rules) or 1)) as pool:
             futures = {
-                pool.submit(self.evaluate_one_rule, rule, source=source, now=now, force=force): rule
+                pool.submit(
+                    self.evaluate_one_rule, rule, source=source, now=now, force=force, ctx_cache=ctx_cache
+                ): rule
                 for rule in rules
             }
             for future in concurrent.futures.as_completed(futures):
@@ -151,11 +168,6 @@ class MonitorService:
                 summary["suppressed"] += result["suppressed"]
                 summary["errors"].extend(result["errors"])
                 summary["event_ids"].extend(result["event_ids"])
-        # Digest mode: group low-severity events into summary
-        if not force and summary["created"] > 5:
-            low_events = len([eid for eid in summary["event_ids"]])
-            if low_events > 5:
-                summary["digest"] = True
         status = self.get_status()
         status.last_checked_at = now_iso()
         status.last_matched_at = now_iso() if summary["matched"] else status.last_matched_at
@@ -169,18 +181,41 @@ class MonitorService:
         symbol: str | None = None,
         severity: str | None = None,
         limit: int = 50,
+        offset: int = 0,
+        allow_fallback: bool = True,
     ) -> list[EventContext]:
-        persisted = self.repo.list_monitor_events(symbol=symbol, severity=severity, limit=limit)
-        if persisted:
+        persisted = self.repo.list_monitor_events(
+            symbol=symbol, severity=severity, limit=limit, offset=offset
+        )
+        # Demo/onboarding fallback is opt-out: UI-facing surfaces (events list,
+        # dashboard summary) pass allow_fallback=False so synthetic events never
+        # inflate real statistics. The agent tool / review inbox keep it on.
+        if persisted or not allow_fallback or self.repo.has_monitor_events():
             return persisted
-        if self.repo.has_monitor_events():
-            return []
+        items = self._fallback_events(symbol, severity)
+        return items[offset : offset + limit]
+
+    def count_events(
+        self,
+        *,
+        symbol: str | None = None,
+        severity: str | None = None,
+        allow_fallback: bool = True,
+    ) -> int:
+        count = self.repo.count_monitor_events(symbol=symbol, severity=severity)
+        if count or not allow_fallback or self.repo.has_monitor_events():
+            return count
+        return len(self._fallback_events(symbol, severity))
+
+    def _fallback_events(
+        self, symbol: str | None, severity: str | None
+    ) -> list[EventContext]:
         items = get_fallback_monitor_events()
         if symbol:
             items = [item for item in items if item.symbol.upper() == symbol.upper()]
         if severity:
             items = [item for item in items if item.severity == severity]
-        return items[:limit]
+        return items
 
     def explain_event(self, event_id: str | None = None, event: EventContext | None = None) -> dict[str, Any]:
         event = event or (self.repo.get_monitor_event(event_id) if event_id else None)
@@ -204,7 +239,8 @@ class MonitorService:
         }
 
     def build_monitor_summary(self) -> dict[str, Any]:
-        events = self.list_events(limit=20)
+        # Dashboard KPIs must reflect only real events — no synthetic fallback.
+        events = self.list_events(limit=20, allow_fallback=False)
         status = self.get_status()
         provider_status = provider_router.status()
         latest = model_to_dict(events[0]) if events else None
@@ -230,15 +266,64 @@ class MonitorService:
             "diagnosis_hints": diagnosis_hints,
         }
 
-    async def stream_snapshot(self) -> AsyncIterator[SSEEvent]:
-        yield SSEEvent(run_id="monitor", task_id="monitor", type="status", payload=model_to_dict(self.get_status()))
-        yield SSEEvent(
-            run_id="monitor",
-            task_id="monitor",
-            type="events",
-            payload={"items": [model_to_dict(item) for item in self.list_events(limit=20)]},
-        )
-        yield SSEEvent(run_id="monitor", task_id="monitor", type="summary", payload=self.build_monitor_summary())
+    def _snapshot_events(self) -> list[SSEEvent]:
+        status = self.get_status()
+        events = self.list_events(limit=20, allow_fallback=False)
+        return [
+            SSEEvent(run_id="monitor", task_id="monitor", type="status", payload=model_to_dict(status)),
+            SSEEvent(
+                run_id="monitor",
+                task_id="monitor",
+                type="events",
+                payload={"items": [model_to_dict(item) for item in events]},
+            ),
+            SSEEvent(run_id="monitor", task_id="monitor", type="summary", payload=self.build_monitor_summary()),
+        ]
+
+    async def stream_snapshot(self, *, once: bool = False) -> AsyncIterator[SSEEvent]:
+        """SSE stream of monitor state.
+
+        With ``once`` it emits a single status/events/summary snapshot and
+        returns — the original behaviour (used by callers that can't consume an
+        open-ended stream, e.g. the in-process TestClient).
+
+        Otherwise it stays alive and pushes a fresh snapshot whenever monitor
+        state changes, with a lightweight heartbeat in between. Previously the
+        endpoint yielded one snapshot and closed, so the browser's EventSource
+        silently reconnected every few seconds — a polling loop dressed up as a
+        stream. Keeping the generator alive makes it a real push: new events
+        from the background loop or a manual evaluation reach the UI within one
+        tick, and the heartbeat keeps proxies / EventSource from timing out.
+        """
+        if once:
+            for event in self._snapshot_events():
+                yield event
+            return
+
+        last_signature: tuple[Any, ...] | None = None
+        first = True
+        try:
+            while True:
+                status = self.get_status()
+                events = self.list_events(limit=20, allow_fallback=False)
+                signature = (
+                    status.status,
+                    status.last_checked_at,
+                    status.last_matched_at,
+                    len(events),
+                    events[0].event_id if events else None,
+                )
+                if first or signature != last_signature:
+                    for event in self._snapshot_events():
+                        yield event
+                    last_signature = signature
+                    first = False
+                else:
+                    yield SSEEvent(run_id="monitor", task_id="monitor", type="ping", payload={})
+                await asyncio.sleep(self._stream_push_seconds())
+        except (asyncio.CancelledError, GeneratorExit):
+            # Client disconnected — stop cleanly without noise.
+            return
 
     async def startup(self) -> None:
         status = self.get_status()
@@ -350,7 +435,14 @@ class MonitorService:
             rule_text=rule_text or f"single_position_weight > {threshold:g}%",
         )
 
-    def _evaluate_rule(self, rule: MonitorRule, *, source: str, now: datetime) -> list[dict[str, Any]]:
+    def _evaluate_rule(
+        self,
+        rule: MonitorRule,
+        *,
+        source: str,
+        now: datetime,
+        ctx_cache: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         # Fatigue suppression: skip rule if suppression score is too high
         if self._suppression_score(rule.rule_id) >= 0.7:
             logger.info("rule %s suppressed by accuracy feedback", rule.rule_id)
@@ -358,7 +450,7 @@ class MonitorService:
         if rule.rule_type == "single_position_weight_gt":
             return self._match_single_position_weight(rule)
         if rule.rule_type == "price_change_pct_gt":
-            return self._match_price_change(rule)
+            return self._match_price_change(rule, ctx_cache=ctx_cache)
         if rule.rule_type == "data_provider_degraded":
             return self._match_data_provider_degraded(rule)
         if rule.rule_type == "intel_keyword_match":
@@ -368,9 +460,9 @@ class MonitorService:
         if rule.rule_type == "volume_spike":
             return self._match_volume_spike(rule)
         if rule.rule_type == "sector_correlation":
-            return self._match_sector_correlation(rule)
+            return self._match_sector_correlation(rule, ctx_cache=ctx_cache)
         if rule.rule_type == "combined_condition":
-            return self._match_combined_condition(rule, source=source, now=now)
+            return self._match_combined_condition(rule, source=source, now=now, ctx_cache=ctx_cache)
         raise ValueError(f"unsupported monitor rule_type: {rule.rule_type}")
 
     def _match_single_position_weight(self, rule: MonitorRule) -> list[dict[str, Any]]:
@@ -400,12 +492,14 @@ class MonitorService:
             )
         return matches
 
-    def _match_price_change(self, rule: MonitorRule) -> list[dict[str, Any]]:
+    def _match_price_change(
+        self, rule: MonitorRule, *, ctx_cache: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
         threshold = float(rule.threshold if rule.threshold is not None else 3)
         symbols = self._rule_symbols(rule)
         matches = []
         for symbol in symbols:
-            ctx = self.context_builder.build_stock_context(symbol)
+            ctx = self._context_for(symbol, ctx_cache)
             price = ctx.price
             if price is None:
                 continue
@@ -496,7 +590,7 @@ class MonitorService:
             except Exception:
                 continue
             bars = history.get("bars", history.get("items", []))
-            closes = [b.get("close", 0) for b in bars if b.get("close")]
+            closes = [b["close"] for b in bars if b.get("close") is not None]
             if len(closes) < slow + 1:
                 continue
             prev_fast = mean(closes[-(fast + 1):-1])
@@ -572,7 +666,9 @@ class MonitorService:
             })
         return matches
 
-    def _match_sector_correlation(self, rule: MonitorRule) -> list[dict[str, Any]]:
+    def _match_sector_correlation(
+        self, rule: MonitorRule, *, ctx_cache: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
         """Detect sector-wide anomalies: more than N symbols in same sector triggering.
         metadata: {min_symbols: 2, sector: "白酒"} (omit sector to scan all)
         threshold: min_symbols (fallback)
@@ -598,7 +694,7 @@ class MonitorService:
             triggered = []
             for sym in syms:
                 try:
-                    ctx = self.context_builder.build_stock_context(sym)
+                    ctx = self._context_for(sym, ctx_cache)
                     if ctx.price is None:
                         continue
                     if abs(ctx.price.change_pct) >= 2.0:
@@ -625,7 +721,9 @@ class MonitorService:
             })
         return matches
 
-    def _match_combined_condition(self, rule: MonitorRule, *, source: str, now: datetime) -> list[dict[str, Any]]:
+    def _match_combined_condition(
+        self, rule: MonitorRule, *, source: str, now: datetime, ctx_cache: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
         """Composite condition: price_change AND volume_spike AND/OR keyword_match in a time window.
         metadata: {
           conditions: [
@@ -655,7 +753,7 @@ class MonitorService:
                 detail = ""
                 if ctype == "price_change":
                     try:
-                        ctx = self.context_builder.build_stock_context(symbol)
+                        ctx = self._context_for(symbol, ctx_cache)
                         if ctx.price is None:
                             continue
                         threshold = float(cond.get("threshold", 2.0))
@@ -672,7 +770,7 @@ class MonitorService:
                         multiplier = float(cond.get("multiplier", 2.0))
                         history = provider_router.get_history(symbol, days=30)
                         bars = history.get("bars", history.get("items", []))
-                        volumes = [b.get("volume", 0) for b in bars if b.get("volume") is not None]
+                        volumes = [b["volume"] for b in bars if b.get("volume") is not None]
                         if len(volumes) >= 6:
                             baseline = mean(volumes[-6:-1]) or 1
                             ratio = volumes[-1] / baseline
@@ -725,10 +823,32 @@ class MonitorService:
 
     # ── alert fatigue suppression ───────────────────────────────────────────
 
-    _accuracy_log: dict[str, deque[bool]] = defaultdict(lambda: deque(maxlen=20))
+    _ACCURACY_CONFIG_KEY = "monitor_accuracy_log"
 
-    def _record_accuracy(self, rule_id: str, was_useful: bool) -> None:
-        self._accuracy_log[rule_id].append(was_useful)
+    def _load_accuracy_log(self) -> None:
+        try:
+            raw = self.repo.get_config(self._ACCURACY_CONFIG_KEY, {}) or {}
+        except Exception:
+            return
+        for rule_id, values in raw.items():
+            if isinstance(values, list):
+                self._accuracy_log[rule_id] = deque((bool(v) for v in values[-20:]), maxlen=20)
+
+    def _persist_accuracy_log(self) -> None:
+        try:
+            self.repo.set_config(
+                self._ACCURACY_CONFIG_KEY,
+                {rule_id: list(log) for rule_id, log in self._accuracy_log.items() if log},
+            )
+        except Exception:
+            logger.warning("failed to persist monitor accuracy log", exc_info=True)
+
+    def record_accuracy(self, rule_id: str, was_useful: bool) -> None:
+        self._accuracy_log[rule_id].append(bool(was_useful))
+        self._persist_accuracy_log()
+
+    # Back-compat alias (route + tests historically called the private name).
+    _record_accuracy = record_accuracy
 
     def _suppression_score(self, rule_id: str) -> float:
         """Return 0.0 (no suppression) to 1.0 (fully suppressed) based on recent accuracy."""
@@ -741,6 +861,37 @@ class MonitorService:
         if accuracy >= 0.4:
             return 0.3
         return 0.7
+
+    def _context_for(self, symbol: str, ctx_cache: dict[str, Any] | None):
+        """Return a StockContext, reusing the per-cycle cache when present."""
+        if ctx_cache is not None:
+            cached = ctx_cache.get(symbol.upper())
+            if cached is not None:
+                return cached
+        return self.context_builder.build_stock_context(symbol)
+
+    def _prebuild_context_cache(self, rules: list[MonitorRule]) -> dict[str, Any]:
+        """Build each StockContext a cycle needs exactly once.
+
+        The returned dict is populated before the parallel phase and only read
+        (never written) by the worker threads, so no locking is required.
+        """
+        symbols: set[str] = set()
+        holdings_symbols: list[str] | None = None
+        for rule in rules:
+            if rule.rule_type in ("price_change_pct_gt", "combined_condition"):
+                symbols.update(self._rule_symbols(rule))
+            elif rule.rule_type == "sector_correlation":
+                if holdings_symbols is None:
+                    holdings_symbols = [item.symbol.upper() for item in self.repo.list_holdings()]
+                symbols.update(holdings_symbols)
+        cache: dict[str, Any] = {}
+        for symbol in symbols:
+            try:
+                cache[symbol.upper()] = self.context_builder.build_stock_context(symbol)
+            except Exception:
+                continue  # rebuilt/handled inside the individual match method
+        return cache
 
     def _rule_symbols(self, rule: MonitorRule) -> list[str]:
         if rule.symbol:
@@ -759,3 +910,10 @@ class MonitorService:
             return max(1, int(raw))
         except ValueError:
             return DEFAULT_MONITOR_INTERVAL_SECONDS
+
+    def _stream_push_seconds(self) -> float:
+        raw = os.getenv("WORKBENCH_MONITOR_STREAM_SECONDS", str(DEFAULT_MONITOR_STREAM_SECONDS))
+        try:
+            return max(1.0, float(raw))
+        except ValueError:
+            return float(DEFAULT_MONITOR_STREAM_SECONDS)

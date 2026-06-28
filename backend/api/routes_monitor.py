@@ -15,18 +15,24 @@ router = APIRouter(prefix="/api/monitor", tags=["monitor"])
 def monitor_events(
     symbol: str | None = None,
     severity: str | None = None,
-    limit: int = Query(default=20, ge=1, le=200),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=5, ge=1, le=100),
     services: AppServices = Depends(get_services),
 ):
-    items = services.monitor_service.list_events(symbol=symbol, severity=severity, limit=limit)
-    total = len(items)
-    start_idx = (page - 1) * page_size
-    end_idx = start_idx + page_size
-    paginated_items = items[start_idx:end_idx]
+    svc = services.monitor_service
+    # Real DB-level pagination: total is a full COUNT(*), not len() of a
+    # truncated page. allow_fallback=False keeps synthetic demo events out of
+    # the user-facing list and its counts.
+    total = svc.count_events(symbol=symbol, severity=severity, allow_fallback=False)
+    items = svc.list_events(
+        symbol=symbol,
+        severity=severity,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+        allow_fallback=False,
+    )
     return {
-        "items": [model_to_dict(item) for item in paginated_items],
+        "items": [model_to_dict(item) for item in items],
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -83,10 +89,16 @@ def monitor_feedback(payload: dict, services: AppServices = Depends(get_services
     rule_id = str(payload.get("rule_id", ""))
     was_useful = bool(payload.get("was_useful", False))
     if rule_id:
-        services.monitor_service._record_accuracy(rule_id, was_useful)
+        services.monitor_service.record_accuracy(rule_id, was_useful)
     return {"ok": True}
 
 
 @router.get("/stream")
-def monitor_stream(services: AppServices = Depends(get_services)):
-    return StreamingResponse(to_sse(services.monitor_service.stream_snapshot()), media_type="text/event-stream")
+def monitor_stream(
+    once: bool = Query(default=False, description="Emit a single snapshot then close (no long-lived stream)"),
+    services: AppServices = Depends(get_services),
+):
+    return StreamingResponse(
+        to_sse(services.monitor_service.stream_snapshot(once=once)),
+        media_type="text/event-stream",
+    )

@@ -10,9 +10,6 @@ from backend.schemas import EventContext
 
 logger = logging.getLogger("monitor_notifier")
 
-FEISHU_WEBHOOK_URL = os.getenv("MONITOR_FEISHU_WEBHOOK_URL", "")
-DINGTALK_WEBHOOK_URL = os.getenv("MONITOR_DINGTALK_WEBHOOK_URL", "")
-
 
 def _feishu_payload(event: EventContext) -> dict[str, Any]:
     return {
@@ -41,12 +38,18 @@ def _dingtalk_payload(event: EventContext) -> dict[str, Any]:
 
 
 def dispatch_notification(event: EventContext) -> None:
-    """Send event to configured webhooks."""
-    if not FEISHU_WEBHOOK_URL and not DINGTALK_WEBHOOK_URL:
+    """Send event to configured webhooks.
+
+    Webhook URLs are read at call time (not import time) so configuration
+    changes take effect without restarting the process.
+    """
+    feishu_url = os.getenv("MONITOR_FEISHU_WEBHOOK_URL", "")
+    dingtalk_url = os.getenv("MONITOR_DINGTALK_WEBHOOK_URL", "")
+    if not feishu_url and not dingtalk_url:
         return
     if event.severity not in ("high", "medium"):
         return
-    for url, builder in [(FEISHU_WEBHOOK_URL, _feishu_payload), (DINGTALK_WEBHOOK_URL, _dingtalk_payload)]:
+    for url, builder in [(feishu_url, _feishu_payload), (dingtalk_url, _dingtalk_payload)]:
         if not url:
             continue
         try:

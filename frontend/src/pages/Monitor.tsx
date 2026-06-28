@@ -8,7 +8,7 @@ import { formatTimeAgo } from "@/utils/format";
 
 interface MonitorEvent {
   event_id: string; title?: string; severity?: string; symbol?: string;
-  rule_type?: string; triggered_at?: string; evidence?: Record<string, unknown>[];
+  rule_id?: string; rule_type?: string; triggered_at?: string; evidence?: Record<string, unknown>[];
   suggested_actions?: string[]; payload?: Record<string, unknown>;
 }
 interface MonitorRule {
@@ -58,13 +58,15 @@ export default function Monitor() {
   const [ruleSaving, setRuleSaving] = useState(false);
   const [ruleSaveError, setRuleSaveError] = useState<string | null>(null);
   const [hintDismissed, setHintDismissed] = useState(false);
+  const [feedbackDone, setFeedbackDone] = useState<Record<string, boolean>>({});
   const sseRef = useRef<EventSource | null>(null);
   const [eventPage, setEventPage] = useState(1);
   const [eventTotal, setEventTotal] = useState(0);
   const eventPageSize = 5;
 
-  const loadAll = useCallback(async (page: number = eventPage) => {
-    setLoading(true); setError(null);
+  const loadAll = useCallback(async (page: number = eventPage, silent = false) => {
+    if (!silent) setLoading(true);
+    setError(null);
     try {
       const [evResp, rl, st] = await Promise.all([
         apiGet<{ items: MonitorEvent[]; total: number }>(`/api/monitor/events?page=${page}&page_size=${eventPageSize}`).catch(() => ({ items: [], total: 0 })),
@@ -72,8 +74,13 @@ export default function Monitor() {
         apiGet<MonitorStatus>("/api/monitor/status").catch(() => null),
       ]);
       setEvents(evResp.items); setEventTotal(evResp.total); setRules(rl); setStatus(st);
-    } catch (err) { setError(err instanceof Error ? err.message : "加载盯盘中心失败"); } finally { setLoading(false); }
+    } catch (err) { setError(err instanceof Error ? err.message : "加载盯盘中心失败"); } finally { if (!silent) setLoading(false); }
   }, [eventPage, eventPageSize]);
+
+  // Keep the SSE handler pointing at the latest loadAll (current page) without
+  // re-subscribing the EventSource on every page change.
+  const loadAllRef = useRef(loadAll);
+  useEffect(() => { loadAllRef.current = loadAll; }, [loadAll]);
 
   // 页面挂载时拉一次数据；SSE 负责后续实时更新
   useEffect(() => { void loadAll(); // eslint-disable-line react-hooks/set-state-in-effect
@@ -81,9 +88,11 @@ export default function Monitor() {
 
   useEffect(() => {
     const es = new EventSource("/api/monitor/stream");
-    es.addEventListener("events", (msg) => {
-      try { const d = JSON.parse(msg.data); if (d.items) setEvents(d.items); } catch { void 0; }
-    });
+    // The SSE payload is the whole SSEEvent: { type, payload: {...} }.
+    // "status" carries the status object directly; "events" signals that the
+    // event set changed — silently refetch the current page so pagination and
+    // totals stay consistent (the stream pushes an unpaginated top-20).
+    es.addEventListener("events", () => { void loadAllRef.current(undefined, true); });
     es.addEventListener("status", (msg) => {
       try { const d = JSON.parse(msg.data); if (d.payload) setStatus(d.payload as MonitorStatus); } catch { void 0; }
     });
@@ -91,11 +100,18 @@ export default function Monitor() {
     return () => { es.close(); sseRef.current = null; };
   }, []);
 
+  const handleFeedback = async (ev: MonitorEvent, wasUseful: boolean) => {
+    if (!ev.rule_id) return;
+    setFeedbackDone((prev) => ({ ...prev, [ev.event_id]: true }));
+    try { await apiPost("/api/monitor/feedback", { rule_id: ev.rule_id, was_useful: wasUseful }); } catch { void 0; }
+  };
+
   const handleStart = async () => { try { await apiPost("/api/monitor/start"); await loadAll(); } catch { void 0; } };
   const handlePause = async () => { try { await apiPost("/api/monitor/pause"); await loadAll(); } catch { void 0; } };
   const handleEval = async () => {
     setEvalBusy(true); setEvalResult(null);
-    try { const res = await apiPost<Record<string, unknown>>("/api/monitor/evaluate-once", {}); setEvalResult(JSON.stringify(res, null, 2)); await loadAll(); }
+    // force=true so a manual evaluation isn't silently swallowed by cooldown.
+    try { const res = await apiPost<Record<string, unknown>>("/api/monitor/evaluate-once", { force: true }); setEvalResult(JSON.stringify(res, null, 2)); await loadAll(); }
     catch (err) { setEvalResult(err instanceof Error ? err.message : "评估失败"); } finally { setEvalBusy(false); }
   };
 
@@ -240,11 +256,28 @@ export default function Monitor() {
                     <div className="intel-desc">
                       {ev.symbol ?? "全市场"} · {ruleTypeLabel(ev.rule_type)} · {formatTimeAgo(ev.triggered_at)}
                     </div>
-                    {expandedEvent === ev.event_id && ev.suggested_actions && ev.suggested_actions.length > 0 && (
-                      <div style={{ marginTop: 8 }}>
-                        {ev.suggested_actions.map((a, i) => (
-                          <span key={i} className="tag" style={{ marginRight: 4, fontSize: 10 }}>{a}</span>
-                        ))}
+                    {expandedEvent === ev.event_id && (
+                      <div style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
+                        {ev.suggested_actions && ev.suggested_actions.length > 0 && (
+                          <div style={{ marginBottom: 8 }}>
+                            {ev.suggested_actions.map((a, i) => (
+                              <span key={i} className="tag" style={{ marginRight: 4, fontSize: 10 }}>{a}</span>
+                            ))}
+                          </div>
+                        )}
+                        {ev.rule_id && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "var(--muted)" }}>
+                            {feedbackDone[ev.event_id] ? (
+                              <span>✓ 已反馈，谢谢</span>
+                            ) : (
+                              <>
+                                <span>这条预警有用吗？</span>
+                                <button className="small" onClick={() => void handleFeedback(ev, true)} type="button">👍 有用</button>
+                                <button className="small" onClick={() => void handleFeedback(ev, false)} type="button">👎 无用</button>
+                              </>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
