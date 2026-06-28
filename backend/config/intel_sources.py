@@ -29,6 +29,15 @@ AVAILABLE_INTEL_PROVIDERS = [
         "requirements": "pip install akshare",
     },
     {
+        "id": "yfinance",
+        "name": "Yahoo Finance",
+        "category": "news_search",
+        "markets": ["US"],
+        "api_key_required": False,
+        "description": "通过 yfinance 获取美股 Yahoo Finance 真实新闻",
+        "requirements": "pip install yfinance",
+    },
+    {
         "id": "mock",
         "name": "模拟新闻",
         "category": "news_search",
@@ -59,6 +68,6 @@ MARKET_NEWS_PROVIDER_MAP: dict[str, list[dict]] = {
         {"id": "akshare", "name": "AKShare 港股", "type": "financial_news"},
     ],
     "US": [
-        {"id": "mock", "name": "模拟新闻", "type": "mock"},
+        {"id": "yfinance", "name": "Yahoo Finance", "type": "financial_news"},
     ],
 }

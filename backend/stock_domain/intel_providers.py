@@ -36,6 +36,72 @@ class MockIntelProvider:
         }
 
 
+class YFinanceIntelProvider:
+    """Real US-equity news via yfinance (Yahoo Finance)."""
+
+    name = "yfinance"
+
+    def search_news(self, symbol: str, query: str = "", *, limit: int = 8) -> dict:
+        normalized = normalize_symbol(symbol)
+        try:
+            import yfinance as yf
+        except Exception as exc:
+            return self._degraded(symbol, query, f"yfinance unavailable: {exc}")
+        try:
+            raw = yf.Ticker(normalized).news or []
+        except Exception as exc:
+            return self._degraded(symbol, query, str(exc))
+
+        def _url(container: dict, key: str) -> str | None:
+            value = container.get(key)
+            if isinstance(value, dict):
+                return value.get("url")
+            return value if isinstance(value, str) else None
+
+        q = (query or "").strip().lower()
+        items: list[dict[str, Any]] = []
+        for entry in raw:
+            # yfinance returns either {"content": {...}} (current) or a flat dict.
+            content = entry.get("content") if isinstance(entry, dict) else None
+            content = content or entry or {}
+            title = str(content.get("title") or "").strip()
+            if not title:
+                continue
+            summary = str(content.get("summary") or content.get("description") or "")
+            if q and q not in title.lower() and q not in summary.lower():
+                continue
+            provider = content.get("provider")
+            source = provider.get("displayName") if isinstance(provider, dict) else None
+            items.append({
+                "type": "news",
+                "title": title,
+                "summary": summary[:400],
+                "url": _url(content, "clickThroughUrl") or _url(content, "canonicalUrl"),
+                "source": source or "yahoo_finance",
+                "confidence": "medium",
+                "published_at": content.get("pubDate") or now_iso(),
+            })
+            if len(items) >= limit:
+                break
+
+        if not items:
+            return self._degraded(symbol, query, "no yfinance news returned")
+        return {
+            "symbol": normalized,
+            "query": query,
+            "source": self.name,
+            "updated_at": now_iso(),
+            "items": items,
+            "coverage": {"mode": "live"},
+        }
+
+    def _degraded(self, symbol: str, query: str, reason: str) -> dict:
+        result = MockIntelProvider().search_news(symbol, query)
+        result["degraded"] = True
+        result["degraded_reason"] = reason
+        return result
+
+
 class AkShareIntelProvider:
     """Wraps the existing AKShare intel logic from AkShareMarketDataProvider.
 
@@ -67,8 +133,11 @@ class AkShareIntelProvider:
                 return self._get_delegate().search_intel(normalized, query)
             except Exception:
                 pass
+        elif market == "US":
+            # Real US-equity news via Yahoo Finance (falls back to mock internally).
+            return YFinanceIntelProvider().search_news(normalized, query)
 
-        # Fallback for US or on error
+        # Fallback for unknown markets or on CN/HK error
         mock = MockIntelProvider()
         result = mock.search_news(normalized, query)
         result["degraded"] = True
@@ -87,6 +156,7 @@ class IntelProviderRouter:
         self.repo: Any = None
         self._providers: dict[str, IntelProvider] = {
             "akshare": AkShareIntelProvider(),
+            "yfinance": YFinanceIntelProvider(),
             "mock": MockIntelProvider(),
         }
 

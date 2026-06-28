@@ -49,7 +49,7 @@ Request flow: **React pages → REST `/api/*` + SSE → FastAPI routers (`backen
 ### Dependency injection / wiring
 - `backend/bootstrap.py::create_services()` is the single composition root. It constructs every service in dependency order, wires the `WorkbenchToolBridge`, builds the `CopilotService`, and returns an `AppServices` dataclass. **Add new services and their dependencies here.**
 - `backend/app.py::create_app()` calls `create_services()`, stores it on `app.state.services`, registers all routers, and serves the SPA. Routers reach services via `backend/api/deps.py`.
-- Bootstrap also performs first-run data seeding: auto-imports A-share / HK / US stock master lists from AKShare when the master table is empty, and kicks off background cache warmups. This only runs when the primary provider is available.
+- Bootstrap also performs first-run data seeding: auto-imports A-share / HK / US stock master lists from AKShare when the master table is empty, and kicks off background cache warmups. This only runs when the primary provider is available. The network-dependent seeding/warmup is isolated in `bootstrap._seed_market_data()`; set `WORKBENCH_SKIP_SEED=1` to skip it for a fast, offline boot (recommended for tests/CI).
 
 ### Agent runtime (`backend/agent_runtime/`)
 - `DeerFlowClientAdapter` (`deerflow_client.py`) is the boundary around DeerFlow. It is deliberately **copyright-safe**: it maps LangGraph-style stream events through `DeerFlowEventMapper` without importing DeerFlow internals, so tests can feed plain dicts/objects.
@@ -67,6 +67,7 @@ Request flow: **React pages → REST `/api/*` + SSE → FastAPI routers (`backen
 
 ### Persistence (`backend/persistence/`)
 - `db.py::connect()` opens the SQLite file (default `data/workbench.sqlite3`); `WorkbenchRepository` (`repositories.py`) is the only data-access surface and calls `seed_defaults()` on startup. `file_store.py` handles generated report/artifact files under `data/files`.
+- `WorkbenchRepository` composes per-domain mixins (`repo_catalog`, `repo_copilot`, `repo_monitor`, `repo_strategy`, `repo_risk`, `repo_trading`, `repo_reports`, `repo_config`); shared JSON helpers live in `repo_base.py`. The core class keeps only `__init__` + seeding. **Add a new query method to the matching domain mixin, not the core class.**
 - Config (runtime settings, data sources, intel sources, enabled skills) is stored as JSON rows via `repo.get_config(key, default)` rather than env/files.
 
 ### Frontend (`frontend/src/`)
@@ -79,6 +80,7 @@ Request flow: **React pages → REST `/api/*` + SSE → FastAPI routers (`backen
 - New agent tools require three coordinated edits: define in `agent_runtime/tools.py`, expose the method on `WorkbenchToolBridge` (`tool_bridge.py`), implement domain logic in `stock_domain/` or an app service.
 - New page: create in `pages/`, add the screen type in `types/`, register in `ScreenRenderer.tsx`, add nav entry in `Rail.tsx`.
 - Keep the DeerFlow boundary copyright-safe: do not import DeerFlow internals outside the adapter; map events through `DeerFlowEventMapper`.
+- `CopilotService` (`copilot_service.py`) is the streaming orchestrator; its self-independent helpers are factored out into `copilot_cost.py` (token-cost estimation), `copilot_session_state.py` (`TurnSummary` / `SessionStateData` multi-turn memory), and `copilot_errors.py` (error categorization/hints). Put new pure helpers there, not on the service class.
 
 ## Reference docs
 

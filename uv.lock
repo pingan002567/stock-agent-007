@@ -3858,6 +3858,7 @@ dependencies = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "yfinance" },
 ]
 
 [package.optional-dependencies]
@@ -3871,9 +3872,6 @@ test = [
     { name = "httpx" },
     { name = "pytest" },
 ]
-yfinance = [
-    { name = "yfinance" },
-]
 
 [package.metadata]
 requires-dist = [
@@ -3886,9 +3884,9 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.8.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
-    { name = "yfinance", marker = "extra == 'yfinance'", specifier = ">=0.2.0" },
+    { name = "yfinance", specifier = ">=0.2.0" },
 ]
-provides-extras = ["akshare", "yfinance", "test", "export"]
+provides-extras = ["akshare", "test", "export"]
 
 [[package]]
 name = "structlog"

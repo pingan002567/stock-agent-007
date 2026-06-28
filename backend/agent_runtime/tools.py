@@ -28,11 +28,35 @@ import contextvars
 import json as _json
 
 _bridge_ctx: contextvars.ContextVar = contextvars.ContextVar("workbench_bridge")
+# Current run attribution (run_id / task_id / source_mode / authority_level), set
+# per DeerFlowClient.stream() so real-mode tool executions are attributed in the
+# ledger and enforce the request authority (not just the tool's declared one).
+_run_ctx: contextvars.ContextVar = contextvars.ContextVar("workbench_run_ctx", default=None)
 
 
 def set_bridge(bridge: Any) -> None:
     """注入 bridge，线程/协程安全。每次 DeerFlowClient.stream() 调用前设置。"""
     _bridge_ctx.set(bridge)
+
+
+def set_run_context(
+    *,
+    run_id: str | None = None,
+    task_id: str | None = None,
+    source_mode: str | None = None,
+    authority_level: str | None = None,
+) -> None:
+    """Set the current run attribution for real-mode tool execution (per stream)."""
+    _run_ctx.set({
+        "run_id": run_id,
+        "task_id": task_id,
+        "source_mode": source_mode,
+        "authority_level": authority_level,
+    })
+
+
+def _get_run_context() -> dict:
+    return _run_ctx.get(None) or {}
 
 
 def _get_bridge() -> Any:
@@ -208,6 +232,7 @@ class EmptyInput(BaseModel):
 
 
 from backend.app_services.execution_policy import ExecutionMode
+from backend.app_services.permission_guard import PermissionDenied
 
 def _tool(
     name: str,
@@ -221,6 +246,16 @@ def _tool(
         spec = bridge._specs[name]
         arguments = validated.model_dump()
 
+        # Run attribution + request authority for the ledger / enforcement.
+        rc = _get_run_context()
+        attribution = {
+            "run_id": rc.get("run_id"),
+            "task_id": rc.get("task_id"),
+            "source_mode": rc.get("source_mode"),
+        }
+        req_auth = rc.get("authority_level")
+        effective_authority = AuthorityLevel(req_auth) if req_auth else authority
+
         policy = bridge.execution_policy.decide(name)
 
         if policy.mode == ExecutionMode.BLOCKED:
@@ -228,7 +263,7 @@ def _tool(
                 tool=name, domain=spec.domain, status="blocked",
                 authority_level=spec.required_authority.value,
                 arguments=arguments, evidence_refs=spec.evidence_refs,
-                error=policy.reason,
+                error=policy.reason, **attribution,
             )
             return _json.dumps({"error": policy.reason, "status": "blocked"}, ensure_ascii=False)
 
@@ -238,10 +273,22 @@ def _tool(
                 tool=name, domain=spec.domain, status="blocked",
                 authority_level=spec.required_authority.value,
                 arguments=arguments, evidence_refs=spec.evidence_refs, result=result,
+                **attribution,
             )
             return _json.dumps(result, ensure_ascii=False)
 
-        bridge.permission_guard.require(authority, spec.required_authority, name)
+        # Enforce the REQUEST authority (real mode previously only compared the tool's
+        # own declared authority, so request-level limits weren't applied).
+        try:
+            bridge.permission_guard.require(effective_authority, spec.required_authority, name)
+        except PermissionDenied as exc:
+            bridge._record_execution(
+                tool=name, domain=spec.domain, status="blocked",
+                authority_level=spec.required_authority.value,
+                arguments=arguments, evidence_refs=spec.evidence_refs,
+                error=str(exc), **attribution,
+            )
+            return _json.dumps({"error": str(exc), "status": "blocked"}, ensure_ascii=False)
 
         try:
             result = bridge._handlers[name](arguments)
@@ -250,6 +297,7 @@ def _tool(
                 tool=name, domain=spec.domain, status="failed",
                 authority_level=spec.required_authority.value,
                 arguments=arguments, evidence_refs=spec.evidence_refs, error=str(exc),
+                **attribution,
             )
             raise
 
@@ -257,6 +305,7 @@ def _tool(
             tool=name, domain=spec.domain, status="succeeded",
             authority_level=spec.required_authority.value,
             arguments=arguments, evidence_refs=spec.evidence_refs, result=result,
+            **attribution,
         )
 
         return _json.dumps(result, ensure_ascii=False, default=str)

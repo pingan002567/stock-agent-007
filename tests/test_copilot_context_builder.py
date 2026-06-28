@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from backend.bootstrap import create_services
-from backend.schemas import HoldingPosition, WatchlistItem
+from backend.schemas import HoldingPosition, PriceSnapshot, WatchlistItem
 
 
 def _make_services(tmp_path):
@@ -26,7 +26,15 @@ def test_build_overview_page(tmp_path):
     assert "inbox" in overview
 
 
-def test_build_with_symbol_includes_summary(tmp_path):
+def test_build_with_symbol_includes_summary(tmp_path, monkeypatch):
+    # Make the quote hermetic — the live provider returns nothing offline, which would
+    # otherwise leave price.last == 0.0.
+    monkeypatch.setattr(
+        "backend.app_services.context_builder.get_realtime_quote",
+        lambda symbol: PriceSnapshot(
+            last=193.7, change_pct=1.2, updated_at="2026-01-01T00:00:00+00:00", source="test"
+        ),
+    )
     services = _make_services(tmp_path)
     ctx = services.copilot_context_builder.build(page="holdings", symbol="AAPL")
 

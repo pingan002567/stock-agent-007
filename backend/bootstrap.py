@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+import os
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -63,6 +66,69 @@ class AppServices:
     worldcup_service: WorldCupService
 
 
+_log = logging.getLogger("bootstrap")
+
+
+def _seed_disabled() -> bool:
+    """Skip network-dependent seeding/warmup when WORKBENCH_SKIP_SEED is truthy."""
+    return os.getenv("WORKBENCH_SKIP_SEED", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _seed_market_data(repo: WorkbenchRepository, provider_router) -> None:
+    """First-run data seeding + background warmup.
+
+    Side-effecting and network-dependent: starts the primary provider's background
+    refresh, auto-imports A-share/HK/US master lists when missing, and warms hot-stock
+    caches on a daemon thread. Safe to skip — the app functions without it (just with a
+    cold cache and empty master table until manually imported).
+    """
+    if hasattr(provider_router.primary, "start_background_refresh"):
+        provider_router.primary.start_background_refresh(interval_seconds=300)
+
+    primary_available = provider_router.primary.is_available()
+    if not primary_available:
+        return
+
+    # Auto-import A-share master when the table is empty.
+    if not repo.list_stock_master():
+        try:
+            from backend.stock_domain.catalog_tools import import_a_share_master
+
+            result = import_a_share_master()
+            if result.get("ok"):
+                _log.info("imported %d A-share stocks", result["imported"])
+        except Exception:
+            _log.exception("A-share master import failed")
+
+    def _warmup():
+        try:
+            provider_router.warmup_hot_stocks()
+        except Exception:
+            pass
+
+    threading.Thread(target=_warmup, name="stock-warmup", daemon=True).start()
+
+    # Auto-import HK/US master lists when those markets are missing.
+    existing_markets = {s.market for s in repo.list_stock_master(active_only=True)}
+    try:
+        from backend.stock_domain.catalog_tools import (
+            import_hk_stock_master,
+            import_us_stock_master,
+        )
+
+        if "HK" not in existing_markets:
+            hk_result = import_hk_stock_master()
+            if hk_result.get("ok"):
+                _log.info("imported %d HK stocks", hk_result["imported"])
+
+        if "US" not in existing_markets:
+            us_result = import_us_stock_master()
+            if us_result.get("ok"):
+                _log.info("imported %d US stocks", us_result["imported"])
+    except Exception:
+        _log.exception("HK/US master import failed")
+
+
 def create_services(
     db_path: str | Path = "data/workbench.sqlite3",
     files_root: str | Path = "data/files",
@@ -85,68 +151,11 @@ def create_services(
 
     stock_intel_router.repo = repo
     repo.get_config("intel_sources", DEFAULT_INTEL_SOURCES)
-    if hasattr(stock_provider_router.primary, "start_background_refresh"):
-        stock_provider_router.primary.start_background_refresh(interval_seconds=300)
-    # Auto-import stocks from AKShare when master table is empty
-    _primary_available = stock_provider_router.primary.is_available()
-
-    if _primary_available and not repo.list_stock_master():
-        try:
-            from backend.stock_domain.catalog_tools import import_a_share_master
-
-            result = import_a_share_master()
-            if result.get("ok"):
-                import logging
-
-                logging.getLogger("bootstrap").info(
-                    "imported %d A-share stocks", result["imported"]
-                )
-        except Exception:
-            import logging
-
-            logging.getLogger("bootstrap").exception("A-share master import failed")
-
-    if _primary_available:
-        import threading as _threading
-
-        def _warmup():
-            try:
-                stock_provider_router.warmup_hot_stocks()
-            except Exception:
-                pass
-
-        _threading.Thread(target=_warmup, name="stock-warmup", daemon=True).start()
-
-    # Auto-import HK/US stocks if primary is available
-    if _primary_available:
-        existing_markets = {s.market for s in repo.list_stock_master(active_only=True)}
-        try:
-            from backend.stock_domain.catalog_tools import (
-                import_hk_stock_master,
-                import_us_stock_master,
-            )
-
-            if "HK" not in existing_markets:
-                hk_result = import_hk_stock_master()
-                if hk_result.get("ok"):
-                    import logging
-
-                    logging.getLogger("bootstrap").info(
-                        "imported %d HK stocks", hk_result["imported"]
-                    )
-
-            if "US" not in existing_markets:
-                us_result = import_us_stock_master()
-                if us_result.get("ok"):
-                    import logging
-
-                    logging.getLogger("bootstrap").info(
-                        "imported %d US stocks", us_result["imported"]
-                    )
-        except Exception:
-            import logging
-
-            logging.getLogger("bootstrap").exception("HK/US master import failed")
+    # Network-dependent seeding + cache warmup. Kept out of the construction path so
+    # `create_services()` stays cheap and offline-safe; gate with WORKBENCH_SKIP_SEED=1
+    # (set in tests) to avoid touching the network during boot.
+    if not _seed_disabled():
+        _seed_market_data(repo, stock_provider_router)
     file_store = FileStore(files_root)
     context_builder = ContextBuilder(repo)
     audit_service = AuditService(repo)
@@ -214,9 +223,12 @@ def create_services(
         risk_policy_service=risk_policy_service,
         review_inbox_service=review_inbox_service,
     )
-    runtime_config = repo.get_config("runtime", {"config": DEFAULT_RUNTIME_CONFIG}).get(
-        "config", DEFAULT_RUNTIME_CONFIG
-    )
+    # Accept both shapes (matches CopilotService.reconnect_runtime): settings saved
+    # via PUT /runtime are stored flat (api_key/base_url/... at top level), while older
+    # data may wrap them under a "config" key. Reading only "config" silently dropped
+    # the page-saved runtime config on startup → Copilot fell back to stub after restart.
+    _raw_runtime = repo.get_config("runtime", {})
+    runtime_config = _raw_runtime.get("config", _raw_runtime) or DEFAULT_RUNTIME_CONFIG
     execution_policy = ExecutionPolicy()
     tool_bridge = WorkbenchToolBridge(
         context_builder=context_builder,

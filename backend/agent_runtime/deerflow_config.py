@@ -96,12 +96,32 @@ def _build_tool_configs() -> list[dict[str, Any]]:
             "group": TOOL_GROUP_MAP.get(tool.name, "a2-research"),
             "use": f"backend.agent_runtime.tools:{tool.name}",
         })
-    # Add community tools (web search etc.)
-    configs.append({
-        "name": "web_search",
-        "group": "search",
-        "use": "deerflow.community.ddg_search.tools:web_search_tool",
-    })
+    # Web search: a single "web_search" tool backed by the best-configured provider.
+    # Tavily / Serper register the same tool name, so we pick one (not all). Tavily and
+    # Serper need an API key; DuckDuckGo is the keyless default fallback.
+    tavily_key = os.getenv("TAVILY_API_KEY")
+    if tavily_key:
+        configs.append({
+            "name": "web_search", "group": "search",
+            "use": "deerflow.community.tavily.tools:web_search_tool",
+            "api_key": tavily_key,
+        })
+        # Tavily also exposes a URL-content fetcher.
+        configs.append({
+            "name": "web_fetch", "group": "search",
+            "use": "deerflow.community.tavily.tools:web_fetch_tool",
+            "api_key": tavily_key,
+        })
+    elif os.getenv("SERPER_API_KEY"):
+        configs.append({
+            "name": "web_search", "group": "search",
+            "use": "deerflow.community.serper.tools:web_search_tool",
+        })
+    else:
+        configs.append({
+            "name": "web_search", "group": "search",
+            "use": "deerflow.community.ddg_search.tools:web_search_tool",
+        })
     return configs
 
 

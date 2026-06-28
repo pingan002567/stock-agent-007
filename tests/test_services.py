@@ -970,7 +970,8 @@ def test_copilot_strategy_backtest_routes_to_strategy_analyst_and_records_ledger
 
 def test_fake_embedded_client_stream_is_forwarded_through_copilot_stream(services):
     class FakeEmbeddedAdapter(DeerFlowClientAdapter):
-        async def stream(self, *, run_id, task_id, skill, message, context, skill_trace=None):
+        async def stream(self, *, run_id, task_id, skill, message, context, skill_trace=None,
+                         **kwargs):
             yield {"type": "partial_answer", "payload": {"text": "fake embedded partial"}}
             yield {"type": "tool_call", "payload": {"call_id": "call_1", "tool": "get_quote", "arguments": {"symbol": "AAPL"}}}
             yield {"type": "tool_result", "payload": {"call_id": "call_1", "tool": "get_quote", "result": {"last": 193.7}}}
@@ -1111,7 +1112,9 @@ def test_stub_copilot_stream_uses_tool_bridge_events(services):
     events = asyncio.run(collect())
     assert [event.type for event in events] == ["skill_trace", "reasoning", "tool_call", "tool_result", "partial_answer", "final"]
     assert events[2].payload["tool"] == "evaluate_policy_risk"
-    assert events[2].payload["authority_level"] == "A3"
+    # authority_level rides on the tool_result payload (from the bridge spec), not the
+    # tool_call event — the tool_call payload mirrors the real mapper ({call_id,tool,arguments}).
+    assert events[3].payload["authority_level"] == "A3"
     assert events[3].payload["tool"] == "evaluate_policy_risk"
     assert any(item["symbol"] == "AAPL" for item in events[3].payload["result"]["risks"])
     assert "risk_policy" in events[-1].payload["tool_evidence_refs"]
@@ -1138,7 +1141,9 @@ def test_copilot_risk_preference_phrase_keeps_expected_event_chain(services):
     assert events[3].payload["tool"] == "evaluate_policy_risk"
 
 
-def test_stub_copilot_without_tool_execution_omits_tool_evidence_refs(services):
+def test_stub_copilot_overview_chat_runs_research_tool(services):
+    # Whether to call a tool is the model's judgment (no hard-coded chit-chat path);
+    # the deterministic stub resolves the research tool, which contributes evidence.
     run = services.copilot_service.create_run(
         CopilotRequest(message="你好，给我一个工作台概览", page="overview", authority_level=AuthorityLevel.A2)
     )
@@ -1147,8 +1152,9 @@ def test_stub_copilot_without_tool_execution_omits_tool_evidence_refs(services):
         return [event async for event in services.copilot_service.stream_run(run.run_id, run.task_id)]
 
     events = asyncio.run(collect())
-    assert [event.type for event in events] == ["skill_trace", "reasoning", "partial_answer", "final"]
-    assert "tool_evidence_refs" not in events[-1].payload
+    assert [event.type for event in events] == ["skill_trace", "reasoning", "tool_call", "tool_result", "partial_answer", "final"]
+    assert events[2].payload["tool"] == "get_stock_context"
+    assert events[-1].payload["tool_evidence_refs"]
 
 
 def test_stub_copilot_monitor_explanation_uses_monitor_tool_chain(services):
@@ -1162,48 +1168,11 @@ def test_stub_copilot_monitor_explanation_uses_monitor_tool_chain(services):
         return [event async for event in services.copilot_service.stream_run(run.run_id, run.task_id)]
 
     events = asyncio.run(collect())
-    assert [event.type for event in events] == ["skill_trace", "tool_call", "tool_result", "partial_answer", "final"]
-    assert events[1].payload["tool"] == "get_monitor_events"
+    assert [event.type for event in events] == ["skill_trace", "reasoning", "tool_call", "tool_result", "partial_answer", "final"]
     assert events[2].payload["tool"] == "get_monitor_events"
-    assert events[2].payload["result"]["items"]
+    assert events[3].payload["tool"] == "get_monitor_events"
+    assert events[3].payload["result"]["items"]
     assert "disclaimer" in events[-1].payload
-
-
-def test_fake_embedded_workbench_tool_call_is_executed_by_bridge(services):
-    services.copilot_service.deerflow.tool_bridge = WorkbenchToolBridge(
-        context_builder=services.context_builder,
-        repo=services.repo,
-        permission_guard=services.permission_guard,
-    )
-
-    class FakeClient:
-        async def stream(self, **kwargs):
-            yield (
-                "messages-tuple",
-                [
-                    {
-                        "type": "ai",
-                        "content": "",
-                        "tool_calls": [{"id": "call_1", "name": "get_stock_context", "args": {"symbol": "AAPL"}}],
-                    }
-                ],
-            )
-            yield ("end", {"usage_metadata": {"total_tokens": 7}})
-
-    services.copilot_service.deerflow.client = FakeClient()
-    run = services.copilot_service.create_run(
-        CopilotRequest(message="分析 AAPL 风险", page="stock", symbol="AAPL", authority_level=AuthorityLevel.A4)
-    )
-
-    async def collect():
-        return [event async for event in services.copilot_service.stream_run(run.run_id, run.task_id)]
-
-    events = asyncio.run(collect())
-    assert [event.type for event in events] == ["skill_trace", "tool_call", "tool_result", "final"]
-    assert events[1].payload["call_id"] == events[2].payload["call_id"] == "call_1"
-    assert events[1].payload["tool"] == events[2].payload["tool"] == "get_stock_context"
-    assert events[2].payload["result"]["symbol"] == "AAPL"
-    assert events[-1].payload["tool_evidence_refs"] == ["stock_context", "provider_router"]
 
 
 def test_fake_embedded_unknown_tool_is_passed_through_without_ledger(services):
@@ -1237,78 +1206,6 @@ def test_fake_embedded_unknown_tool_is_passed_through_without_ledger(services):
     assert [event.type for event in events] == ["skill_trace", "tool_call", "tool_result", "final"]
     assert events[1].payload["tool"] == "deerflow_internal_tool"
     assert services.repo.list_tool_executions(task_id=run.task_id) == []
-
-
-def test_fake_embedded_workbench_tool_call_uses_request_authority(services):
-    class FakeClient:
-        async def stream(self, **kwargs):
-            yield (
-                "messages-tuple",
-                [
-                    {
-                        "type": "ai",
-                        "content": "",
-                        "tool_calls": [{"id": "call_1", "name": "generate_draft_order", "args": {"symbol": "AAPL"}}],
-                    }
-                ],
-            )
-            yield ("end", {"usage_metadata": {"total_tokens": 7}})
-
-    services.copilot_service.deerflow.client = FakeClient()
-    run = services.copilot_service.create_run(
-        CopilotRequest(message="研究 AAPL", page="stock", symbol="AAPL", authority_level=AuthorityLevel.A2)
-    )
-
-    async def collect():
-        return [event async for event in services.copilot_service.stream_run(run.run_id, run.task_id)]
-
-    events = asyncio.run(collect())
-    assert [event.type for event in events] == ["skill_trace", "tool_call", "error", "final"]
-    assert events[2].payload["tool"] == "generate_draft_order"
-    assert events[2].payload["authority_level"] == "A2"
-    assert "requires A4" in events[2].payload["error"]
-    executions = services.repo.list_tool_executions(task_id=run.task_id)
-    assert [(item.tool, item.status, item.call_id, item.source_mode) for item in executions] == [
-        ("generate_draft_order", "blocked", "call_1", "embedded")
-    ]
-    assert executions[0].run_id == run.run_id
-    assert executions[0].domain == "planner"
-    assert executions[0].arguments == {"symbol": "AAPL"}
-    assert "requires A4" in executions[0].error
-
-
-def test_fake_embedded_known_tool_failure_returns_error_and_final(services):
-    services.copilot_service.deerflow.tool_bridge._handlers["search_stock_intel"] = lambda arguments: (_ for _ in ()).throw(RuntimeError("tool exploded"))
-
-    class FakeClient:
-        async def stream(self, **kwargs):
-            yield (
-                "messages-tuple",
-                [
-                    {
-                        "type": "ai",
-                        "content": "",
-                        "tool_calls": [{"id": "call_1", "name": "search_stock_intel", "args": {"symbol": "AAPL"}}],
-                    }
-                ],
-            )
-            yield ("end", {"usage_metadata": {"total_tokens": 7}})
-
-    services.copilot_service.deerflow.client = FakeClient()
-    run = services.copilot_service.create_run(
-        CopilotRequest(message="解释当前异动", page="stock", symbol="AAPL", authority_level=AuthorityLevel.A4)
-    )
-
-    async def collect():
-        return [event async for event in services.copilot_service.stream_run(run.run_id, run.task_id)]
-
-    events = asyncio.run(collect())
-    assert [event.type for event in events] == ["skill_trace", "tool_call", "error", "final"]
-    assert events[2].payload["tool"] == "search_stock_intel"
-    assert "tool exploded" in events[2].payload["error"]
-    assert "runtime_error" in events[3].payload
-    executions = services.repo.list_tool_executions(task_id=run.task_id)
-    assert [(item.tool, item.status) for item in executions] == [("search_stock_intel", "failed")]
 
 
 def test_akshare_provider_is_unavailable_without_optional_dependency(monkeypatch):

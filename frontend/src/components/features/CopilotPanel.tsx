@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useAppState } from "@/hooks/useAppState";
 import type { Screen } from "@/types";
-import { parseCopilotEvent, EVENT_FINAL, EVENT_ERROR, EVENT_TOOL_CALL, EVENT_PARTIAL_ANSWER } from "@/api/copilot";
+import { parseCopilotEvent, EVENT_FINAL, EVENT_ERROR, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, EVENT_PARTIAL_ANSWER } from "@/api/copilot";
 import type { CopilotMessage } from "@/api/client";
 import { useCopilotChat } from "@/hooks/useCopilotChat";
 import { CopilotMessageItem } from "@/components/features/CopilotMessageItem";
@@ -37,20 +37,26 @@ type GroupedItem =
   | { t: "ai"; msg: CopilotMessage; tools: ToolItem[] };
 
 function pairMessages(msgs: CopilotMessage[]): GroupedItem[] {
-  // 识别已完成的 run（有 final_answer 或 error）
+  // 识别已完成的 run（有 final_answer 或 error），并按 call_id 预收集 tool_result。
+  // 不能按相邻位置配对：模型常一次批量发多个 tool_call，顺序是 call×N 再 result×N，
+  // 相邻配对会全部落空、把成功的工具误判为失败。改为按 call_id 匹配。
   const completedRuns = new Set<string>();
-  // 记录每个 run 最后一条 final_answer 的 index
   const lastFinalIndex = new Map<string, number>();
+  const resultByCallId = new Map<string, Record<string, unknown>>();
   for (let idx = 0; idx < msgs.length; idx++) {
     const msg = msgs[idx];
+    const ev = parseCopilotEvent(msg as unknown as Record<string, unknown>);
     if (msg.run_id) {
       if (msg.kind === "final_answer") {
         completedRuns.add(msg.run_id);
         lastFinalIndex.set(msg.run_id, idx);
-      } else {
-        const ev = parseCopilotEvent(msg as unknown as Record<string, unknown>);
-        if (ev.type === EVENT_ERROR) completedRuns.add(msg.run_id);
+      } else if (ev.type === EVENT_ERROR) {
+        completedRuns.add(msg.run_id);
       }
+    }
+    if (ev.type === EVENT_TOOL_RESULT) {
+      const cid = (ev.payload as Record<string, unknown>)?.call_id;
+      if (cid) resultByCallId.set(String(cid), ev.payload as Record<string, unknown>);
     }
   }
 
@@ -63,24 +69,23 @@ function pairMessages(msgs: CopilotMessage[]): GroupedItem[] {
     const rid = msg.run_id || "";
 
     if (ev.type === EVENT_TOOL_CALL) {
-      const name = String((ev.payload as Record<string, unknown>)?.tool || "tool");
-      const next = i + 1 < msgs.length ? msgs[i + 1] : null;
+      const p = ev.payload as Record<string, unknown>;
+      const name = String(p?.tool || "tool");
+      const cid = p?.call_id ? String(p.call_id) : "";
+      const resultPayload = cid ? resultByCallId.get(cid) : undefined;
+      const matched = !!resultPayload;
       let resultText: string | undefined;
-      let matched = false;
-      if (next) {
-        const nextEv = parseCopilotEvent(next as unknown as Record<string, unknown>);
-        if (nextEv.type === "tool_result") {
-          const np = nextEv.payload as Record<string, unknown>;
-          const textResult = np.text || np.output || np.result || "";
-          resultText = typeof textResult === "string" ? textResult : JSON.stringify(textResult);
-          matched = true;
-          i++;
-        }
+      if (resultPayload) {
+        const textResult = resultPayload.text || resultPayload.output || resultPayload.result || "";
+        resultText = typeof textResult === "string" ? textResult : JSON.stringify(textResult);
       }
       const failed = !matched && !!msg.run_id && completedRuns.has(msg.run_id);
       const tools = pendingTools.get(rid) || [];
       tools.push({ t: "tool", name, done: matched, failed, id: msg.message_id, created_at: msg.created_at, resultText });
       pendingTools.set(rid, tools);
+    } else if (ev.type === EVENT_TOOL_RESULT) {
+      // 已在预扫描中按 call_id 收集，配对到对应 tool_call；此处跳过，不单独渲染。
+      continue;
     } else if (ev.type === EVENT_PARTIAL_ANSWER) {
       // 如果该 run 已完成，跳过 partial_answer
       if (msg.run_id && completedRuns.has(msg.run_id)) continue;

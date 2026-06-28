@@ -47,8 +47,22 @@ class DeerFlowEventMapper:
     safe and replaceable.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        historical_msg_ids: set[str] | None = None,
+        msg_id_sink: set[str] | None = None,
+    ) -> None:
         self._streamed_text: set[str] = set()
+        self._emitted_tool_calls: set[str] = set()
+        # DeerFlow message ids seen in PRIOR runs of this session. On a resumed
+        # (session-keyed) thread the first "values" snapshot replays those messages,
+        # so DeerFlowClient.stream re-emits their text/tool_calls/tool_results (every
+        # event carries the message "id"). Skip any replayed message by id — covers
+        # historical answer text AND tool cards uniformly.
+        self._historical_msg_ids: set[str] = set(historical_msg_ids or ())
+        # Optional caller-owned set: ids seen THIS run are added here so the session
+        # can treat them as historical on the next run.
+        self._msg_id_sink: set[str] | None = msg_id_sink
         self._last_ai_text: str = ""
 
     def map(self, raw_event: Any) -> list[dict[str, Any]]:
@@ -89,16 +103,22 @@ class DeerFlowEventMapper:
         messages = self._messages_from_payload(payload)
         events: list[dict[str, Any]] = []
         for message in messages:
+            msg_id = self._get(message, "id")
+            # Skip whole messages replayed from a prior run of a resumed thread.
+            if msg_id and msg_id in self._historical_msg_ids:
+                continue
+            if msg_id and self._msg_id_sink is not None:
+                self._msg_id_sink.add(msg_id)
             events.extend(self._map_tool_calls(message))
             role = self._get(message, "type") or self._get(message, "role")
             content = self._get(message, "content")
             if role == "tool" or self._get(message, "tool_call_id"):
+                result_call_id = self._get(message, "tool_call_id") or self._get(message, "id")
                 events.append(
                     {
                         "type": "tool_result",
                         "payload": {
-                            "call_id": self._get(message, "tool_call_id")
-                            or self._get(message, "id"),
+                            "call_id": result_call_id,
                             "tool": self._get(message, "name")
                             or self._get(message, "tool")
                             or "tool",
@@ -106,7 +126,9 @@ class DeerFlowEventMapper:
                         },
                     }
                 )
-            elif content:
+            elif role in ("ai", "assistant") and content:
+                # Only assistant content is the answer. Human (the prompt envelope) /
+                # system messages must never be echoed into the bubble.
                 text = self._text(content)
                 if text and text not in self._streamed_text:
                     self._streamed_text.add(text)
@@ -123,6 +145,12 @@ class DeerFlowEventMapper:
             call_id = self._get(call, "id")
             if not name or not call_id:
                 continue
+            # Dedupe within a stream: the same tool_call can appear in multiple
+            # snapshots; emit each call_id at most once. (Cross-run replay is already
+            # filtered upstream by message id in _map_messages.)
+            if call_id in self._emitted_tool_calls:
+                continue
+            self._emitted_tool_calls.add(call_id)
             function = self._get(call, "function") or {}
             events.append(
                 {
@@ -154,13 +182,16 @@ class DeerFlowEventMapper:
             for message in self._messages_from_payload(messages):
                 role = self._get(message, "type") or self._get(message, "role")
                 content = self._get(message, "content")
-                if role == "ai" and content:
-                    ai_text = self._text(content)
-                    if ai_text:
-                        self._last_ai_text = ai_text
-                text = self._text(self._get(message, "content"))
-                if text and text not in self._streamed_text:
-                    latest_text = text
+                # Only assistant content is reasoning/answer text. Skip human (the
+                # prompt envelope), system, and tool messages — tool results show as
+                # tool cards; the input envelope must never surface in the bubble.
+                if role not in ("ai", "assistant") or not content:
+                    continue
+                ai_text = self._text(content)
+                if ai_text:
+                    self._last_ai_text = ai_text
+                    if ai_text not in self._streamed_text:
+                        latest_text = ai_text
             if latest_text:
                 summary["latest_text"] = latest_text
         events.append({"type": "reasoning", "payload": summary})
@@ -261,10 +292,15 @@ class DeerFlowClientAdapter:
     ) -> "DeerFlowClientAdapter":
         runtime_config = runtime_config or {}
         
-        # 获取 API Key，忽略占位符值
+        # 获取 API Key，忽略占位符值。注意：_try_direct / generate_config 会直接
+        # 再读一次 os.getenv("OPENAI_API_KEY")，所以仅把局部变量置空不够——必须把
+        # 占位符从 os.environ 里清掉，否则像 .env 里残留的 your_api_key_here 会盖过
+        # 页面保存的有效 key，导致真实 LLM 调用 401。
+        _PLACEHOLDER_KEYS = {"your_api_key_here", "sk-xxx", "xxx", ""}
+        for _k in ("OPENAI_API_KEY", "WORKBENCH_AI_API_KEY"):
+            if (os.getenv(_k) or "").strip() in _PLACEHOLDER_KEYS:
+                os.environ.pop(_k, None)
         env_api_key = os.getenv("OPENAI_API_KEY") or os.getenv("WORKBENCH_AI_API_KEY")
-        if env_api_key and env_api_key in ("your_api_key_here", "sk-xxx", "xxx"):
-            env_api_key = None
         
         _resolved_api_key = (
             env_api_key
@@ -410,6 +446,18 @@ class DeerFlowClientAdapter:
                 )
                 return None
 
+        # Explicit stub request short-circuits all real-runtime attempts, so a
+        # deterministic stub can be forced regardless of installed harness or
+        # ambient OPENAI_* credentials (used by the test suite).
+        if ai_mode == "stub":
+            return cls(
+                mode="stub",
+                tool_bridge=tool_bridge,
+                config_path=config_path,
+                model_name=model_name,
+                thinking_enabled=thinking_enabled,
+            )
+
         # Try modes in priority order: explicit request first, then fallback
         if ai_mode == "direct":
             result = _try_direct()
@@ -518,10 +566,14 @@ class DeerFlowClientAdapter:
         history: list[dict[str, str]] | None = None,
         session_id: str | None = None,
         subagent_enabled: bool = False,
+        historical_msg_ids: set[str] | None = None,
+        msg_id_sink: set[str] | None = None,
     ) -> AsyncIterator[Dict[str, Any]]:
         # Both direct and embedded modes use DeerFlowClient.stream()
         if self.client is not None:
-            mapper = DeerFlowEventMapper()
+            mapper = DeerFlowEventMapper(
+                historical_msg_ids=historical_msg_ids, msg_id_sink=msg_id_sink
+            )
             tool_evidence_refs: list[str] = []
             authority_level = AuthorityLevel(
                 str(context.get("_authority_level") or AuthorityLevel.A2.value)
@@ -534,6 +586,12 @@ class DeerFlowClientAdapter:
             try:
                 raw_stream = self.client.stream(
                     message=envelope_message,
+                    # Per-session thread: the DeerFlow checkpointer keeps full
+                    # multi-turn state across runs of the same conversation. NOTE: on
+                    # a resumed thread the first "values" snapshot contains prior runs'
+                    # messages, and DeerFlowClient.stream re-emits their tool_calls /
+                    # tool_results (their msg ids aren't in this call's streamed_ids).
+                    # Filtering that replay is handled at the mapper boundary.
                     thread_id=session_id or run_id,
                     model_name=self.model_name,
                     thinking_enabled=self.thinking_enabled,
@@ -553,8 +611,17 @@ class DeerFlowClientAdapter:
                 return
 
             if self.tool_bridge:
-                from backend.agent_runtime.tools import set_bridge
+                from backend.agent_runtime.tools import set_bridge, set_run_context
                 set_bridge(self.tool_bridge)
+                # Attribute real-mode tool executions to this run + enforce the
+                # request authority (the agent invokes StructuredTools, not the
+                # bridge.execute path that carries this context in stub mode).
+                set_run_context(
+                    run_id=run_id,
+                    task_id=task_id,
+                    source_mode=self.mode,
+                    authority_level=str(context.get("_authority_level") or ""),
+                )
 
             stream_started = False
             try:

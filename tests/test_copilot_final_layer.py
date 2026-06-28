@@ -239,9 +239,11 @@ def test_execution_policy_allows_only_low_risk_automatic_actions():
     assert policy.decide("cancel_paper_order").mode is ExecutionMode.NEEDS_CONFIRMATION
     assert policy.decide("decision_journal_close").mode is ExecutionMode.NEEDS_CONFIRMATION
     assert policy.decide("decision_journal_link_snapshot").mode is ExecutionMode.NEEDS_CONFIRMATION
-    assert policy.decide("review_inbox_dismiss").mode is ExecutionMode.NEEDS_CONFIRMATION
-    assert policy.decide("review_inbox_snooze").mode is ExecutionMode.NEEDS_CONFIRMATION
-    assert policy.decide("review_inbox_done").mode is ExecutionMode.NEEDS_CONFIRMATION
+    # Review-inbox actions are deliberately low-risk auto-safe (with audit); the real
+    # tool names are dismiss_inbox_item / snooze_inbox_item / mark_inbox_item_done.
+    assert policy.decide("dismiss_inbox_item").mode is ExecutionMode.AUTO_SAFE
+    assert policy.decide("snooze_inbox_item").mode is ExecutionMode.AUTO_SAFE
+    assert policy.decide("mark_inbox_item_done").mode is ExecutionMode.AUTO_SAFE
 
     assert policy.decide("place_real_order").mode is ExecutionMode.BLOCKED
     assert policy.decide("TeamRun").mode is ExecutionMode.BLOCKED

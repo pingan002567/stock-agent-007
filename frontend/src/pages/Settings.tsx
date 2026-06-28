@@ -417,9 +417,18 @@ function AiTab({
             也可在此页输入并保存到本地数据库。环境变量优先级高于页面配置。
           </div>
           <label className="page-stack" style={{ gap: 4 }}>
-            <span className="muted" style={{ fontSize: 12 }}>API Key</span>
+            <span className="muted" style={{ fontSize: 12 }}>
+              API Key
+              {Boolean((rc as { api_key?: string }).api_key) && (
+                <span style={{ marginLeft: 8, color: "var(--green, #3fb950)", fontSize: 11 }}>
+                  ✓ 已配置（出于安全不回显，留空则沿用已保存的 Key）
+                </span>
+              )}
+            </span>
             <input
-              type="password" placeholder="sk-..." value={apiKey}
+              type="password"
+              placeholder={(rc as { api_key?: string }).api_key ? "已保存，留空则不修改" : "sk-..."}
+              value={apiKey}
               onChange={(e) => { setApiKey(e.target.value); markDirty(); }}
               style={{ width: "100%", height: 34, border: "1px solid var(--line)", borderRadius: 7, background: "var(--panel)", color: "var(--ink)", padding: "0 10px", fontSize: 13 }}
             />

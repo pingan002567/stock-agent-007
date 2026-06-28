@@ -327,7 +327,13 @@ export function useCopilotChat() {
         const sessionId = sid;
         if (sessionId) {
           fetchSessionMessages(sessionId)
-            .then((items) => { setMessages(items); setStreamMessage(null); })
+            .then((items) => {
+              // 在途期间用户可能已新建/切换会话；若当前会话已不是本轮 run 的会话，
+              // 丢弃这批历史消息，避免把旧会话的流信息覆盖进新对话。
+              if (currentSessionIdRef.current !== sessionId) return;
+              setMessages(items);
+              setStreamMessage(null);
+            })
             .catch(() => { /* 重载失败则保留流式气泡，答案仍可见 */ });
         } else {
           setStreamMessage(null);

@@ -233,7 +233,9 @@ def test_copilot_sse_uses_fake_embedded_deerflow_mapper(tmp_path, monkeypatch):
     ] == [events[1]]
     assert events[-1]["payload"]["usage"] == {"total_tokens": 9}
     assert "skill_trace" in events[-1]["payload"]
-    assert "tool_evidence_refs" not in events[-1]["payload"]
+    # Embedded final always carries tool_evidence_refs; get_quote is not a workbench
+    # tool, so it contributes no evidence and the list stays empty.
+    assert events[-1]["payload"]["tool_evidence_refs"] == []
 
 
 def test_copilot_sse_supports_sync_embedded_generator(tmp_path, monkeypatch):
@@ -1927,12 +1929,15 @@ def test_task_stream_replays_blocked_tool_execution_as_error(tmp_path):
 
     class FakeClient:
         async def stream(self, **kwargs):
+            from backend.agent_runtime.tools import generate_draft_order
+
             yield (
                 "messages-tuple",
                 [
                     {
                         "type": "ai",
                         "content": "",
+                        "id": "msg_ai1",
                         "tool_calls": [
                             {
                                 "id": "call_1",
@@ -1942,6 +1947,14 @@ def test_task_stream_replays_blocked_tool_execution_as_error(tmp_path):
                         ],
                     }
                 ],
+            )
+            # Mimic the real agent invoking the StructuredTool — _tool._run enforces
+            # the request authority (A2 < A4) and records the blocked execution.
+            result = generate_draft_order.invoke({"symbol": "AAPL"})
+            yield (
+                "messages-tuple",
+                [{"type": "tool", "name": "generate_draft_order",
+                  "tool_call_id": "call_1", "content": result, "id": "msg_tool1"}],
             )
             yield ("end", {"usage_metadata": {"total_tokens": 7}})
 
@@ -1970,7 +1983,8 @@ def test_task_stream_replays_blocked_tool_execution_as_error(tmp_path):
     assert [event["type"] for event in events] == ["reasoning", "error", "final"]
     assert events[1]["payload"]["tool"] == "generate_draft_order"
     assert events[1]["payload"]["domain"] == "planner"
-    assert events[1]["payload"]["arguments"] == {"symbol": "AAPL"}
+    # Execution-path records the validated args (schema default filled in).
+    assert events[1]["payload"]["arguments"] == {"symbol": "AAPL", "target_weight_pct": 15.0}
     assert events[1]["payload"]["status"] == "blocked"
     assert "requires A4" in events[1]["payload"]["error"]
 
@@ -2105,7 +2119,7 @@ def test_copilot_pre_trade_review_stream_fails_without_confirmed_draft_and_recor
     ]
     assert events[2]["payload"]["tool"] == "create_pre_trade_review"
     assert events[3]["payload"]["tool"] == "create_pre_trade_review"
-    assert "confirmed draft_id" in events[3]["payload"]["error"]
+    assert "confirm a draft first" in events[3]["payload"]["error"]
     assert events[-1]["payload"]["runtime_error"]
     assert services.repo.list_pre_trade_reviews(limit=None) == []
     detail = client.get(f"/api/tasks/{run['task_id']}").json()

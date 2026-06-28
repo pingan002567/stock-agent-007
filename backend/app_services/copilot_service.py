@@ -35,43 +35,17 @@ from backend.schemas import (
 )
 
 
-ESTIMATED_COST_PER_1K_TOKENS: dict[str, dict[str, float]] = {
-    "gpt-4": {"input": 0.03, "output": 0.06},
-    "gpt-4-turbo": {"input": 0.01, "output": 0.03},
-    "gpt-3.5-turbo": {"input": 0.0015, "output": 0.002},
-    "gpt-4o": {"input": 0.005, "output": 0.015},
-    "gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
-    "deepseek-chat": {"input": 0.0005, "output": 0.002},
-}
-
-
-# 内存中保留的会话轮次记忆数量上限（LRU 淘汰），防止单进程长跑无限增长。
-MAX_SESSION_STATES = 256
-
-
-def _resolve_rates(model_name: str | None) -> dict[str, float]:
-    """Match model name to a pricing entry.
-
-    Real model ids often carry date/variant suffixes (e.g. ``gpt-4o-2024-08-06``,
-    ``deepseek-chat-v2``), so fall back to a longest-prefix match before the
-    default rates instead of requiring an exact key.
-    """
-    name = (model_name or "").lower()
-    if name in ESTIMATED_COST_PER_1K_TOKENS:
-        return ESTIMATED_COST_PER_1K_TOKENS[name]
-    matches = [key for key in ESTIMATED_COST_PER_1K_TOKENS if name.startswith(key)]
-    if matches:
-        return ESTIMATED_COST_PER_1K_TOKENS[max(matches, key=len)]
-    return ESTIMATED_COST_PER_1K_TOKENS["gpt-4o-mini"]
-
-
-def _estimate_cost(
-    input_tokens: int, output_tokens: int, model_name: str | None = None
-) -> float:
-    rates = _resolve_rates(model_name)
-    input_cost = (input_tokens / 1000) * rates["input"]
-    output_cost = (output_tokens / 1000) * rates["output"]
-    return round(input_cost + output_cost, 6)
+from backend.app_services.copilot_cost import _estimate_cost
+from backend.app_services.copilot_errors import (
+    categorize_error,
+    classify_outcome,
+    error_hint,
+)
+from backend.app_services.copilot_session_state import (
+    MAX_SESSION_STATES,
+    SessionStateData,
+    TurnSummary,
+)
 
 
 @dataclass
@@ -83,63 +57,6 @@ class CopilotRunState:
     intent: str
     skill: str
     skill_trace: list[dict[str, Any]]
-
-
-@dataclass
-class TurnSummary:
-    question: str
-    intent: str
-    outcome: str
-    summary: str
-    state_changes: dict[str, Any]
-    error_hint: str | None = None
-
-    def to_context(self) -> dict[str, Any]:
-        return {
-            "outcome": self.outcome,
-            "summary": self.summary,
-            "state_changes": self.state_changes,
-        }
-
-    @property
-    def is_empty(self) -> bool:
-        return not self.summary and not self.state_changes.get("generated_drafts") \
-               and not self.state_changes.get("confirmed_drafts")
-
-
-@dataclass
-class SessionStateData:
-    active_drafts: dict[str, dict[str, Any]]
-    active_reviews: dict[str, dict[str, Any]]
-    total_runs: int = 0
-
-    def apply_turn(self, turn: TurnSummary) -> None:
-        import datetime as _dt
-        now = _dt.datetime.now().isoformat()
-        for d in turn.state_changes.get("generated_drafts", []):
-            self.active_drafts[d["id"]] = {"symbol": d["symbol"], "status": "pending", "created_at": now}
-        for d in turn.state_changes.get("confirmed_drafts", []):
-            if d["id"] in self.active_drafts:
-                self.active_drafts[d["id"]]["status"] = "confirmed"
-        for r in turn.state_changes.get("created_reviews", []):
-            self.active_reviews[r["id"]] = {"draft_id": r.get("draft_id"), "status": "created", "created_at": now}
-        self.total_runs += 1
-
-    def to_context(self) -> dict[str, Any]:
-        pending = {k: v for k, v in self.active_drafts.items() if v["status"] == "pending"}
-        confirmed = {k: v for k, v in self.active_drafts.items() if v["status"] == "confirmed"}
-        actions = []
-        for d_id, d in pending.items():
-            actions.append(f"草案 {d_id}({d['symbol']}) 待确认")
-        for d_id, d in confirmed.items():
-            actions.append(f"草案 {d_id} 可创建交易前审查")
-        return {
-            "pending_drafts": [{"id": k, "symbol": v["symbol"]} for k, v in pending.items()],
-            "confirmed_drafts": [{"id": k, "symbol": v["symbol"]} for k, v in confirmed.items()],
-            "active_reviews": [{"id": k, **v} for k, v in self.active_reviews.items()],
-            "pending_actions": actions,
-            "total_runs": self.total_runs,
-        }
 
 
 class CopilotService:
@@ -171,6 +88,11 @@ class CopilotService:
         self.runtime_observer = runtime_observer
         self._runs: Dict[str, CopilotRunState] = {}
         self._session_states: dict[str, SessionStateData] = {}
+        # Per-session set of DeerFlow message ids already streamed in prior runs.
+        # Used to drop the resumed-thread replay (historical answer text + tool cards)
+        # from the live stream. In-memory (best-effort); lost on restart, which only
+        # means the first run after a restart may show one replayed turn.
+        self._session_msg_ids: dict[str, set[str]] = {}
 
     def reconnect_runtime(self) -> dict[str, Any]:
         """Re-initialize DeerFlowClientAdapter from persisted runtime_config.
@@ -231,10 +153,35 @@ class CopilotService:
                     json={
                         "model": model_name,
                         "messages": [{"role": "user", "content": "ping"}],
-                        "max_tokens": 5,
+                        # Reasoning/thinking models spend tokens on the hidden trace;
+                        # a tiny cap (e.g. 5) makes them return HTTP 400. Keep it small
+                        # but large enough to clear the reasoning budget.
+                        "max_tokens": 256,
                     },
                 )
-                resp.raise_for_status()
+                if resp.status_code >= 400:
+                    # Surface the upstream error body — a bare "HTTP 400" hides the
+                    # real reason (bad model name, unsupported param, quota, etc.).
+                    detail = resp.text.strip()
+                    try:
+                        body = resp.json()
+                        detail = (
+                            (body.get("error") or {}).get("message")
+                            if isinstance(body.get("error"), dict)
+                            else body.get("error") or body.get("message") or detail
+                        )
+                    except Exception:
+                        pass
+                    logger.warning(
+                        "connection test HTTP %s: model=%s detail=%s",
+                        resp.status_code, model_name, detail,
+                    )
+                    return {
+                        "ok": False,
+                        "error": f"HTTP {resp.status_code}: {str(detail)[:500]}",
+                        "model": model_name,
+                        "base_url": base_url or "default",
+                    }
                 data = resp.json()
             logger.info(
                 "connection test OK: model=%s base_url=%s",
@@ -299,6 +246,19 @@ class CopilotService:
                     tool_calls_map[tool_name]['result_summary'] = result_summary
         
         return list(tool_calls_map.values())
+
+    def _record_session_msg_ids(self, session_id: str, seen: set[str]) -> None:
+        """Merge this run's DeerFlow msg ids into the session's seen-set (LRU-capped)."""
+        if not seen:
+            return
+        bucket = self._session_msg_ids.pop(session_id, None) or set()
+        bucket |= seen
+        # Keep the set bounded; a session rarely exceeds a few hundred messages.
+        if len(bucket) > 2000:
+            bucket = set(list(bucket)[-2000:])
+        while len(self._session_msg_ids) >= MAX_SESSION_STATES:
+            self._session_msg_ids.pop(next(iter(self._session_msg_ids)))
+        self._session_msg_ids[session_id] = bucket
 
     def list_sessions(self) -> list[CopilotSession]:
         return self.repo.list_copilot_sessions(limit=100)
@@ -546,7 +506,13 @@ class CopilotService:
         )
         if previous_tool_calls:
             context["previous_tool_calls"] = previous_tool_calls
-        
+
+        # Resumed-thread replay filter: DeerFlow msg ids streamed in prior runs of
+        # this session are dropped from the live stream; ids seen this run go into the
+        # sink and are folded back into the session set once the run completes.
+        historical_msg_ids = set(self._session_msg_ids.get(state.session_id, ()))
+        msg_id_sink: set[str] = set()
+
         runtime_context = {**context, "_authority_level": request.authority_level.value}
         resolved_task_id = task_id or state.task_id
         # 按工具名捕获最近一次有意义的结果，供 final 阶段回填。
@@ -586,6 +552,8 @@ class CopilotService:
                 history=[],
                 session_id=state.session_id,
                 subagent_enabled=state.intent in {"rebalance_plan", "strategy_backtest"},
+                historical_msg_ids=historical_msg_ids,
+                msg_id_sink=msg_id_sink,
             ):
                 payload = event["payload"]
                 self._capture_tool_result(event, captured)
@@ -797,10 +765,13 @@ class CopilotService:
             self._upsert_run_log(
                 run_id,
                 status="failed",
-                error_category=self._categorize_error(exc),
+                error_category=categorize_error(exc),
                 runtime_error=str(exc),
                 latency_ms=(time.monotonic() - _start_time) * 1000,
             )
+        # Fold this run's DeerFlow msg ids into the session set so the next run can
+        # filter them out of the resumed-thread replay.
+        self._record_session_msg_ids(state.session_id, msg_id_sink)
         self._runs.pop(run_id, None)
 
     @staticmethod
@@ -827,28 +798,6 @@ class CopilotService:
             captured["draft"] = result
         elif tool == "create_pre_trade_review":
             captured["review"] = result
-
-    @staticmethod
-    def _categorize_error(exc: Exception) -> str:
-        """Map a stream-run exception to a coarse error category for the run log.
-
-        NOTE: this is heuristic substring matching on the exception text and is
-        locale/SDK-fragile (see review item #4); centralized here so it can be
-        unit-tested and later replaced by structured error codes from the
-        tool-bridge / adapter boundary.
-        """
-        error_msg = str(exc).lower()
-        if "401" in error_msg or "unauthorized" in error_msg:
-            return "auth_error"
-        if "429" in error_msg or "rate limit" in error_msg:
-            return "rate_limit"
-        if "timeout" in error_msg or "timed out" in error_msg:
-            return "timeout"
-        if "tool" in error_msg or "execution" in error_msg:
-            return "tool_error"
-        if "permission" in error_msg or "denied" in error_msg:
-            return "auth_error"
-        return "stream_run"
 
     def _ensure_session(self, request: CopilotRequest) -> CopilotSession:
         if request.session_id:
@@ -1131,42 +1080,18 @@ class CopilotService:
         final_payload: dict[str, Any] | None,
         error_payload: dict[str, Any] | None,
     ) -> TurnSummary:
-        outcome = self._classify_outcome(error_payload)
-        error_hint = self._error_hint(error_payload) if error_payload else None
+        outcome = classify_outcome(error_payload)
+        hint = error_hint(error_payload) if error_payload else None
         state_changes = self._extract_state_changes(tool_call_events, tool_result_events)
-        summary = self._build_summary_text(outcome, tool_result_events, error_hint)
+        summary = self._build_summary_text(outcome, tool_result_events, hint)
         return TurnSummary(
             question=user_message[:100],
             intent=intent,
             outcome=outcome,
             summary=summary,
             state_changes=state_changes,
-            error_hint=error_hint,
+            error_hint=hint,
         )
-
-    @staticmethod
-    def _classify_outcome(error_payload: dict[str, Any] | None) -> str:
-        if not error_payload:
-            return "success"
-        error_msg = str(error_payload.get("error", "")).lower()
-        if "timeout" in error_msg or "timed out" in error_msg:
-            return "timeout"
-        return "error"
-
-    @staticmethod
-    def _error_hint(error_payload: dict[str, Any]) -> str | None:
-        error_msg = str(error_payload.get("error", ""))
-        if "draft must be confirmed" in error_msg:
-            return "DRAFT_NOT_CONFIRMED"
-        if "requires an explicit confirmed draft_id" in error_msg:
-            return "MISSING_DRAFT_ID"
-        if "draft is already" in error_msg and "confirmed" in error_msg:
-            return "DRAFT_ALREADY_CONFIRMED"
-        if "expired" in error_msg:
-            return "DRAFT_EXPIRED"
-        if "permission" in error_msg.lower() or "denied" in error_msg.lower():
-            return "PERMISSION_DENIED"
-        return None
 
     @staticmethod
     def _build_summary_text(

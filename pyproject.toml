@@ -8,15 +8,13 @@ dependencies = [
   "uvicorn[standard]>=0.30.0",
   "pydantic>=2.8.0",
   "openai>=2.37.0",
+  "yfinance>=0.2.0",
   "deerflow-harness @ git+https://github.com/bytedance/deer-flow.git@main#subdirectory=backend/packages/harness",
 ]
 
 [project.optional-dependencies]
 akshare = [
   "akshare>=1.18.60",
-]
-yfinance = [
-  "yfinance>=0.2.0",
 ]
 test = [
   "pytest>=8.0.0",
