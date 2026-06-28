@@ -47,22 +47,15 @@ class DeerFlowEventMapper:
     safe and replaceable.
     """
 
-    def __init__(
-        self,
-        historical_msg_ids: set[str] | None = None,
-        msg_id_sink: set[str] | None = None,
-    ) -> None:
+    def __init__(self, historical_msg_ids: set[str] | None = None) -> None:
         self._streamed_text: set[str] = set()
         self._emitted_tool_calls: set[str] = set()
-        # DeerFlow message ids seen in PRIOR runs of this session. On a resumed
-        # (session-keyed) thread the first "values" snapshot replays those messages,
-        # so DeerFlowClient.stream re-emits their text/tool_calls/tool_results (every
-        # event carries the message "id"). Skip any replayed message by id — covers
-        # historical answer text AND tool cards uniformly.
+        # DeerFlow message ids already in the thread before this run (from the
+        # checkpoint). On a resumed (session-keyed) thread the first "values" snapshot
+        # replays those messages, so DeerFlowClient.stream re-emits their
+        # text/tool_calls/tool_results (every event carries the message "id"). Skip any
+        # replayed message by id — covers historical answer text AND tool cards.
         self._historical_msg_ids: set[str] = set(historical_msg_ids or ())
-        # Optional caller-owned set: ids seen THIS run are added here so the session
-        # can treat them as historical on the next run.
-        self._msg_id_sink: set[str] | None = msg_id_sink
         self._last_ai_text: str = ""
 
     def map(self, raw_event: Any) -> list[dict[str, Any]]:
@@ -107,8 +100,6 @@ class DeerFlowEventMapper:
             # Skip whole messages replayed from a prior run of a resumed thread.
             if msg_id and msg_id in self._historical_msg_ids:
                 continue
-            if msg_id and self._msg_id_sink is not None:
-                self._msg_id_sink.add(msg_id)
             events.extend(self._map_tool_calls(message))
             role = self._get(message, "type") or self._get(message, "role")
             content = self._get(message, "content")
@@ -554,6 +545,30 @@ class DeerFlowClientAdapter:
             thinking_enabled=self.thinking_enabled,
         )
 
+    def _existing_thread_msg_ids(self, thread_id: str | None) -> set[str]:
+        """DeerFlow message ids already in the thread's checkpoint (prior runs).
+
+        Read from DeerFlow's own persisted checkpoint via ``get_thread`` — the same
+        source the resumed-thread replay comes from, so the ids match exactly and the
+        filter survives a backend restart (unlike in-memory tracking).
+        """
+        if not thread_id or self.client is None:
+            return set()
+        get_thread = getattr(self.client, "get_thread", None)
+        if not callable(get_thread):
+            return set()
+        try:
+            checkpoints = (get_thread(thread_id) or {}).get("checkpoints") or []
+            messages = (checkpoints[-1].get("values") or {}).get("messages") or [] if checkpoints else []
+        except Exception:
+            return set()
+        ids: set[str] = set()
+        for m in messages:
+            mid = m.get("id") if isinstance(m, dict) else getattr(m, "id", None)
+            if mid:
+                ids.add(str(mid))
+        return ids
+
     async def stream(
         self,
         *,
@@ -566,14 +581,15 @@ class DeerFlowClientAdapter:
         history: list[dict[str, str]] | None = None,
         session_id: str | None = None,
         subagent_enabled: bool = False,
-        historical_msg_ids: set[str] | None = None,
-        msg_id_sink: set[str] | None = None,
     ) -> AsyncIterator[Dict[str, Any]]:
         # Both direct and embedded modes use DeerFlowClient.stream()
         if self.client is not None:
-            mapper = DeerFlowEventMapper(
-                historical_msg_ids=historical_msg_ids, msg_id_sink=msg_id_sink
-            )
+            # On a resumed session thread, DeerFlow re-streams prior-run messages from
+            # the first values snapshot. Filter that replay out of the live stream using
+            # the ids ALREADY in the thread's checkpoint — same source as the replay, so
+            # ids always match, and persisted so it survives a backend restart.
+            historical_msg_ids = self._existing_thread_msg_ids(session_id or run_id)
+            mapper = DeerFlowEventMapper(historical_msg_ids=historical_msg_ids)
             tool_evidence_refs: list[str] = []
             authority_level = AuthorityLevel(
                 str(context.get("_authority_level") or AuthorityLevel.A2.value)

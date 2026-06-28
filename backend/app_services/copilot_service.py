@@ -88,11 +88,6 @@ class CopilotService:
         self.runtime_observer = runtime_observer
         self._runs: Dict[str, CopilotRunState] = {}
         self._session_states: dict[str, SessionStateData] = {}
-        # Per-session set of DeerFlow message ids already streamed in prior runs.
-        # Used to drop the resumed-thread replay (historical answer text + tool cards)
-        # from the live stream. In-memory (best-effort); lost on restart, which only
-        # means the first run after a restart may show one replayed turn.
-        self._session_msg_ids: dict[str, set[str]] = {}
 
     def reconnect_runtime(self) -> dict[str, Any]:
         """Re-initialize DeerFlowClientAdapter from persisted runtime_config.
@@ -246,19 +241,6 @@ class CopilotService:
                     tool_calls_map[tool_name]['result_summary'] = result_summary
         
         return list(tool_calls_map.values())
-
-    def _record_session_msg_ids(self, session_id: str, seen: set[str]) -> None:
-        """Merge this run's DeerFlow msg ids into the session's seen-set (LRU-capped)."""
-        if not seen:
-            return
-        bucket = self._session_msg_ids.pop(session_id, None) or set()
-        bucket |= seen
-        # Keep the set bounded; a session rarely exceeds a few hundred messages.
-        if len(bucket) > 2000:
-            bucket = set(list(bucket)[-2000:])
-        while len(self._session_msg_ids) >= MAX_SESSION_STATES:
-            self._session_msg_ids.pop(next(iter(self._session_msg_ids)))
-        self._session_msg_ids[session_id] = bucket
 
     def list_sessions(self) -> list[CopilotSession]:
         return self.repo.list_copilot_sessions(limit=100)
@@ -507,12 +489,6 @@ class CopilotService:
         if previous_tool_calls:
             context["previous_tool_calls"] = previous_tool_calls
 
-        # Resumed-thread replay filter: DeerFlow msg ids streamed in prior runs of
-        # this session are dropped from the live stream; ids seen this run go into the
-        # sink and are folded back into the session set once the run completes.
-        historical_msg_ids = set(self._session_msg_ids.get(state.session_id, ()))
-        msg_id_sink: set[str] = set()
-
         runtime_context = {**context, "_authority_level": request.authority_level.value}
         resolved_task_id = task_id or state.task_id
         # 按工具名捕获最近一次有意义的结果，供 final 阶段回填。
@@ -552,8 +528,6 @@ class CopilotService:
                 history=[],
                 session_id=state.session_id,
                 subagent_enabled=state.intent in {"rebalance_plan", "strategy_backtest"},
-                historical_msg_ids=historical_msg_ids,
-                msg_id_sink=msg_id_sink,
             ):
                 payload = event["payload"]
                 self._capture_tool_result(event, captured)
@@ -769,9 +743,6 @@ class CopilotService:
                 runtime_error=str(exc),
                 latency_ms=(time.monotonic() - _start_time) * 1000,
             )
-        # Fold this run's DeerFlow msg ids into the session set so the next run can
-        # filter them out of the resumed-thread replay.
-        self._record_session_msg_ids(state.session_id, msg_id_sink)
         self._runs.pop(run_id, None)
 
     @staticmethod
