@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from statistics import mean, pstdev
+from statistics import mean
 from typing import Any, Iterable
 
 from backend.schemas import HoldingPosition, PriceSnapshot, RiskPolicy, StrategySpec, model_to_dict, now_iso
@@ -55,13 +55,29 @@ def _max_drawdown(closes: list[float]) -> float:
     return max_dd
 
 
+def _pstdev(values: list[float]) -> float:
+    """Population stdev tolerant of NaN/inf and short series.
+
+    ``statistics.pstdev`` raises ``'float' object has no attribute 'numerator'`` on
+    NaN under Python 3.12, and backtest returns can contain NaN/inf when the price
+    series has gaps or zeros. Filter to finite numbers and compute manually.
+    """
+    finite = [v for v in values if isinstance(v, (int, float)) and math.isfinite(v)]
+    n = len(finite)
+    if n < 2:
+        return 0.0
+    m = sum(finite) / n
+    return math.sqrt(sum((x - m) ** 2 for x in finite) / n)
+
+
 def _sharpe_ratio(returns: list[float], risk_free_rate: float = 0.03) -> float:
     """Calculate Sharpe ratio (annualized)."""
+    returns = [r for r in returns if isinstance(r, (int, float)) and math.isfinite(r)]
     if len(returns) < 2:
         return 0.0
     excess_returns = [r - risk_free_rate / 252 for r in returns]
     avg_excess = mean(excess_returns)
-    std = pstdev(returns)
+    std = _pstdev(returns)
     if std == 0:
         return 0.0
     return (avg_excess / std) * math.sqrt(252)
@@ -87,7 +103,7 @@ def _calculate_enhanced_metrics(
     max_dd = _max_drawdown(closes)
     sharpe = _sharpe_ratio(returns)
     win = _win_rate(returns)
-    volatility = pstdev(returns) * math.sqrt(252) * 100 if len(returns) > 1 else 0.0
+    volatility = _pstdev(returns) * math.sqrt(252) * 100 if len(returns) > 1 else 0.0
     
     metrics = {
         "total_return_pct": round(total_ret, 2),
@@ -481,4 +497,4 @@ def _volatility_pct(closes: list[float]) -> float:
         if previous == 0:
             continue
         returns.append((current / previous - 1) * 100)
-    return pstdev(returns) if returns else 0.0
+    return _pstdev(returns)

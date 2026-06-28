@@ -42,6 +42,39 @@ from backend.schemas import (
 )
 from backend.persistence.repo_base import _json, _loads
 
+
+def _num(value: Any) -> float:
+    """Coerce a possibly-NULL numeric DB column to float (StockDaily defaults to 0.0)."""
+    if value is None:
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _row_to_stock_daily(row: sqlite3.Row) -> StockDaily:
+    """Build a StockDaily from a DB row, tolerating NULL OHLC/volume columns.
+
+    Seeded placeholder rows (e.g. a master-list stock with no history yet) can
+    carry NULL price columns; passing those straight into ``StockDaily`` raises a
+    pydantic ValidationError, which previously crashed get_history and any
+    backtest that touched the symbol.
+    """
+    return StockDaily(
+        symbol=row["symbol"],
+        trade_date=row["trade_date"] or "",
+        open=_num(row["open"]),
+        high=_num(row["high"]),
+        low=_num(row["low"]),
+        close=_num(row["close"]),
+        volume=_num(row["volume"]),
+        amount=_num(row["amount"]),
+        source=row["source"] or "",
+        created_at=row["created_at"],
+    )
+
+
 class CatalogRepoMixin:
     def list_watchlist(self) -> List[WatchlistItem]:
         with self._lock:
@@ -397,21 +430,7 @@ class CatalogRepoMixin:
         params.append(limit)
         with self._lock:
             rows = self.conn.execute(query, tuple(params)).fetchall()
-        return [
-            StockDaily(
-                symbol=row["symbol"],
-                trade_date=row["trade_date"],
-                open=row["open"],
-                high=row["high"],
-                low=row["low"],
-                close=row["close"],
-                volume=row["volume"],
-                amount=row["amount"],
-                source=row["source"] or "",
-                created_at=row["created_at"],
-            )
-            for row in rows
-        ]
+        return [_row_to_stock_daily(row) for row in rows]
 
     def get_stock_daily(self, symbol: str, trade_date: str) -> Optional[StockDaily]:
         with self._lock:
@@ -421,18 +440,7 @@ class CatalogRepoMixin:
             ).fetchone()
         if not row:
             return None
-        return StockDaily(
-            symbol=row["symbol"],
-            trade_date=row["trade_date"],
-            open=row["open"],
-            high=row["high"],
-            low=row["low"],
-            close=row["close"],
-            volume=row["volume"],
-            amount=row["amount"],
-            source=row["source"] or "",
-            created_at=row["created_at"],
-        )
+        return _row_to_stock_daily(row)
 
     def count_stock_daily(self, symbol: str) -> int:
         with self._lock:
