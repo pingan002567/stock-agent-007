@@ -20,6 +20,21 @@ from backend.schemas import AuthorityLevel
 
 SYNC_STREAM_QUEUE_MAXSIZE = 64
 
+# LangGraph super-step ceiling per turn. Single-agent turns rarely exceed the
+# default 100; subagent-enabled turns delegate to nested graphs and need more.
+# Both overridable via env for ops without a code change.
+_DEFAULT_RECURSION_LIMIT = 100
+_SUBAGENT_RECURSION_LIMIT = 160
+
+
+def _recursion_limit(subagent_enabled: bool) -> int:
+    env_key = "WORKBENCH_AI_RECURSION_LIMIT_SUBAGENT" if subagent_enabled else "WORKBENCH_AI_RECURSION_LIMIT"
+    default = _SUBAGENT_RECURSION_LIMIT if subagent_enabled else _DEFAULT_RECURSION_LIMIT
+    raw = (os.getenv(env_key) or "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return default
+
 
 @dataclass
 class AgentRuntimeStatus:
@@ -613,6 +628,12 @@ class DeerFlowClientAdapter:
                     thinking_enabled=self.thinking_enabled,
                     subagent_enabled=subagent_enabled,
                     plan_mode=False,
+                    # Subagent runs (rebalance_plan / strategy_backtest) fan out to
+                    # delegated graphs, so each turn burns more LangGraph super-steps;
+                    # give them extra headroom over the default 100 so a legitimate
+                    # multi-step plan doesn't trip GRAPH_RECURSION_LIMIT. Loop
+                    # detection still hard-stops genuine repeat loops.
+                    recursion_limit=_recursion_limit(subagent_enabled),
                 )
             except Exception as exc:
                 self._set_degraded(str(exc), fallback_to_stub=True)
