@@ -519,7 +519,7 @@ def test_paper_portfolio_review_report_reads_snapshot_payload_without_live_quote
     assert report.source_type == "paper_portfolio_snapshot"
     assert report.execution_guard["auto_trade"] is False
     assert report.payload["snapshot"]["snapshot_id"] == snapshot.snapshot_id
-    assert "execution_guard.auto_trade=false" in report.content
+    assert "auto_trade = false" in report.content
 
 
 def test_decision_journal_link_snapshot_explicit_omitted_idempotent_conflict_and_missing(monkeypatch, services, tmp_path):

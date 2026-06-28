@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from io import BytesIO
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from backend.api.deps import get_services
 from backend.bootstrap import AppServices
@@ -90,7 +91,17 @@ def export_report(
                 headers={"Content-Disposition": f'attachment; filename="{report_id}.pdf"'},
             )
         result = services.report_service.export_report(report_id)
-        return result
+        report = services.report_service.get_report(report_id)
+        title = (getattr(report, "title", None) or report_id).strip() or report_id
+        disposition = (
+            f'attachment; filename="{report_id}.md"; '
+            f"filename*=UTF-8''{quote(title + '.md')}"
+        )
+        return Response(
+            content=result["content"],
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": disposition},
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="report not found") from exc
     except ImportError as exc:

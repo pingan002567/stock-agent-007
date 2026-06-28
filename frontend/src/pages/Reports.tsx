@@ -6,6 +6,7 @@ import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Pagination } from "@/components/ui/Pagination";
 import { formatTimeAgo } from "@/utils/format";
 import { useAppState } from "@/hooks/useAppState";
+import { MarkdownRenderer } from "@/components/features/MarkdownRenderer";
 
 interface ReportItem { report_id: string; title?: string; report_type?: string; status?: string; quality_score?: number; created_at?: string; source_label?: string }
 interface ReportTemplate { template_id: string; name: string; report_type: string; source_types?: string[] }
@@ -18,8 +19,6 @@ export default function Reports() {
   const [selectedReport, setSelectedReport] = useState<ReportItem | null>(null);
   const [quality, setQuality] = useState<ReportQuality | null>(null);
   const [reportPreview, setReportPreview] = useState<string | null>(null);
-  const [candidateActions, setCandidateActions] = useState<string>("等待报告。");
-  const [evidence, setEvidence] = useState<string>("等待报告。");
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [paperReportBusy, setPaperReportBusy] = useState(false);
@@ -43,14 +42,14 @@ export default function Reports() {
 
   const handleSelectReport = async (r: ReportItem) => {
     setSelectedReport(r);
+    setReportPreview(null);
     try {
-      const [ql, ev, ca, prev] = await Promise.all([
+      const [ql, full] = await Promise.all([
         apiGet<ReportQuality>(`/api/reports/${r.report_id}/quality`).catch(() => null),
-        apiGet<{ items?: unknown[] }>(`/api/reports/${r.report_id}`).then((d) => JSON.stringify(d, null, 2)).catch(() => "等待报告。"),
-        Promise.resolve("等待报告。"),
-        apiGet<Record<string, unknown>>(`/api/reports/${r.report_id}`).then((d) => JSON.stringify(d, null, 2)).catch(() => "等待报告。"),
+        apiGet<{ content?: string }>(`/api/reports/${r.report_id}`).catch(() => null),
       ]);
-      setQuality(ql); setEvidence(ev); setCandidateActions(ca); setReportPreview(prev);
+      setQuality(ql);
+      setReportPreview(full?.content ?? "（该报告没有正文内容）");
     } catch { /* ignore */ }
   };
 
@@ -84,7 +83,8 @@ export default function Reports() {
     } catch { /* ignore */ }
   };
 
-  const avgQuality = reports.length > 0 ? reports.reduce((sum, r) => sum + (r.quality_score ?? 0), 0) / reports.filter(r => r.quality_score != null).length : 0;
+  const scoredReports = reports.filter(r => r.quality_score != null);
+  const avgQuality = scoredReports.length > 0 ? scoredReports.reduce((sum, r) => sum + (r.quality_score ?? 0), 0) / scoredReports.length : 0;
   const thisMonthReports = reports.filter(r => r.created_at && r.created_at.startsWith(new Date().toISOString().slice(0, 7))).length;
 
   return (
@@ -127,41 +127,6 @@ export default function Reports() {
               <span className="market-stat-value">{templates.length}</span>
               <span className="market-stat-change neutral">可用模板</span>
             </div>
-          </div>
-        </div>
-
-        <div className="kpi-grid">
-          <div className="kpi-card">
-            <div className="kpi-header">
-              <span className="kpi-label">总报告</span>
-              <div className="kpi-icon blue">📄</div>
-            </div>
-            <div className="kpi-value">{reports.length}</div>
-            <div className="kpi-change neutral">全部报告</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-header">
-              <span className="kpi-label">平均质量</span>
-              <div className="kpi-icon green">⭐</div>
-            </div>
-            <div className="kpi-value" style={{ color: "var(--green)" }}>{avgQuality.toFixed(1)} 分</div>
-            <div className="kpi-change up">优秀</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-header">
-              <span className="kpi-label">本月生成</span>
-              <div className="kpi-icon amber">📅</div>
-            </div>
-            <div className="kpi-value">{thisMonthReports}</div>
-            <div className="kpi-change neutral">本月</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-header">
-              <span className="kpi-label">模板数量</span>
-              <div className="kpi-icon" style={{ background: "rgba(139, 92, 246, 0.12)", color: "#8b5cf6" }}>📋</div>
-            </div>
-            <div className="kpi-value">{templates.length}</div>
-            <div className="kpi-change neutral">可用模板</div>
           </div>
         </div>
 
@@ -252,8 +217,8 @@ export default function Reports() {
               </div>
               <div className="panel-body">
                 {reportPreview ? (
-                  <div style={{ padding: 16, background: "var(--bg-tertiary)", borderRadius: 8, fontSize: 13, lineHeight: 1.8, color: "var(--muted)", maxHeight: 300, overflow: "auto" }}>
-                    <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: 12 }}>{reportPreview}</pre>
+                  <div style={{ padding: 16, background: "var(--bg-tertiary)", borderRadius: 8, fontSize: 13, lineHeight: 1.7, maxHeight: 360, overflow: "auto" }}>
+                    <MarkdownRenderer text={reportPreview} />
                   </div>
                 ) : (
                   <div className="muted">选择报告查看预览</div>
@@ -275,10 +240,10 @@ export default function Reports() {
                 </div>
                 <div className="panel-body">
                   <div style={{ display: "flex", gap: 12 }}>
-                    <a className="btn" style={{ flex: 1, textAlign: "center" }} href={`/api/reports/${selectedReport.report_id}/export?format=markdown`} target="_blank" rel="noopener noreferrer">
+                    <a className="btn" style={{ flex: 1, textAlign: "center" }} href={`/api/reports/${selectedReport.report_id}/export?format=markdown`} download>
                       导出 Markdown
                     </a>
-                    <a className="btn" style={{ flex: 1, textAlign: "center" }} href={`/api/reports/${selectedReport.report_id}/export?format=pdf`} target="_blank" rel="noopener noreferrer">
+                    <a className="btn" style={{ flex: 1, textAlign: "center" }} href={`/api/reports/${selectedReport.report_id}/export?format=pdf`} download>
                       导出 PDF
                     </a>
                   </div>

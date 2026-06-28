@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -25,6 +26,7 @@ from backend.schemas import (
     model_to_dict,
 )
 from backend.stock_domain.report_tools import generate_stock_dashboard
+from backend.stock_domain import report_charts as rc
 
 
 def _utc_now() -> datetime:
@@ -152,44 +154,101 @@ class ReportService:
         }
 
     def export_report_pdf(self, report_id: str) -> bytes:
-        try:
-            from fpdf import FPDF
-        except ImportError:
-            raise ImportError("fpdf2 is required for PDF export. Install with: uv sync --extra export")
+        from fpdf import FPDF  # listed in core deps; raises ImportError if absent
 
         report = self.get_report(report_id)
         self.audit_service.record("report pdf export", report_id, AuthorityLevel.A2)
 
-        pdf = FPDF()
+        font_path = str(Path(__file__).resolve().parent.parent / "assets" / "fonts" / "NotoSansSC-Regular.ttf")
+        pdf = FPDF(format="A4")
+        pdf.set_auto_page_break(auto=True, margin=18)
         pdf.add_page()
-        pdf.set_auto_page_break(auto=True, margin=20)
+        # Register the same Unicode TTF for every style so any bold/italic
+        # request can never fall back to the latin-1-only core font (helvetica).
+        for style in ("", "B", "I", "BI"):
+            pdf.add_font("NotoSansSC", style, font_path)
+        pdf.set_font("NotoSansSC", "", 11)
+
+        def clean(text: str) -> str:
+            # Strip inline emphasis/code markers; bold is conveyed via heading size.
+            return text.replace("**", "").replace("`", "")
+
+        def write(text: str, size: float, lead: float, *, gap: float = 0.0, style: str = "") -> None:
+            pdf.set_font("NotoSansSC", style, size)
+            # new_x=LMARGIN so consecutive multi_cells reset to the left margin
+            # (default RIGHT leaves x at the page edge → "no horizontal space").
+            pdf.multi_cell(0, lead, text, new_x="LMARGIN", new_y="NEXT")
+            if gap:
+                pdf.ln(gap)
+
+        def is_sep(text: str) -> bool:
+            t = text.strip()
+            return bool(t) and set(t) <= {"-", "|", ":", " "}
+
+        def render_table(block: list[str]) -> None:
+            rows: list[list[str]] = []
+            for ln in block:
+                if is_sep(ln):
+                    continue
+                cells = [clean(c.strip()) for c in ln.strip().strip("|").split("|")]
+                rows.append(cells)
+            if not rows:
+                return
+            pdf.set_font("NotoSansSC", "", 9.5)
+            with pdf.table(
+                borders_layout="MINIMAL",
+                line_height=pdf.font_size * 1.7,
+                first_row_as_headings=True,
+                cell_fill_color=245,
+                cell_fill_mode="ROWS",
+            ) as table:
+                for r in rows:
+                    trow = table.row()
+                    for cell in r:
+                        trow.cell(cell)
+            pdf.set_font("NotoSansSC", "", 11)
+            pdf.ln(2)
 
         lines = report.content.split("\n")
-        for line in lines:
-            stripped = line.strip()
-            if stripped.startswith("# ") and not stripped.startswith("## "):
-                pdf.set_font("Helvetica", "B", 16)
-                text = stripped[2:]
-                pdf.cell(0, 10, text, new_x="LMARGIN", new_y="NEXT")
-            elif stripped.startswith("## "):
-                pdf.set_font("Helvetica", "B", 14)
-                text = stripped[3:]
-                pdf.cell(0, 9, text, new_x="LMARGIN", new_y="NEXT")
-            elif stripped.startswith("### "):
-                pdf.set_font("Helvetica", "B", 12)
-                text = stripped[4:]
-                pdf.cell(0, 8, text, new_x="LMARGIN", new_y="NEXT")
-            elif stripped.startswith("- "):
-                pdf.set_font("Helvetica", "", 10)
-                text = "- " + stripped[2:]
-                pdf.cell(0, 6, text, new_x="LMARGIN", new_y="NEXT")
-            elif stripped == "":
+        i, n = 0, len(lines)
+        while i < n:
+            stripped = lines[i].strip()
+            if not stripped:
+                pdf.ln(2)
+                i += 1
+                continue
+            # Table block: a "|" row immediately followed by a separator row.
+            if stripped.startswith("|") and i + 1 < n and is_sep(lines[i + 1]) and "|" in lines[i + 1]:
+                block: list[str] = []
+                while i < n and lines[i].strip().startswith("|"):
+                    block.append(lines[i])
+                    i += 1
+                render_table(block)
+                continue
+            # Horizontal rule.
+            if set(stripped) <= {"-", "="} and len(stripped) >= 3:
+                y = pdf.get_y() + 1
+                pdf.set_draw_color(200, 200, 200)
+                pdf.line(pdf.l_margin, y, pdf.w - pdf.r_margin, y)
                 pdf.ln(4)
+                i += 1
+                continue
+            body = clean(stripped)
+            if stripped.startswith("> "):
+                write(body[2:], 11, 6, style="I", gap=1)
+            elif stripped.startswith("### "):
+                write(body[4:], 13, 7, gap=1, style="B")
+            elif stripped.startswith("## "):
+                write(body[3:], 15, 8, gap=1.5, style="B")
+            elif stripped.startswith("# "):
+                write(body[2:], 18, 10, gap=2, style="B")
+            elif stripped.startswith(("- ", "* ", "+ ")):
+                write("• " + body[2:], 11, 6)
+            elif len(body) >= 2 and body.startswith("_") and body.endswith("_"):
+                write(body.strip("_"), 10, 5, style="I")
             else:
-                pdf.set_font("Helvetica", "", 10)
-                # Encode to latin-1 for PDF compat, replacing non-latin chars
-                encoded = stripped.encode("latin-1", errors="replace").decode("latin-1")
-                pdf.cell(0, 6, encoded, new_x="LMARGIN", new_y="NEXT")
+                write(body, 11, 6)
+            i += 1
 
         return bytes(pdf.output())
 
@@ -328,23 +387,86 @@ class ReportService:
         dashboard = generate_stock_dashboard(context, mode="research")
         report_id = f"report_{context.symbol.lower()}_{uuid4().hex[:8]}"
         title = request.title or f"{context.symbol} 研究报告"
+
+        price = context.price
+        holding = context.holding
+        ai = context.ai_state
+        tech = dashboard["technical_analysis"]
+        advice = dashboard["holding_advice"]
+        stance = dashboard["stance_summary"]
+
         content = "\n".join(
             [
                 f"# {title}",
                 "",
-                f"结论：{dashboard['conclusion']}",
-                f"置信度：{dashboard['confidence']}",
+                f"**{context.name}（{context.symbol}）** · {context.market} · {context.sector or '—'}"
+                f" / {context.industry or '—'}",
                 "",
-                "## 理由",
+                f"> **结论**：{dashboard['conclusion']}（置信度 {ai.confidence}，有效期 {stance['valid_for']}）",
+                "",
+                "## 评级总览",
+                *rc.table(
+                    ["维度", "评估", "可视化"],
+                    [
+                        ["AI 评分", f"{ai.score} / 100", rc.bar(ai.score, 100)],
+                        ["立场", ai.stance, ""],
+                        ["风险标签", ai.risk_label, ""],
+                        ["置信度", ai.confidence, ""],
+                        ["权限级别", stance["authority_level"], ""],
+                    ],
+                ),
+                "",
+                "## 行情快照",
+                *rc.table(
+                    ["指标", "数值"],
+                    [
+                        ["最新价", rc.fmt(price.last)],
+                        ["涨跌幅", rc.pct_marker(price.change_pct)],
+                        ["数据源", price.source + (" · 已降级" if price.degraded else "")],
+                        ["更新时间", price.updated_at],
+                    ],
+                ),
+                "",
+                "## 风险雷达",
+                *rc.table(
+                    ["风险维度", "强度", "评分"],
+                    [[item["name"], rc.bar(item["value"], 100), item["value"]] for item in dashboard["risk_bars"]],
+                ),
+                "",
+                "## 技术面",
+                *rc.table(
+                    ["项", "判断"],
+                    [
+                        ["趋势", tech["trend"]],
+                        ["动能", tech["momentum"]],
+                        ["支撑位", rc.fmt(tech["support"])],
+                        ["压力位", rc.fmt(tech["resistance"])],
+                    ],
+                ),
+                "",
+                "## 持仓建议",
+                *rc.table(
+                    ["项", "数值"],
+                    [
+                        ["当前仓位", rc.gauge(holding.weight_pct, 100, suffix="%")],
+                        ["建议仓位", rc.gauge(advice["suggested_weight"], 100, suffix="%")],
+                        ["操作", advice["action"]],
+                        ["持仓盈亏", rc.pct_marker(holding.pnl_pct) if holding.pnl_pct is not None else "—"],
+                    ],
+                ),
+                f"\n{advice['reason']}",
+                "",
+                "## 核心理由",
                 *[f"- {item}" for item in dashboard["reasons"]],
                 "",
-                "## 反对理由",
+                "## 反对理由 / 风险提示",
                 *[f"- {item}" for item in dashboard["counter_reasons"]],
                 "",
                 "## 证据引用",
-                *[f"- {item}" for item in source["evidence_refs"]],
+                *[f"- `{item}`" for item in source["evidence_refs"]],
                 "",
-                dashboard["disclaimer"],
+                "---",
+                f"_{dashboard['disclaimer']}_",
             ]
         )
         return Report(
@@ -385,31 +507,46 @@ class ReportService:
             "auto_trade": False,
             "place_real_order_enabled": False,
         }
+        severity_marker = {"high": "● 高", "medium": "● 中", "low": "● 低"}.get(
+            str(event.severity).lower(), f"● {event.severity}"
+        )
+        evidence_rows = [
+            [item.get("type") or item.get("ref") or "evidence", rc.fmt(item.get("value")) if item.get("value") is not None else (item.get("detail") or item.get("note") or "—")]
+            for item in event.evidence
+        ] or [["—", "无证据记录"]]
         content = "\n".join(
             [
                 f"# {title}",
                 "",
+                f"> **{event.title}** · 标的 `{event.symbol}` · 严重度 {severity_marker}",
+                "",
                 "## 事件概览",
-                f"- 事件 ID：{event.event_id}",
-                f"- 标的：{event.symbol}",
-                f"- 标题：{event.title}",
-                f"- 严重度：{event.severity}",
-                f"- 触发时间：{event.triggered_at}",
+                *rc.table(
+                    ["项", "值"],
+                    [
+                        ["事件 ID", f"`{event.event_id}`"],
+                        ["标的", event.symbol],
+                        ["严重度", severity_marker],
+                        ["触发规则", event.trigger_rule or "—"],
+                        ["触发时间", event.triggered_at],
+                    ],
+                ),
                 "",
                 "## 触发说明",
                 explanation["summary"],
                 "",
                 "## 证据引用",
-                *[f"- {item.get('type') or item.get('ref') or 'evidence'}" for item in event.evidence],
-                *[f"- {item}" for item in source["evidence_refs"]],
+                *rc.table(["证据", "明细"], evidence_rows),
+                *([f"- `{item}`" for item in source["evidence_refs"]]),
                 "",
                 "## 候选动作",
                 *candidate_action_lines,
                 "",
                 "## 执行约束",
-                "- execution_guard.auto_trade=false",
+                "- `execution_guard.auto_trade = false`（研究态，禁止自动下单）",
                 "",
-                "仅供研究，不构成投资建议。",
+                "---",
+                "_仅供研究，不构成投资建议。_",
             ]
         )
         return Report(
@@ -454,29 +591,52 @@ class ReportService:
         )
         report_id = f"report_backtest_{uuid4().hex[:8]}"
         title = request.title or f"{run.strategy_name} 回测报告"
+        period = run.period or {}
+        equity_curve = [
+            sig.get("equity") or sig.get("nav") or sig.get("value")
+            for sig in run.signals
+            if isinstance(sig, dict)
+        ]
+        spark = rc.sparkline([v for v in equity_curve if v is not None])
         content = "\n".join(
             [
                 f"# {title}",
                 "",
-                "## 回测概览",
-                f"- run_id：{run.run_id}",
-                f"- strategy_id：{run.strategy_id}",
-                f"- universe：{', '.join(run.universe) if run.universe else 'N/A'}",
-                f"- degraded：{str(run.degraded).lower()}",
+                f"> **结论**：{conclusion}",
                 "",
+                "## 回测概览",
+                *rc.table(
+                    ["项", "值"],
+                    [
+                        ["策略", f"{run.strategy_name}（{run.strategy_type}）"],
+                        ["run_id", f"`{run.run_id}`"],
+                        ["标的池", ", ".join(run.universe) if run.universe else "—"],
+                        ["区间", f"{period.get('start', '—')} → {period.get('end', '—')}"],
+                        ["样本数", sample_size],
+                        ["数据状态", "已降级，需复核" if run.degraded else "正常"],
+                    ],
+                ),
+                *([f"\n净值走势：{spark}", ""] if spark else [""]),
                 "## 关键指标",
-                *[f"- {key}: {value}" for key, value in run.metrics.items()],
+                *rc.table(
+                    ["指标", "数值", "可视化"],
+                    [[key, rc.fmt(value), self._metric_bar(key, value)] for key, value in run.metrics.items()],
+                ),
                 "",
                 "## 风险总结",
-                *[f"- {key}: {value}" for key, value in run.risk_summary.items()],
+                *rc.table(
+                    ["风险项", "数值"],
+                    [[key, rc.fmt(value)] for key, value in run.risk_summary.items()],
+                ),
                 "",
                 "## 候选动作",
                 *candidate_action_lines,
                 "",
                 "## 执行约束",
-                "- execution_guard.auto_trade=false",
+                "- `execution_guard.auto_trade = false`（研究态，禁止自动下单）",
                 "",
-                "仅供研究，不构成投资建议。",
+                "---",
+                "_仅供研究，不构成投资建议。_",
             ]
         )
         return Report(
@@ -525,42 +685,59 @@ class ReportService:
             "auto_trade": False,
             "place_real_order_enabled": False,
         }
-        warning_lines = [f"- {item.code}: {item.message}" for item in projection.warnings] or ["- 无"]
-        position_lines = [
-            f"- {item.symbol}: qty={item.quantity} mv={item.market_value} pnl={item.pnl} weight={item.weight_pct}%"
+        warning_lines = [f"- `{item.code}`：{item.message}" for item in projection.warnings] or ["- 无"]
+        position_rows = [
+            [
+                item.symbol,
+                rc.fmt(item.quantity),
+                rc.fmt(item.market_value),
+                rc.pct_marker(item.pnl) if isinstance(item.pnl, (int, float)) and abs(item.pnl) <= 100 else rc.fmt(item.pnl),
+                rc.gauge(item.weight_pct, 100, width=10, suffix="%"),
+            ]
             for item in projection.positions[:10]
-        ] or ["- 无持仓"]
+        ] or [["—", "—", "—", "—", "无持仓"]]
         risk_lines = [
-            f"- {item.policy_id}@v{item.version} updated_at={item.updated_at}"
+            f"- `{item.policy_id}` @v{item.version} · updated_at={item.updated_at}"
             for item in projection.risk_policy_refs
         ] or ["- 无冻结 risk policy ref"]
+        invested = (snapshot.market_value or 0)
         content = "\n".join(
             [
                 f"# {title}",
                 "",
-                "## 组合概览",
-                f"- snapshot_id：{snapshot.snapshot_id}",
-                f"- baseline_id：{snapshot.baseline_id}",
-                f"- as_of：{snapshot.as_of}",
-                f"- degraded：{str(snapshot.degraded).lower()}",
-                f"- equity_estimate：{snapshot.equity_estimate}",
-                f"- cash_estimate：{snapshot.cash_estimate}",
-                f"- market_value：{snapshot.market_value}",
-                f"- pnl_estimate：{snapshot.pnl_estimate}",
+                f"> **净值估算 {rc.fmt(snapshot.equity_estimate)}** · "
+                f"浮动盈亏 {rc.pct_marker((snapshot.pnl_estimate / invested * 100) if invested else 0)}"
+                f"（{rc.fmt(snapshot.pnl_estimate)}）",
                 "",
-                "## 持仓变化",
-                *position_lines,
+                "## 组合概览",
+                *rc.table(
+                    ["项", "值"],
+                    [
+                        ["快照 ID", f"`{snapshot.snapshot_id}`"],
+                        ["基线 ID", f"`{snapshot.baseline_id}`"],
+                        ["截至", snapshot.as_of],
+                        ["净值估算", rc.fmt(snapshot.equity_estimate)],
+                        ["现金估算", rc.fmt(snapshot.cash_estimate)],
+                        ["持仓市值", rc.fmt(snapshot.market_value)],
+                        ["浮动盈亏", rc.fmt(snapshot.pnl_estimate)],
+                        ["数据状态", "已降级，需复核" if snapshot.degraded else "正常"],
+                    ],
+                ),
+                "",
+                "## 持仓明细",
+                *rc.table(["标的", "数量", "市值", "盈亏", "权重"], position_rows),
                 "",
                 "## 风险策略引用",
                 *risk_lines,
                 "",
-                "## Warnings",
+                "## 预警",
                 *warning_lines,
                 "",
                 "## 执行约束",
-                "- execution_guard.auto_trade=false",
+                "- `execution_guard.auto_trade = false`（研究态，禁止自动下单）",
                 "",
-                "仅供研究，不构成投资建议。",
+                "---",
+                "_仅供研究，不构成投资建议。_",
             ]
         )
         return Report(
@@ -650,6 +827,26 @@ class ReportService:
     def _write_markdown(self, report: Report) -> None:
         path = self.file_store.write_text("reports", f"{report.report_id}.md", report.content)
         report.markdown_path = str(path)
+
+    def _metric_bar(self, key: str, value: Any) -> str:
+        """Best-effort 0..100 gauge for a backtest metric; empty when not mappable."""
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return ""
+        import math
+
+        if not math.isfinite(value):
+            return ""
+        k = key.lower()
+        if "sharpe" in k or "sortino" in k:
+            return rc.bar(value, vmax=3.0)
+        if "drawdown" in k:
+            mag = abs(value) * 100 if abs(value) <= 1 else abs(value)
+            return rc.bar(mag, vmax=100)
+        if -1.0 <= value <= 1.0:
+            return rc.bar(value * 100, vmax=100)
+        if any(tag in k for tag in ("rate", "win", "pct", "ratio")) and 0 <= value <= 100:
+            return rc.bar(value, vmax=100)
+        return ""
 
     def _format_candidate_action(self, action: dict[str, Any]) -> str:
         label = action.get("action") or action.get("type") or "candidate_action"
