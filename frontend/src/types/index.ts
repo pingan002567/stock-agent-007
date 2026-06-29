@@ -8,6 +8,7 @@ export type Screen =
   | "strategies"
   | "tasks"
   | "reports"
+  | "channels"
   | "settings"
   | "worldcup";
 

@@ -20,6 +20,7 @@ akshare = [
 channels = [
   "python-telegram-bot>=21.0",
   "slack-sdk>=3.33.0",
+  "wecom-aibot-python-sdk>=1.0.0",
 ]
 test = [
   "pytest>=8.0.0",

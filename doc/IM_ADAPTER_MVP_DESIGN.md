@@ -61,12 +61,18 @@ env 兜底：`TELEGRAM_BOT_TOKEN` / `SLACK_BOT_TOKEN` / `SLACK_APP_TOKEN`。
 
 ## 6. MVP 范围
 
-- ✅ Telegram + Slack 双向对话（接 CopilotService）
+- ✅ Telegram + Slack + **企业微信** 双向对话（接 CopilotService）
 - ✅ `/connect <code>` 绑定门禁 + `/new /status /help`
 - ✅ 盯盘 high/medium 告警推送到已绑定 chat
 - ✅ 连接码生成 API + 绑定管理 API
 - ✅ 核心单测（FakeChannel）
-- ⬜（暂不做）流式编辑消息（先整条发）、文件收发、前端设置页、钉钉/飞书/企微/微信（base 已可扩展）
+- ✅ 前端「IM 渠道」设置页（provider 配置 + 绑定列表 + 连接弹窗轮询）
+- ⬜（暂不做）流式编辑消息（先整条发）、文件收发、钉钉/飞书/微信（base 已可扩展）
+
+### 企业微信适配器要点
+- SDK `wecom-aibot-python-sdk`（`from aibot import WSClient`）；凭证 `bot_id`+`bot_secret`；WebSocket 出站，无公网。
+- 与 Telegram/Slack 不同：回复绑定到**入站 frame**——收到消息即 `reply_stream(frame, stream_id, "处理中…", False)` 保活，agent 出结果后 `reply_stream(..., True)` 收口；按 `reply_to=msgid` 存取 frame。
+- 告警（无 frame）走 `send_message(chatid, {...})` 主动推送。
 
 ## 7. 交互原型
 

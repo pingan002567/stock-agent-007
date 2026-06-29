@@ -37,6 +37,13 @@ def resolve_channels_config(repo: WorkbenchRepository) -> dict[str, Any]:
         slack["enabled"] = True
     cfg["slack"] = slack
 
+    wecom = dict(cfg.get("wecom", {}))
+    wecom.setdefault("bot_id", os.getenv("WECOM_BOT_ID", ""))
+    wecom.setdefault("bot_secret", os.getenv("WECOM_BOT_SECRET", ""))
+    if wecom.get("bot_id") and wecom.get("bot_secret") and "enabled" not in wecom:
+        wecom["enabled"] = True
+    cfg["wecom"] = wecom
+
     cfg.setdefault("require_binding", True)
     cfg.setdefault("authority_level", "A2")
     return cfg
@@ -79,6 +86,13 @@ class ChannelService:
                 channels.append(SlackChannel(self.bus, cfg["slack"]))
             except ImportError:
                 logger.warning("slack enabled but slack-sdk not installed; skipping")
+        if cfg.get("wecom", {}).get("enabled") and cfg["wecom"].get("bot_id") and cfg["wecom"].get("bot_secret"):
+            try:
+                from backend.channels.wecom import WeComChannel
+
+                channels.append(WeComChannel(self.bus, cfg["wecom"]))
+            except ImportError:
+                logger.warning("wecom enabled but wecom-aibot-python-sdk not installed; skipping")
         return channels
 
     async def start(self) -> None:

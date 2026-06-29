@@ -11,6 +11,7 @@ const Monitor = lazy(() => import("./Monitor"));
 const Strategies = lazy(() => import("./Strategies"));
 const Tasks = lazy(() => import("./Tasks"));
 const Reports = lazy(() => import("./Reports"));
+const Channels = lazy(() => import("./Channels"));
 const Settings = lazy(() => import("./Settings"));
 const WorldCup = lazy(() => import("./WorldCup"));
 
@@ -29,6 +30,7 @@ export function ScreenRenderer() {
       case "strategies": return <Strategies />;
       case "tasks": return <Tasks />;
       case "reports": return <Reports />;
+      case "channels": return <Channels />;
       case "settings": return <Settings />;
       case "worldcup": return <WorldCup />;
     }
