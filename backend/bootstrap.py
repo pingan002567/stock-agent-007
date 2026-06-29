@@ -3,6 +3,11 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from backend.channels.binding import BindingStore
+    from backend.channels.service import ChannelService
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -64,6 +69,8 @@ class AppServices:
     tool_execution_service: ToolExecutionService
     runtime_observer: RuntimeObserver
     worldcup_service: WorldCupService
+    channel_service: "ChannelService"
+    channel_binding_store: "BindingStore"
 
 
 _log = logging.getLogger("bootstrap")
@@ -264,6 +271,15 @@ def create_services(
         result_normalizer=ResultNormalizer(),
         runtime_observer=runtime_observer,
     )
+    # IM channel layer (Telegram/Slack): bridges inbound IM → CopilotService and
+    # pushes monitor alerts back out. Idle unless channels are configured.
+    from backend.channels.service import build_channel_service
+
+    channel_service, channel_binding_store, channel_notifier = build_channel_service(
+        repo=repo, copilot_service=copilot_service
+    )
+    monitor_service.alert_sink = channel_notifier.push
+
     # Cleanup old logs on startup
     try:
         deleted = repo.cleanup_provider_call_logs(keep_days=7)
@@ -294,4 +310,6 @@ def create_services(
         tool_execution_service=tool_execution_service,
         runtime_observer=runtime_observer,
         worldcup_service=worldcup_service,
+        channel_service=channel_service,
+        channel_binding_store=channel_binding_store,
     )

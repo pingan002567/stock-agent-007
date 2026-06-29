@@ -51,6 +51,9 @@ class MonitorService:
         self.audit_service = audit_service
         self.risk_policy_service = risk_policy_service
         self._loop_task: asyncio.Task[None] | None = None
+        # Optional thread-safe sink for high/medium alerts (e.g. IM channels).
+        # Signature: (title: str, text: str) -> None. Wired in bootstrap.
+        self.alert_sink: Callable[[str, str], None] | None = None
         # Per-instance, persisted accuracy feedback (was a shared class-level
         # dict that leaked across instances/tests and vanished on restart).
         self._accuracy_log: dict[str, deque[bool]] = defaultdict(lambda: deque(maxlen=20))
@@ -134,6 +137,12 @@ class MonitorService:
                     dispatch_notification(event)
                 except Exception:
                     pass
+                if self.alert_sink is not None:
+                    try:
+                        sev = {"high": "🔴", "medium": "🟠"}.get(event.severity, "•")
+                        self.alert_sink(f"{sev} 盯盘告警 · {event.title}", event.trigger_rule or "")
+                    except Exception:
+                        pass
         return result
 
     def evaluate_once(self, source: str = "manual", force: bool = False) -> dict[str, Any]:

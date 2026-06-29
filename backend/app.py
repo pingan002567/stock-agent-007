@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 import threading
 from contextlib import asynccontextmanager
 
@@ -15,6 +16,7 @@ except ImportError as exc:  # pragma: no cover
 
 from backend.api import (
     routes_audit,
+    routes_channels,
     routes_copilot,
     routes_decision_journal,
     routes_holdings,
@@ -68,6 +70,10 @@ def create_app(
     async def lifespan(app: FastAPI):
         await services.monitor_service.startup()
         await services.data_collector.startup()
+        try:
+            await services.channel_service.start()
+        except Exception:
+            logging.getLogger("app").exception("channel service failed to start")
         # Fire-and-forget warmup — data will be cached before most users navigate to overview/market
         threading.Thread(target=_warmup_cache, daemon=True).start()
         try:
@@ -75,6 +81,10 @@ def create_app(
         finally:
             await services.monitor_service.shutdown()
             await services.data_collector.shutdown()
+            try:
+                await services.channel_service.stop()
+            except Exception:
+                logging.getLogger("app").exception("channel service failed to stop")
 
     app = FastAPI(title="AI Stock Workbench", version="0.1.0", lifespan=lifespan)
     app.state.services = services
@@ -118,6 +128,7 @@ def create_app(
         routes_runtime.router,
         routes_settings.router,
         routes_copilot.router,
+        routes_channels.router,
         routes_worldcup.router,
     ]:
         app.include_router(router)
