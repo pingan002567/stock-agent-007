@@ -3,6 +3,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from backend.agent_runtime import skill_specs
+
+_RESEARCH_SKILLS = {"stock-researcher", "valuation-analyst", "catalyst-tracker"}
+
 
 SAFE_RUNTIME_CONSTRAINTS = [
     "只输出研究、风险和拟单建议；不要尝试真实交易。",
@@ -19,7 +23,7 @@ def build_prompt_envelope(
     context: dict[str, Any],
 ) -> dict[str, Any]:
     envelope: dict[str, Any] = {
-        "envelope_version": "v0.20",
+        "envelope_version": "v0.21",
         "user_message": user_message,
         "current_page": context.get("page") or "overview",
         "skill_trace": _trim_skill_trace(skill_trace),
@@ -27,6 +31,20 @@ def build_prompt_envelope(
         "condensed_page_context": _trim_page_context(context),
         "safety_constraints": SAFE_RUNTIME_CONSTRAINTS,
     }
+    # RTO: downstream the planned skills' output schemas so structured output
+    # stays consistent even when the SKILL.md body isn't injected this turn.
+    plan_skills = [item.get("skill") for item in skill_trace if item.get("skill")]
+    schemas = {s: skill_specs.output_schema(s) for s in plan_skills}
+    schemas = {s: v for s, v in schemas.items() if v}
+    if schemas:
+        envelope["skill_output_schemas"] = schemas
+    # Multi-agent synthesis: when both a research-leaning skill and risk-officer
+    # are in the plan, ask the model to surface bull/bear tension and synthesize.
+    if "risk-officer" in plan_skills and any(s in _RESEARCH_SKILLS for s in plan_skills):
+        envelope["synthesis_directive"] = (
+            "本轮涉及研究(看多侧)与风控(看空/约束侧)：请分别给出正方(bull)与反方(bear)论点，"
+            "明确呈现二者张力，再给出权衡后的综合结论与不确定性。"
+        )
     if context.get("turn_summary"):
         envelope["turn_summary"] = context["turn_summary"]
     if context.get("session_state"):

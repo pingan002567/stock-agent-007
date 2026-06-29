@@ -8,6 +8,7 @@
     "stock-monitor":       {"enabled": true},
     "report-writer":       {"enabled": true},
     "valuation-analyst":   {"enabled": true},
+    "catalyst-tracker":    {"enabled": true},
     "worldcup-predictor":  {"enabled": false}
   }
 }

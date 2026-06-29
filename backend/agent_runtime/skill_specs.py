@@ -50,7 +50,7 @@ def _read_skill_md(name: str) -> tuple[str, list[str]]:
 class WorkbenchSkill:
     label: str
     system_prompt: str = ""
-    intents: tuple[str, ...] = ()          # copilot intents this skill participates in
+    authority: str = "A2"                  # copilot skill_trace authority level
     extra_tools: tuple[str, ...] = ("web_search",)
     disallowed_extra: tuple[str, ...] = ()
     max_turns: int = 30
@@ -207,44 +207,74 @@ _REPORT = """你是 AI 报告员。聚焦报告生成和质量检查。
 </output_format>"""
 
 
+_CATALYST = """你是 AI 催化剂追踪员，从情报/公告中提炼带时点的事件驱动催化剂。只做研究，不出买卖指令。
+
+<guidelines>
+- 用 search_stock_intel 拉情报，get_stock_context 结合行情判断相关性
+- 输出：近期催化剂(数日~周) / 中期催化剂(数月) / 已落地事件 / 关注清单(财报日·解禁·政策窗口)
+- 每条催化剂给 事件 + 预计时点 + 方向(利好/利空/中性) + 影响强度
+- 引用纪律：标来源与时间 [来源: intel · 时间]；时点不确定标「待确认」；严禁编造事件或日期
+</guidelines>
+
+<output_format>
+{
+  "near_term": "近期催化剂(事件+时点+方向+强度)",
+  "mid_term": "中期催化剂",
+  "landed": "已发生仍发酵的事件",
+  "watchlist": "待确认时点清单"
+}
+</output_format>"""
+
+
 WORKBENCH_SKILLS: dict[str, WorkbenchSkill] = {
     "stock-researcher": WorkbenchSkill(
-        label="AI 研究员", system_prompt=_RESEARCHER,
-        intents=("stock_research", "copilot_chat", "rebalance_plan"),
+        label="AI 研究员", system_prompt=_RESEARCHER, authority="A2",
         disallowed_extra=("generate_draft_order",), max_turns=50, timeout_seconds=600,
     ),
     "valuation-analyst": WorkbenchSkill(
-        label="AI 估值分析师", system_prompt=_VALUATION,
-        intents=("stock_research",),
+        label="AI 估值分析师", system_prompt=_VALUATION, authority="A2",
         disallowed_extra=("generate_draft_order",), max_turns=40, timeout_seconds=600,
     ),
+    "catalyst-tracker": WorkbenchSkill(
+        label="AI 催化剂追踪", system_prompt=_CATALYST, authority="A2",
+        disallowed_extra=("generate_draft_order",), max_turns=30, timeout_seconds=300,
+    ),
     "risk-officer": WorkbenchSkill(
-        label="AI 风控官", system_prompt=_RISK,
-        intents=("rebalance_plan", "risk_review"), max_turns=30, timeout_seconds=300,
+        label="AI 风控官", system_prompt=_RISK, authority="A3", max_turns=30, timeout_seconds=300,
     ),
     "strategy-analyst": WorkbenchSkill(
-        label="AI 策略分析师", system_prompt=_STRATEGY,
-        intents=("strategy_backtest",), max_turns=30, timeout_seconds=600,
+        label="AI 策略分析师", system_prompt=_STRATEGY, authority="A3", max_turns=30, timeout_seconds=600,
     ),
     "rebalance-planner": WorkbenchSkill(
-        label="AI 调仓规划师", system_prompt=_REBALANCE,
-        intents=("rebalance_plan",), max_turns=40, timeout_seconds=600,
+        label="AI 调仓规划师", system_prompt=_REBALANCE, authority="A4", max_turns=40, timeout_seconds=600,
     ),
     "stock-monitor": WorkbenchSkill(
-        label="AI 盯盘员", system_prompt=_MONITOR,
-        intents=("monitor_event",), max_turns=20, timeout_seconds=300,
+        label="AI 盯盘员", system_prompt=_MONITOR, authority="A2", max_turns=20, timeout_seconds=300,
     ),
     "report-writer": WorkbenchSkill(
-        label="AI 报告员", system_prompt=_REPORT,
-        intents=("stock_research", "strategy_backtest", "rebalance_plan",
-                 "risk_review", "monitor_event", "copilot_chat"),
-        max_turns=20, timeout_seconds=300,
+        label="AI 报告员", system_prompt=_REPORT, authority="A2", max_turns=20, timeout_seconds=300,
     ),
     # Synthetic, no SKILL.md: locked-disabled execution agent (research-only guard).
     "execution-agent-disabled": WorkbenchSkill(
-        label="AI 执行代理", enabled=False, locked=True, is_subagent=False,
+        label="AI 执行代理", authority="A5", enabled=False, locked=True, is_subagent=False,
         synthetic_description="（已禁用）执行代理", synthetic_tools=("paper_trade",),
     ),
+}
+
+# Canonical ordered intent → skill plan (single source). Consumed by
+# copilot _build_skill_trace; the set-form INTENT_SKILLS is derived from this.
+INTENT_PLANS: dict[str, tuple[str, ...]] = {
+    "stock_research": ("stock-researcher", "valuation-analyst", "catalyst-tracker", "report-writer"),
+    "strategy_backtest": ("strategy-analyst", "report-writer"),
+    "rebalance_plan": ("stock-researcher", "risk-officer", "rebalance-planner", "report-writer", "execution-agent-disabled"),
+    "risk_review": ("stock-researcher", "risk-officer", "report-writer"),
+    "monitor_event": ("stock-monitor", "stock-researcher", "report-writer"),
+    "copilot_chat": ("stock-researcher", "report-writer"),
+    "review_inbox": ("risk-officer",),
+    "decision_journal_review": ("risk-officer",),
+    "paper_portfolio_review": ("risk-officer",),
+    "pre_trade_review": ("risk-officer", "rebalance-planner", "report-writer", "execution-agent-disabled"),
+    "execution_request": ("execution-agent-disabled",),
 }
 
 
@@ -285,9 +315,24 @@ def skill_labels() -> dict[str, str]:
     return {name: spec.label for name, spec in WORKBENCH_SKILLS.items()}
 
 
+def intent_plans() -> dict[str, list[str]]:
+    """Ordered intent → skill plan (for copilot skill_trace)."""
+    return {intent: list(plan) for intent, plan in INTENT_PLANS.items()}
+
+
 def intent_skills() -> dict[str, set[str]]:
-    out: dict[str, set[str]] = {}
-    for name, spec in WORKBENCH_SKILLS.items():
-        for intent in spec.intents:
-            out.setdefault(intent, set()).add(name)
-    return out
+    """Set-form intent → skills, derived from INTENT_PLANS."""
+    return {intent: set(plan) for intent, plan in INTENT_PLANS.items()}
+
+
+def skill_authority() -> dict[str, str]:
+    return {name: spec.authority for name, spec in WORKBENCH_SKILLS.items()}
+
+
+def output_schema(name: str) -> str | None:
+    """Extract the <output_format> block from a skill's system_prompt (for RTO hints)."""
+    spec = WORKBENCH_SKILLS.get(name)
+    if not spec or not spec.system_prompt:
+        return None
+    m = re.search(r"<output_format>\s*(.*?)\s*</output_format>", spec.system_prompt, re.S)
+    return m.group(1).strip() if m else None

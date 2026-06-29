@@ -1156,39 +1156,12 @@ class CopilotService:
     def _build_skill_trace(
         self, intent_name: str, request: CopilotRequest
     ) -> list[dict[str, Any]]:
-        plans = {
-            "review_inbox": ["risk-officer"],
-            "decision_journal_review": ["risk-officer"],
-            "paper_portfolio_review": ["risk-officer"],
-            "strategy_backtest": ["strategy-analyst", "report-writer"],
-            "rebalance_plan": [
-                "stock-researcher",
-                "risk-officer",
-                "rebalance-planner",
-                "report-writer",
-                "execution-agent-disabled",
-            ],
-            "pre_trade_review": [
-                "risk-officer",
-                "rebalance-planner",
-                "report-writer",
-                "execution-agent-disabled",
-            ],
-            "risk_review": ["stock-researcher", "risk-officer", "report-writer"],
-            "monitor_event": ["stock-monitor", "stock-researcher", "report-writer"],
-            "stock_research": ["stock-researcher", "valuation-analyst", "report-writer"],
-            "copilot_chat": ["stock-researcher", "report-writer"],
-            "execution_request": ["execution-agent-disabled"],
-        }
-        authority = {
-            "stock-researcher": "A2",
-            "stock-monitor": "A2",
-            "risk-officer": "A3",
-            "strategy-analyst": "A3",
-            "rebalance-planner": "A4",
-            "report-writer": "A2",
-            "execution-agent-disabled": "A5",
-        }
+        # Single source of truth: intent→skill plans + per-skill authority come
+        # from skill_specs (same table that drives subagents/registry).
+        from backend.agent_runtime import skill_specs
+
+        plans = skill_specs.intent_plans()
+        authority = skill_specs.skill_authority()
         trace = []
         plan = self._resolve_plan(intent_name, request, plans)
         for index, skill_name in enumerate(plan, start=1):
