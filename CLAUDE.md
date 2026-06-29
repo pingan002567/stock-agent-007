@@ -9,17 +9,16 @@ Single-user, locally-run AI investment workbench. A FastAPI backend exposes an A
 ## Commands
 
 ```bash
-# Run everything (dev, hot reload): backend on :6666, frontend on :8888
-./scripts/dev.sh
+# Single entry point — runs backend on :6666 + frontend on :8888 (loads .env, sets AI defaults).
+# Flags: --dev (backend hot reload), --backend-only, --frontend-only, --port PORT. Safe under `sh start.sh` (re-execs with bash).
+./start.sh
+./scripts/dev.sh   # thin shim, equivalent to `./start.sh --dev`
 
 # Backend only (manual)
 uv run uvicorn backend.app:app --host 0.0.0.0 --port 6666
 
 # Frontend only (manual) — Vite proxies /api -> 127.0.0.1:6666
 cd frontend && npm run dev
-
-# Production-style launcher (also handles install); --dev for hot reload, --backend-only / --frontend-only
-./start.sh
 
 # Backend tests (pytest is configured with --assert=plain; testpaths=tests)
 uv run pytest
@@ -40,7 +39,7 @@ python scripts/deerflow_smoke.py
 python scripts/closed_loop_smoke.py
 ```
 
-Ports differ by entry point: `dev.sh` and `vite.config.ts` use **8888** for the frontend; `start.sh` defaults to **5173**. Backend is always **6666**. When `frontend/dist` exists the backend serves the built SPA at `/app` and mounts it at `/`.
+Frontend is **8888** (matching `vite.config.ts`), backend is **6666** — for both `./start.sh` and the `./scripts/dev.sh` shim. When `frontend/dist` exists the backend serves the built SPA at `/app` and mounts it at `/`.
 
 ## Architecture
 
@@ -54,7 +53,7 @@ Request flow: **React pages → REST `/api/*` + SSE → FastAPI routers (`backen
 ### Agent runtime (`backend/agent_runtime/`)
 - `DeerFlowClientAdapter` (`deerflow_client.py`) is the boundary around DeerFlow. It is deliberately **copyright-safe**: it maps LangGraph-style stream events through `DeerFlowEventMapper` without importing DeerFlow internals, so tests can feed plain dicts/objects.
 - Runtime mode is selected by `DeerFlowClientAdapter.from_env()` via env vars, with fallback **direct → embedded → stub**:
-  - `WORKBENCH_AI_MODE=direct` — generates DeerFlow config on the fly from `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `WORKBENCH_AI_MODEL`. This is the default in `dev.sh` because it needs no pre-existing config files.
+  - `WORKBENCH_AI_MODE=direct` — generates DeerFlow config on the fly from `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `WORKBENCH_AI_MODEL`. This is the default set by `start.sh` because it needs no pre-existing config files.
   - `embedded` — uses a real embedded DeerFlow graph (auto-upgrades to direct when prerequisites are met).
   - `stub` — final fallback; no real model calls. Tests run in stub mode.
   - Check `/api/health` to see the resolved `active_client` and degraded state.
