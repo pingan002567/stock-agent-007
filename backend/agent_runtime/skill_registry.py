@@ -10,10 +10,11 @@ SKILL_LABELS: Dict[str, str] = {
     "strategy-analyst": "AI 策略分析师",
     "rebalance-planner": "AI 调仓规划师",
     "report-writer": "AI 报告员",
+    "valuation-analyst": "AI 估值分析师",
 }
 
 INTENT_SKILLS: Dict[str, set[str]] = {
-    "stock_research": {"stock-researcher", "report-writer"},
+    "stock_research": {"stock-researcher", "valuation-analyst", "report-writer"},
     "strategy_backtest": {"strategy-analyst", "report-writer"},
     "rebalance_plan": {"stock-researcher", "risk-officer", "rebalance-planner", "report-writer"},
     "risk_review": {"risk-officer", "report-writer"},
@@ -41,6 +42,7 @@ DEFAULT_SKILLS: Dict[str, SkillSpec] = {
     ),
     "rebalance-planner": SkillSpec("rebalance-planner", "AI 调仓规划师", ["portfolio", "risk", "draft_order", "web_search"]),
     "report-writer": SkillSpec("report-writer", "AI 报告员", ["report", "history", "audit", "web_search"]),
+    "valuation-analyst": SkillSpec("valuation-analyst", "AI 估值分析师", ["get_stock_financial", "get_stock_context", "history", "web_search"]),
     "execution-agent-disabled": SkillSpec("execution-agent-disabled", "AI 执行代理", ["paper_trade"], enabled=False, locked=True),
 }
 

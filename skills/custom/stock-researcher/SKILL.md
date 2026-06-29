@@ -3,6 +3,7 @@ name: stock-researcher
 description: 分析个股基本面、技术面和情报，输出带投资论点、三情景、正反论据与引用的结构化研究。适用场景：单只股票深度研究。触发词：分析、研究、估值、基本面、技术面。
 allowed-tools:
   - get_stock_context
+  - get_stock_financial
   - get_daily_history
   - search_stock_intel
 ---
@@ -14,9 +15,10 @@ allowed-tools:
 
 ## 工作流
 1. `get_stock_context`：基本面概况（价格、PE、市值、行业、当前 AI 评分/立场）
-2. `get_daily_history`：近期趋势（30/90 日 K 线、均线、成交量、支撑/阻力）
-3. `search_stock_intel`：最新情报（新闻、公告、研报）→ 提炼**催化剂**
-4. 综合为下方「输出框架」
+2. `get_stock_financial`：财报（营收/净利/资产/负债）——支撑基本面的真实数据
+3. `get_daily_history`：近期趋势（30/90 日 K 线、均线、成交量、支撑/阻力）
+4. `search_stock_intel`：最新情报（新闻、公告、研报）→ 提炼**催化剂**
+5. 综合为下方「输出框架」
 
 ## 输出框架（必须按此结构）
 1. **投资论点（一句话）**：当前研究观点 + 置信度（高/中/低）

@@ -328,6 +328,11 @@ get_stock_context = _tool(
     "根据股票代码获取完整的个股上下文信息，包含实时行情、基本面摘要、相关情报和风险提示。",
     StockInput, AuthorityLevel.A2,
 )
+get_stock_financial = _tool(
+    "get_stock_financial",
+    "获取指定股票的财务报表数据（营收、净利润、总资产、总负债等），用于估值与财务健康分析。",
+    StockInput, AuthorityLevel.A2,
+)
 get_daily_history = _tool(
     "get_daily_history",
     "获取指定股票的历史K线数据，支持自定义天数。返回每日开盘价、收盘价、最高价、最低价、成交量。",

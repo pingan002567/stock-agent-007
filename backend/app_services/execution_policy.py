@@ -20,6 +20,7 @@ class ExecutionDecision:
 class ExecutionPolicy:
     AUTO_SAFE_TOOLS = {
         "get_stock_context",
+        "get_stock_financial",
         "get_daily_history",
         "search_stock_intel",
         "get_portfolio_snapshot",

@@ -23,6 +23,7 @@ from backend.app_services.worldcup_service import WorldCupService
 from backend.persistence.file_store import FileStore
 from backend.persistence.repositories import WorkbenchRepository
 from backend.schemas import AuthorityLevel, HoldingPosition, RebalanceDraftDecisionNoteRequest, RebalanceDraftStatus, ReportGenerateRequest, model_to_dict
+from backend.stock_domain.financial_tools import get_stock_financial
 from backend.stock_domain.history_tools import get_daily_history
 from backend.stock_domain.intel_tools import search_stock_intel
 from backend.stock_domain.portfolio_tools import summarize_portfolio
@@ -127,6 +128,7 @@ class WorkbenchToolBridge:
         self.execution_policy = execution_policy or ExecutionPolicy()
         self._handlers: dict[str, Callable[[dict[str, Any]], Any]] = {
             "get_stock_context": self._get_stock_context,
+            "get_stock_financial": self._get_stock_financial,
             "get_daily_history": self._get_daily_history,
             "search_stock_intel": self._search_stock_intel,
             "get_portfolio_snapshot": self._get_portfolio_snapshot,
@@ -184,6 +186,15 @@ class WorkbenchToolBridge:
                 True,
                 {"symbol": "str"},
                 ["stock_context", "provider_router"],
+            ),
+            "get_stock_financial": ToolSpec(
+                "get_stock_financial",
+                "stock",
+                AuthorityLevel.A2,
+                "low",
+                True,
+                {"symbol": "str"},
+                ["stock_financial", "provider_router"],
             ),
             "get_daily_history": ToolSpec(
                 "get_daily_history",
@@ -757,6 +768,9 @@ class WorkbenchToolBridge:
 
     def _get_stock_context(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return model_to_dict(self.context_builder.build_stock_context(str(arguments.get("symbol") or "AAPL")))
+
+    def _get_stock_financial(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return get_stock_financial(str(arguments.get("symbol") or "AAPL"))
 
     def _get_daily_history(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return get_daily_history(str(arguments.get("symbol") or "AAPL"), int(arguments.get("days") or 30))

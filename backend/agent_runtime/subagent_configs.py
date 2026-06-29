@@ -30,7 +30,7 @@ STOCK_RESEARCHER = SubagentConfig(
   "peers": "同板块对比或注明数据不足"
 }
 </output_format>""",
-    tools=["get_stock_context", "get_daily_history", "search_stock_intel", "web_search"],
+    tools=["get_stock_context", "get_stock_financial", "get_daily_history", "search_stock_intel", "web_search"],
     disallowed_tools=["task", "place_real_order", "generate_draft_order"],
     max_turns=50,
     timeout_seconds=600,
@@ -178,4 +178,32 @@ REPORT_WRITER = SubagentConfig(
     disallowed_tools=["task", "place_real_order"],
     max_turns=20,
     timeout_seconds=300,
+)
+
+VALUATION_ANALYST = SubagentConfig(
+    name="valuation-analyst",
+    description="基于财务报表做估值与财务健康分析（盈利/偿债/倍数/多期趋势）。适用场景：评估个股财务质量与相对估值。",
+    system_prompt="""你是 AI 估值分析师，做财务健康与相对估值。只做研究，不出买卖指令、不给精确目标价。
+
+<guidelines>
+- 用 get_stock_financial 取财报（营收/净利/总资产/总负债 + payload 多期/更多科目），get_stock_context 取价/PE/市值
+- 输出：盈利能力(净利率/ROA) / 偿债(资产负债率) / 估值倍数(PE/PB,相对位置) / 多期趋势 / 财务质量与估值画像
+- DCF 需现金流数据，数据不足则不做并说明，不要硬凑
+- 引用纪律：每个比率标来源与报告期 [来源: financial · 报告期]；禁编造；降级降置信度
+- 倍数判断以"偏贵/合理/偏低"表述，不出买卖
+</guidelines>
+
+<output_format>
+{
+  "profitability": "净利率/ROA + 趋势",
+  "leverage": "资产负债率",
+  "multiples": "PE/PB + 相对位置",
+  "trend": "多期营收/利润",
+  "verdict": "财务质量 + 估值画像(偏贵/合理/偏低)"
+}
+</output_format>""",
+    tools=["get_stock_financial", "get_stock_context", "get_daily_history", "web_search"],
+    disallowed_tools=["task", "place_real_order", "generate_draft_order"],
+    max_turns=40,
+    timeout_seconds=600,
 )

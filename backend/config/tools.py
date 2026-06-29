@@ -1,6 +1,7 @@
 DEFAULT_TOOLS = [
     # ── A2: Research tools ──
     {"domain": "stock", "name": "get_stock_context", "risk": "low", "status": "enabled"},
+    {"domain": "stock", "name": "get_stock_financial", "risk": "low", "status": "enabled"},
     {"domain": "market-data", "name": "get_daily_history", "risk": "low", "status": "enabled"},
     {"domain": "intel", "name": "search_stock_intel", "risk": "medium", "status": "enabled"},
     {"domain": "monitor", "name": "get_monitor_events", "risk": "low", "status": "enabled"},

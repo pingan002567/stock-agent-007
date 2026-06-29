@@ -1176,7 +1176,7 @@ class CopilotService:
             ],
             "risk_review": ["stock-researcher", "risk-officer", "report-writer"],
             "monitor_event": ["stock-monitor", "stock-researcher", "report-writer"],
-            "stock_research": ["stock-researcher", "report-writer"],
+            "stock_research": ["stock-researcher", "valuation-analyst", "report-writer"],
             "copilot_chat": ["stock-researcher", "report-writer"],
             "execution_request": ["execution-agent-disabled"],
         }

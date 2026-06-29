@@ -129,11 +129,11 @@ def _build_subagent_configs() -> dict[str, dict]:
     """Build the ``subagents.custom_agents`` section from SubagentConfig definitions."""
     from backend.agent_runtime.subagent_configs import (
         STOCK_RESEARCHER, RISK_OFFICER, STRATEGY_ANALYST,
-        REBALANCE_PLANNER, STOCK_MONITOR, REPORT_WRITER,
+        REBALANCE_PLANNER, STOCK_MONITOR, REPORT_WRITER, VALUATION_ANALYST,
     )
     result = {}
     for cfg in [STOCK_RESEARCHER, RISK_OFFICER, STRATEGY_ANALYST,
-                REBALANCE_PLANNER, STOCK_MONITOR, REPORT_WRITER]:
+                REBALANCE_PLANNER, STOCK_MONITOR, REPORT_WRITER, VALUATION_ANALYST]:
         result[cfg.name] = {
             "description": cfg.description,
             "system_prompt": cfg.system_prompt,
