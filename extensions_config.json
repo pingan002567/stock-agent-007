@@ -6,6 +6,7 @@
     "strategy-analyst":    {"enabled": true},
     "rebalance-planner":   {"enabled": true},
     "stock-monitor":       {"enabled": true},
-    "report-writer":       {"enabled": true}
+    "report-writer":       {"enabled": true},
+    "worldcup-predictor":  {"enabled": false}
   }
 }
