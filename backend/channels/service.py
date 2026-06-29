@@ -64,6 +64,7 @@ class ChannelService:
         self._repo = repo
         self._channels: list[Channel] = []
         self._started = False
+        self._reload_lock = asyncio.Lock()
 
     @property
     def is_running(self) -> bool:
@@ -128,6 +129,13 @@ class ChannelService:
         await self.manager.stop()
         self._channels = []
         self._started = False
+
+    async def reload(self) -> None:
+        """Re-read config and restart channels (used after the config changes,
+        since adapters are built once at start time)."""
+        async with self._reload_lock:
+            await self.stop()
+            await self.start()
 
     def status(self) -> dict[str, Any]:
         return {

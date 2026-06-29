@@ -53,8 +53,9 @@ def get_config(services: AppServices = Depends(get_services)):
 
 
 @router.post("/config")
-def update_config(payload: dict, request: Request, services: AppServices = Depends(get_services)):
-    """Merge-update the channels config. Masked secret fields are preserved."""
+async def update_config(payload: dict, request: Request, services: AppServices = Depends(get_services)):
+    """Merge-update the channels config, then hot-reload the channel service so
+    newly-configured adapters actually connect (they are built at start time)."""
     current = dict(services.repo.get_config("channels", {}) or {})
     for key, value in (payload or {}).items():
         if isinstance(value, dict):
@@ -67,4 +68,15 @@ def update_config(payload: dict, request: Request, services: AppServices = Depen
         else:
             current[key] = value
     services.repo.set_config("channels", current)
-    return _mask(current)
+    if services.channel_service is not None:
+        await services.channel_service.reload()
+    return {**_mask(current), "service": services.channel_service.status() if services.channel_service else None}
+
+
+@router.post("/restart")
+async def restart_service(services: AppServices = Depends(get_services)):
+    """Manually restart the channel service (re-read config, reconnect bots)."""
+    if services.channel_service is not None:
+        await services.channel_service.reload()
+        return services.channel_service.status()
+    return {"running": False, "channels": []}

@@ -10,6 +10,7 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, PanelSkeleton, KpiSkeleton } from "@/components/ui/Loading";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { useAppState } from "@/hooks/useAppState";
+import ChannelsTab from "./Channels";
 
 /* ---------- Types ---------- */
 
@@ -65,7 +66,7 @@ interface SettingsData {
   trading_controls?: { paper_trading?: string; real_order?: string };
 }
 
-type SettingTab = "general" | "ai" | "risk" | "stock" | "raw";
+type SettingTab = "general" | "ai" | "risk" | "stock" | "channels" | "raw";
 
 /* ---------- Helpers ---------- */
 
@@ -1054,6 +1055,7 @@ const TABS: { key: SettingTab; label: string }[] = [
   { key: "ai", label: "AI" },
   { key: "risk", label: "风控" },
   { key: "stock", label: "数据源" },
+  { key: "channels", label: "渠道" },
   { key: "raw", label: "原始 JSON" },
 ];
 
@@ -1175,6 +1177,7 @@ export default function Settings() {
           savingIntelSources={savingIntelSources}
         />
       );
+      case "channels": return <ChannelsTab />;
       case "raw": return <RawTab data={settings} />;
     }
   };

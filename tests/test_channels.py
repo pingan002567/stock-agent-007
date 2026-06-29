@@ -34,10 +34,20 @@ class FakeRun:
         self.session_id = None
 
 
+class FakeSession:
+    def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
+
+
 class FakeCopilot:
     def __init__(self, conclusion: str = "你好，我是投研助手") -> None:
         self.conclusion = conclusion
         self.requests: list[Any] = []
+        self._session_n = 0
+
+    def create_session(self, payload: Any) -> FakeSession:
+        self._session_n += 1
+        return FakeSession(f"session_{self._session_n}")
 
     def create_run(self, request: Any) -> FakeRun:
         self.requests.append(request)
@@ -120,15 +130,18 @@ def test_commands_help_new_status():
     async def run():
         bus, repo, store, copilot, manager, channel = _setup(require_binding=False)
         await manager._handle(_inbound(bus, "/help"))
-        s0 = store.session_key("fake", "c1")
-        await manager._handle(_inbound(bus, "/new"))
-        s1 = store.session_key("fake", "c1")
-        await manager._handle(_inbound(bus, "/status"))
-        return channel, s0, s1
+        await manager._handle(_inbound(bus, "你好"))           # creates a session
+        s0 = store.get_session_id("fake", "c1")
+        await manager._handle(_inbound(bus, "/new"))           # clears it
+        cleared = store.get_session_id("fake", "c1")
+        await manager._handle(_inbound(bus, "再聊"))           # creates a fresh one
+        s1 = store.get_session_id("fake", "c1")
+        return channel, s0, cleared, s1
 
-    channel, s0, s1 = asyncio.run(run())
+    channel, s0, cleared, s1 = asyncio.run(run())
     assert any("可用命令" in m.text for m in channel.sent)
-    assert s0 != s1  # /new rotated the session
+    assert s0 is not None and cleared is None           # /new cleared the session
+    assert s1 is not None and s1 != s0                  # next message started a fresh one
 
 
 def test_notifier_broadcasts_to_bound_chats():

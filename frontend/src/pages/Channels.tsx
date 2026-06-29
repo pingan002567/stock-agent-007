@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiPost, apiDelete } from "@/api/client";
-import { PageContainer } from "@/components/layout/PageContainer";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { formatTimeAgo } from "@/utils/format";
 
 interface ProviderConfig { enabled?: boolean; bot_token?: string; app_token?: string; bot_id?: string; bot_secret?: string }
 interface ChannelsConfig { require_binding?: boolean; telegram?: ProviderConfig; slack?: ProviderConfig; wecom?: ProviderConfig }
-type ProviderId = "telegram" | "slack" | "wecom";
-type ConfigField = "bot_token" | "app_token" | "bot_id" | "bot_secret";
-type FieldDef = { key: ConfigField; label: string; placeholder: string };
 interface Binding { channel: string; chat_id: string; label?: string; bound_at?: number }
 interface ChannelStatus { running: boolean; channels: { name: string; running: boolean }[] }
 interface ConnectState { provider: string; code: string; expiresAt: number; instruction: string }
+type ProviderId = "telegram" | "slack" | "wecom";
+type ConfigField = "bot_token" | "app_token" | "bot_id" | "bot_secret";
+type FieldDef = { key: ConfigField; label: string; placeholder: string };
 
-export default function Channels() {
+/** IM 渠道配置（作为「设置」页的一个 Tab 渲染，不含 PageContainer）。 */
+export default function ChannelsTab() {
   const [config, setConfig] = useState<ChannelsConfig>({});
   const [status, setStatus] = useState<ChannelStatus | null>(null);
   const [bindings, setBindings] = useState<Binding[]>([]);
@@ -37,7 +37,6 @@ export default function Channels() {
 
   useEffect(() => { void loadAll(); }, [loadAll]); // eslint-disable-line react-hooks/set-state-in-effect
 
-  // tick for the connect-dialog countdown
   useEffect(() => {
     if (!connect) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -118,75 +117,63 @@ export default function Channels() {
   };
 
   return (
-    <PageContainer>
-      <div className="page-stack fade-in">
-        <div className="market-hero">
-          <div className="market-hero-header">
-            <div className="market-title">
-              <h1>IM 渠道</h1>
-              <p>在 IM 里直接与投研助手对话，并接收盯盘告警。全程无需公网。</p>
-            </div>
-            <div className="hero-actions">
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-                <input type="checkbox" checked={config.require_binding ?? true} onChange={(e) => void toggleRequireBinding(e.target.checked)} />
-                要求绑定
-              </label>
-              <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
-            </div>
-          </div>
-          <div className="market-stats">
-            <div className="market-stat">
-              <span className="market-stat-label">服务状态</span>
-              <span className={`market-stat-value ${status?.running ? "up" : ""}`}>{status?.running ? "运行中" : "未运行"}</span>
-              <span className="market-stat-change neutral">{(status?.channels.length ?? 0)} 个渠道</span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">已绑定会话</span>
-              <span className="market-stat-value">{bindings.length}</span>
-              <span className="market-stat-change neutral">个</span>
-            </div>
+    <div className="page-stack">
+      <div className="panel">
+        <div className="panel-header">
+          <div className="panel-title">IM 渠道</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+              <input type="checkbox" checked={config.require_binding ?? true} onChange={(e) => void toggleRequireBinding(e.target.checked)} />
+              要求绑定
+            </label>
+            <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
           </div>
         </div>
+        <div className="panel-body" style={{ display: "flex", gap: 24, fontSize: 13 }}>
+          <span className="muted">在 IM 里直接与投研助手对话，并接收盯盘告警。全程无需公网。</span>
+          <span>服务：<b style={{ color: status?.running ? "var(--green)" : "var(--muted)" }}>{status?.running ? "运行中" : "未运行"}</b></span>
+          <span>已绑定：<b>{bindings.length}</b></span>
+        </div>
+      </div>
 
-        <div className="two-col">
-          <div>
-            {providerCard("telegram", "Telegram", "📨", [{ key: "bot_token", label: "Bot Token", placeholder: "123:ABC..." }])}
-            {providerCard("slack", "Slack", "💬", [
-              { key: "bot_token", label: "Bot Token", placeholder: "xoxb-..." },
-              { key: "app_token", label: "App Token", placeholder: "xapp-..." },
-            ])}
-            {providerCard("wecom", "企业微信", "🏢", [
-              { key: "bot_id", label: "Bot ID", placeholder: "智能机器人 botId" },
-              { key: "bot_secret", label: "Bot Secret", placeholder: "智能机器人 secret" },
-            ])}
-            <div className="muted" style={{ fontSize: 12 }}>钉钉 / 飞书 即将支持。</div>
-          </div>
+      <div className="two-col">
+        <div>
+          {providerCard("telegram", "Telegram", "📨", [{ key: "bot_token", label: "Bot Token", placeholder: "123:ABC..." }])}
+          {providerCard("slack", "Slack", "💬", [
+            { key: "bot_token", label: "Bot Token", placeholder: "xoxb-..." },
+            { key: "app_token", label: "App Token", placeholder: "xapp-..." },
+          ])}
+          {providerCard("wecom", "企业微信", "🏢", [
+            { key: "bot_id", label: "Bot ID", placeholder: "智能机器人 botId" },
+            { key: "bot_secret", label: "Bot Secret", placeholder: "智能机器人 secret" },
+          ])}
+          <div className="muted" style={{ fontSize: 12 }}>钉钉 / 飞书 即将支持。</div>
+        </div>
 
-          <div className="panel">
-            <div className="panel-header"><div className="panel-title">已绑定会话</div><span className="panel-badge">{bindings.length}</span></div>
-            <div className="panel-body">
-              {bindings.length === 0 ? (
-                <div className="muted">暂无绑定。配置 Bot 后点「连接」生成连接码，在 IM 里发送 /connect &lt;code&gt;。</div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {bindings.map((b) => (
-                    <div key={`${b.channel}:${b.chat_id}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 10, background: "var(--bg-tertiary)", borderRadius: 8 }}>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>{b.channel} · {b.chat_id}</div>
-                        <div style={{ fontSize: 11, color: "var(--muted)" }}>{b.label ? `用户 ${b.label} · ` : ""}{b.bound_at ? `绑定于 ${formatTimeAgo(new Date(b.bound_at * 1000).toISOString())}` : ""}</div>
-                      </div>
-                      <button className="small" style={{ color: "var(--red)" }} onClick={() => void unbind(b)} type="button">解绑</button>
+        <div className="panel">
+          <div className="panel-header"><div className="panel-title">已绑定会话</div><span className="panel-badge">{bindings.length}</span></div>
+          <div className="panel-body">
+            {bindings.length === 0 ? (
+              <div className="muted">暂无绑定。配置 Bot 后点「连接」生成连接码，在 IM 里发送 /connect &lt;code&gt;。</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {bindings.map((b) => (
+                  <div key={`${b.channel}:${b.chat_id}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 10, background: "var(--bg-tertiary)", borderRadius: 8 }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{b.channel} · {b.chat_id}</div>
+                      <div style={{ fontSize: 11, color: "var(--muted)" }}>{b.label ? `用户 ${b.label} · ` : ""}{b.bound_at ? `绑定于 ${formatTimeAgo(new Date(b.bound_at * 1000).toISOString())}` : ""}</div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
+                    <button className="small" style={{ color: "var(--red)" }} onClick={() => void unbind(b)} type="button">解绑</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {connect && (
-        <div className="modal-overlay" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={closeConnect}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={closeConnect}>
           <div className="panel" style={{ width: 420, maxWidth: "90vw" }} onClick={(e) => e.stopPropagation()}>
             <div className="panel-header"><div className="panel-title">连接 {connect.provider}</div><button className="small" onClick={closeConnect} type="button">✕</button></div>
             <div className="panel-body" style={{ display: "grid", gap: 12 }}>
@@ -207,6 +194,6 @@ export default function Channels() {
           </div>
         </div>
       )}
-    </PageContainer>
+    </div>
   );
 }

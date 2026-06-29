@@ -48,7 +48,19 @@ class WeComChannel(Channel):
         client.on("disconnected", lambda *a: logger.warning("[wecom] disconnected; will reconnect"))
         self._client = client
         self._task = asyncio.create_task(client.connect())
+        self._task.add_done_callback(self._on_connect_done)
         self._running = True
+
+    def _on_connect_done(self, task: asyncio.Task[Any]) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error(
+                "[wecom] WebSocket 连接任务退出：%s。检查 bot_id/bot_secret 是否正确、"
+                "网络是否放通 wss://openws.work.weixin.qq.com",
+                exc,
+            )
 
     async def stop(self) -> None:
         self._running = False

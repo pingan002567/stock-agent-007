@@ -11,7 +11,7 @@ from backend.app_services.copilot_service import CopilotService
 from backend.app_services.permission_guard import PermissionDenied
 from backend.channels.binding import BindingStore
 from backend.channels.message_bus import InboundMessage, MessageBus, OutboundMessage
-from backend.schemas import AuthorityLevel, CopilotRequest
+from backend.schemas import AuthorityLevel, CopilotRequest, CopilotSessionCreateRequest
 
 logger = logging.getLogger("channels.manager")
 
@@ -118,30 +118,43 @@ class ChannelManager:
         if command == "help":
             await self._reply(msg, _HELP)
         elif command == "new":
-            self.bindings.rotate_session(msg.channel_name, msg.chat_id)
+            self.bindings.clear_session(msg.channel_name, msg.chat_id)
             await self._reply(msg, "🆕 已开启新对话。")
         elif command == "status":
             bound = self.bindings.is_bound(msg.channel_name, msg.chat_id)
-            session = self.bindings.session_key(msg.channel_name, msg.chat_id)
-            await self._reply(msg, f"绑定：{'已绑定' if bound else '未绑定'}\n会话：{session}")
+            sid = self.bindings.get_session_id(msg.channel_name, msg.chat_id)
+            await self._reply(msg, f"绑定：{'已绑定' if bound else '未绑定'}\n会话：{sid or '（尚未开始）'}")
         else:
             await self._reply(msg, f"未知命令 /{command}。\n\n{_HELP}")
 
     async def _handle_chat(self, msg: InboundMessage, text: str) -> None:
-        session_key = self.bindings.session_key(msg.channel_name, msg.chat_id)
-        lock = self._convo_locks[session_key]
+        convo_key = f"{msg.channel_name}:{msg.chat_id}"
+        lock = self._convo_locks[convo_key]
         if lock.locked():
             await self._reply(msg, "⏳ 上一条还在处理中，请稍候。")
             return
         async with self._sem, lock:
-            reply = await self._run_copilot(session_key, text, page=msg.metadata.get("page", "overview"))
+            reply = await self._run_copilot(msg, text, page=msg.metadata.get("page", "overview"))
             await self._reply(msg, reply)
 
-    async def _run_copilot(self, session_key: str, text: str, *, page: str) -> str:
+    def _ensure_session_id(self, msg: InboundMessage, *, page: str) -> str:
+        """Get-or-create a real CopilotService session for this IM conversation,
+        so multi-turn memory persists. `/new` clears the mapping → fresh session."""
+        sid = self.bindings.get_session_id(msg.channel_name, msg.chat_id)
+        if sid:
+            return sid
+        session = self.copilot.create_session(
+            CopilotSessionCreateRequest(current_page=page, authority_level=AuthorityLevel(self.authority_level))
+        )
+        self.bindings.set_session_id(msg.channel_name, msg.chat_id, session.session_id)
+        return session.session_id
+
+    async def _run_copilot(self, msg: InboundMessage, text: str, *, page: str) -> str:
+        session_id = self._ensure_session_id(msg, page=page)
         request = CopilotRequest(
             message=text,
             page=page,
-            session_id=session_key,
+            session_id=session_id,
             authority_level=AuthorityLevel(self.authority_level),
         )
         try:
@@ -153,7 +166,7 @@ class ChannelManager:
 
         final_text = ""
         try:
-            async for event in self.copilot.stream_run(run.run_id, session_id=session_key):
+            async for event in self.copilot.stream_run(run.run_id, session_id=session_id):
                 payload: dict[str, Any] = event.payload or {}
                 if event.type in ("final", "final_answer"):
                     conclusion = str(payload.get("conclusion") or "").strip()

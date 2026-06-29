@@ -99,17 +99,23 @@ class BindingStore:
             self._repo.set_config(_CODES_KEY, codes)
             return True
 
-    # -- session (DeerFlow thread) rotation for /new ----------------------
+    # -- IM conversation -> CopilotService session id mapping -------------
+    # CopilotService requires a real persisted session id (not a synthetic
+    # key), so we store the mapping here and create the session on demand.
 
-    def session_key(self, channel: str, chat_id: str) -> str:
-        gens = self._repo.get_config(_SESSIONS_KEY, {}) or {}
-        gen = int(gens.get(self._key(channel, chat_id), 0))
-        return f"im:{channel}:{chat_id}:{gen}"
+    def get_session_id(self, channel: str, chat_id: str) -> str | None:
+        sessions = self._repo.get_config(_SESSIONS_KEY, {}) or {}
+        return sessions.get(self._key(channel, chat_id))
 
-    def rotate_session(self, channel: str, chat_id: str) -> str:
+    def set_session_id(self, channel: str, chat_id: str, session_id: str) -> None:
         with self._lock:
-            gens = self._repo.get_config(_SESSIONS_KEY, {}) or {}
-            key = self._key(channel, chat_id)
-            gens[key] = int(gens.get(key, 0)) + 1
-            self._repo.set_config(_SESSIONS_KEY, gens)
-        return self.session_key(channel, chat_id)
+            sessions = self._repo.get_config(_SESSIONS_KEY, {}) or {}
+            sessions[self._key(channel, chat_id)] = session_id
+            self._repo.set_config(_SESSIONS_KEY, sessions)
+
+    def clear_session(self, channel: str, chat_id: str) -> None:
+        """Drop the mapping so the next message starts a fresh session (/new)."""
+        with self._lock:
+            sessions = self._repo.get_config(_SESSIONS_KEY, {}) or {}
+            if sessions.pop(self._key(channel, chat_id), None) is not None:
+                self._repo.set_config(_SESSIONS_KEY, sessions)
