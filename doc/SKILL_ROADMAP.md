@@ -1,0 +1,37 @@
+# Skill 演进路线图
+
+> 依据：业务特性（个人投研台、research-only A1–A5、多市场 A/HK/US）+ 专业框架（FinRobot/TradingAgents/AlphaAgents/CFI 11 维）+ 数据可行性（现有 provider 仅 quote/history/intel）。
+> 分层：**A 类**=现有数据就能做；**B 类**=需先接数据源；**C 类**=结构性。
+
+## 现状（7 个 skill）
+| skill | 升级状态 |
+|---|---|
+| stock-researcher | ✅ 已升级（论点+三情景+引用纪律+反方） |
+| report-writer | ✅ 已升级（引用纪律+论点结构+质量门禁） |
+| risk-officer / rebalance-planner / stock-monitor / strategy-analyst | ⏳ P0 待升级 |
+| worldcup-predictor | 玩具，禁用，不动 |
+
+## P0 — A 类（现有数据，最高性价比）
+1. **引用纪律全推**：逐条溯源 `[来源:tool·时间]` + 禁编造 + 降级降置信度 → 推广到 risk/rebalance/monitor/strategy。
+2. **risk-officer**：＋仓位建议区间（引用阈值）＋距硬限预警＋轻量压力测试（板块/单票冲击）；保持不出调仓。
+3. **rebalance-planner**：＋多方案（保守/中性/激进）＋调仓后影响预估（权重/集中度变化）＋每项引用触发的 risk rule。
+4. **stock-monitor**：＋优先级 Top3（severity×标的聚合）＋异动↔intel 根因关联＋跨 skill 跳转建议。
+5. **strategy-analyst**：＋稳健性（参数敏感性/样本内外）＋基准对比（买入持有）＋过拟合/小样本警示。
+
+## P1 — C 类（结构性，提质）
+6. **RTO 输出 schema 下发 envelope**：把各 skill 的 output_format 注入 prompt 信封，稳定结构化产出（多数 turn 不注入 SKILL.md 正文，见 prompt 分析）。
+7. **单一真相源**：`SKILL.md` → 自动生成 `subagent_configs`/`skill_registry.tools`，消三处漂移 + 统一工具命名。
+8. **多代理对抗**：researcher(看多) ↔ risk-officer(看空) → synthesis（TradingAgents 范式）；扩大 subagent 启用范围（现仅 strategy_backtest/rebalance_plan）。
+9. **intent↔skill 映射对齐**：`INTENT_SKILLS` / `_build_skill_trace` / `INTENT_TO_CONTEXT_SECTIONS` 三处校验一致。
+
+## P2 — B 类（需先接数据源，按 ROI）
+10. **接财报数据**（AKShare A/HK 财报；US 需 10-K 源）→ 新增 **valuation-analyst**（DCF/倍数/ROIC vs WACC）+ 深化 researcher 基本面。
+11. **结构化公告/财报日历** → 新增 **catalyst-tracker**（带时点催化剂）/ **management-credibility**（guidance vs 实际）。
+12. **（美股专有，最低优先级）** 期权流 / 内部人 Form4。
+
+## 贯穿约束
+research-only（不出买卖/精确目标价；risk 给仓位区间而非指令）· 多市场口径分支 · token/隐私走摘要 · 每个建议挂 `evidence_refs`。
+
+## 落地记录
+- 2026-06：stock-researcher / report-writer 完成 A 类升级（commit `ed37e9c`）。
+- P0 其余 4 个 skill：本次落地（见下方 commit）。
