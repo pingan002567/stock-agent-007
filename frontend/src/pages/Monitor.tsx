@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiPost, apiDelete } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
-import { ErrorMessage, PanelSkeleton, KpiSkeleton, EmptyState } from "@/components/ui/Loading";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Pagination } from "@/components/ui/Pagination";
 import { formatTimeAgo } from "@/utils/format";
+import { ChannelBindings } from "@/components/features/ChannelBindings";
 
 interface MonitorEvent {
   event_id: string; title?: string; severity?: string; symbol?: string;
@@ -33,13 +33,6 @@ const RULE_TYPE_OPTIONS = [
   { value: "intel_keyword_match", label: "情报关键词" },
 ];
 
-const SEVERITY_COLORS: Record<string, string> = { high: "red", medium: "amber", low: "gray" };
-
-function severityBadge(s: string | undefined) {
-  const cls = SEVERITY_COLORS[s ?? ""] || "gray";
-  return <span className={`tag ${cls}`}>{s ?? "info"}</span>;
-}
-
 function ruleTypeLabel(t: string | undefined) {
   return RULE_TYPE_OPTIONS.find((o) => o.value === t)?.label ?? t ?? "unknown";
 }
@@ -51,7 +44,7 @@ export default function Monitor() {
   const [evalBusy, setEvalBusy] = useState(false);
   const [evalResult, setEvalResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [, setError] = useState<string | null>(null);
   const [expandedEvent, setExpandedEvent] = useState<string | null>(null);
   const [showAddRule, setShowAddRule] = useState(false);
   const [ruleForm, setRuleForm] = useState<Partial<MonitorRule>>({ rule_type: "single_position_weight_gt", severity: "medium", enabled: true, cooldown_seconds: 3600 });
@@ -380,6 +373,21 @@ export default function Monitor() {
                     上次错误: {status.last_error}
                   </div>
                 )}
+              </div>
+            </div>
+
+            <div className="panel" style={{ marginBottom: 20 }}>
+              <div className="panel-header">
+                <div className="panel-title">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                  </svg>
+                  IM 告警接收
+                </div>
+              </div>
+              <div className="panel-body">
+                <ChannelBindings />
               </div>
             </div>
 

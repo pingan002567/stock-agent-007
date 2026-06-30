@@ -47,6 +47,14 @@ def delete_binding(channel: str, chat_id: str, services: AppServices = Depends(g
     return {"deleted": services.channel_binding_store.unbind(channel, chat_id)}
 
 
+@router.patch("/bindings/{channel}/{chat_id}")
+def update_binding(channel: str, chat_id: str, payload: dict, services: AppServices = Depends(get_services)):
+    """Update a binding's alert preference (which bound chats receive pushes)."""
+    enabled = bool((payload or {}).get("alerts_enabled", True))
+    updated = services.channel_binding_store.set_alerts_enabled(channel, chat_id, enabled)
+    return {"updated": updated, "alerts_enabled": enabled}
+
+
 @router.get("/config")
 def get_config(services: AppServices = Depends(get_services)):
     return _mask(services.repo.get_config("channels", {}) or {})

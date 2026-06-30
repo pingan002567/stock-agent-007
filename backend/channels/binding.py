@@ -45,8 +45,31 @@ class BindingStore:
     def bind(self, channel: str, chat_id: str, *, label: str = "") -> None:
         with self._lock:
             bindings = self._repo.get_config(_BINDINGS_KEY, {}) or {}
-            bindings[self._key(channel, chat_id)] = {"label": label, "bound_at": time.time()}
+            key = self._key(channel, chat_id)
+            prev = bindings.get(key) or {}
+            bindings[key] = {
+                "label": label,
+                "bound_at": prev.get("bound_at", time.time()),
+                # re-binding keeps the prior alert preference; new bindings opt in
+                "alerts_enabled": prev.get("alerts_enabled", True),
+            }
             self._repo.set_config(_BINDINGS_KEY, bindings)
+
+    def set_alerts_enabled(self, channel: str, chat_id: str, enabled: bool) -> bool:
+        """Toggle whether this bound chat receives monitor alert pushes."""
+        with self._lock:
+            bindings = self._repo.get_config(_BINDINGS_KEY, {}) or {}
+            meta = bindings.get(self._key(channel, chat_id))
+            if meta is None:
+                return False
+            meta["alerts_enabled"] = bool(enabled)
+            bindings[self._key(channel, chat_id)] = meta
+            self._repo.set_config(_BINDINGS_KEY, bindings)
+            return True
+
+    def alert_targets(self) -> list[dict[str, Any]]:
+        """Bindings that opted in to receive monitor alerts."""
+        return [b for b in self.list_bindings() if b.get("alerts_enabled", True)]
 
     def unbind(self, channel: str, chat_id: str) -> bool:
         with self._lock:
@@ -61,7 +84,15 @@ class BindingStore:
         out: list[dict[str, Any]] = []
         for key, meta in bindings.items():
             channel, _, chat_id = key.partition(":")
-            out.append({"channel": channel, "chat_id": chat_id, **(meta or {})})
+            meta = meta or {}
+            out.append(
+                {
+                    "channel": channel,
+                    "chat_id": chat_id,
+                    **meta,
+                    "alerts_enabled": meta.get("alerts_enabled", True),
+                }
+            )
         return out
 
     # -- one-time connect codes ------------------------------------------

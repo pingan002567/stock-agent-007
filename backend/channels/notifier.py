@@ -27,8 +27,8 @@ class ChannelNotifier:
         self._loop = loop
 
     def push(self, title: str, text: str) -> None:
-        """Thread-safe: schedule a broadcast to all bound chats. No-op if the
-        channel service isn't running yet."""
+        """Thread-safe: schedule a push to the bound chats that opted in to
+        alerts. No-op if the channel service isn't running yet."""
         loop = self._loop
         if loop is None or not loop.is_running():
             return
@@ -39,7 +39,7 @@ class ChannelNotifier:
             logger.exception("failed to schedule channel alert")
 
     async def _broadcast(self, text: str) -> None:
-        for binding in self._bindings.list_bindings():
+        for binding in self._bindings.alert_targets():
             await self._bus.publish_outbound(
                 OutboundMessage(
                     channel_name=binding["channel"],

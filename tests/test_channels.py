@@ -159,3 +159,20 @@ def test_notifier_broadcasts_to_bound_chats():
     channel = asyncio.run(run())
     assert {m.chat_id for m in channel.sent} == {"c1", "c2"}
     assert all("盯盘告警" in m.text for m in channel.sent)
+
+
+def test_notifier_skips_alerts_disabled_bindings():
+    async def run():
+        bus = MessageBus()
+        store = BindingStore(FakeRepo())
+        store.bind("fake", "c1")
+        store.bind("fake", "c2")
+        store.set_alerts_enabled("fake", "c2", False)  # c2 opts out
+        channel = FakeChannel(bus)
+        bus.subscribe_outbound(channel._on_outbound)
+        notifier = ChannelNotifier(bus, store)
+        await notifier._broadcast("🔴 盯盘告警")
+        return channel
+
+    channel = asyncio.run(run())
+    assert {m.chat_id for m in channel.sent} == {"c1"}  # only the opted-in chat
