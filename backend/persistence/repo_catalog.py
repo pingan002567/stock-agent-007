@@ -518,8 +518,8 @@ class CatalogRepoMixin:
             volume=row["volume"],
             amount=row["amount"],
             source=row["source"] or "",
-            provider=row.get("provider", "") or "",
-            hit_count=row.get("hit_count", 0) if row.get("hit_count") is not None else 0,
+            provider=row["provider"] or "",
+            hit_count=row["hit_count"] if row["hit_count"] is not None else 0,
             updated_at=row["updated_at"],
         )
 

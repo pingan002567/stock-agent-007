@@ -3887,6 +3887,7 @@ name = "stock-agent-001"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "akshare" },
     { name = "deerflow-harness" },
     { name = "fastapi" },
     { name = "fpdf2" },
@@ -3912,6 +3913,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "akshare", specifier = ">=1.18.60" },
     { name = "akshare", marker = "extra == 'akshare'", specifier = ">=1.18.60" },
     { name = "deerflow-harness", git = "https://github.com/bytedance/deer-flow.git?subdirectory=backend%2Fpackages%2Fharness&rev=main" },
     { name = "fastapi", specifier = ">=0.115.0" },

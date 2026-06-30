@@ -229,6 +229,18 @@ class ProviderRouter:
                 degraded_reason="market closed",
                 coverage={"mode": "market_closed"},
             )
+        # trading hours, cache miss: fetch live (with provider fallback chain)
+        provider = self._provider_for_market(market)
+        result = self._call_with_provider(
+            "quote",
+            provider,
+            market,
+            lambda p: p.get_quote(normalized),
+            symbol=normalized,
+        )
+        if isinstance(result, PriceSnapshot) and not result.degraded:
+            self._mem_cache.set(ck, result, ttl=_CACHE_TTL["quote"])
+        return result
 
     def get_history(self, symbol: str, days: int = 30) -> dict:
         normalized = normalize_symbol(symbol)
