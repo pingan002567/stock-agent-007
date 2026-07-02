@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useAppState } from "@/hooks/useAppState";
 import type { Screen } from "@/types";
-import { parseCopilotEvent, EVENT_FINAL, EVENT_ERROR, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, EVENT_PARTIAL_ANSWER } from "@/api/copilot";
+import { parseCopilotEvent, uploadSessionFiles, EVENT_FINAL, EVENT_ERROR, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, EVENT_PARTIAL_ANSWER, type UploadedFileInfo } from "@/api/copilot";
 import type { CopilotMessage } from "@/api/client";
 import { useCopilotChat } from "@/hooks/useCopilotChat";
 import { CopilotMessageItem } from "@/components/features/CopilotMessageItem";
@@ -118,10 +118,13 @@ export function CopilotPanel({ open, onToggle }: { open: boolean; onToggle: () =
     sending, streamMessage, copiedId,
     switchSession, handleNewSession, handleRenameSession, handleDeleteSession,
     handleSend: sendMessage, handleStop,
-    handleCopy,
+    handleCopy, ensureSession,
   } = useCopilotChat();
 
   const [input, setInput] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [sessionFiles, setSessionFiles] = useState<UploadedFileInfo[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [sessionOpen, setSessionOpen] = useState(false);
   const [sessionRename, setSessionRename] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -173,6 +176,30 @@ export function CopilotPanel({ open, onToggle }: { open: boolean; onToggle: () =
     setInput("");
     if (inputRef.current) { inputRef.current.style.height = "auto"; }
     sendMessage(text);
+  };
+
+  // 附件属于会话线程；切换会话后清空展示（文件本身仍保存在原会话，可回去继续问）。
+  // 用 render 期派生状态调整替代 effect，避免级联渲染。
+  const [chipSessionId, setChipSessionId] = useState<string | null>(currentSession?.session_id ?? null);
+  if ((currentSession?.session_id ?? null) !== chipSessionId) {
+    setChipSessionId(currentSession?.session_id ?? null);
+    setSessionFiles([]);
+  }
+
+  const handleUpload = async (picked: FileList | null) => {
+    if (!picked || picked.length === 0) return;
+    const files = Array.from(picked);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    setUploading(true);
+    try {
+      const sid = await ensureSession();
+      const result = await uploadSessionFiles(sid, files);
+      setSessionFiles((prev) => [...prev, ...(result.files || [])]);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "上传失败");
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleNavigate = useCallback((screen: string, stockParam?: string) => {
@@ -392,7 +419,37 @@ export function CopilotPanel({ open, onToggle }: { open: boolean; onToggle: () =
       </div>
 
       <div className="copilot-input">
+        {(sessionFiles.length > 0 || uploading) && (
+          <div className="upload-chips">
+            {sessionFiles.map((f, i) => (
+              <span key={`${f.filename}-${i}`} className="upload-chip" title={f.markdown_file ? `已转 Markdown：${f.markdown_file}` : f.filename}>
+                📄 {f.filename}
+                {f.markdown_file && <span className="upload-chip-ok"> ✓</span>}
+              </span>
+            ))}
+            {uploading && <span className="upload-chip">⏳ 上传中…</span>}
+          </div>
+        )}
         <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.md,.txt,.csv"
+            style={{ display: "none" }}
+            onChange={(e) => handleUpload(e.target.files)}
+          />
+          <button
+            className="ghost"
+            title="上传研报/年报等资料（PDF/Word/Excel/PPT），AI 可在本会话直接读取"
+            disabled={uploading || sending}
+            onClick={() => fileInputRef.current?.click()}
+            style={{ height: 40, padding: "0 10px" }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+            </svg>
+          </button>
           <textarea
             ref={inputRef}
             placeholder="输入您的问题..."

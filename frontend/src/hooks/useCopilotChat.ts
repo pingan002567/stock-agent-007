@@ -187,6 +187,16 @@ export function useCopilotChat() {
     } catch { /* empty */ }
   }, [currentSessionId, sessions, loadMessages]);
 
+  // 确保有当前会话（发消息/上传附件共用）：无则复用最近会话或新建
+  const ensureSession = useCallback(async (): Promise<string> => {
+    if (currentSessionIdRef.current) return currentSessionIdRef.current;
+    const existing = await fetchSessions();
+    const session = existing[0] ?? await createSession(`${stock} 对话`, currentScreen, stock || null);
+    currentSessionIdRef.current = session.session_id;
+    setCurrentSessionId(session.session_id);
+    return session.session_id;
+  }, [currentScreen, stock]);
+
   const handleSend = useCallback(async (input: string) => {
     const text = input.trim();
     if (!text || sendingRef.current) return;
@@ -207,13 +217,7 @@ export function useCopilotChat() {
     });
 
     try {
-      let sid = currentSessionId;
-      if (!sid) {
-        const existing = await fetchSessions();
-        const session = existing[0] ?? await createSession(`${stock} 对话`, currentScreen, stock || null);
-        sid = session.session_id;
-        setCurrentSessionId(sid);
-      }
+      const sid = await ensureSession();
 
       const run = await sendMessage(sid, text, currentScreen, stock);
 
@@ -419,7 +423,7 @@ export function useCopilotChat() {
       setCopilotStreaming(false);
       setSending(false);
     }
-  }, [currentSessionId, currentScreen, stock, setCopilotStreaming, loadSessions]);
+  }, [ensureSession, currentScreen, stock, setCopilotStreaming, loadSessions]);
 
   const handleStop = useCallback(() => {
     eventSourceRef.current?.close();
@@ -460,6 +464,7 @@ export function useCopilotChat() {
     toolOpen,
     loadSessions,
     loadMessages,
+    ensureSession,
     switchSession,
     handleNewSession,
     handleRenameSession,

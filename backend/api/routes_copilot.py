@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+import tempfile
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from backend.agent_runtime.stream_adapter import to_sse
@@ -53,6 +56,61 @@ def delete_session(session_id: str, request: Request, services: AppServices = De
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
     return {"status": "deleted"}
+
+
+# 允许的研报/资料类型：PDF/Office 会被 DeerFlow 自动转 Markdown，纯文本直接可读
+_UPLOAD_ALLOWED_EXTENSIONS = {
+    ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx",
+    ".md", ".txt", ".csv",
+}
+_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
+
+
+@router.post("/sessions/{session_id}/uploads")
+def upload_session_files(
+    session_id: str,
+    files: list[UploadFile],
+    request: Request,
+    services: AppServices = Depends(get_services),
+):
+    """上传研报/年报等资料到会话线程，供 AI 在后续对话中直接读取。"""
+    try:
+        services.copilot_service.get_session(session_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="session not found") from exc
+    if not files:
+        raise HTTPException(status_code=422, detail="no files provided")
+    for f in files:
+        suffix = Path(f.filename or "").suffix.lower()
+        if suffix not in _UPLOAD_ALLOWED_EXTENSIONS:
+            raise HTTPException(
+                status_code=415,
+                detail=f"unsupported file type: {f.filename}（支持 {'/'.join(sorted(_UPLOAD_ALLOWED_EXTENSIONS))}）",
+            )
+
+    with tempfile.TemporaryDirectory(prefix="copilot-upload-") as tmp_dir:
+        local_paths: list[str] = []
+        for f in files:
+            # basename 防路径穿越；DeerFlow 侧 claim_unique_filename 再做去重
+            dest = Path(tmp_dir) / Path(f.filename or "upload.bin").name
+            size = 0
+            with dest.open("wb") as out:
+                while chunk := f.file.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > _UPLOAD_MAX_BYTES:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"file too large: {f.filename}（上限 50MB）",
+                        )
+                    out.write(chunk)
+            local_paths.append(str(dest))
+        result = services.copilot_service.deerflow.upload_files(session_id, local_paths)
+
+    if not result.get("supported"):
+        raise HTTPException(status_code=409, detail=result)
+    if result.get("error"):
+        raise HTTPException(status_code=500, detail=result)
+    return result
 
 
 @router.get("/sessions/{session_id}/messages")

@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from "./client";
+import { apiDelete, apiGet, apiPost, apiPut } from "./client";
 
 export interface RuntimeMetricSnapshot {
   snapshot_id: string;
@@ -104,4 +104,47 @@ export async function testConnection(payload: {
   model_name?: string;
 }): Promise<ConnectionTestResult> {
   return apiPost("/api/runtime/test-connection", payload);
+}
+
+// ── AI 记忆管理 ──
+
+export interface MemoryFact {
+  id: string;
+  content: string;
+  category?: string;
+  confidence?: number;
+}
+
+export interface MemoryStatus {
+  supported: boolean;
+  error?: string;
+  config?: { enabled?: boolean; max_facts?: number; injection_enabled?: boolean };
+  data?: { facts?: MemoryFact[]; user?: Record<string, unknown> };
+}
+
+export async function fetchMemoryStatus(): Promise<MemoryStatus> {
+  return apiGet<MemoryStatus>("/api/runtime/memory");
+}
+
+export async function clearMemory(): Promise<{ supported: boolean }> {
+  return apiDelete("/api/runtime/memory");
+}
+
+export async function createMemoryFact(payload: {
+  content: string;
+  category?: string;
+  confidence?: number;
+}): Promise<{ supported: boolean }> {
+  return apiPost("/api/runtime/memory/facts", payload);
+}
+
+export async function updateMemoryFact(
+  factId: string,
+  payload: { content?: string; category?: string; confidence?: number },
+): Promise<{ supported: boolean }> {
+  return apiPut(`/api/runtime/memory/facts/${encodeURIComponent(factId)}`, payload);
+}
+
+export async function deleteMemoryFact(factId: string): Promise<{ supported: boolean }> {
+  return apiDelete(`/api/runtime/memory/facts/${encodeURIComponent(factId)}`);
 }

@@ -2942,3 +2942,28 @@ def test_settings_profiles_and_tools_round_trip(tmp_path):
     assert updated["profiles"][0]["name"] == "测试 Profile"
     overview = client.get("/api/overview").json()
     assert overview["audit"][0]["action"] == "settings profiles updated"
+
+
+def test_runtime_memory_routes_degrade_cleanly_in_stub_mode(tmp_path):
+    """记忆管理路由：stub 模式下 GET 报 supported=False（前端据此隐藏区块），
+    写操作返回 409 而非 500；空 content 校验 422。"""
+    client = make_client(tmp_path)
+
+    status = client.get("/api/runtime/memory")
+    assert status.status_code == 200
+    assert status.json()["supported"] is False
+
+    assert client.delete("/api/runtime/memory").status_code == 409
+    assert client.delete("/api/runtime/memory/facts/f-1").status_code == 409
+    assert (
+        client.put("/api/runtime/memory/facts/f-1", json={"content": "x"}).status_code
+        == 409
+    )
+    assert (
+        client.post("/api/runtime/memory/facts", json={"content": ""}).status_code
+        == 422
+    )
+    assert (
+        client.post("/api/runtime/memory/facts", json={"content": "偏好低估值"}).status_code
+        == 409
+    )

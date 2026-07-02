@@ -96,6 +96,15 @@ def _build_tool_configs() -> list[dict[str, Any]]:
             "group": TOOL_GROUP_MAP.get(tool.name, "a2-research"),
             "use": f"backend.agent_runtime.tools:{tool.name}",
         })
+    # Sandbox file tools (read-only set): let the agent read uploaded research
+    # docs under /mnt/user-data/uploads (UploadsMiddleware injects the file list
+    # per turn; upload_files converts PDF/Word/Excel/PPT to Markdown). Write
+    # tools (write_file/str_replace/bash) are intentionally NOT registered.
+    for _file_tool in ("ls", "glob", "grep", "read_file"):
+        configs.append({
+            "name": _file_tool, "group": "files",
+            "use": f"deerflow.sandbox.tools:{_file_tool}_tool",
+        })
     # Web search: a single "web_search" tool backed by the best-configured provider.
     # Tavily / Serper register the same tool name, so we pick one (not all). Tavily and
     # Serper need an API key; DuckDuckGo is the keyless default fallback.

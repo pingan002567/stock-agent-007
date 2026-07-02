@@ -3,8 +3,9 @@ import { apiGet, apiPost, apiPut, apiDelete } from "@/api/client";
 import {
   fetchCopilotRuns, fetchProviderEvents, fetchRuntimeMetrics, fetchRegressionCases,
   reconnectRuntime, testConnection,
+  fetchMemoryStatus, clearMemory, deleteMemoryFact, updateMemoryFact, createMemoryFact,
   type CopilotRunLog, type ProviderEvent, type RuntimeMetricSnapshot,
-  type RegressionCase, type ConnectionTestResult,
+  type RegressionCase, type ConnectionTestResult, type MemoryStatus,
 } from "@/api/runtime";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, PanelSkeleton, KpiSkeleton } from "@/components/ui/Loading";
@@ -322,6 +323,116 @@ const MODEL_PROVIDER_BASE_URLS: Record<string, string> = {
   gemini: "native or OpenAI-compatible",
 };
 
+/* ---------- AI 记忆管理 ---------- */
+
+function MemorySection() {
+  const [memory, setMemory] = useState<MemoryStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
+  const [newFact, setNewFact] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setMemory(await fetchMemoryStatus());
+    } catch {
+      setMemory(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // 异步加载后 setState，非同步级联渲染（同 loadSessions 的规则误报）
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { load(); }, [load]);
+
+  const run = async (action: () => Promise<unknown>) => {
+    setBusy(true);
+    try {
+      await action();
+      await load();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "记忆操作失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const facts = memory?.data?.facts ?? [];
+  // stub 模式（或 runtime 降级）没有记忆后端：隐藏区块而非报错
+  if (!loading && !memory?.supported) return null;
+
+  return (
+    <SectionCard title="AI 记忆" subtitle="AI 记住的用户事实，可纠偏/清空">
+      {loading ? (
+        <span className="muted" style={{ fontSize: 12 }}>加载中…</span>
+      ) : (
+        <div className="page-stack" style={{ gap: 8 }}>
+          {facts.length === 0 && (
+            <span className="muted" style={{ fontSize: 12 }}>
+              暂无记忆。AI 会在对话中自动记住你的偏好与事实（写入侧已开启），也可在下方手动添加。
+            </span>
+          )}
+          {facts.map((fact) => (
+            <div key={fact.id} className="check" style={{ alignItems: "center", gap: 8 }}>
+              {editingId === fact.id ? (
+                <>
+                  <input
+                    type="text" value={editText} onChange={(e) => setEditText(e.target.value)}
+                    style={{ flex: 1, height: 30, border: "1px solid var(--line)", borderRadius: 7, background: "var(--panel)", color: "var(--ink)", padding: "0 10px", fontSize: 12 }}
+                  />
+                  <button className="primary" disabled={busy || !editText.trim()} type="button" style={{ height: 28, fontSize: 12 }}
+                    onClick={() => run(async () => { await updateMemoryFact(fact.id, { content: editText.trim() }); setEditingId(null); })}>
+                    保存
+                  </button>
+                  <button className="ghost" type="button" style={{ height: 28, fontSize: 12 }} onClick={() => setEditingId(null)}>取消</button>
+                </>
+              ) : (
+                <>
+                  <div style={{ flex: 1 }}>
+                    <span style={{ fontSize: 12 }}>{fact.content}</span>
+                    <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>
+                      {fact.category ?? "context"}
+                      {fact.confidence != null && ` · ${(fact.confidence * 100).toFixed(0)}%`}
+                    </span>
+                  </div>
+                  <button className="ghost" disabled={busy} type="button" style={{ height: 28, fontSize: 12 }}
+                    onClick={() => { setEditingId(fact.id); setEditText(fact.content); }}>
+                    编辑
+                  </button>
+                  <button className="ghost" disabled={busy} type="button" style={{ height: 28, fontSize: 12, color: "var(--red)" }}
+                    onClick={() => run(() => deleteMemoryFact(fact.id))}>
+                    删除
+                  </button>
+                </>
+              )}
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input
+              type="text" placeholder="手动添加一条事实，如：我偏好低估值蓝筹，仓位不超过 3 成" value={newFact}
+              onChange={(e) => setNewFact(e.target.value)}
+              style={{ flex: 1, height: 32, border: "1px solid var(--line)", borderRadius: 7, background: "var(--panel)", color: "var(--ink)", padding: "0 10px", fontSize: 12 }}
+            />
+            <button className="primary" disabled={busy || !newFact.trim()} type="button" style={{ height: 30, fontSize: 12 }}
+              onClick={() => run(async () => { await createMemoryFact({ content: newFact.trim(), confidence: 0.9 }); setNewFact(""); })}>
+              添加
+            </button>
+            {facts.length > 0 && (
+              <button className="ghost" disabled={busy} type="button" style={{ height: 30, fontSize: 12, color: "var(--red)" }}
+                onClick={() => { if (window.confirm(`确认清空全部 ${facts.length} 条记忆？此操作不可撤销。`)) run(() => clearMemory()); }}>
+                清空全部
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
 function AiTab({
   settings, copilotRuns, runtimeMetrics, regressionCases, onSaveRuntimeConfig,
 }: {
@@ -533,6 +644,9 @@ function AiTab({
           </div>
         </SectionCard>
       )}
+
+      {/* AI 记忆 */}
+      <MemorySection />
 
       {/* Skills */}
       <SectionCard title="Skills" subtitle="AI 能力">

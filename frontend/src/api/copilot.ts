@@ -97,6 +97,34 @@ export async function sendMessage(
   );
 }
 
+export interface UploadedFileInfo {
+  filename: string;
+  size: number;
+  markdown_file?: string;
+}
+
+export async function uploadSessionFiles(
+  sessionId: string,
+  files: File[],
+): Promise<{ success: boolean; files: UploadedFileInfo[]; message?: string }> {
+  const form = new FormData();
+  for (const f of files) form.append("files", f);
+  // multipart 不能走 api() 包装（它会强制 JSON Content-Type），直接 fetch
+  const res = await fetch(`/api/copilot/sessions/${encodeURIComponent(sessionId)}/uploads`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    let detail = `${res.status}`;
+    try {
+      const body = await res.json();
+      detail = typeof body?.detail === "string" ? body.detail : JSON.stringify(body?.detail ?? body);
+    } catch { /* empty */ }
+    throw new Error(`上传失败: ${detail}`);
+  }
+  return res.json();
+}
+
 export function createStreamUrl(sessionId: string, runId: string): string {
   return `/api/copilot/sessions/${encodeURIComponent(sessionId)}/stream/${encodeURIComponent(runId)}`;
 }

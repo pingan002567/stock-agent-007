@@ -563,6 +563,65 @@ class DeerFlowClientAdapter:
             thinking_enabled=self.thinking_enabled,
         )
 
+    # ── memory management (public DeerFlow client API passthrough) ──
+    # 记忆写入侧由 deerflow_config 的 memory 段开启；这里补读取/纠偏侧，
+    # 供设置页「AI 记忆」区块查看/编辑/清空用户事实库。stub 模式下降级为
+    # supported=False，前端据此隐藏区块。
+
+    def _memory_call(self, method: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        fn = getattr(self.client, method, None) if self.client is not None else None
+        if not callable(fn):
+            return {"supported": False, "error": f"{method} unavailable in {self.mode} mode"}
+        try:
+            result = fn(*args, **kwargs)
+            return {"supported": True, **(result if isinstance(result, dict) else {"result": result})}
+        except Exception as exc:
+            return {"supported": True, "error": str(exc)}
+
+    def memory_status(self) -> dict[str, Any]:
+        return self._memory_call("get_memory_status")
+
+    def clear_memory(self) -> dict[str, Any]:
+        return self._memory_call("clear_memory")
+
+    def create_memory_fact(
+        self, content: str, category: str = "context", confidence: float = 0.5
+    ) -> dict[str, Any]:
+        return self._memory_call(
+            "create_memory_fact", content=content, category=category, confidence=confidence
+        )
+
+    def update_memory_fact(
+        self,
+        fact_id: str,
+        content: str | None = None,
+        category: str | None = None,
+        confidence: float | None = None,
+    ) -> dict[str, Any]:
+        return self._memory_call(
+            "update_memory_fact",
+            fact_id=fact_id,
+            content=content,
+            category=category,
+            confidence=confidence,
+        )
+
+    def delete_memory_fact(self, fact_id: str) -> dict[str, Any]:
+        return self._memory_call("delete_memory_fact", fact_id)
+
+    # ── file uploads (RAG：研报/年报 PDF 等直接给 AI 读) ──
+
+    def upload_files(self, thread_id: str, files: list[str]) -> dict[str, Any]:
+        """Upload local files into a session thread's uploads directory.
+
+        DeerFlow converts PDF/Word/Excel/PPT to Markdown on upload; on the next
+        turn UploadsMiddleware injects the file list (with outline) into the
+        prompt and the agent reads content via the read-only sandbox file tools
+        (ls/glob/grep/read_file) registered in deerflow_config.
+        """
+        # 复用 _memory_call 的护栏语义：stub/降级模式返回 supported=False
+        return self._memory_call("upload_files", thread_id, files)
+
     def _existing_thread_msg_ids(self, thread_id: str | None) -> set[str]:
         """DeerFlow message ids already in the thread's checkpoint (prior runs).
 

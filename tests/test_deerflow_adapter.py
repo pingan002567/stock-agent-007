@@ -360,3 +360,30 @@ def test_real_deerflow_embedded_smoke_when_enabled():
     assert adapter.status().mode in {"embedded", "stub"}
     if adapter.client is None:
         pytest.skip(json.dumps(adapter.status().to_dict(), ensure_ascii=False))
+
+
+def test_adapter_memory_and_upload_passthrough_guard_stub_and_real_modes():
+    """记忆/上传透传：stub（无 client）降级为 supported=False；
+    有 client 时调用同名公开方法并透传返回值。"""
+    stub = DeerFlowClientAdapter(mode="stub", client=None)
+    assert stub.memory_status()["supported"] is False
+    assert stub.upload_files("t-1", ["/tmp/x.pdf"])["supported"] is False
+    assert stub.clear_memory()["supported"] is False
+
+    class FakeMemoryClient:
+        def get_memory_status(self):
+            return {"config": {"enabled": True}, "data": {"facts": []}}
+
+        def upload_files(self, thread_id, files):
+            return {"success": True, "files": [{"filename": "x.pdf"}], "thread": thread_id}
+
+    real = DeerFlowClientAdapter(mode="embedded", client=FakeMemoryClient())
+    status = real.memory_status()
+    assert status["supported"] is True
+    assert status["data"] == {"facts": []}
+    upload = real.upload_files("sess-9", ["/tmp/x.pdf"])
+    assert upload["supported"] is True
+    assert upload["success"] is True
+    assert upload["thread"] == "sess-9"
+    # FakeMemoryClient 没有 clear_memory：单方法缺失也应降级而非抛错
+    assert real.clear_memory()["supported"] is False

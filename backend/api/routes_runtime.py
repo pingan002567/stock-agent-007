@@ -204,3 +204,58 @@ def regression_cases():
         },
     ]
     return {"items": cases}
+
+
+# ── AI 记忆管理（查看/编辑/清空用户事实库） ──
+# 经 copilot_service.deerflow 现取 adapter：reconnect 会整体换实例，不能缓存。
+
+
+@router.get("/memory")
+def memory_status(services: AppServices = Depends(get_services)):
+    return services.copilot_service.deerflow.memory_status()
+
+
+@router.delete("/memory")
+def memory_clear(services: AppServices = Depends(get_services)):
+    result = services.copilot_service.deerflow.clear_memory()
+    if not result.get("supported"):
+        raise HTTPException(status_code=409, detail=result)
+    return result
+
+
+@router.post("/memory/facts")
+def memory_create_fact(payload: dict, services: AppServices = Depends(get_services)):
+    content = str(payload.get("content") or "").strip()
+    if not content:
+        raise HTTPException(status_code=422, detail="content is required")
+    result = services.copilot_service.deerflow.create_memory_fact(
+        content=content,
+        category=str(payload.get("category") or "context"),
+        confidence=float(payload.get("confidence") or 0.5),
+    )
+    if not result.get("supported"):
+        raise HTTPException(status_code=409, detail=result)
+    return result
+
+
+@router.put("/memory/facts/{fact_id}")
+def memory_update_fact(
+    fact_id: str, payload: dict, services: AppServices = Depends(get_services)
+):
+    result = services.copilot_service.deerflow.update_memory_fact(
+        fact_id=fact_id,
+        content=payload.get("content"),
+        category=payload.get("category"),
+        confidence=payload.get("confidence"),
+    )
+    if not result.get("supported"):
+        raise HTTPException(status_code=409, detail=result)
+    return result
+
+
+@router.delete("/memory/facts/{fact_id}")
+def memory_delete_fact(fact_id: str, services: AppServices = Depends(get_services)):
+    result = services.copilot_service.deerflow.delete_memory_fact(fact_id)
+    if not result.get("supported"):
+        raise HTTPException(status_code=409, detail=result)
+    return result
