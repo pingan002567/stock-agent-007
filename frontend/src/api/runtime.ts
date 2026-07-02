@@ -148,3 +148,32 @@ export async function updateMemoryFact(
 export async function deleteMemoryFact(factId: string): Promise<{ supported: boolean }> {
   return apiDelete(`/api/runtime/memory/facts/${encodeURIComponent(factId)}`);
 }
+
+// ── MCP 服务器管理 ──
+
+export interface McpServerConfig {
+  enabled: boolean;
+  type: "stdio" | "sse" | "http";
+  command?: string | null;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string | null;
+  headers?: Record<string, string>;
+  description?: string;
+}
+
+export interface McpConfigResponse {
+  supported?: boolean;
+  error?: string;
+  mcp_servers?: Record<string, McpServerConfig>;
+}
+
+export async function fetchMcpConfig(): Promise<McpConfigResponse> {
+  return apiGet<McpConfigResponse>("/api/runtime/mcp");
+}
+
+export async function updateMcpConfig(
+  servers: Record<string, McpServerConfig>,
+): Promise<McpConfigResponse> {
+  return apiPut("/api/runtime/mcp", { mcp_servers: servers });
+}

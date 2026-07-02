@@ -1,14 +1,32 @@
 {
   "mcpServers": {},
   "skills": {
-    "stock-researcher":    {"enabled": true},
-    "risk-officer":        {"enabled": true},
-    "strategy-analyst":    {"enabled": true},
-    "rebalance-planner":   {"enabled": true},
-    "stock-monitor":       {"enabled": true},
-    "report-writer":       {"enabled": true},
-    "valuation-analyst":   {"enabled": true},
-    "catalyst-tracker":    {"enabled": true},
-    "worldcup-predictor":  {"enabled": false}
+    "stock-researcher": {
+      "enabled": true
+    },
+    "risk-officer": {
+      "enabled": true
+    },
+    "strategy-analyst": {
+      "enabled": true
+    },
+    "rebalance-planner": {
+      "enabled": true
+    },
+    "stock-monitor": {
+      "enabled": true
+    },
+    "report-writer": {
+      "enabled": true
+    },
+    "valuation-analyst": {
+      "enabled": true
+    },
+    "catalyst-tracker": {
+      "enabled": true
+    },
+    "worldcup-predictor": {
+      "enabled": false
+    }
   }
 }

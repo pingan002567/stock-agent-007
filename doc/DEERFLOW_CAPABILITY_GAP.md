@@ -30,7 +30,7 @@
 | **文件上传 / RAG**(PDF/Excel/Word→MD) | ✅ 已接线（2026-07-02）：`POST /api/copilot/sessions/{id}/uploads` + 输入框附件按钮；沙箱只读文件工具(ls/glob/grep/read_file)已注册进 config，UploadsMiddleware 自动注入文件清单 | ⭐⭐⭐ 上传**研报/年报/招股书/财报 PDF** 让 AI 直接读 | 已完成 |
 | **Sandbox 代码执行**(Python/pandas/matplotlib) | `deerflow.sandbox`(Local/Docker/K8s)+ `data-analysis`/`chart-visualization` skills | ⭐⭐⭐ 让 AI 跑真实数据做**自定义回测/画图/因子计算**，不再只调固定工具 | 中高 |
 | **多模态 / 看图**(view_image) | ✅ 已接线（2026-07-02）：上传白名单加图片(png/jpg/webp)；模型 `supports_vision` 按模型名自动判定（`WORKBENCH_AI_VISION` 可覆盖），命中后 harness 自动挂 view_image 工具+中间件；顺带修了 config 模型名与 stream 不一致导致按模型能力判定失效的 bug | ⭐⭐ 上传 **K 线截图/研报图表** 做视觉分析 | 已完成 |
-| **MCP 集成** | `deerflow.mcp`(stdio/SSE/OAuth) | ⭐⭐ 无需写代码即可接 **Wind/Choice/内部数据源/外部工具** | 中 |
+| **MCP 集成** | ✅ 已接线（2026-07-02）：`/api/runtime/mcp` GET/PUT + 设置页「MCP 服务器」区块（增删/启停/stdio+sse+http）；写入 `extensions_config.json`，harness 按 mtime 自动重载工具缓存，保存后下一轮对话生效。MCP 接入后可再开 tool_search 省 prompt | ⭐⭐ 无需写代码即可接 **Wind/Choice/内部数据源/外部工具** | 已完成 |
 | **可观测 Tracing**(Langfuse/LangSmith) | ✅ 复核已内置（2026-07-02）：`client.stream` 自动注入 `build_tracing_callbacks()`，纯 env 驱动——`LANGFUSE_TRACING=1`+keys 或 `LANGSMITH_TRACING=1`+key 即生效，用法已写入 `.env.example` | ⭐⭐ 排查 agent 执行链、**token 成本分析** | 已完成 |
 | **报告后处理**：语音播客(TTS)/ PPT 生成 | public skills `podcast-generation` / `ppt-generation` | ⭐⭐ **语音晨报 / 投研路演 PPT**，产品差异化 | 中 |
 | **ask_clarification**(反问澄清) | ✅ 已接线（2026-07-02）：工具+中间件 harness 侧本就总是挂载；补齐我方缺口——copilot_service 捕获同名 tool_result 发专用 `clarification` SSE、final 空壳用问题文本兜底，前端渲染琥珀色问题卡（下一条消息即回答） | ⭐ 股票代码/意图歧义时 AI 主动反问 | 已完成 |
@@ -42,7 +42,7 @@
 | **子代理 subagent** | `deerflow_client.py` 硬编码 `False`；**但 8 个 subagent 配置已生成**(`deerflow_config.py::_build_subagent_configs`) | 开一个开关就能让 researcher/valuation/catalyst **并行**跑，现在串行。价值高、改动极小 | ⭐ 低 |
 | **plan_mode(TodoMiddleware)** | 硬编码 `False` | 复杂多步研究的**计划审核 human-in-the-loop** | 中 |
 | **web 搜索** | ✅ 复核已接线（2026-07-02）：主代理经 `get_available_tools(groups=None)` 不过滤拿到 `web_search`；全部 subagent 经 `skill_specs.extra_tools` 默认带上。DDG 无 key 兜底，配 `TAVILY_API_KEY` 自动升级并追加 `web_fetch` | 让研究突破 akshare，接**实时新闻/全网** | 已完成 |
-| **tool_search** | 配置 `enabled: False`(`deerflow_config.py:213`) | 47 个工具时用延迟工具搜索省 prompt | 低 |
+| **tool_search** | ⚠️ 复核不适用（2026-07-02）：harness 的 tool_search **只延迟 MCP 工具**（`ToolSearchConfig` docstring），config 注册的 54 个本地工具不受影响——当前未接 MCP，开了无收益。待 MCP 集成后再开 | 47 个工具时用延迟工具搜索省 prompt | 暂不适用 |
 | **记忆管理 UI** | ✅ 已接线（2026-07-02）：`/api/runtime/memory*` 路由 + 设置页 AI Tab「AI 记忆」区块（查看/添加/编辑/删除/清空；stub 模式自动隐藏） | 让用户看到 AI 记住了什么、纠偏 | 已完成 |
 
 ## C. 后端已产出、前端没友好展示 ⚠️(最划算)

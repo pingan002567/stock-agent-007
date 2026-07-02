@@ -259,3 +259,33 @@ def memory_delete_fact(fact_id: str, services: AppServices = Depends(get_service
     if not result.get("supported"):
         raise HTTPException(status_code=409, detail=result)
     return result
+
+
+# ── MCP 服务器管理（无代码接外部数据源/工具） ──
+
+
+@router.get("/mcp")
+def mcp_config(services: AppServices = Depends(get_services)):
+    return services.copilot_service.deerflow.mcp_config()
+
+
+@router.put("/mcp")
+def mcp_update(payload: dict, services: AppServices = Depends(get_services)):
+    """整体覆盖 MCP 服务器配置。body: {"mcp_servers": {name: {...}}}"""
+    mcp_servers = payload.get("mcp_servers")
+    if not isinstance(mcp_servers, dict):
+        raise HTTPException(status_code=422, detail="mcp_servers (object) is required")
+    for name, server in mcp_servers.items():
+        if not isinstance(server, dict):
+            raise HTTPException(status_code=422, detail=f"server '{name}' must be an object")
+        server_type = str(server.get("type") or server.get("transport") or "stdio")
+        if server_type == "stdio" and not server.get("command"):
+            raise HTTPException(status_code=422, detail=f"stdio server '{name}' requires command")
+        if server_type in ("sse", "http") and not server.get("url"):
+            raise HTTPException(status_code=422, detail=f"{server_type} server '{name}' requires url")
+    result = services.copilot_service.deerflow.update_mcp_config(mcp_servers)
+    if not result.get("supported"):
+        raise HTTPException(status_code=409, detail=result)
+    if result.get("error"):
+        raise HTTPException(status_code=500, detail=result)
+    return result

@@ -2967,3 +2967,37 @@ def test_runtime_memory_routes_degrade_cleanly_in_stub_mode(tmp_path):
         client.post("/api/runtime/memory/facts", json={"content": "偏好低估值"}).status_code
         == 409
     )
+
+
+def test_runtime_mcp_routes_validate_and_degrade_in_stub_mode(tmp_path):
+    """MCP 路由：stdio 缺 command / sse 缺 url 校验 422；stub 模式写入 409。"""
+    client = make_client(tmp_path)
+
+    status = client.get("/api/runtime/mcp")
+    assert status.status_code == 200
+    assert status.json()["supported"] is False
+
+    assert (
+        client.put("/api/runtime/mcp", json={}).status_code == 422
+    )
+    assert (
+        client.put(
+            "/api/runtime/mcp",
+            json={"mcp_servers": {"bad": {"type": "stdio"}}},
+        ).status_code
+        == 422
+    )
+    assert (
+        client.put(
+            "/api/runtime/mcp",
+            json={"mcp_servers": {"bad": {"type": "sse"}}},
+        ).status_code
+        == 422
+    )
+    assert (
+        client.put(
+            "/api/runtime/mcp",
+            json={"mcp_servers": {"ok": {"type": "stdio", "command": "uvx", "args": ["x"]}}},
+        ).status_code
+        == 409
+    )

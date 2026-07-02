@@ -609,6 +609,17 @@ class DeerFlowClientAdapter:
     def delete_memory_fact(self, fact_id: str) -> dict[str, Any]:
         return self._memory_call("delete_memory_fact", fact_id)
 
+    # ── MCP servers（无代码接入外部数据源/工具） ──
+
+    def mcp_config(self) -> dict[str, Any]:
+        """Read MCP server configs from extensions_config.json (via harness)."""
+        return self._memory_call("get_mcp_config")
+
+    def update_mcp_config(self, mcp_servers: dict[str, Any]) -> dict[str, Any]:
+        """Overwrite MCP server configs. Harness 侧做原子写入、agent 失效重建、
+        缓存重载；MCP 工具缓存按配置文件 mtime 自动失效，下一轮对话即生效。"""
+        return self._memory_call("update_mcp_config", mcp_servers)
+
     # ── file uploads (RAG：研报/年报 PDF 等直接给 AI 读) ──
 
     def upload_files(self, thread_id: str, files: list[str]) -> dict[str, Any]:

@@ -4,8 +4,10 @@ import {
   fetchCopilotRuns, fetchProviderEvents, fetchRuntimeMetrics, fetchRegressionCases,
   reconnectRuntime, testConnection,
   fetchMemoryStatus, clearMemory, deleteMemoryFact, updateMemoryFact, createMemoryFact,
+  fetchMcpConfig, updateMcpConfig,
   type CopilotRunLog, type ProviderEvent, type RuntimeMetricSnapshot,
   type RegressionCase, type ConnectionTestResult, type MemoryStatus,
+  type McpServerConfig,
 } from "@/api/runtime";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, PanelSkeleton, KpiSkeleton } from "@/components/ui/Loading";
@@ -433,6 +435,157 @@ function MemorySection() {
   );
 }
 
+/* ---------- MCP 服务器管理 ---------- */
+
+const EMPTY_MCP_FORM = { name: "", type: "stdio" as McpServerConfig["type"], command: "", args: "", url: "", description: "" };
+
+function McpSection() {
+  const [servers, setServers] = useState<Record<string, McpServerConfig> | null>(null);
+  const [supported, setSupported] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState(EMPTY_MCP_FORM);
+
+  const load = useCallback(async () => {
+    try {
+      const cfg = await fetchMcpConfig();
+      setSupported(cfg.supported !== false);
+      setServers(cfg.mcp_servers ?? {});
+    } catch {
+      setServers({});
+    }
+  }, []);
+
+  // 异步加载后 setState，非同步级联渲染（同 loadSessions 的规则误报）
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { load(); }, [load]);
+
+  const save = async (next: Record<string, McpServerConfig>) => {
+    setBusy(true);
+    try {
+      const result = await updateMcpConfig(next);
+      setServers(result.mcp_servers ?? next);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "MCP 配置保存失败");
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAdd = () => {
+    const name = form.name.trim();
+    if (!name) return;
+    const server: McpServerConfig = {
+      enabled: true,
+      type: form.type,
+      description: form.description.trim(),
+    };
+    if (form.type === "stdio") {
+      server.command = form.command.trim();
+      server.args = form.args.trim() ? form.args.trim().split(/\s+/) : [];
+    } else {
+      server.url = form.url.trim();
+    }
+    setShowAdd(false);
+    setForm(EMPTY_MCP_FORM);
+    save({ ...(servers ?? {}), [name]: server });
+  };
+
+  if (!supported || servers === null) return null;
+  const names = Object.keys(servers);
+
+  return (
+    <SectionCard title="MCP 服务器" subtitle="无代码接入外部数据源/工具（保存后下一轮对话生效）">
+      <div className="page-stack" style={{ gap: 8 }}>
+        {names.length === 0 && (
+          <span className="muted" style={{ fontSize: 12 }}>
+            未配置 MCP 服务器。可接入行情终端、内部数据库、文件系统等 MCP 生态工具，AI 对话中即可调用。
+          </span>
+        )}
+        {names.map((name) => {
+          const s = servers[name];
+          return (
+            <div key={name} className="check" style={{ alignItems: "center", gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{name}</span>
+                  <span className="tag" style={{ fontSize: 10 }}>{s.type}</span>
+                  {!s.enabled && <span className="tag" style={{ fontSize: 10, background: "var(--red-soft)", color: "var(--red)" }}>已停用</span>}
+                </div>
+                <span className="muted" style={{ fontSize: 11, fontFamily: "var(--mono)" }}>
+                  {s.type === "stdio" ? `${s.command ?? ""} ${(s.args ?? []).join(" ")}`.trim() : s.url ?? ""}
+                </span>
+                {s.description && <span className="muted" style={{ fontSize: 11 }}> · {s.description}</span>}
+              </div>
+              <button className="ghost" disabled={busy} type="button" style={{ height: 28, fontSize: 12 }}
+                onClick={() => save({ ...servers, [name]: { ...s, enabled: !s.enabled } })}>
+                {s.enabled ? "停用" : "启用"}
+              </button>
+              <button className="ghost" disabled={busy} type="button" style={{ height: 28, fontSize: 12, color: "var(--red)" }}
+                onClick={() => {
+                  if (!window.confirm(`确认删除 MCP 服务器「${name}」？`)) return;
+                  const next = { ...servers };
+                  delete next[name];
+                  save(next);
+                }}>
+                删除
+              </button>
+            </div>
+          );
+        })}
+        {showAdd ? (
+          <div className="card page-stack" style={{ padding: 12, gap: 8 }}>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input type="text" placeholder="名称，如 wind-mcp" value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                style={{ flex: 1, height: 30, border: "1px solid var(--line)", borderRadius: 7, background: "var(--panel)", color: "var(--ink)", padding: "0 10px", fontSize: 12 }} />
+              <select value={form.type}
+                onChange={(e) => setForm({ ...form, type: e.target.value as McpServerConfig["type"] })}
+                style={{ height: 30, border: "1px solid var(--line)", borderRadius: 7, background: "var(--panel)", color: "var(--ink)", padding: "0 6px", fontSize: 12 }}>
+                <option value="stdio">stdio（本地命令）</option>
+                <option value="sse">sse（远程 SSE）</option>
+                <option value="http">http（远程 HTTP）</option>
+              </select>
+            </div>
+            {form.type === "stdio" ? (
+              <div style={{ display: "flex", gap: 8 }}>
+                <input type="text" placeholder="命令，如 uvx" value={form.command}
+                  onChange={(e) => setForm({ ...form, command: e.target.value })}
+                  style={{ width: 140, height: 30, border: "1px solid var(--line)", borderRadius: 7, background: "var(--panel)", color: "var(--ink)", padding: "0 10px", fontSize: 12 }} />
+                <input type="text" placeholder="参数（空格分隔），如 mcp-server-fetch" value={form.args}
+                  onChange={(e) => setForm({ ...form, args: e.target.value })}
+                  style={{ flex: 1, height: 30, border: "1px solid var(--line)", borderRadius: 7, background: "var(--panel)", color: "var(--ink)", padding: "0 10px", fontSize: 12 }} />
+              </div>
+            ) : (
+              <input type="text" placeholder="URL，如 https://host/mcp/sse" value={form.url}
+                onChange={(e) => setForm({ ...form, url: e.target.value })}
+                style={{ height: 30, border: "1px solid var(--line)", borderRadius: 7, background: "var(--panel)", color: "var(--ink)", padding: "0 10px", fontSize: 12 }} />
+            )}
+            <input type="text" placeholder="描述（可选）" value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              style={{ height: 30, border: "1px solid var(--line)", borderRadius: 7, background: "var(--panel)", color: "var(--ink)", padding: "0 10px", fontSize: 12 }} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="primary" type="button" style={{ height: 30, fontSize: 12 }}
+                disabled={busy || !form.name.trim() || (form.type === "stdio" ? !form.command.trim() : !form.url.trim())}
+                onClick={handleAdd}>
+                添加并保存
+              </button>
+              <button className="ghost" type="button" style={{ height: 30, fontSize: 12 }} onClick={() => setShowAdd(false)}>取消</button>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <button className="ghost" disabled={busy} type="button" style={{ height: 30, fontSize: 12 }} onClick={() => setShowAdd(true)}>
+              + 添加 MCP 服务器
+            </button>
+          </div>
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
 function AiTab({
   settings, copilotRuns, runtimeMetrics, regressionCases, onSaveRuntimeConfig,
 }: {
@@ -647,6 +800,9 @@ function AiTab({
 
       {/* AI 记忆 */}
       <MemorySection />
+
+      {/* MCP 服务器 */}
+      <McpSection />
 
       {/* Skills */}
       <SectionCard title="Skills" subtitle="AI 能力">

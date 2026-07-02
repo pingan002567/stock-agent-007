@@ -726,7 +726,10 @@ class CopilotService:
                         # Already have a final with content, skip
                         continue
                     final_seen = True
-                if event["type"] not in ("reasoning", "partial_answer", "skill_trace"):
+                # title 是瞬态事件（会话标题已由前端 title listener 更新），落库会
+                # 走 _serialize_event 的兜底分支变成一条空 final_answer——既污染
+                # 历史，又会让断流恢复的「已收口」判定（any final_answer）误判。
+                if event["type"] not in ("reasoning", "partial_answer", "skill_trace", "title"):
                     self._persist_stream_event(state, sse_event)
                 yield sse_event
                 if event["type"] in ("final", "error"):
@@ -995,6 +998,19 @@ class CopilotService:
                 data.get("text") or data.get("phase") or "reasoning",
                 data,
             )
+        if event_type == "clarification":
+            # 不落成 final_answer：断流恢复用 final_answer 判定本轮是否收口，
+            # 反问事件混进去会误判（且产生一条空壳回答）。
+            data = {
+                "question": payload.get("question"),
+                "call_id": payload.get("call_id"),
+            }
+            return (
+                "assistant",
+                "clarification",
+                str(payload.get("question") or ""),
+                data,
+            )
         if event_type == "error":
             data = {
                 "tool": payload.get("tool"),
@@ -1072,6 +1088,7 @@ class CopilotService:
             "tool_result": "tool_result",
             "partial_answer": "partial_answer",
             "reasoning": "reasoning",
+            "clarification": "clarification",
             "error": "error",
             "final_answer": "final",
         }.get(kind, "reasoning")

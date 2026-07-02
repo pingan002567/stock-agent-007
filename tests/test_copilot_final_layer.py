@@ -307,3 +307,74 @@ def test_execution_policy_auto_safe_full_set():
 
 
 
+
+
+def test_clarification_tool_result_emits_sse_and_backfills_empty_final(tmp_path):
+    """ask_clarification：同名 tool_result 应发专用 clarification SSE；
+    final 空壳（占位 conclusion）时用问题文本兜底，不落空回答。"""
+    client = make_client(tmp_path)
+    services = client.app.state.services
+
+    question = "❓ 你指的是哪只白酒股？\n  1. 600519 贵州茅台\n  2. 000858 五粮液"
+
+    async def fake_stream(**kwargs):
+        # title 是瞬态事件：不应被持久化（历史上曾兜底成空 final_answer）
+        yield {"type": "title", "payload": {"title": "白酒股咨询"}}
+        yield {
+            "type": "tool_call",
+            "payload": {"call_id": "c-clar-1", "tool": "ask_clarification", "arguments": {}},
+        }
+        yield {
+            "type": "tool_result",
+            "payload": {"call_id": "c-clar-1", "tool": "ask_clarification", "result": question},
+        }
+        yield {
+            "type": "final",
+            "payload": {"conclusion": "DeerFlow embedded stream completed."},
+        }
+
+    services.copilot_service.deerflow.stream = lambda **kwargs: fake_stream(**kwargs)
+
+    session = client.post(
+        "/api/copilot/sessions",
+        json={
+            "title": "澄清测试",
+            "current_page": "overview",
+            "anchor_symbol": None,
+            "authority_level": "A4",
+        },
+    ).json()
+    run = client.post(
+        f"/api/copilot/sessions/{session['session_id']}/messages",
+        json={
+            "message": "分析那只白酒股",
+            "page": "overview",
+            "symbol": "",
+            "client_message_id": "clar-001",
+        },
+    ).json()
+
+    body = client.get(
+        f"/api/copilot/sessions/{session['session_id']}/stream/{run['run_id']}"
+    ).text
+    events = parse_sse_events(body)
+    types = [e["type"] for e in events]
+    assert "clarification" in types
+    clarification = next(e for e in events if e["type"] == "clarification")
+    assert clarification["payload"]["question"] == question
+    assert clarification["payload"]["call_id"] == "c-clar-1"
+
+    final = next(e for e in events if e["type"] == "final")
+    assert final["payload"]["conclusion"] == question
+    assert final["payload"]["clarification"]["question"] == question
+
+    # 持久化侧：clarification 事件与兜底后的 final 都能从历史消息读回
+    messages = client.get(
+        f"/api/copilot/sessions/{session['session_id']}/messages"
+    ).json()["items"]
+    kinds = {m["kind"] for m in messages}
+    assert "clarification" in kinds
+    persisted_final = [m for m in messages if m["kind"] == "final_answer"]
+    assert persisted_final and question in (persisted_final[-1]["text"] or "")
+    # title 事件不落库：不产生空壳 final_answer
+    assert all((m["text"] or "").strip() for m in persisted_final)
