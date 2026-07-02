@@ -76,6 +76,13 @@ export function CopilotStreamingMessage({ streamMessage }: Props) {
           </div>
         </div>
       ))}
+      {streamMessage.clarificationText && (
+        <div className="clarification-card">
+          <div className="clarification-title">AI 需要你的补充信息</div>
+          <div style={{ whiteSpace: "pre-wrap" }}>{streamMessage.clarificationText}</div>
+          <div className="clarification-hint">直接在下方输入框回答即可继续</div>
+        </div>
+      )}
       {streamMessage.answerText && (
         <div className={streamMessage.phase === "final" ? "" : "cursor-blink"}>
           {streamMessage.answerText}

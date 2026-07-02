@@ -502,6 +502,10 @@ class CopilotService:
         tool_call_events: list[dict[str, Any]] = []
         tool_result_events: list[dict[str, Any]] = []
         final_seen = False
+        # ask_clarification：ClarificationMiddleware 把反问以同名 ToolMessage 落进
+        # 流后直接终止本轮（用户下一条消息即回答）。捕获它以便：
+        # ①发专用 clarification SSE；②final 空壳时用问题文本兜底 conclusion。
+        clarification_payload: Dict[str, Any] | None = None
 
         skill_trace_payload = {
             "phase": "declared",
@@ -532,6 +536,22 @@ class CopilotService:
             ):
                 payload = event["payload"]
                 self._capture_tool_result(event, captured)
+                if (
+                    event["type"] == "tool_result"
+                    and str(payload.get("tool") or "") == "ask_clarification"
+                ):
+                    clarification_payload = {
+                        "question": str(payload.get("result") or ""),
+                        "call_id": payload.get("call_id"),
+                    }
+                    clarification_sse = SSEEvent(
+                        run_id=run_id,
+                        task_id=resolved_task_id,
+                        type="clarification",
+                        payload=clarification_payload,
+                    )
+                    self._persist_stream_event(state, clarification_sse)
+                    yield clarification_sse
                 if event["type"] == "final":
                     last_report_result = captured["report"]
                     last_draft_result = captured["draft"]
@@ -543,6 +563,17 @@ class CopilotService:
                             "evidence_refs",
                             self._evidence_refs(state.skill_trace, context),
                         )
+                        if clarification_payload:
+                            payload["clarification"] = clarification_payload
+                            _conclusion_now = str(payload.get("conclusion") or "")
+                            # 反问中断的 final 往往没有正文，用问题文本兜底，
+                            # 避免持久化一条空壳回答。
+                            if (
+                                not _conclusion_now
+                                or _conclusion_now
+                                == "DeerFlow embedded stream completed."
+                            ):
+                                payload["conclusion"] = clarification_payload["question"]
                         if last_report_result:
                             self.copilot_context_builder._cache.invalidate(
                                 "reports_summary"

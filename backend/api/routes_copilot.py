@@ -58,10 +58,12 @@ def delete_session(session_id: str, request: Request, services: AppServices = De
     return {"status": "deleted"}
 
 
-# 允许的研报/资料类型：PDF/Office 会被 DeerFlow 自动转 Markdown，纯文本直接可读
+# 允许的研报/资料类型：PDF/Office 会被 DeerFlow 自动转 Markdown，纯文本直接可读；
+# 图片（K线截图/研报图表）由 view_image 工具读取，需模型 supports_vision
 _UPLOAD_ALLOWED_EXTENSIONS = {
     ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx",
     ".md", ".txt", ".csv",
+    ".png", ".jpg", ".jpeg", ".webp",
 }
 _UPLOAD_MAX_BYTES = 50 * 1024 * 1024
 

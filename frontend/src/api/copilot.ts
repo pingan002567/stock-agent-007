@@ -9,6 +9,7 @@ export const EVENT_TOOL_RESULT = "tool_result";
 export const EVENT_PARTIAL_ANSWER = "partial_answer";
 export const EVENT_REASONING = "reasoning";
 export const EVENT_SKILL_TRACE = "skill_trace";
+export const EVENT_CLARIFICATION = "clarification";
 
 // ── skill_trace payload 条目（声明式技能链路，final payload 与 skill_trace 事件共用） ──
 export interface SkillTraceItem {
@@ -146,6 +147,7 @@ export function parseCopilotEvent(source: Record<string, unknown>) {
   }
   const mapping: Record<string, string> = {
     skill_trace: EVENT_SKILL_TRACE,
+    clarification: EVENT_CLARIFICATION,
     tool_call: EVENT_TOOL_CALL,
     tool_result: EVENT_TOOL_RESULT,
     partial_answer: EVENT_PARTIAL_ANSWER,

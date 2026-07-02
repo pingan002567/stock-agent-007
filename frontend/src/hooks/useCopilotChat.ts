@@ -30,6 +30,8 @@ export interface StreamMessage {
   skillTrace: SkillTraceItem[];
   tools: StreamToolCall[];
   answerText: string;
+  /** AI 反问澄清的问题文本（ask_clarification）；出现即等待用户下一条消息回答 */
+  clarificationText: string | null;
   finalPayload: Record<string, unknown> | null;
   errorText: string | null;
 }
@@ -76,6 +78,14 @@ const TOOL_LABELS: Record<string, string> = {
   list_report_templates: "报告模板",
   generate_report: "生成报告",
   get_report_quality: "报告质量",
+  ask_clarification: "反问澄清",
+  web_search: "全网搜索",
+  web_fetch: "网页抓取",
+  read_file: "读取资料",
+  grep: "检索资料",
+  glob: "查找文件",
+  ls: "浏览目录",
+  view_image: "查看图片",
 };
 
 export function toolLabel(name: string): string {
@@ -212,6 +222,7 @@ export function useCopilotChat() {
       skillTrace: [],
       tools: [],
       answerText: "",
+      clarificationText: null,
       finalPayload: null,
       errorText: null,
     });
@@ -252,6 +263,15 @@ export function useCopilotChat() {
               s.session_id === sid ? { ...s, title: t } : s
             ));
           }
+        } catch { /* empty */ }
+      });
+
+      // AI 反问澄清：展示问题卡片，等待用户以下一条消息回答
+      es.addEventListener("clarification", (streamEvent: Event) => {
+        try {
+          const data = JSON.parse((streamEvent as MessageEvent).data);
+          const q = String((data?.payload as Record<string, unknown>)?.question || "");
+          if (q) setStreamMessage((prev) => prev ? { ...prev, clarificationText: q } : prev);
         } catch { /* empty */ }
       });
 

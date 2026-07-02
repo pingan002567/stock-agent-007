@@ -121,6 +121,7 @@ function makeStream(overrides: Partial<StreamMessage> = {}): StreamMessage {
     skillTrace: [],
     tools: [],
     answerText: "",
+    clarificationText: null,
     finalPayload: null,
     errorText: null,
     ...overrides,

@@ -29,9 +29,34 @@ def _resolve_env(val: str) -> str:
     return val
 
 
+# 常见多模态模型名特征：命中即默认开 vision（view_image 工具随之可用）。
+# WORKBENCH_AI_VISION=1/0 可显式覆盖。
+_VISION_MODEL_HINTS = (
+    "gpt-4o", "gpt-4.1", "gpt-5", "o3", "o4",
+    "claude", "gemini", "qwen-vl", "qwen2-vl", "qvq", "glm-4v", "vision",
+)
+
+
+def _model_supports_vision(model_name: str) -> bool:
+    env = os.getenv("WORKBENCH_AI_VISION", "").strip().lower()
+    if env in {"1", "true", "on"}:
+        return True
+    if env in {"0", "false", "off"}:
+        return False
+    name = model_name.lower()
+    return any(hint in name for hint in _VISION_MODEL_HINTS)
+
+
 def _build_model_config() -> dict[str, Any]:
     """Build the ``models`` section from env vars."""
-    model_name = os.getenv("WORKBENCH_DEERFLOW_MODEL_NAME") or DEFAULT_MODEL
+    # 运行时（reconnect）env 可能已被设置页更新，这里逐次现读，不用 import
+    # 时快照的 DEFAULT_MODEL。名字必须与 adapter.stream 传的 model_name 一致，
+    # 否则 get_model_config 查不到 → vision 等按模型的能力判定全部失效。
+    model_name = (
+        os.getenv("WORKBENCH_DEERFLOW_MODEL_NAME")
+        or os.getenv("WORKBENCH_AI_MODEL")
+        or DEFAULT_MODEL
+    )
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("WORKBENCH_AI_API_KEY") or ""
     base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("WORKBENCH_AI_BASE_URL") or ""
 
@@ -41,7 +66,7 @@ def _build_model_config() -> dict[str, Any]:
         "use": "langchain_openai:ChatOpenAI",
         "model": model_name,
         "supports_thinking": False,
-        "supports_vision": False,
+        "supports_vision": _model_supports_vision(model_name),
     }
     if api_key:
         model_cfg["openai_api_key"] = api_key

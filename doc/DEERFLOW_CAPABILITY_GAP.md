@@ -29,11 +29,11 @@
 |---|---|---|---|
 | **文件上传 / RAG**(PDF/Excel/Word→MD) | ✅ 已接线（2026-07-02）：`POST /api/copilot/sessions/{id}/uploads` + 输入框附件按钮；沙箱只读文件工具(ls/glob/grep/read_file)已注册进 config，UploadsMiddleware 自动注入文件清单 | ⭐⭐⭐ 上传**研报/年报/招股书/财报 PDF** 让 AI 直接读 | 已完成 |
 | **Sandbox 代码执行**(Python/pandas/matplotlib) | `deerflow.sandbox`(Local/Docker/K8s)+ `data-analysis`/`chart-visualization` skills | ⭐⭐⭐ 让 AI 跑真实数据做**自定义回测/画图/因子计算**，不再只调固定工具 | 中高 |
-| **多模态 / 看图**(view_image) | `tools/builtins/view_image_tool` + `view_image_middleware` | ⭐⭐ 上传 **K 线截图/研报图表** 做视觉分析 | 中 |
+| **多模态 / 看图**(view_image) | ✅ 已接线（2026-07-02）：上传白名单加图片(png/jpg/webp)；模型 `supports_vision` 按模型名自动判定（`WORKBENCH_AI_VISION` 可覆盖），命中后 harness 自动挂 view_image 工具+中间件；顺带修了 config 模型名与 stream 不一致导致按模型能力判定失效的 bug | ⭐⭐ 上传 **K 线截图/研报图表** 做视觉分析 | 已完成 |
 | **MCP 集成** | `deerflow.mcp`(stdio/SSE/OAuth) | ⭐⭐ 无需写代码即可接 **Wind/Choice/内部数据源/外部工具** | 中 |
-| **可观测 Tracing**(Langfuse/LangSmith) | `deerflow.tracing` | ⭐⭐ 排查 agent 执行链、**token 成本分析**(开发运维) | 低 |
+| **可观测 Tracing**(Langfuse/LangSmith) | ✅ 复核已内置（2026-07-02）：`client.stream` 自动注入 `build_tracing_callbacks()`，纯 env 驱动——`LANGFUSE_TRACING=1`+keys 或 `LANGSMITH_TRACING=1`+key 即生效，用法已写入 `.env.example` | ⭐⭐ 排查 agent 执行链、**token 成本分析** | 已完成 |
 | **报告后处理**：语音播客(TTS)/ PPT 生成 | public skills `podcast-generation` / `ppt-generation` | ⭐⭐ **语音晨报 / 投研路演 PPT**，产品差异化 | 中 |
-| **ask_clarification**(反问澄清) | `tools/builtins/clarification_tool` | ⭐ 股票代码/意图歧义时 AI 主动反问 | 低 |
+| **ask_clarification**(反问澄清) | ✅ 已接线（2026-07-02）：工具+中间件 harness 侧本就总是挂载；补齐我方缺口——copilot_service 捕获同名 tool_result 发专用 `clarification` SSE、final 空壳用问题文本兜底，前端渲染琥珀色问题卡（下一条消息即回答） | ⭐ 股票代码/意图歧义时 AI 主动反问 | 已完成 |
 
 ## B. 已集成但硬编码关闭 / 休眠
 

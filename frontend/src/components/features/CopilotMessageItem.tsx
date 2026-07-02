@@ -84,6 +84,9 @@ export function CopilotMessageItem({ msg, tools }: Props) {
             )}
           </div>
         )}
+        {Boolean(evPayload.clarification) && (
+          <div className="clarification-hint" style={{ marginBottom: 4 }}>❓ AI 反问澄清 · 回复即可继续</div>
+        )}
         <MarkdownRenderer text={stripToolCallTags(raw)} />
         <CopilotFinalMeta payload={evPayload} />
       </>
