@@ -12,6 +12,7 @@ Add a skill = write its ``skills/custom/<name>/SKILL.md`` + one row in
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -277,6 +278,38 @@ INTENT_PLANS: dict[str, tuple[str, ...]] = {
     "execution_request": ("execution-agent-disabled",),
 }
 
+# Intents whose plan fans out to multiple research subagents. These turns run
+# with DeerFlow subagent delegation enabled so plan skills execute as parallel
+# nested graphs instead of one serial prompt. Conversational / inbox intents
+# stay off by default — delegation adds latency with no fan-out benefit there.
+SUBAGENT_INTENTS: frozenset[str] = frozenset({
+    "stock_research",
+    "strategy_backtest",
+    "rebalance_plan",
+    "risk_review",
+    "monitor_event",
+    "pre_trade_review",
+})
+
+
+def subagent_intent_enabled(intent: str) -> bool:
+    """Whether this turn's intent should stream with subagent delegation.
+
+    ``WORKBENCH_AI_SUBAGENT`` overrides: ``0/false/off`` disables everywhere,
+    ``all`` (or ``1/true/on``) enables every intent; unset uses SUBAGENT_INTENTS.
+    """
+    mode = os.getenv("WORKBENCH_AI_SUBAGENT", "").strip().lower()
+    if mode in {"0", "false", "off"}:
+        return False
+    if mode in {"1", "true", "on", "all"}:
+        return True
+    return intent in SUBAGENT_INTENTS
+
+
+def subagent_supported() -> bool:
+    """Runtime-level flag (for status reporting): delegation not force-disabled."""
+    return os.getenv("WORKBENCH_AI_SUBAGENT", "").strip().lower() not in {"0", "false", "off"}
+
 
 # ── generators (consumed by deerflow_config + skill_registry) ──
 
@@ -309,6 +342,11 @@ def skill_registry_specs() -> dict[str, dict]:
             tools = list(spec.synthetic_tools)
         out[name] = {"label": spec.label, "tools": tools, "enabled": spec.enabled, "locked": spec.locked}
     return out
+
+
+def subagent_names() -> set[str]:
+    """Enabled subagent skill names (drives DeerFlow ``available_skills``)."""
+    return {name for name, spec in WORKBENCH_SKILLS.items() if spec.is_subagent and spec.enabled}
 
 
 def skill_labels() -> dict[str, str]:

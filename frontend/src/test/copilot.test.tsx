@@ -117,6 +117,8 @@ function makeStream(overrides: Partial<StreamMessage> = {}): StreamMessage {
     runId: "r-1",
     phase: "reasoning",
     reasoningText: "",
+    reasoningLog: [],
+    skillTrace: [],
     tools: [],
     answerText: "",
     finalPayload: null,

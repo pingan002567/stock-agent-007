@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, AsyncIterator, Dict, Optional
 from uuid import uuid4
 
+from backend.agent_runtime import skill_specs
 from backend.agent_runtime.deerflow_client import DeerFlowClientAdapter
 from backend.agent_runtime.result_normalizer import ResultNormalizer
 from backend.agent_runtime.skill_registry import SkillRegistry
@@ -527,7 +528,7 @@ class CopilotService:
                 skill_trace=state.skill_trace,
                 history=[],
                 session_id=state.session_id,
-                subagent_enabled=state.intent in {"rebalance_plan", "strategy_backtest"},
+                subagent_enabled=skill_specs.subagent_intent_enabled(state.intent),
             ):
                 payload = event["payload"]
                 self._capture_tool_result(event, captured)
@@ -631,6 +632,18 @@ class CopilotService:
                             resolved_task_id, "final", 100, status="done"
                         )
                         usage = payload.get("usage") or {}
+                        _usage_in = usage.get("input_tokens") or usage.get("prompt_tokens") or 0
+                        _usage_out = (
+                            usage.get("output_tokens") or usage.get("completion_tokens") or 0
+                        )
+                        if _usage_in or _usage_out:
+                            payload.setdefault("model_name", self.deerflow.model_name)
+                            payload.setdefault(
+                                "cost_estimate",
+                                _estimate_cost(
+                                    _usage_in, _usage_out, self.deerflow.model_name
+                                ),
+                            )
                         self._upsert_run_log(
                             run_id,
                             status="completed",
@@ -1158,8 +1171,6 @@ class CopilotService:
     ) -> list[dict[str, Any]]:
         # Single source of truth: intent→skill plans + per-skill authority come
         # from skill_specs (same table that drives subagents/registry).
-        from backend.agent_runtime import skill_specs
-
         plans = skill_specs.intent_plans()
         authority = skill_specs.skill_authority()
         trace = []

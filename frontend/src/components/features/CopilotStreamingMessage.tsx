@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { toolLabel, type StreamMessage } from "@/hooks/useCopilotChat";
+import { CopilotFinalMeta, SkillTraceChain } from "@/components/features/CopilotFinalMeta";
 
 interface Props {
   streamMessage: StreamMessage;
@@ -21,9 +23,12 @@ const PHASE_COLORS: Record<string, string> = {
 };
 
 export function CopilotStreamingMessage({ streamMessage }: Props) {
+  const [reasoningOpen, setReasoningOpen] = useState(false);
   const hasContent = streamMessage.answerText.length > 0 || streamMessage.phase === "final" || streamMessage.phase === "error";
   const phaseLabel = PHASE_LABELS[streamMessage.phase] || "推理中";
   const phaseColor = PHASE_COLORS[streamMessage.phase] || "var(--blue)";
+  const fullReasoning = streamMessage.reasoningLog.join("\n\n");
+  const canExpandReasoning = fullReasoning.length > 300;
 
   return (
     <div className={`msg ai${hasContent ? "" : " streaming"}`}>
@@ -34,10 +39,10 @@ export function CopilotStreamingMessage({ streamMessage }: Props) {
         </svg>
         AI Copilot
         <span style={{ fontSize: 10, color: phaseColor, marginLeft: "auto", display: "flex", alignItems: "center", gap: 4 }}>
-          <span style={{ 
-            width: 6, 
-            height: 6, 
-            borderRadius: "50%", 
+          <span style={{
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
             background: phaseColor,
             boxShadow: `0 0 8px ${phaseColor}`,
             animation: streamMessage.phase !== "final" && streamMessage.phase !== "error" ? "pulse 1s infinite" : "none"
@@ -45,9 +50,19 @@ export function CopilotStreamingMessage({ streamMessage }: Props) {
           {phaseLabel}
         </span>
       </div>
+      {streamMessage.phase !== "final" && <SkillTraceChain items={streamMessage.skillTrace} />}
       {streamMessage.reasoningText && (
         <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8, fontStyle: "italic" }}>
-          {streamMessage.reasoningText.slice(-300)}
+          {reasoningOpen ? (
+            <div style={{ whiteSpace: "pre-wrap" }}>{fullReasoning}</div>
+          ) : (
+            (fullReasoning || streamMessage.reasoningText).slice(-300)
+          )}
+          {canExpandReasoning && (
+            <button className="final-meta-toggle" style={{ display: "block", marginTop: 4 }} onClick={() => setReasoningOpen((v) => !v)}>
+              {reasoningOpen ? "▼ 收起完整思维链" : `▶ 展开完整思维链（${streamMessage.reasoningLog.length} 段）`}
+            </button>
+          )}
         </div>
       )}
       {streamMessage.tools.map((tool) => (
@@ -65,6 +80,9 @@ export function CopilotStreamingMessage({ streamMessage }: Props) {
         <div className={streamMessage.phase === "final" ? "" : "cursor-blink"}>
           {streamMessage.answerText}
         </div>
+      )}
+      {streamMessage.phase === "final" && streamMessage.finalPayload && (
+        <CopilotFinalMeta payload={streamMessage.finalPayload} />
       )}
       {streamMessage.errorText && (
         <div style={{ color: "var(--red)" }}>⚠️ {streamMessage.errorText}</div>

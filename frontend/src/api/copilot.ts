@@ -10,6 +10,22 @@ export const EVENT_PARTIAL_ANSWER = "partial_answer";
 export const EVENT_REASONING = "reasoning";
 export const EVENT_SKILL_TRACE = "skill_trace";
 
+// ── skill_trace payload 条目（声明式技能链路，final payload 与 skill_trace 事件共用） ──
+export interface SkillTraceItem {
+  step?: number;
+  skill?: string;
+  label?: string;
+  authority_level?: string;
+  status?: string;
+  purpose?: string;
+  blocked_reason?: string | null;
+}
+
+export function skillTraceItems(v: unknown): SkillTraceItem[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((item): item is SkillTraceItem => !!item && typeof item === "object");
+}
+
 export async function fetchSessions(): Promise<CopilotSession[]> {
   const data = await api<{ items: CopilotSession[] }>("/api/copilot/sessions");
   return data.items || [];

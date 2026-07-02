@@ -10,6 +10,7 @@ import {
   deleteSession,
 } from "@/api/copilot";
 import type { CopilotSession, CopilotMessage } from "@/api/client";
+import { skillTraceItems, type SkillTraceItem } from "@/api/copilot";
 
 // ── Streaming message types ──
 
@@ -24,6 +25,9 @@ export interface StreamMessage {
   runId: string;
   phase: "reasoning" | "tools" | "answering" | "final" | "error";
   reasoningText: string;
+  /** 完整思维链：每条 reasoning 事件追加一段，供展开查看（reasoningText 只是最新一段） */
+  reasoningLog: string[];
+  skillTrace: SkillTraceItem[];
   tools: StreamToolCall[];
   answerText: string;
   finalPayload: Record<string, unknown> | null;
@@ -194,6 +198,8 @@ export function useCopilotChat() {
       runId: "",
       phase: "reasoning",
       reasoningText: "AI 正在思考...",
+      reasoningLog: [],
+      skillTrace: [],
       tools: [],
       answerText: "",
       finalPayload: null,
@@ -245,13 +251,35 @@ export function useCopilotChat() {
         } catch { /* empty */ }
       });
 
-      // 推理过程：实时更新流式气泡的推理文本
+      // 声明式技能链路：渲染 researcher→valuation→…→report 流水线
+      es.addEventListener("skill_trace", (streamEvent: Event) => {
+        try {
+          const data = JSON.parse((streamEvent as MessageEvent).data);
+          const items = skillTraceItems((data?.payload as Record<string, unknown>)?.items);
+          if (items.length > 0) {
+            setStreamMessage((prev) => prev ? { ...prev, skillTrace: items } : prev);
+          }
+        } catch { /* empty */ }
+      });
+
+      // 推理过程：实时更新流式气泡的推理文本，并累积完整思维链供展开查看
       es.addEventListener("reasoning", (streamEvent: Event) => {
         try {
           const data = JSON.parse((streamEvent as MessageEvent).data);
           const p = (data?.payload || {}) as Record<string, unknown>;
-          const t = String(p.text || p.latest_text || p.phase || "");
-          if (t) setStreamMessage((prev) => prev ? { ...prev, phase: "reasoning", reasoningText: t } : prev);
+          const t = String(p.text || p.latest_text || "");
+          const display = t || String(p.phase || "");
+          if (display) {
+            setStreamMessage((prev) => prev ? {
+              ...prev,
+              phase: "reasoning",
+              reasoningText: display,
+              // 只累积真实推理文本；跳过 phase 占位与重复快照
+              reasoningLog: t && prev.reasoningLog[prev.reasoningLog.length - 1] !== t
+                ? [...prev.reasoningLog, t]
+                : prev.reasoningLog,
+            } : prev);
+          }
         } catch { /* empty */ }
       });
 

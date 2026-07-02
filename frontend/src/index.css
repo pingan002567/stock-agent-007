@@ -1963,6 +1963,91 @@ pre {
 .tool-status-text.success { color: var(--green); }
 .tool-status-text.running { color: var(--amber); }
 .tool-status-text.failed { color: var(--red); }
+
+/* ── final payload 富信息条 + skill 链路 ── */
+.final-meta {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+}
+.final-meta-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 10px;
+}
+.final-meta-badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+.final-meta-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 2px 4px;
+}
+.final-meta-toggle:hover {
+  color: var(--blue);
+}
+.final-meta-usage {
+  margin-left: auto;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+.final-meta-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.final-meta-list.counter li { color: var(--amber); }
+.final-meta-list.refs li {
+  font-family: var(--mono);
+  word-break: break-all;
+}
+.skill-trace-chain {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 8px;
+  font-size: 10px;
+}
+.skill-trace-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.skill-trace-arrow {
+  color: var(--muted);
+}
+.skill-trace-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.skill-trace-chip.blocked {
+  background: var(--red-soft);
+  color: var(--red);
+  text-decoration: line-through;
+}
+.skill-trace-auth {
+  font-size: 9px;
+  opacity: 0.7;
+  font-family: var(--mono);
+}
 .copilot-input {
   padding: 10px;
   border-top: 1px solid var(--line);

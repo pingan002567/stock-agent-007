@@ -2,6 +2,7 @@ import { useState } from "react";
 import { parseCopilotEvent } from "@/api/copilot";
 import type { CopilotMessage } from "@/api/client";
 import { MarkdownRenderer } from "@/components/features/MarkdownRenderer";
+import { CopilotFinalMeta } from "@/components/features/CopilotFinalMeta";
 import { toolLabel } from "@/hooks/useCopilotChat";
 
 /** 从 AI 回答文本中移除嵌入的 XML 式工具调用标签 */
@@ -84,6 +85,7 @@ export function CopilotMessageItem({ msg, tools }: Props) {
           </div>
         )}
         <MarkdownRenderer text={stripToolCallTags(raw)} />
+        <CopilotFinalMeta payload={evPayload} />
       </>
     );
   } else if (isErrorEvent) {

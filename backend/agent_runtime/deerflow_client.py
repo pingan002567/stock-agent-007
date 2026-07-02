@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 
+from backend.agent_runtime import skill_specs
 from backend.agent_runtime.deerflow_config import generate_config
 from backend.agent_runtime.prompt_envelope import render_prompt_envelope
 from backend.agent_runtime.tool_bridge import WorkbenchToolBridge
@@ -361,6 +362,11 @@ class DeerFlowClientAdapter:
         )
         mode: str
 
+        # Runtime-level delegation flag: per-turn enablement is decided by
+        # skill_specs.subagent_intent_enabled and passed explicitly on every
+        # stream() call; this only sets the client default + status reporting.
+        subagent_supported = skill_specs.subagent_supported()
+
         _init_errors: list[str] = []
 
         def _try_direct() -> "DeerFlowClientAdapter | None":
@@ -393,12 +399,9 @@ class DeerFlowClientAdapter:
                     checkpointer=_cp_saver,
                     model_name=model_name,
                     thinking_enabled=thinking_enabled,
-                    subagent_enabled=False,
+                    subagent_enabled=subagent_supported,
                     plan_mode=False,
-                    available_skills={
-                        "stock-researcher", "risk-officer", "strategy-analyst",
-                        "rebalance-planner", "stock-monitor", "report-writer",
-                    },
+                    available_skills=skill_specs.subagent_names(),
                 )
                 return cls(
                     mode="direct",
@@ -407,7 +410,7 @@ class DeerFlowClientAdapter:
                     config_path=generated_path,
                     model_name=model_name,
                     thinking_enabled=thinking_enabled,
-                    subagent_enabled=False,
+                    subagent_enabled=subagent_supported,
                     plan_mode=False,
                     client_capabilities=["stream", "chat", "list_models"],
                 )
@@ -428,7 +431,7 @@ class DeerFlowClientAdapter:
                     "config_path": config_path,
                     "model_name": model_name,
                     "thinking_enabled": thinking_enabled,
-                    "subagent_enabled": False,
+                    "subagent_enabled": subagent_supported,
                     "plan_mode": False,
                 }
                 client = client_cls(**kwargs)
@@ -439,7 +442,7 @@ class DeerFlowClientAdapter:
                     config_path=config_path,
                     model_name=model_name,
                     thinking_enabled=thinking_enabled,
-                    subagent_enabled=False,
+                    subagent_enabled=subagent_supported,
                     plan_mode=False,
                     client_capabilities=cls._detect_capabilities(client),
                 )
@@ -504,7 +507,7 @@ class DeerFlowClientAdapter:
                     "config_path": config_path,
                     "model_name": model_name,
                     "thinking_enabled": thinking_enabled,
-                    "subagent_enabled": False,
+                    "subagent_enabled": subagent_supported,
                     "plan_mode": False,
                 }
                 client = client_cls(**kwargs)
@@ -524,7 +527,7 @@ class DeerFlowClientAdapter:
                 config_path=config_path,
                 model_name=model_name,
                 thinking_enabled=thinking_enabled,
-                subagent_enabled=False,
+                subagent_enabled=subagent_supported,
                 plan_mode=False,
                 client_capabilities=cls._detect_capabilities(client),
             )
