@@ -77,6 +77,7 @@ def _build_model_config() -> dict[str, Any]:
 
 A2_TOOLS = [
     "get_stock_context", "get_daily_history", "search_stock_intel",
+    "get_industry_context",
     "add_watchlist_item", "remove_watchlist_item",
     "get_monitor_events", "get_monitor_rules", "evaluate_monitor_rules",
     "list_strategies", "get_backtest_result",
@@ -87,6 +88,7 @@ A3_TOOLS = [
     "get_portfolio_snapshot", "upsert_holding",
     "analyze_portfolio_risk", "get_active_risk_policy",
     "list_risk_policies", "evaluate_policy_risk",
+    "upsert_monitor_rule", "delete_monitor_rule",
     "run_strategy_backtest", "list_pre_trade_reviews", "list_paper_orders",
     "get_paper_portfolio", "analyze_paper_performance", "create_paper_portfolio_snapshot",
     "list_decision_journal", "get_decision_journal_entry", "summarize_decision_outcomes",

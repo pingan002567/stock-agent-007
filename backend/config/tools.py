@@ -4,6 +4,7 @@ DEFAULT_TOOLS = [
     {"domain": "stock", "name": "get_stock_financial", "risk": "low", "status": "enabled"},
     {"domain": "market-data", "name": "get_daily_history", "risk": "low", "status": "enabled"},
     {"domain": "intel", "name": "search_stock_intel", "risk": "medium", "status": "enabled"},
+    {"domain": "industry", "name": "get_industry_context", "risk": "low", "status": "enabled"},
     {"domain": "monitor", "name": "get_monitor_events", "risk": "low", "status": "enabled"},
     {"domain": "monitor", "name": "get_monitor_rules", "risk": "low", "status": "enabled"},
     {"domain": "monitor", "name": "evaluate_monitor_rules", "risk": "medium", "status": "enabled"},
@@ -13,6 +14,8 @@ DEFAULT_TOOLS = [
     {"domain": "report", "name": "generate_report", "risk": "medium", "status": "enabled"},
     {"domain": "report", "name": "get_report_quality", "risk": "low", "status": "enabled"},
     # ── A3: Portfolio & Risk tools ──
+    {"domain": "monitor", "name": "upsert_monitor_rule", "risk": "medium", "status": "enabled"},
+    {"domain": "monitor", "name": "delete_monitor_rule", "risk": "medium", "status": "enabled"},
     {"domain": "portfolio", "name": "get_portfolio_snapshot", "risk": "medium", "status": "enabled"},
     {"domain": "risk", "name": "analyze_portfolio_risk", "risk": "medium", "status": "enabled"},
     {"domain": "risk", "name": "get_active_risk_policy", "risk": "low", "status": "enabled"},

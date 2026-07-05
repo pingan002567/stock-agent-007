@@ -38,9 +38,9 @@ REPORT_TEMPLATE_REGISTRY: tuple[ReportTemplate, ...] = (
         template_id="stock_research_default",
         report_type="stock_research",
         name="个股研究模板",
-        summary="基于 StockContext 生成研究结论、证据、反对理由与风险提示。",
+        summary="基于 StockContext 生成研究结论、证据、行业与竞争格局、反对理由与风险提示。",
         source_types=["stock"],
-        sections=["结论", "理由", "反对理由", "证据引用", "免责声明"],
+        sections=["结论", "理由", "行业与竞争格局", "反对理由", "证据引用", "免责声明"],
     ),
     ReportTemplate(
         template_id="monitor_review_default",
@@ -444,6 +444,9 @@ class ReportService:
                     ],
                 ),
                 "",
+                "## 行业与竞争格局",
+                *self._industry_section(context),
+                "",
                 "## 持仓建议",
                 *rc.table(
                     ["项", "数值"],
@@ -773,6 +776,59 @@ class ReportService:
             },
         )
 
+    def _industry_section(self, context: StockContext) -> list[str]:
+        """行业与竞争格局章节：非降级给硬数据表格，降级给明确说明（不编数据）。"""
+        from backend.stock_domain.industry_tools import get_industry_context
+
+        try:
+            ctx = get_industry_context(symbol=context.symbol)
+        except Exception as exc:
+            return [f"> 行业数据获取异常：{exc}（本节降级，建议人工核验行业地位）"]
+        if ctx.get("degraded"):
+            return [f"> 行业数据不可用：{ctx.get('reason') or '未知原因'}（本节降级，壁垒/上下游请结合研报与公开信息人工判断）"]
+
+        snapshot = ctx.get("snapshot") or {}
+        valuation = ctx.get("valuation") or {}
+        target = ctx.get("target") or {}
+        lines: list[str] = [
+            f"所属行业：**{ctx['industry']}**（{ctx.get('company_count')} 家公司）"
+            f" · 行业涨跌 {rc.pct_marker(snapshot.get('change_pct')) if snapshot.get('change_pct') is not None else '—'}",
+            "",
+            *rc.table(
+                ["行业内指标", "数值"],
+                [
+                    [
+                        "市值排名（推算口径）",
+                        f"{target.get('cap_rank')} / {target.get('cap_rank_total')}"
+                        if target.get("cap_rank")
+                        else "—",
+                    ],
+                    [
+                        "PE 分位 vs 行业",
+                        f"{target.get('pe_percentile')}%（行业中位 {valuation.get('pe_median')}）"
+                        if target.get("pe_percentile") is not None
+                        else "—",
+                    ],
+                    [
+                        "PB 分位 vs 行业",
+                        f"{target.get('pb_percentile')}%（行业中位 {valuation.get('pb_median')}）"
+                        if target.get("pb_percentile") is not None
+                        else "—",
+                    ],
+                ],
+            ),
+            "",
+            "行业市值 Top5：",
+            *[
+                f"- {item['name']}（{item['symbol']}）PE {rc.fmt(item.get('pe'))} / 涨跌 {rc.pct_marker(item.get('change_pct')) if item.get('change_pct') is not None else '—'}"
+                for item in (ctx.get("top_constituents") or [])[:5]
+            ],
+            "",
+            "> 市值为推算口径（成交额/换手率），仅用于行业内相对排序 `[来源: industry]`；"
+            "壁垒/上下游属定性判断，需结合研报与公开信息，本模板不自动生成。",
+        ]
+        return lines
+
     def _build_quality_check(self, report: Report) -> ReportQualityCheck:
         issues: list[dict[str, Any]] = []
         if not report.content.strip().startswith("# "):
@@ -799,6 +855,23 @@ class ReportService:
             )
         if not report.valid_until:
             issues.append({"level": "warning", "code": "missing_valid_until", "message": "报告缺少有效期。"})
+        if report.report_type == "stock_research":
+            if "## 行业与竞争格局" not in report.content:
+                issues.append(
+                    {
+                        "level": "warning",
+                        "code": "missing_industry_section",
+                        "message": "个股研究报告缺少「行业与竞争格局」章节。",
+                    }
+                )
+            elif "行业数据不可用" in report.content or "行业数据获取异常" in report.content:
+                issues.append(
+                    {
+                        "level": "warning",
+                        "code": "industry_section_degraded",
+                        "message": "行业章节数据降级，行业地位结论需人工复核。",
+                    }
+                )
         errors = [item for item in issues if item["level"] == "error"]
         warnings = [item for item in issues if item["level"] == "warning"]
         if errors:

@@ -165,6 +165,41 @@ class MonitorEvalInput(BaseModel):
     force: bool | None = Field(default=False, description="是否强制绕过冷却")
 
 
+class IndustryContextInput(BaseModel):
+    symbol: str | None = Field(
+        default=None, description="股票代码（自动解析所属行业），如 600519"
+    )
+    industry: str | None = Field(
+        default=None, description="行业名称（东财行业板块口径），如 酿酒行业。与 symbol 二选一"
+    )
+
+
+class MonitorRuleUpsertInput(BaseModel):
+    rule_id: str | None = Field(
+        default=None,
+        description="规则ID。提供则部分更新现有规则（未提供的字段保留原值），不提供则创建新规则",
+    )
+    rule_type: str | None = Field(
+        default=None,
+        description=(
+            "规则类型（创建时必填）：price_change_pct_gt(涨跌幅超阈值%) / volume_spike(放量) / "
+            "intel_keyword_match(情报关键词) / ma_crossover(均线交叉) / single_position_weight_gt(单仓超限%) / "
+            "sector_correlation(板块联动) / data_provider_degraded(数据源降级) / combined_condition(组合条件)"
+        ),
+    )
+    symbol: str | None = Field(default=None, description="股票代码，如 AAPL、600519（组合/持仓类规则可不填）")
+    threshold: float | None = Field(default=None, description="阈值，如涨跌幅 5 表示 5%")
+    keyword: str | None = Field(default=None, description="关键词（intel_keyword_match 用）")
+    severity: str | None = Field(default=None, description="严重级别：low/medium/high")
+    enabled: bool | None = Field(default=None, description="是否启用")
+    cooldown_seconds: int | None = Field(default=None, description="触发冷却秒数（默认走风险策略配置）")
+    title: str | None = Field(default=None, description="规则标题（可选，展示用）")
+
+
+class MonitorRuleDeleteInput(BaseModel):
+    rule_id: str = Field(description="要删除的规则ID")
+
+
 class StrategyListInput(BaseModel):
     enabled: bool | None = Field(default=None, description="是否只返回启用策略")
 
@@ -353,6 +388,11 @@ remove_watchlist_item = _tool(
     "从自选列表中删除指定的股票。",
     WatchlistRemoveInput, AuthorityLevel.A2,
 )
+get_industry_context = _tool(
+    "get_industry_context",
+    "获取行业竞争格局：行业行情快照、个股在行业内的市值排名与 PE/PB/涨幅分位、Top10 成分股对比。仅覆盖 A 股。",
+    IndustryContextInput, AuthorityLevel.A2,
+)
 get_monitor_events = _tool(
     "get_monitor_events",
     "获取盯盘监控事件列表，可按股票、严重级别筛选。",
@@ -367,6 +407,16 @@ evaluate_monitor_rules = _tool(
     "evaluate_monitor_rules",
     "手动触发一次盯盘规则评估，检查是否需要触发监控事件。",
     MonitorEvalInput, AuthorityLevel.A2,
+)
+upsert_monitor_rule = _tool(
+    "upsert_monitor_rule",
+    "创建或修改盯盘监控规则（涨跌幅/放量/关键词/均线交叉/仓位超限等）。带 rule_id 为部分更新，否则新建。",
+    MonitorRuleUpsertInput, AuthorityLevel.A3,
+)
+delete_monitor_rule = _tool(
+    "delete_monitor_rule",
+    "删除指定的盯盘监控规则。",
+    MonitorRuleDeleteInput, AuthorityLevel.A3,
 )
 list_strategies = _tool(
     "list_strategies",

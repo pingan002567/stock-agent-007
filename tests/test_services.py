@@ -1571,3 +1571,25 @@ def test_akshare_provider_get_quote_hk_strips_hk_prefix_correctly(monkeypatch):
     quote = provider.get_quote("HK00700")
     assert quote.last == 456.4
     assert quote.degraded is False
+
+
+def test_stock_research_report_includes_industry_section_with_degradation_warning(tmp_path):
+    """个股研究报告：必含「行业与竞争格局」章节；离线（行业数据不可用）时
+    章节给明确降级说明，质量检查追加 industry_section_degraded warning。"""
+    from backend.bootstrap import create_services
+    from backend.schemas import ReportGenerateRequest
+
+    services = create_services(db_path=tmp_path / "r.sqlite3", files_root=tmp_path / "files")
+    result = services.report_service.generate(
+        ReportGenerateRequest(report_type="stock_research", source_type="stock", source_id="600519")
+    )
+    report = result["report"] if isinstance(result, dict) and "report" in result else result
+    content = report.content if hasattr(report, "content") else report["content"]
+    assert "## 行业与竞争格局" in content
+    assert "行业数据不可用" in content  # 离线明确降级，不编数据
+
+    report_id = report.report_id if hasattr(report, "report_id") else report["report_id"]
+    quality = services.report_service.get_quality(report_id)
+    check = quality.get("latest") or (quality.get("items") or [{}])[0]
+    codes = [issue["code"] for issue in (check.get("issues") or [])]
+    assert "industry_section_degraded" in codes

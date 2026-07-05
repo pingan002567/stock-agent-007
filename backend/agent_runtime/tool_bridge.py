@@ -136,9 +136,12 @@ class WorkbenchToolBridge:
             "list_risk_policies": self._list_risk_policies,
             "evaluate_policy_risk": self._evaluate_policy_risk,
             "analyze_portfolio_risk": self._analyze_portfolio_risk,
+            "get_industry_context": self._get_industry_context,
             "get_monitor_events": self._get_monitor_events,
             "get_monitor_rules": self._get_monitor_rules,
             "evaluate_monitor_rules": self._evaluate_monitor_rules,
+            "upsert_monitor_rule": self._upsert_monitor_rule,
+            "delete_monitor_rule": self._delete_monitor_rule,
             "list_strategies": self._list_strategies,
             "run_strategy_backtest": self._run_strategy_backtest,
             "get_backtest_result": self._get_backtest_result,
@@ -452,6 +455,15 @@ class WorkbenchToolBridge:
                 {"item_key": "str"},
                 ["review_inbox_state", "audit_log"],
             ),
+            "get_industry_context": ToolSpec(
+                "get_industry_context",
+                "industry",
+                AuthorityLevel.A2,
+                "low",
+                True,
+                {"symbol": "str?", "industry": "str?"},
+                ["industry_board", "industry_constituents"],
+            ),
             "get_monitor_events": ToolSpec(
                 "get_monitor_events",
                 "monitor",
@@ -478,6 +490,28 @@ class WorkbenchToolBridge:
                 True,
                 {"source": "str?", "force": "bool?"},
                 ["monitor_rule", "monitor_event", "monitor_status"],
+            ),
+            "upsert_monitor_rule": ToolSpec(
+                "upsert_monitor_rule",
+                "monitor",
+                AuthorityLevel.A3,
+                "medium",
+                True,
+                {
+                    "rule_id": "str?", "rule_type": "str?", "symbol": "str?",
+                    "threshold": "float?", "keyword": "str?", "severity": "str?",
+                    "enabled": "bool?", "cooldown_seconds": "int?", "title": "str?",
+                },
+                ["monitor_rule"],
+            ),
+            "delete_monitor_rule": ToolSpec(
+                "delete_monitor_rule",
+                "monitor",
+                AuthorityLevel.A3,
+                "medium",
+                True,
+                {"rule_id": "str"},
+                ["monitor_rule"],
             ),
             "list_strategies": ToolSpec(
                 "list_strategies",
@@ -680,8 +714,20 @@ class WorkbenchToolBridge:
 
         policy = self.execution_policy.decide(name)
         if policy.mode == ExecutionMode.BLOCKED:
-            self.permission_guard.block_real_order()
-            raise PermissionDenied(policy.reason)
+            # 拦截也要进执行账本，否则 blocked 调用在审计里凭空消失；
+            # error 记 guard 抛出的真实消息（而非 policy 文案）。
+            try:
+                self.permission_guard.block_real_order()
+                raise PermissionDenied(policy.reason)
+            except PermissionDenied as exc:
+                self._record_execution(
+                    tool=name, domain=spec.domain, status="blocked",
+                    authority_level=spec.required_authority.value,
+                    arguments=args, task_id=task_id, run_id=run_id, call_id=call_id,
+                    source_mode=source_mode, evidence_refs=spec.evidence_refs,
+                    error=str(exc),
+                )
+                raise
         if policy.mode == ExecutionMode.NEEDS_CONFIRMATION:
             return {
                 "tool": name,
@@ -793,6 +839,14 @@ class WorkbenchToolBridge:
     def _analyze_portfolio_risk(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return self._evaluate_policy_risk(arguments)
 
+    def _get_industry_context(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from backend.stock_domain.industry_tools import get_industry_context
+
+        return get_industry_context(
+            symbol=arguments.get("symbol"),
+            industry=arguments.get("industry"),
+        )
+
     def _get_monitor_events(self, arguments: dict[str, Any]) -> dict[str, Any]:
         symbol = str(arguments.get("symbol") or "").upper() or None
         severity = str(arguments.get("severity") or "") or None
@@ -815,6 +869,44 @@ class WorkbenchToolBridge:
         source = str(arguments.get("source") or "tool")
         force = bool(arguments.get("force", False))
         return self.monitor_service.evaluate_once(source=source, force=force)
+
+    _MONITOR_RULE_FIELDS = (
+        "rule_type", "symbol", "threshold", "keyword",
+        "severity", "enabled", "cooldown_seconds", "title",
+    )
+
+    def _upsert_monitor_rule(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        rule_id = str(arguments.get("rule_id") or "").strip() or None
+        provided = {
+            key: arguments[key]
+            for key in self._MONITOR_RULE_FIELDS
+            if arguments.get(key) is not None
+        }
+        if rule_id:
+            # 部分更新：save_monitor_rule 是整行覆盖，先取现有规则合并，
+            # 避免模型只传 enabled=false 时把阈值/关键词等字段清空。
+            existing = next(
+                (r for r in self.monitor_service.list_rules() if r.rule_id == rule_id),
+                None,
+            )
+            if existing is None:
+                raise ValueError(f"monitor rule not found: {rule_id}")
+            payload = {**model_to_dict(existing), **provided, "rule_id": rule_id}
+        else:
+            if not provided.get("rule_type"):
+                raise ValueError("creating a monitor rule requires rule_type")
+            payload = {**provided, "source": "copilot"}
+        saved = self.monitor_service.upsert_rule(payload)
+        return {"rule": model_to_dict(saved), "created": rule_id is None}
+
+    def _delete_monitor_rule(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        rule_id = str(arguments.get("rule_id") or "").strip()
+        if not rule_id:
+            raise ValueError("delete_monitor_rule requires rule_id")
+        deleted = self.monitor_service.delete_rule(rule_id)
+        if not deleted:
+            raise ValueError(f"monitor rule not found: {rule_id}")
+        return {"deleted": True, "rule_id": rule_id}
 
     def _list_strategies(self, arguments: dict[str, Any]) -> dict[str, Any]:
         enabled = arguments.get("enabled")

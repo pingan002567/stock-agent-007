@@ -297,6 +297,26 @@ class CatalogRepoMixin:
             self.conn.commit()
         return item
 
+    def batch_update_stock_master_industry(self, mapping: dict[str, str]) -> int:
+        """Backfill only the industry column for existing master rows.
+
+        不用 batch_upsert（那是整行覆盖，会把 name/market 冲掉）；映射来自
+        东财行业成分股反向索引，只应触碰 industry + updated_at。
+        """
+        if not mapping:
+            return 0
+        from backend.schemas import now_iso
+
+        now_val = now_iso()
+        rows = [(industry, now_val, symbol.upper()) for symbol, industry in mapping.items()]
+        with self._lock:
+            cursor = self.conn.executemany(
+                "UPDATE stock_master SET industry = ?, updated_at = ? WHERE symbol = ?",
+                rows,
+            )
+            self.conn.commit()
+        return cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
+
     def batch_upsert_stock_master(self, items: List[StockMaster]) -> int:
         if not items:
             return 0

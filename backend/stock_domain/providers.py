@@ -1568,6 +1568,67 @@ class AkShareMarketDataProvider:
         except Exception:
             return []
 
+    def fetch_industry_boards(self) -> list[dict[str, Any]]:
+        """东财行业板块列表 + 快照（约 86 个行业）。
+
+        列名以 akshare stock_board_industry_em.py 源码为准；未在源码确认的
+        列一律不取。
+        """
+        try:
+            frame = self._ak().stock_board_industry_name_em()
+            rows = _frame_tail(frame, 500)
+            items: list[dict[str, Any]] = []
+            for row in rows:
+                name = str(row.get("板块名称") or "")
+                if not name:
+                    continue
+                items.append({
+                    "industry": name,
+                    "board_code": str(row.get("板块代码") or ""),
+                    "rank": _safe_float(row.get("排名")),
+                    "change_pct": _safe_float(row.get("涨跌幅")),
+                    "turnover_pct": _safe_float(row.get("换手率")),
+                    "total_market_cap": _safe_float(row.get("总市值")),
+                })
+            return items
+        except Exception:
+            return []
+
+    def fetch_industry_constituents(self, industry: str) -> list[dict[str, Any]]:
+        """东财行业板块成分股（含最新价/涨跌幅/换手率/PE/PB）。
+
+        cons_em 没有市值列：用 成交额/(换手率/100) 推算流通市值（cap_est），
+        仅用于行业内排序，消费方须标注推算口径。
+        """
+        try:
+            frame = self._ak().stock_board_industry_cons_em(symbol=industry)
+            rows = _frame_tail(frame, 2000)
+            items: list[dict[str, Any]] = []
+            for row in rows:
+                code = str(row.get("代码") or "")
+                if not code:
+                    continue
+                turnover_amount = _safe_float(row.get("成交额"))
+                turnover_pct = _safe_float(row.get("换手率"))
+                cap_est = (
+                    turnover_amount / (turnover_pct / 100)
+                    if turnover_amount and turnover_pct
+                    else None
+                )
+                items.append({
+                    "symbol": code,
+                    "name": str(row.get("名称") or ""),
+                    "price": _safe_float(row.get("最新价")),
+                    "change_pct": _safe_float(row.get("涨跌幅")),
+                    "turnover_pct": turnover_pct,
+                    "pe": _safe_float(row.get("市盈率-动态")),
+                    "pb": _safe_float(row.get("市净率")),
+                    "cap_est": cap_est,
+                })
+            return items
+        except Exception:
+            return []
+
     def import_hk_stock_master(self) -> list[dict[str, Any]]:
         """Fetch HK stock codes/names and return as list.
 
@@ -2199,6 +2260,19 @@ def _coerce_float(value: Any, default: float = 0.0) -> float:
     if value in (None, ""):
         return default
     return float(value)
+
+
+def _safe_float(value: Any) -> float | None:
+    """None 保留的 float 转换；NaN/±inf/解析失败 → None（JSON 友好）。"""
+    if value in (None, ""):
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    if result != result or result == float("inf") or result == float("-inf"):
+        return None
+    return result
 
 
 def _safe_iso(value: Any) -> str | None:

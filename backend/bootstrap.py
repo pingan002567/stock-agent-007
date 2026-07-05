@@ -115,6 +115,23 @@ def _seed_market_data(repo: WorkbenchRepository, provider_router) -> None:
 
     threading.Thread(target=_warmup, name="stock-warmup", daemon=True).start()
 
+    # 行业映射回填（东财行业成分股反向索引，约 86 次请求）：
+    # 后台线程执行，TTL 7 天内幂等跳过，不阻塞启动。
+    def _sync_industry():
+        try:
+            from backend.stock_domain.industry_tools import sync_industry_mapping
+
+            result = sync_industry_mapping()
+            if result.get("ok") and not result.get("skipped"):
+                _log.info(
+                    "industry mapping: %s symbols mapped, %s rows updated",
+                    result.get("mapped"), result.get("updated"),
+                )
+        except Exception:
+            _log.exception("industry mapping sync failed")
+
+    threading.Thread(target=_sync_industry, name="industry-sync", daemon=True).start()
+
     # Auto-import HK/US master lists when those markets are missing.
     existing_markets = {s.market for s in repo.list_stock_master(active_only=True)}
     try:

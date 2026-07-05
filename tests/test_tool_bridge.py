@@ -26,46 +26,58 @@ def test_tool_bridge_registry_includes_default_tools_and_blocks_real_orders(brid
     tools = {tool["name"]: tool for tool in bridge.list_tools()}
 
     assert set(tools) == {
-        "get_stock_context",
-        "get_daily_history",
-        "search_stock_intel",
-        "get_portfolio_snapshot",
-        "get_active_risk_policy",
-        "list_risk_policies",
-        "evaluate_policy_risk",
-        "analyze_portfolio_risk",
-        "list_rebalance_drafts",
-        "get_rebalance_draft",
-        "create_pre_trade_review",
-        "list_pre_trade_reviews",
-        "list_paper_orders",
-        "get_paper_portfolio",
+        "add_watchlist_item",
         "analyze_paper_performance",
+        "analyze_portfolio_risk",
+        "confirm_rebalance_draft",
         "create_paper_portfolio_snapshot",
-        "list_decision_journal",
+        "create_pre_trade_review",
+        "create_worldcup_bet",
+        "create_worldcup_prediction",
+        "delete_monitor_rule",
+        "delete_worldcup_bet",
+        "dismiss_inbox_item",
+        "evaluate_monitor_rules",
+        "evaluate_policy_risk",
+        "generate_draft_order",
+        "generate_report",
+        "get_active_risk_policy",
+        "get_backtest_result",
+        "get_daily_history",
+        "get_industry_context",
         "get_decision_journal_entry",
-        "summarize_decision_outcomes",
-        "list_review_inbox",
-        "summarize_review_inbox",
         "get_monitor_events",
         "get_monitor_rules",
-        "evaluate_monitor_rules",
-        "list_strategies",
-        "run_strategy_backtest",
-        "get_backtest_result",
-        "list_report_templates",
-        "generate_report",
+        "get_paper_portfolio",
+        "get_portfolio_snapshot",
+        "get_rebalance_draft",
         "get_report_quality",
-        "generate_draft_order",
-        "confirm_rebalance_draft",
-        "reject_rebalance_draft",
-        "add_watchlist_item",
-        "remove_watchlist_item",
-        "upsert_holding",
-        "dismiss_inbox_item",
-        "snooze_inbox_item",
+        "get_stock_context",
+        "get_stock_financial",
+        "get_worldcup_analysis",
+        "get_worldcup_matches",
+        "get_worldcup_odds",
+        "list_decision_journal",
+        "list_paper_orders",
+        "list_pre_trade_reviews",
+        "list_rebalance_drafts",
+        "list_report_templates",
+        "list_review_inbox",
+        "list_risk_policies",
+        "list_strategies",
+        "list_worldcup_bets",
         "mark_inbox_item_done",
         "place_real_order",
+        "reject_rebalance_draft",
+        "remove_watchlist_item",
+        "run_strategy_backtest",
+        "search_stock_intel",
+        "snooze_inbox_item",
+        "summarize_decision_outcomes",
+        "summarize_review_inbox",
+        "update_worldcup_bet",
+        "upsert_holding",
+        "upsert_monitor_rule",
     }
     assert tools["get_stock_context"]["required_authority"] == "A2"
     assert tools["analyze_portfolio_risk"]["required_authority"] == "A3"
@@ -80,9 +92,55 @@ def test_tool_bridge_registry_includes_default_tools_and_blocks_real_orders(brid
     assert tools["get_decision_journal_entry"]["required_authority"] == "A3"
     assert tools["summarize_decision_outcomes"]["required_authority"] == "A3"
     assert tools["run_strategy_backtest"]["required_authority"] == "A3"
+    assert tools["upsert_monitor_rule"]["required_authority"] == "A3"
+    assert tools["delete_monitor_rule"]["required_authority"] == "A3"
     assert tools["place_real_order"]["enabled"] is False
     assert tools["place_real_order"]["risk"] == "blocked"
     assert "create_paper_order" not in tools
+
+
+def test_tool_bridge_monitor_rule_crud_with_partial_update_and_authority(bridge):
+    """盯盘规则写工具：创建（source=copilot、symbol 大写化）→ 部分更新保留
+    未传字段 → 删除；创建缺 rule_type / 删除不存在报错；A2 权限拦截。"""
+    created = bridge.execute(
+        "upsert_monitor_rule",
+        {"rule_type": "price_change_pct_gt", "symbol": "aapl", "threshold": 5, "severity": "high"},
+        AuthorityLevel.A4,
+    )["result"]
+    assert created["created"] is True
+    rule = created["rule"]
+    assert rule["symbol"] == "AAPL"
+    assert rule["source"] == "copilot"
+    rule_id = rule["rule_id"]
+
+    updated = bridge.execute(
+        "upsert_monitor_rule",
+        {"rule_id": rule_id, "enabled": False},
+        AuthorityLevel.A4,
+    )["result"]
+    assert updated["created"] is False
+    assert updated["rule"]["enabled"] is False
+    assert updated["rule"]["threshold"] == 5.0
+    assert updated["rule"]["severity"] == "high"
+
+    listed = bridge.execute("get_monitor_rules", {}, AuthorityLevel.A2)["result"]
+    assert any(item["rule_id"] == rule_id for item in listed["items"])
+
+    deleted = bridge.execute(
+        "delete_monitor_rule", {"rule_id": rule_id}, AuthorityLevel.A4
+    )["result"]
+    assert deleted == {"deleted": True, "rule_id": rule_id}
+
+    with pytest.raises(ValueError):
+        bridge.execute("delete_monitor_rule", {"rule_id": "nope"}, AuthorityLevel.A4)
+    with pytest.raises(ValueError):
+        bridge.execute("upsert_monitor_rule", {"symbol": "AAPL"}, AuthorityLevel.A4)
+    with pytest.raises(PermissionDenied):
+        bridge.execute(
+            "upsert_monitor_rule",
+            {"rule_type": "volume_spike", "symbol": "AAPL"},
+            AuthorityLevel.A2,
+        )
 
 
 def test_tool_bridge_lists_and_summarizes_review_inbox_with_ledger(bridge):
@@ -315,7 +373,9 @@ def test_tool_bridge_create_pre_trade_review_requires_confirmed_draft_id_and_rec
     created = bridge.execute("generate_draft_order", {"symbol": "AAPL", "target_weight_pct": 15}, AuthorityLevel.A4)
     draft_id = created["result"]["draft_id"]
 
-    with pytest.raises(ValueError, match="draft_id"):
+    # 现行为（P1 综合指令）：不带 draft_id 时自动解析最近一张已确认草案；
+    # 没有已确认草案则报错提示先确认。
+    with pytest.raises(ValueError, match="no confirmed drafts"):
         bridge.execute(
             "create_pre_trade_review",
             {"symbol": "AAPL"},
@@ -342,7 +402,7 @@ def test_tool_bridge_create_pre_trade_review_requires_confirmed_draft_id_and_rec
         (
             "create_pre_trade_review",
             "failed",
-            "create_pre_trade_review requires an explicit confirmed draft_id; symbol-only fallback is disabled",
+            "no confirmed drafts found; confirm a draft first before creating a review",
         ),
         (
             "create_pre_trade_review",
@@ -746,3 +806,45 @@ def test_tool_bridge_monitor_events_explanation_matches_returned_event(bridge):
     hit = bridge.execute("get_monitor_events", {"symbol": "AAPL", "limit": 1}, AuthorityLevel.A2)
     assert hit["result"]["items"][0]["symbol"] == "AAPL"
     assert hit["result"]["explanation"]["event"]["event_id"] == hit["result"]["items"][0]["event_id"]
+
+
+def test_tool_bridge_industry_context_degrades_cleanly_and_computes_percentiles(bridge, monkeypatch):
+    """get_industry_context：US 票明确降级提示 web_search；离线成分股失败降级；
+    注入假数据时正确计算行业内排名/分位/Top10。"""
+    us = bridge.execute("get_industry_context", {"symbol": "AAPL"}, AuthorityLevel.A2)["result"]
+    assert us["degraded"] is True
+    assert "web_search" in us["reason"]
+
+    offline = bridge.execute("get_industry_context", {"symbol": "600519"}, AuthorityLevel.A2)["result"]
+    assert offline["degraded"] is True
+
+    from backend.stock_domain import industry_tools
+
+    fake_cons = [
+        {"symbol": "600519", "name": "贵州茅台", "price": 1500.0, "change_pct": 1.0,
+         "turnover_pct": 0.5, "pe": 22.0, "pb": 8.0, "cap_est": 1.9e12},
+        {"symbol": "000858", "name": "五粮液", "price": 130.0, "change_pct": -0.5,
+         "turnover_pct": 0.8, "pe": 15.0, "pb": 4.0, "cap_est": 5.0e11},
+        {"symbol": "000596", "name": "古井贡酒", "price": 160.0, "change_pct": 0.2,
+         "turnover_pct": 1.1, "pe": 18.0, "pb": 5.0, "cap_est": 8.0e10},
+    ]
+    fake_boards = [{"industry": "白酒", "board_code": "BK0001", "rank": 3.0,
+                    "change_pct": 0.8, "turnover_pct": 0.9, "total_market_cap": 3.0e12}]
+    monkeypatch.setattr(industry_tools, "_cached_boards", lambda: fake_boards)
+    monkeypatch.setattr(industry_tools, "_cached_constituents", lambda industry: fake_cons)
+
+    ctx = bridge.execute("get_industry_context", {"symbol": "600519"}, AuthorityLevel.A2)["result"]
+    assert ctx["degraded"] is False
+    assert ctx["industry"] == "白酒"
+    assert ctx["company_count"] == 3
+    assert ctx["valuation"]["pe_median"] == 18.0
+    assert ctx["target"]["cap_rank"] == 1
+    assert ctx["target"]["cap_rank_total"] == 3
+    assert ctx["target"]["pe_percentile"] == 100.0
+    assert [c["symbol"] for c in ctx["top_constituents"]] == ["600519", "000858", "000596"]
+
+    by_industry = bridge.execute(
+        "get_industry_context", {"industry": "白酒"}, AuthorityLevel.A2
+    )["result"]
+    assert by_industry["degraded"] is False
+    assert "target" not in by_industry
