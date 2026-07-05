@@ -142,4 +142,17 @@ def create_app(
     return app
 
 
-app = create_app()
+def __getattr__(name: str):
+    """Lazy module attribute (PEP 562): build the default app only when uvicorn
+    actually asks for ``backend.app:app``.
+
+    之前是模块级 ``app = create_app()``——任何 ``from backend.app import
+    create_app``（比如整个测试套件）都会在默认路径上再建一套服务栈，
+    pytest 全程握着 data/workbench.sqlite3 的连接，把真实后端的启动播种
+    锁死（database is locked）。
+    """
+    if name == "app":
+        application = create_app()
+        globals()["app"] = application
+        return application
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

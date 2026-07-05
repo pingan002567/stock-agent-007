@@ -1,4 +1,30 @@
+import { useEffect, useState } from "react";
 import { useAppState } from "@/hooks/useAppState";
+
+const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
+
+function formatClock(d: Date): { date: string; time: string } {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return {
+    date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} 周${WEEKDAYS[d.getDay()]}`,
+    time: `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`,
+  };
+}
+
+function TopbarClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const { date, time } = formatClock(now);
+  return (
+    <div className="topbar-clock" title="本地时间">
+      <span className="topbar-clock-date">{date}</span>
+      <span className="topbar-clock-time">{time}</span>
+    </div>
+  );
+}
 
 export function PageContainer({ children }: { children: React.ReactNode }) {
   const { currentScreenLabel } = useAppState();
@@ -16,6 +42,7 @@ export function PageContainer({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <div className="topbar-right">
+          <TopbarClock />
           <div className="topbar-status">
             <span className="topbar-status-dot"></span>
             <span>AI 就绪</span>
