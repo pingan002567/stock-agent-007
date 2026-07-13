@@ -1593,3 +1593,64 @@ def test_stock_research_report_includes_industry_section_with_degradation_warnin
     check = quality.get("latest") or (quality.get("items") or [{}])[0]
     codes = [issue["code"] for issue in (check.get("issues") or [])]
     assert "industry_section_degraded" in codes
+
+
+def test_plan_mode_intents_and_env_override(monkeypatch):
+    from backend.agent_runtime import skill_specs
+
+    monkeypatch.delenv("WORKBENCH_AI_PLAN_MODE", raising=False)
+    assert skill_specs.plan_mode_intent_enabled("rebalance_plan") is True
+    assert skill_specs.plan_mode_intent_enabled("copilot_chat") is False
+    monkeypatch.setenv("WORKBENCH_AI_PLAN_MODE", "off")
+    assert skill_specs.plan_mode_intent_enabled("rebalance_plan") is False
+    assert skill_specs.plan_mode_supported() is False
+    monkeypatch.setenv("WORKBENCH_AI_PLAN_MODE", "all")
+    assert skill_specs.plan_mode_intent_enabled("copilot_chat") is True
+
+
+def test_tool_search_auto_enabled_only_with_enabled_mcp_server(tmp_path, monkeypatch):
+    """tool_search 只延迟 MCP 工具：有启用的 MCP server 时自动开，否则关。"""
+    import json
+    from backend.agent_runtime.deerflow_config import _has_enabled_mcp_server
+
+    cfg = tmp_path / "extensions_config.json"
+    monkeypatch.setenv("DEER_FLOW_EXTENSIONS_CONFIG_PATH", str(cfg))
+
+    cfg.write_text(json.dumps({"mcpServers": {}}), encoding="utf-8")
+    assert _has_enabled_mcp_server() is False
+
+    cfg.write_text(
+        json.dumps({"mcpServers": {"fetch": {"enabled": False, "type": "stdio", "command": "uvx"}}}),
+        encoding="utf-8",
+    )
+    assert _has_enabled_mcp_server() is False
+
+    cfg.write_text(
+        json.dumps({"mcpServers": {"fetch": {"enabled": True, "type": "stdio", "command": "uvx"}}}),
+        encoding="utf-8",
+    )
+    assert _has_enabled_mcp_server() is True
+
+
+def test_report_export_pptx_and_speech_text(tmp_path):
+    """报告导出：pptx 可回读、每 H2 节成页；朗读文本无表格线/图形字符/引用标记。"""
+    from backend.bootstrap import create_services
+    from backend.schemas import ReportGenerateRequest
+
+    services = create_services(db_path=tmp_path / "e.sqlite3", files_root=tmp_path / "files")
+    result = services.report_service.generate(
+        ReportGenerateRequest(report_type="stock_research", source_type="stock", source_id="600519")
+    )
+    report = result["report"] if isinstance(result, dict) and "report" in result else result
+
+    data = services.report_service.export_report_pptx(report.report_id)
+    from io import BytesIO
+    from pptx import Presentation
+
+    prs = Presentation(BytesIO(data))
+    assert len(prs.slides) >= 5  # 标题页 + 各章节页
+
+    speech = services.report_service._markdown_to_speech_text(report.content)
+    assert speech
+    for banned in ("█", "░", "|", "[来源:", "▲"):
+        assert banned not in speech

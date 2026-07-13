@@ -311,6 +311,34 @@ def subagent_supported() -> bool:
     return os.getenv("WORKBENCH_AI_SUBAGENT", "").strip().lower() not in {"0", "false", "off"}
 
 
+# plan_mode（TodoMiddleware）：write_todos 计划清单 + 未完成不许收口。
+# 只给"步骤多、计划性强"的执行类 intent 开——研究类开了会变啰嗦。
+PLAN_MODE_INTENTS: frozenset[str] = frozenset({
+    "rebalance_plan",
+    "pre_trade_review",
+    "strategy_backtest",
+})
+
+
+def plan_mode_intent_enabled(intent: str) -> bool:
+    """Whether this turn streams with plan mode (TodoMiddleware).
+
+    ``WORKBENCH_AI_PLAN_MODE``：``0/false/off`` 全关，``1/true/on/all`` 全开，
+    未设置用 PLAN_MODE_INTENTS。
+    """
+    mode = os.getenv("WORKBENCH_AI_PLAN_MODE", "").strip().lower()
+    if mode in {"0", "false", "off"}:
+        return False
+    if mode in {"1", "true", "on", "all"}:
+        return True
+    return intent in PLAN_MODE_INTENTS
+
+
+def plan_mode_supported() -> bool:
+    """Runtime-level flag (for status reporting): plan mode not force-disabled."""
+    return os.getenv("WORKBENCH_AI_PLAN_MODE", "").strip().lower() not in {"0", "false", "off"}
+
+
 # ── generators (consumed by deerflow_config + skill_registry) ──
 
 def subagent_config_dicts() -> dict[str, dict]:

@@ -533,6 +533,7 @@ class CopilotService:
                 history=[],
                 session_id=state.session_id,
                 subagent_enabled=skill_specs.subagent_intent_enabled(state.intent),
+                plan_mode=skill_specs.plan_mode_intent_enabled(state.intent),
             ):
                 payload = event["payload"]
                 self._capture_tool_result(event, captured)

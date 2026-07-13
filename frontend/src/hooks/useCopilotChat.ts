@@ -21,10 +21,17 @@ export interface StreamToolCall {
   resultText?: string;
 }
 
+export interface PlanTodo {
+  content: string;
+  status: "pending" | "in_progress" | "completed" | string;
+}
+
 export interface StreamMessage {
   runId: string;
   phase: "reasoning" | "tools" | "answering" | "final" | "error";
   reasoningText: string;
+  /** plan_mode（write_todos）计划清单：AI 的多步计划与实时进度 */
+  todos: PlanTodo[];
   /** 完整思维链：每条 reasoning 事件追加一段，供展开查看（reasoningText 只是最新一段） */
   reasoningLog: string[];
   skillTrace: SkillTraceItem[];
@@ -223,6 +230,7 @@ export function useCopilotChat() {
       reasoningText: "AI 正在思考...",
       reasoningLog: [],
       skillTrace: [],
+      todos: [],
       tools: [],
       answerText: "",
       clarificationText: null,
@@ -310,13 +318,25 @@ export function useCopilotChat() {
         } catch { /* empty */ }
       });
 
-      // 工具调用开始：追加一张「进行中」工具卡
+      // 工具调用开始：追加一张「进行中」工具卡；
+      // write_todos（plan_mode 计划清单）单独渲染成 checklist，不进工具卡
       es.addEventListener("tool_call", (streamEvent: Event) => {
         try {
           const data = JSON.parse((streamEvent as MessageEvent).data);
           const p = (data?.payload || {}) as Record<string, unknown>;
           const callId = String(p.call_id || `${p.tool}-${Date.now()}`);
           const name = String(p.tool || "tool");
+          if (name === "write_todos") {
+            let args = p.arguments;
+            if (typeof args === "string") {
+              try { args = JSON.parse(args); } catch { args = {}; }
+            }
+            const todos = (args as { todos?: PlanTodo[] })?.todos;
+            if (Array.isArray(todos)) {
+              setStreamMessage((prev) => prev ? { ...prev, todos } : prev);
+            }
+            return;
+          }
           setStreamMessage((prev) => {
             if (!prev) return prev;
             if (prev.tools.some((t) => t.callId === callId)) return prev;

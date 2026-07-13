@@ -119,6 +119,7 @@ function makeStream(overrides: Partial<StreamMessage> = {}): StreamMessage {
     reasoningText: "",
     reasoningLog: [],
     skillTrace: [],
+    todos: [],
     tools: [],
     answerText: "",
     clarificationText: null,

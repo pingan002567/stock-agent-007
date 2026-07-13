@@ -153,6 +153,194 @@ class ReportService:
             "quality_summary": report.quality_summary,
         }
 
+    def export_report_audio(self, report_id: str) -> bytes:
+        """报告 → 语音（m4a/AAC）。零依赖方案：macOS ``say``（有中文语音）。
+
+        say 不可用（非 macOS / 无中文语音）时 raise RuntimeError，路由层转 501。
+        产物同时留档 file_store（reports/<id>.m4a），供重复播放不重复合成。
+        """
+        import re
+        import shutil
+        import subprocess
+        import tempfile
+
+        report = self.get_report(report_id)
+
+        cached = Path(self.file_store.root) / "reports" / f"{report_id}.m4a"
+        if cached.is_file():
+            return cached.read_bytes()
+
+        if shutil.which("say") is None:
+            raise RuntimeError("audio export requires macOS `say` (not found on this host)")
+
+        voices = subprocess.run(
+            ["say", "-v", "?"], capture_output=True, text=True, timeout=15
+        ).stdout
+        zh_voices = [line.split()[0] for line in voices.splitlines() if "zh_CN" in line]
+        preferred = next((v for v in ("Tingting", "Meijia") if v in zh_voices), None)
+        voice = preferred or (zh_voices[0] if zh_voices else None)
+        if voice is None:
+            raise RuntimeError("no zh_CN voice installed for `say`")
+
+        speech = self._markdown_to_speech_text(report.content)
+        self.audit_service.record("report audio export", report_id, AuthorityLevel.A2)
+
+        with tempfile.TemporaryDirectory(prefix="report-audio-") as tmp:
+            text_path = Path(tmp) / "speech.txt"
+            out_path = Path(tmp) / "out.m4a"
+            text_path.write_text(speech, encoding="utf-8")
+            proc = subprocess.run(
+                ["say", "-v", voice, "-o", str(out_path), "--data-format=aac", "-f", str(text_path)],
+                capture_output=True, text=True, timeout=300,
+            )
+            if proc.returncode != 0 or not out_path.is_file():
+                raise RuntimeError(f"say failed: {proc.stderr.strip() or proc.returncode}")
+            audio = out_path.read_bytes()
+
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        cached.write_bytes(audio)
+        return audio
+
+    @staticmethod
+    def _markdown_to_speech_text(content: str, max_chars: int = 6000) -> str:
+        """Markdown → 朗读文本：去表格线/标记符/引用标记，保留标题与句子。"""
+        import re
+
+        lines: list[str] = []
+        for raw in content.splitlines():
+            line = raw.strip()
+            if not line or set(line) <= {"-", "|", ":", " ", "="}:
+                continue
+            if line.startswith("|"):
+                cells = [
+                    re.sub(r"[▲▼█░●◆*_`]+", "", c).strip()
+                    for c in line.strip("|").split("|")
+                ]
+                cells = [c for c in cells if c and set(c) - {"-", ":", "—"}]
+                if cells:
+                    lines.append("，".join(cells) + "。")
+                continue
+            line = re.sub(r"^#+\s*", "", line)          # 标题井号
+            line = re.sub(r"[*_`>]+", "", line)          # 强调/引用符
+            line = re.sub(r"\[来源:[^\]]*\]", "", line)  # 引用标记不朗读
+            line = re.sub(r"[▲▼█░●◆]+", "", line)       # 图形字符
+            line = line.strip()
+            if line:
+                lines.append(line)
+        return "\n".join(lines)[:max_chars]
+
+    def export_report_pptx(self, report_id: str) -> bytes:
+        """报告 → 路演 PPT（python-pptx，随 markitdown 已在依赖内）。
+
+        结构映射：H1→标题页；每个 H2 节→内容页（md 表格→pptx 表格，列表→bullet）；
+        每页最多 12 行，超出自动续页。
+        """
+        from io import BytesIO
+
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+
+        report = self.get_report(report_id)
+        self.audit_service.record("report pptx export", report_id, AuthorityLevel.A2)
+
+        prs = Presentation()
+        prs.slide_width = Inches(13.33)
+        prs.slide_height = Inches(7.5)
+
+        title_slide = prs.slides.add_slide(prs.slide_layouts[0])
+        title_slide.shapes.title.text = report.title
+        subtitle = title_slide.placeholders[1]
+        subtitle.text = (
+            f"{report.symbol or ''} · {report.report_type}"
+            f" · {report.created_at[:10]}\n{report.disclaimer or '仅供研究，不构成投资建议。'}"
+        )
+
+        def clean(text: str) -> str:
+            import re
+
+            text = re.sub(r"[*_`>]+", "", text)
+            return re.sub(r"\[来源:[^\]]*\]", "", text).strip()
+
+        # 解析 markdown：按 H2 分节；节内区分表格块与文本行
+        sections: list[tuple[str, list[Any]]] = []
+        current: tuple[str, list[Any]] | None = None
+        table_buf: list[list[str]] = []
+
+        def flush_table() -> None:
+            nonlocal table_buf
+            if table_buf and current is not None:
+                current[1].append(("table", table_buf))
+            table_buf = []
+
+        for raw in report.content.splitlines():
+            line = raw.strip()
+            if line.startswith("## "):
+                flush_table()
+                current = (clean(line[3:]), [])
+                sections.append(current)
+                continue
+            if current is None or not line or line.startswith("# ") or set(line) <= {"-", "="}:
+                continue
+            if line.startswith("|"):
+                cells = [clean(c) for c in line.strip("|").split("|")]
+                if cells and not all(set(c) <= {"-", ":", " "} for c in cells if c):
+                    table_buf.append(cells)
+                continue
+            flush_table()
+            text = clean(line.lstrip("-").strip() if line.startswith("- ") else line)
+            if text:
+                current[1].append(("bullet" if line.startswith("- ") else "text", text))
+        flush_table()
+
+        blank_layout = prs.slide_layouts[6]
+        for section_title, blocks in sections:
+            page_blocks: list[list[Any]] = [[]]
+            weight = 0
+            for block in blocks:
+                rows = len(block[1]) if block[0] == "table" else 1
+                if weight + rows > 12 and page_blocks[-1]:
+                    page_blocks.append([])
+                    weight = 0
+                page_blocks[-1].append(block)
+                weight += rows
+            for page_index, page in enumerate(page_blocks):
+                slide = prs.slides.add_slide(blank_layout)
+                heading = slide.shapes.add_textbox(Inches(0.6), Inches(0.35), Inches(12), Inches(0.9))
+                run = heading.text_frame.paragraphs[0].add_run()
+                run.text = section_title if page_index == 0 else f"{section_title}（续）"
+                run.font.size = Pt(28)
+                run.font.bold = True
+
+                top = 1.4
+                for kind, payload in page:
+                    if kind == "table":
+                        rows, cols = len(payload), max(len(r) for r in payload)
+                        height = min(0.4 * rows, 5.6)
+                        shape = slide.shapes.add_table(
+                            rows, cols, Inches(0.6), Inches(top), Inches(12), Inches(height)
+                        )
+                        for r, row in enumerate(payload):
+                            for c in range(cols):
+                                cell = shape.table.cell(r, c)
+                                cell.text = row[c] if c < len(row) else ""
+                                cell.text_frame.paragraphs[0].font.size = Pt(13)
+                                if r == 0:
+                                    cell.text_frame.paragraphs[0].font.bold = True
+                        top += height + 0.25
+                    else:
+                        box = slide.shapes.add_textbox(Inches(0.7), Inches(top), Inches(11.8), Inches(0.45))
+                        paragraph = box.text_frame.paragraphs[0]
+                        run = paragraph.add_run()
+                        run.text = ("• " if kind == "bullet" else "") + payload
+                        run.font.size = Pt(15)
+                        top += 0.45
+                    if top > 6.8:
+                        break
+
+        buffer = BytesIO()
+        prs.save(buffer)
+        return buffer.getvalue()
+
     def export_report_pdf(self, report_id: str) -> bytes:
         from fpdf import FPDF  # listed in core deps; raises ImportError if absent
 

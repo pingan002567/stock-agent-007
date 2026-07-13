@@ -439,6 +439,19 @@ function MemorySection() {
 
 const EMPTY_MCP_FORM = { name: "", type: "stdio" as McpServerConfig["type"], command: "", args: "", url: "", description: "" };
 
+// 官方 MCP reference servers（包名可验证）。Wind/Choice 等商用终端如提供
+// MCP 服务端，按其文档手动填 stdio 命令或远程 URL。
+const MCP_PRESETS: Array<{ label: string; form: typeof EMPTY_MCP_FORM }> = [
+  {
+    label: "网页抓取 fetch",
+    form: { name: "fetch", type: "stdio", command: "uvx", args: "mcp-server-fetch", url: "", description: "通用网页抓取（官方 reference server）" },
+  },
+  {
+    label: "本地文件 filesystem",
+    form: { name: "filesystem", type: "stdio", command: "npx", args: "-y @modelcontextprotocol/server-filesystem ~/Documents", url: "", description: "读取本地目录（官方 reference server，注意目录授权范围）" },
+  },
+];
+
 function McpSection() {
   const [servers, setServers] = useState<Record<string, McpServerConfig> | null>(null);
   const [supported, setSupported] = useState(true);
@@ -536,6 +549,16 @@ function McpSection() {
         })}
         {showAdd ? (
           <div className="card page-stack" style={{ padding: 12, gap: 8 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <span className="muted" style={{ fontSize: 11 }}>预设：</span>
+              {MCP_PRESETS.map((preset) => (
+                <button key={preset.form.name} className="ghost" type="button" style={{ height: 26, fontSize: 11 }}
+                  onClick={() => setForm({ ...preset.form })}>
+                  {preset.label}
+                </button>
+              ))}
+              <span className="muted" style={{ fontSize: 11 }}>· Wind/Choice 等按厂商 MCP 文档手动填</span>
+            </div>
             <div style={{ display: "flex", gap: 8 }}>
               <input type="text" placeholder="名称，如 wind-mcp" value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}

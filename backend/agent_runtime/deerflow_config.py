@@ -161,6 +161,24 @@ def _build_tool_configs() -> list[dict[str, Any]]:
     return configs
 
 
+def _has_enabled_mcp_server() -> bool:
+    """extensions_config.json 里是否有启用的 MCP server（直接读文件，不 import DeerFlow）。"""
+    import json
+
+    path = os.getenv("DEER_FLOW_EXTENSIONS_CONFIG_PATH") or str(
+        Path(__file__).resolve().parents[2] / "extensions_config.json"
+    )
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    servers = data.get("mcpServers") or {}
+    return any(
+        isinstance(server, dict) and server.get("enabled", True)
+        for server in servers.values()
+    )
+
+
 def _build_subagent_configs() -> dict[str, dict]:
     """Build the ``subagents.custom_agents`` section.
 
@@ -246,7 +264,9 @@ def generate_config(target_dir: str | Path = "data") -> str:
             "max_chars": 40,
         },
         "tool_search": {
-            "enabled": False,
+            # harness 的 tool_search 只延迟 MCP 工具（本地 config 工具不受影响）：
+            # 配置了启用的 MCP server 时自动打开，省 prompt token。
+            "enabled": _has_enabled_mcp_server(),
         },
         "subagents": {
             "timeout_seconds": 900,

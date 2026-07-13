@@ -366,6 +366,7 @@ class DeerFlowClientAdapter:
         # skill_specs.subagent_intent_enabled and passed explicitly on every
         # stream() call; this only sets the client default + status reporting.
         subagent_supported = skill_specs.subagent_supported()
+        plan_mode_supported = skill_specs.plan_mode_supported()
 
         _init_errors: list[str] = []
 
@@ -400,7 +401,7 @@ class DeerFlowClientAdapter:
                     model_name=model_name,
                     thinking_enabled=thinking_enabled,
                     subagent_enabled=subagent_supported,
-                    plan_mode=False,
+                    plan_mode=plan_mode_supported,
                     available_skills=skill_specs.subagent_names(),
                 )
                 return cls(
@@ -411,7 +412,7 @@ class DeerFlowClientAdapter:
                     model_name=model_name,
                     thinking_enabled=thinking_enabled,
                     subagent_enabled=subagent_supported,
-                    plan_mode=False,
+                    plan_mode=plan_mode_supported,
                     client_capabilities=["stream", "chat", "list_models"],
                 )
             except Exception as exc:
@@ -432,7 +433,7 @@ class DeerFlowClientAdapter:
                     "model_name": model_name,
                     "thinking_enabled": thinking_enabled,
                     "subagent_enabled": subagent_supported,
-                    "plan_mode": False,
+                    "plan_mode": plan_mode_supported,
                 }
                 client = client_cls(**kwargs)
                 return cls(
@@ -443,7 +444,7 @@ class DeerFlowClientAdapter:
                     model_name=model_name,
                     thinking_enabled=thinking_enabled,
                     subagent_enabled=subagent_supported,
-                    plan_mode=False,
+                    plan_mode=plan_mode_supported,
                     client_capabilities=cls._detect_capabilities(client),
                 )
             except Exception as exc:
@@ -508,7 +509,7 @@ class DeerFlowClientAdapter:
                     "model_name": model_name,
                     "thinking_enabled": thinking_enabled,
                     "subagent_enabled": subagent_supported,
-                    "plan_mode": False,
+                    "plan_mode": plan_mode_supported,
                 }
                 client = client_cls(**kwargs)
             except Exception as exc:
@@ -528,7 +529,7 @@ class DeerFlowClientAdapter:
                 model_name=model_name,
                 thinking_enabled=thinking_enabled,
                 subagent_enabled=subagent_supported,
-                plan_mode=False,
+                plan_mode=plan_mode_supported,
                 client_capabilities=cls._detect_capabilities(client),
             )
 
@@ -669,6 +670,7 @@ class DeerFlowClientAdapter:
         history: list[dict[str, str]] | None = None,
         session_id: str | None = None,
         subagent_enabled: bool = False,
+        plan_mode: bool = False,
     ) -> AsyncIterator[Dict[str, Any]]:
         # Both direct and embedded modes use DeerFlowClient.stream()
         if self.client is not None:
@@ -700,7 +702,9 @@ class DeerFlowClientAdapter:
                     model_name=self.model_name,
                     thinking_enabled=self.thinking_enabled,
                     subagent_enabled=subagent_enabled,
-                    plan_mode=False,
+                    # plan_mode（TodoMiddleware）：write_todos 计划清单进流 +
+                    # 未完成 todo 阻止提前收口。按 intent 决定（见 skill_specs）。
+                    plan_mode=plan_mode,
                     # Subagent runs (rebalance_plan / strategy_backtest) fan out to
                     # delegated graphs, so each turn burns more LangGraph super-steps;
                     # give them extra headroom over the default 100 so a legitimate

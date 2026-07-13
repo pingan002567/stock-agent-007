@@ -2066,6 +2066,42 @@ pre {
   font-family: var(--mono);
 }
 
+/* ── plan_mode 执行计划清单 ── */
+.plan-todos {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 6px 0;
+  background: var(--bg-tertiary);
+  font-size: 12px;
+}
+.plan-todos-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.plan-todo {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  color: var(--text-secondary);
+}
+.plan-todo.completed {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.plan-todo.in_progress {
+  color: var(--blue);
+  font-weight: 600;
+}
+.plan-todo-mark {
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.plan-todo.completed .plan-todo-mark { color: var(--green); }
+
 /* ── AI 反问澄清 ── */
 .clarification-card {
   border: 1px solid var(--amber);

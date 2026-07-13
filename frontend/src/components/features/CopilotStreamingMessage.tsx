@@ -51,6 +51,19 @@ export function CopilotStreamingMessage({ streamMessage }: Props) {
         </span>
       </div>
       {streamMessage.phase !== "final" && <SkillTraceChain items={streamMessage.skillTrace} />}
+      {streamMessage.todos.length > 0 && (
+        <div className="plan-todos">
+          <div className="plan-todos-title">📋 执行计划</div>
+          {streamMessage.todos.map((todo, i) => (
+            <div key={i} className={`plan-todo ${todo.status}`}>
+              <span className="plan-todo-mark">
+                {todo.status === "completed" ? "✓" : todo.status === "in_progress" ? "▸" : "·"}
+              </span>
+              {todo.content}
+            </div>
+          ))}
+        </div>
+      )}
       {streamMessage.reasoningText && (
         <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8, fontStyle: "italic" }}>
           {reasoningOpen ? (

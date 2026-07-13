@@ -90,6 +90,23 @@ def export_report(
                 media_type="application/pdf",
                 headers={"Content-Disposition": f'attachment; filename="{report_id}.pdf"'},
             )
+        if format == "pptx":
+            pptx_bytes = services.report_service.export_report_pptx(report_id)
+            return StreamingResponse(
+                BytesIO(pptx_bytes),
+                media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                headers={"Content-Disposition": f'attachment; filename="{report_id}.pptx"'},
+            )
+        if format == "audio":
+            try:
+                audio_bytes = services.report_service.export_report_audio(report_id)
+            except RuntimeError as exc:
+                raise HTTPException(status_code=501, detail=f"audio export not available: {exc}") from exc
+            return StreamingResponse(
+                BytesIO(audio_bytes),
+                media_type="audio/mp4",
+                headers={"Content-Disposition": f'inline; filename="{report_id}.m4a"'},
+            )
         result = services.report_service.export_report(report_id)
         report = services.report_service.get_report(report_id)
         title = (getattr(report, "title", None) or report_id).strip() or report_id
