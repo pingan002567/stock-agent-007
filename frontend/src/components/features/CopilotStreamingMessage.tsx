@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { toolLabel, type StreamMessage } from "@/hooks/useCopilotChat";
+import { toolLabel, type StreamMessage, type StreamToolCall } from "@/hooks/useCopilotChat";
 import { CopilotFinalMeta, SkillTraceChain } from "@/components/features/CopilotFinalMeta";
 
 interface Props {
   streamMessage: StreamMessage;
+  /** 提供时流式工具卡可点击（聊天中心主区 → 右栏详情联动） */
+  onToolClick?: (tool: StreamToolCall) => void;
 }
 
 const PHASE_LABELS: Record<string, string> = {
@@ -22,7 +24,7 @@ const PHASE_COLORS: Record<string, string> = {
   reasoning: "var(--blue)",
 };
 
-export function CopilotStreamingMessage({ streamMessage }: Props) {
+export function CopilotStreamingMessage({ streamMessage, onToolClick }: Props) {
   const [reasoningOpen, setReasoningOpen] = useState(false);
   const hasContent = streamMessage.answerText.length > 0 || streamMessage.phase === "final" || streamMessage.phase === "error";
   const phaseLabel = PHASE_LABELS[streamMessage.phase] || "推理中";
@@ -79,7 +81,13 @@ export function CopilotStreamingMessage({ streamMessage }: Props) {
         </div>
       )}
       {streamMessage.tools.map((tool) => (
-        <div key={tool.callId} className="tool-card" style={{ marginBottom: 4 }}>
+        <div
+          key={tool.callId}
+          className={`tool-card${onToolClick ? " clickable" : ""}`}
+          style={{ marginBottom: 4 }}
+          onClick={onToolClick ? () => onToolClick(tool) : undefined}
+          title={onToolClick ? "查看完整结果" : undefined}
+        >
           <div className="tool-card-header">
             <span className={`tool-dot ${tool.status === "done" ? "ok" : tool.status === "failed" ? "fail" : "busy"}`} />
             <span className="tool-name">{toolLabel(tool.name)}</span>

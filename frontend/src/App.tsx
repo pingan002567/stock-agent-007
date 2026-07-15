@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AppStateProvider, useAppState } from "@/hooks/useAppState";
 import { CopilotChatProvider } from "@/hooks/useCopilotChat";
+import { ChatDetailProvider } from "@/hooks/useChatDetail";
 import { Rail } from "@/components/layout/Rail";
 import { ScreenRenderer } from "@/pages/ScreenRenderer";
 import { CopilotPanel } from "@/components/features/CopilotPanel";
@@ -46,8 +47,10 @@ function AppContent() {
   return (
     <AppStateProvider>
       <CopilotChatProvider>
-        <LoadingOverlay />
-        <AppShell />
+        <ChatDetailProvider>
+          <LoadingOverlay />
+          <AppShell />
+        </ChatDetailProvider>
       </CopilotChatProvider>
     </AppStateProvider>
   );

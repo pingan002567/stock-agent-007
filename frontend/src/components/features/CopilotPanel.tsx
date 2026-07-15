@@ -3,8 +3,9 @@ import { useAppState } from "@/hooks/useAppState";
 import type { Screen } from "@/types";
 import { parseCopilotEvent, uploadSessionFiles, EVENT_FINAL, EVENT_ERROR, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, EVENT_PARTIAL_ANSWER, type UploadedFileInfo } from "@/api/copilot";
 import type { CopilotMessage } from "@/api/client";
-import { useCopilotChat } from "@/hooks/useCopilotChat";
-import { CopilotMessageItem } from "@/components/features/CopilotMessageItem";
+import { useCopilotChat, extractToolResultText, type StreamToolCall } from "@/hooks/useCopilotChat";
+import { useChatDetail } from "@/hooks/useChatDetail";
+import { CopilotMessageItem, type ToolInfo } from "@/components/features/CopilotMessageItem";
 import { CopilotStreamingMessage } from "@/components/features/CopilotStreamingMessage";
 import { ContextCard } from "@/components/features/ContextCard";
 import { NextActions } from "@/components/features/NextActions";
@@ -74,11 +75,7 @@ function pairMessages(msgs: CopilotMessage[]): GroupedItem[] {
       const cid = p?.call_id ? String(p.call_id) : "";
       const resultPayload = cid ? resultByCallId.get(cid) : undefined;
       const matched = !!resultPayload;
-      let resultText: string | undefined;
-      if (resultPayload) {
-        const textResult = resultPayload.text || resultPayload.output || resultPayload.result || "";
-        resultText = typeof textResult === "string" ? textResult : JSON.stringify(textResult);
-      }
+      const resultText = extractToolResultText(resultPayload);
       const failed = !matched && !!msg.run_id && completedRuns.has(msg.run_id);
       const tools = pendingTools.get(rid) || [];
       tools.push({ t: "tool", name, done: matched, failed, id: msg.message_id, created_at: msg.created_at, resultText });
@@ -122,6 +119,27 @@ export function CopilotPanel({ open = true, onToggle, variant = "panel" }: { ope
     handleSend: sendMessage, handleStop,
     handleCopy, ensureSession,
   } = useCopilotChat();
+
+  const { openDetail } = useChatDetail();
+  // 工具卡 → 右栏详情联动只在聊天中心主区生效；业务页侧栏没有右栏，保持原样
+  const handleToolClick = useMemo(() => {
+    if (variant !== "main") return undefined;
+    return (t: ToolInfo) => openDetail({
+      id: t.id,
+      name: t.name,
+      status: t.failed ? "failed" : t.done ? "done" : "running",
+      resultText: t.resultText,
+    });
+  }, [variant, openDetail]);
+  const handleStreamToolClick = useMemo(() => {
+    if (variant !== "main") return undefined;
+    return (t: StreamToolCall) => openDetail({
+      id: t.callId,
+      name: t.name,
+      status: t.status,
+      resultText: t.resultText,
+    });
+  }, [variant, openDetail]);
 
   const [input, setInput] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -251,7 +269,7 @@ export function CopilotPanel({ open = true, onToggle, variant = "panel" }: { ope
           <React.Fragment key={item.msg.message_id}>
             {showHeader && <div className="date-divider">{dateHeader(msgDate)}</div>}
             <div style={{ position: "relative" }}>
-              <CopilotMessageItem msg={item.msg} tools={item.tools} />
+              <CopilotMessageItem msg={item.msg} tools={item.tools} onToolClick={handleToolClick} />
               <button className="msg-copy" onClick={() => handleCopy(item.msg)} title="复制">
                 {copiedId === item.msg.message_id ? "已复制" : "复制"}
               </button>
@@ -275,7 +293,7 @@ export function CopilotPanel({ open = true, onToggle, variant = "panel" }: { ope
         </React.Fragment>
       );
     });
-  }, [messages, copiedId, handleCopy, handleNavigate, handleApi]);
+  }, [messages, copiedId, handleCopy, handleNavigate, handleApi, handleToolClick]);
 
   if (variant === "panel" && !open) {
     return <button className="copilot-tab" onClick={onToggle} title="展开 AI 对话">‹</button>;
@@ -416,7 +434,7 @@ export function CopilotPanel({ open = true, onToggle, variant = "panel" }: { ope
 
           {messageElements}
 
-          {streamMessage && <CopilotStreamingMessage streamMessage={streamMessage} />}
+          {streamMessage && <CopilotStreamingMessage streamMessage={streamMessage} onToolClick={handleStreamToolClick} />}
 
           <div ref={messagesEndRef} />
         </div>

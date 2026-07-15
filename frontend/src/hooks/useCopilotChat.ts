@@ -102,6 +102,20 @@ export function toolLabel(name: string): string {
   return TOOL_LABELS[name] || name;
 }
 
+/** tool_result 载荷 → 展示文本：优先 text/output/result；工具桥（stub/embedded）把
+ * 结构化结果平铺在载荷顶层（{call_id, ...result}），此时序列化剩余载荷兜底，
+ * 否则工具卡预览和右栏详情都拿不到内容。 */
+export function extractToolResultText(payload: Record<string, unknown> | null | undefined): string | undefined {
+  if (!payload) return undefined;
+  const direct = payload.text ?? payload.output ?? payload.result;
+  if (direct !== undefined && direct !== null && direct !== "") {
+    return typeof direct === "string" ? direct : JSON.stringify(direct);
+  }
+  const rest = { ...payload };
+  delete rest.call_id;
+  return Object.keys(rest).length ? JSON.stringify(rest) : undefined;
+}
+
 // ── Hook ──
 // 聊天状态是应用级单例（经 CopilotChatProvider 提供）：聊天主屏与业务页侧栏
 // 共享同一份会话/消息/EventSource，切屏不断流、不状态分裂。
@@ -353,9 +367,10 @@ function useCopilotChatState() {
           const data = JSON.parse((streamEvent as MessageEvent).data);
           const p = (data?.payload || {}) as Record<string, unknown>;
           const callId = String(p.call_id || "");
+          const resultText = extractToolResultText(p);
           setStreamMessage((prev) => prev ? {
             ...prev,
-            tools: prev.tools.map((t) => t.callId === callId ? { ...t, status: "done" } : t),
+            tools: prev.tools.map((t) => t.callId === callId ? { ...t, status: "done", resultText } : t),
           } : prev);
         } catch { /* empty */ }
       });

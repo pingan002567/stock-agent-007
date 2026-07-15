@@ -17,7 +17,7 @@ function stripToolCallTags(text: string): string {
   return cleaned.trim();
 }
 
-interface ToolInfo {
+export interface ToolInfo {
   name: string;
   done: boolean;
   failed?: boolean;
@@ -28,9 +28,59 @@ interface ToolInfo {
 interface Props {
   msg: CopilotMessage;
   tools?: ToolInfo[];
+  /** 提供时工具卡可点击（聊天中心主区 → 右栏详情联动） */
+  onToolClick?: (tool: ToolInfo) => void;
 }
 
-export function CopilotMessageItem({ msg, tools }: Props) {
+/** final / error 两个分支共用的「调用了 N 个工具」折叠区 */
+function ToolListSection({ tools, open, onToggle, onToolClick }: {
+  tools: ToolInfo[];
+  open: boolean;
+  onToggle: () => void;
+  onToolClick?: (tool: ToolInfo) => void;
+}) {
+  const doneCount = tools.filter((t) => t.done).length;
+  const failCount = tools.filter((t) => t.failed).length;
+  return (
+    <div className="tool-list-wrap">
+      <button className="tool-list-toggle" onClick={onToggle}>
+        <span className="tool-list-arrow">{open ? "▼" : "▶"}</span>
+        <span className="tool-list-summary">
+          调用了 {tools.length} 个工具
+          {doneCount > 0 && <span className="tool-count-ok"> · {doneCount} 完成</span>}
+          {failCount > 0 && <span className="tool-count-fail"> · {failCount} 失败</span>}
+        </span>
+      </button>
+      {open && (
+        <div className="tool-list-body">
+          {tools.map((t) => (
+            <div
+              key={t.id}
+              className={`tool-card${onToolClick ? " clickable" : ""}`}
+              onClick={onToolClick ? () => onToolClick(t) : undefined}
+              title={onToolClick ? "查看完整结果" : undefined}
+            >
+              <div className="tool-card-header">
+                <span className={`tool-dot ${t.failed ? "fail" : t.done ? "ok" : "busy"}`} />
+                <span className="tool-name">{toolLabel(t.name)}</span>
+                <span className={`tool-status-text ${t.failed ? "failed" : t.done ? "success" : "running"}`}>
+                  {t.failed ? "⚠ 失败" : t.done ? "✓ 完成" : "⏳ 进行中"}
+                </span>
+              </div>
+              {t.resultText && (
+                <div className="tool-card-body">
+                  {t.resultText.length > 200 ? t.resultText.slice(0, 200) + "…" : t.resultText}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function CopilotMessageItem({ msg, tools, onToolClick }: Props) {
   const ev = parseCopilotEvent(msg as unknown as Record<string, unknown>);
   const isUser = msg.role === "user";
   const isFinal = msg.kind === "final_answer";
@@ -48,41 +98,10 @@ export function CopilotMessageItem({ msg, tools }: Props) {
     cls += " ai";
     const evPayload = ev.payload as Record<string, unknown>;
     const raw = (evPayload.conclusion as string) || msg.text || "";
-    const doneCount = tools?.filter(t => t.done).length || 0;
-    const failCount = tools?.filter(t => t.failed).length || 0;
     body = (
       <>
         {hasTools && (
-          <div className="tool-list-wrap">
-            <button className="tool-list-toggle" onClick={() => setOpenTools((v) => !v)}>
-              <span className="tool-list-arrow">{openTools ? "▼" : "▶"}</span>
-              <span className="tool-list-summary">
-                调用了 {tools!.length} 个工具
-                {doneCount > 0 && <span className="tool-count-ok"> · {doneCount} 完成</span>}
-                {failCount > 0 && <span className="tool-count-fail"> · {failCount} 失败</span>}
-              </span>
-            </button>
-            {openTools && (
-              <div className="tool-list-body">
-                {tools!.map((t) => (
-                  <div key={t.id} className="tool-card">
-                    <div className="tool-card-header">
-                      <span className={`tool-dot ${t.failed ? "fail" : t.done ? "ok" : "busy"}`} />
-                      <span className="tool-name">{toolLabel(t.name)}</span>
-                      <span className={`tool-status-text ${t.failed ? "failed" : t.done ? "success" : "running"}`}>
-                        {t.failed ? "⚠ 失败" : t.done ? "✓ 完成" : "⏳ 进行中"}
-                      </span>
-                    </div>
-                    {t.resultText && (
-                      <div className="tool-card-body">
-                        {t.resultText.length > 200 ? t.resultText.slice(0, 200) + "…" : t.resultText}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <ToolListSection tools={tools!} open={openTools} onToggle={() => setOpenTools((v) => !v)} onToolClick={onToolClick} />
         )}
         {Boolean(evPayload.clarification) && (
           <div className="clarification-hint" style={{ marginBottom: 4 }}>❓ AI 反问澄清 · 回复即可继续</div>
@@ -94,36 +113,10 @@ export function CopilotMessageItem({ msg, tools }: Props) {
   } else if (isErrorEvent) {
     cls += " error";
     const evPayload = ev.payload as Record<string, unknown>;
-    const doneCount = tools?.filter(t => t.done).length || 0;
-    const failCount = tools?.filter(t => t.failed).length || 0;
     body = (
       <>
         {hasTools && (
-          <div className="tool-list-wrap">
-            <button className="tool-list-toggle" onClick={() => setOpenTools((v) => !v)}>
-              <span className="tool-list-arrow">{openTools ? "▼" : "▶"}</span>
-              <span className="tool-list-summary">
-                调用了 {tools!.length} 个工具
-                {doneCount > 0 && <span className="tool-count-ok"> · {doneCount} 完成</span>}
-                {failCount > 0 && <span className="tool-count-fail"> · {failCount} 失败</span>}
-              </span>
-            </button>
-            {openTools && (
-              <div className="tool-list-body">
-                {tools!.map((t) => (
-                  <div key={t.id} className="tool-card">
-                    <div className="tool-card-header">
-                      <span className={`tool-dot ${t.failed ? "fail" : t.done ? "ok" : "busy"}`} />
-                      <span className="tool-name">{toolLabel(t.name)}</span>
-                      <span className={`tool-status-text ${t.failed ? "failed" : t.done ? "success" : "running"}`}>
-                        {t.failed ? "⚠ 失败" : t.done ? "✓ 完成" : "⏳ 进行中"}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <ToolListSection tools={tools!} open={openTools} onToggle={() => setOpenTools((v) => !v)} onToolClick={onToolClick} />
         )}
         <>⚠️ {(evPayload.error as string) || msg.text || "error"}</>
       </>
