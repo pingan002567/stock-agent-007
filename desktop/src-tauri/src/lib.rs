@@ -48,6 +48,7 @@ fn repo_root() -> std::path::PathBuf {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![service_cli, navigate])
         .setup(|app| {
             // 空白页自愈：实测两种情况会让 webview 停在 about:blank——

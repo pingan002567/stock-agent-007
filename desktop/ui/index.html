@@ -41,6 +41,36 @@
   button:disabled { opacity: 0.5; cursor: default; }
   button.ghost { background: transparent; border: 1px solid #2a2e3a; color: #8a8f9c; margin-top: 8px; }
   .err { color: #e05a5a; font-size: 12px; margin-top: 10px; white-space: pre-wrap; word-break: break-all; }
+
+  /* 首启向导 */
+  .step-dots { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 4px 0 18px; }
+  .step-dot {
+    width: 22px; height: 22px; border-radius: 50%;
+    display: grid; place-items: center;
+    font: 600 11px/1 ui-monospace, Menlo, monospace;
+    color: #8a8f9c; border: 1px solid #2a2e3a; background: #171a21;
+  }
+  .step-dot.on { color: #fff; background: #5b8cff; border-color: #5b8cff; }
+  .step-dot.done { color: #5b8cff; border-color: #5b8cff; }
+  .step-line { width: 34px; height: 1px; background: #2a2e3a; }
+  .setup-step { display: none; }
+  .setup-step.on { display: block; animation: stepin .2s ease both; }
+  @keyframes stepin { from { opacity: 0; transform: translateX(8px); } }
+  .step-desc { font-size: 12.5px; color: #8a8f9c; line-height: 1.6; margin-bottom: 12px; }
+  .btn-row { display: flex; gap: 8px; margin-top: 16px; }
+  .btn-row button { margin-top: 0; }
+  .btn-row .ghost { width: 90px; flex: none; }
+  .browse-row { display: flex; gap: 8px; }
+  .browse-row input { flex: 1; }
+  .browse-row .ghost { width: 74px; flex: none; margin-top: 0; padding: 0; }
+  .field-hint { font-size: 11px; color: #565f73; margin-top: 6px; min-height: 15px; }
+  .confirm-box { border: 1px solid #2a2e3a; border-radius: 10px; padding: 4px 12px; }
+  .confirm-row {
+    display: flex; justify-content: space-between; gap: 16px;
+    font-size: 12px; color: #8a8f9c; padding: 8px 0;
+  }
+  .confirm-row + .confirm-row { border-top: 1px solid #1d212b; }
+  .confirm-row .mono { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -52,14 +82,57 @@
       <div class="hint" id="splash-hint"></div>
     </div>
 
-    <!-- 闸门：环境检测 + 数据目录 + 服务注册（doc/DESKTOP_APP_PLAN.md §3.1） -->
+    <!-- 首启向导：环境检测 → 工作目录 → 注册启动（doc/DESKTOP_APP_PLAN.md §3.1 闸门式串行） -->
     <div id="gate-setup" class="gate">
       <h2>初始化 Stock Agent</h2>
-      <div id="checklist"></div>
-      <label for="dataDir">数据目录（行情缓存 / 会话 / 报告存放位置）</label>
-      <input type="text" id="dataDir" spellcheck="false" />
-      <button id="installBtn">注册后台服务并启动</button>
-      <div class="err" id="setupErr"></div>
+      <div class="step-dots">
+        <span class="step-dot" data-step="1">1</span><span class="step-line"></span
+        ><span class="step-dot" data-step="2">2</span><span class="step-line"></span
+        ><span class="step-dot" data-step="3">3</span>
+      </div>
+
+      <!-- 步骤 1：环境检测 -->
+      <div class="setup-step" data-step="1">
+        <div class="step-desc">欢迎使用 Stock Agent。先确认运行环境就绪：</div>
+        <div id="checklist"></div>
+        <div class="btn-row">
+          <button id="step1Next">继续</button>
+        </div>
+      </div>
+
+      <!-- 步骤 2：工作目录 -->
+      <div class="setup-step" data-step="2">
+        <div class="step-desc">
+          选择工作目录——行情缓存、会话记录、生成的报告都会存放在这里。
+          默认位置即可，也可以选到 iCloud/移动硬盘等自定义位置。
+        </div>
+        <label for="dataDir">工作目录</label>
+        <div class="browse-row">
+          <input type="text" id="dataDir" spellcheck="false" />
+          <button class="ghost" id="browseBtn" type="button">浏览…</button>
+        </div>
+        <div class="field-hint" id="dirHint"></div>
+        <div class="btn-row">
+          <button class="ghost" data-back="1">上一步</button>
+          <button id="step2Next">继续</button>
+        </div>
+      </div>
+
+      <!-- 步骤 3：确认并启动 -->
+      <div class="setup-step" data-step="3">
+        <div class="step-desc">确认无误后注册后台服务。服务由系统守护（launchd），
+          开机自启、崩溃自动拉起，之后打开应用即直接进入。</div>
+        <div class="confirm-box">
+          <div class="confirm-row"><span>工作目录</span><span class="mono" id="confirmDir"></span></div>
+          <div class="confirm-row"><span>服务端口</span><span class="mono">自动分配（默认 8686）</span></div>
+          <div class="confirm-row"><span>开机自启</span><span class="mono">是（launchd KeepAlive）</span></div>
+        </div>
+        <div class="btn-row">
+          <button class="ghost" data-back="2">上一步</button>
+          <button id="installBtn">注册后台服务并启动</button>
+        </div>
+        <div class="err" id="setupErr"></div>
+      </div>
     </div>
 
     <!-- 修复向导：自愈失败才出现（§3.1.4 多层自愈，UI 只在失败时打断） -->
@@ -115,7 +188,47 @@
       const ok = !!d[key];
       return `<div class="check ${ok ? "ok" : "bad"}"><span class="mark">${ok ? "✓" : "✗"}</span>${label}</div>`;
     }).join("");
+    // 关键项（平台/运行时/前端产物）不满足时不放行；目录可写在第 2 步自选后由服务端校验
+    $("step1Next").disabled = !(d.platform_ok && d.venv_python_exists && d.frontend_dist_exists);
   }
+
+  // ── 首启向导：闸门式串行（§3.1） ──
+  let defaultDataDir = "";
+  function showStep(n) {
+    document.querySelectorAll(".setup-step").forEach((s) =>
+      s.classList.toggle("on", Number(s.dataset.step) === n));
+    document.querySelectorAll(".step-dot").forEach((dot) => {
+      const k = Number(dot.dataset.step);
+      dot.classList.toggle("on", k === n);
+      dot.classList.toggle("done", k < n);
+    });
+    if (n === 3) $("confirmDir").textContent = $("dataDir").value.trim();
+  }
+  function openSetup(d) {
+    renderChecklist(d);
+    defaultDataDir = d.data_dir || "";
+    if (!$("dataDir").value) $("dataDir").value = defaultDataDir;
+    $("dirHint").textContent = `默认：${defaultDataDir}`;
+    showGate("setup");
+    showStep(1);
+  }
+  $("step1Next").addEventListener("click", () => showStep(2));
+  $("step2Next").addEventListener("click", () => {
+    if (!$("dataDir").value.trim()) { $("dirHint").textContent = "请填写或选择一个目录"; return; }
+    showStep(3);
+  });
+  document.querySelectorAll("[data-back]").forEach((b) =>
+    b.addEventListener("click", () => showStep(Number(b.dataset.back))));
+
+  // 原生目录选择（tauri-plugin-dialog）；不可用时隐藏浏览按钮，退回手输
+  const dialogOpen = window.__TAURI__ && window.__TAURI__.dialog && window.__TAURI__.dialog.open;
+  if (!dialogOpen) $("browseBtn").style.display = "none";
+  $("browseBtn").addEventListener("click", async () => {
+    try {
+      const picked = await dialogOpen({ directory: true, defaultPath: $("dataDir").value.trim() || defaultDataDir, title: "选择 Stock Agent 工作目录" });
+      if (picked) $("dataDir").value = picked;
+    } catch (e) { $("dirHint").textContent = String(e); }
+  });
 
   async function waitHealthy(port, rounds = 24) {
     for (let i = 0; i < rounds; i++) {
@@ -162,10 +275,7 @@
     }
 
     if (!d.service_installed) {
-      // 闸门：首次安装
-      renderChecklist(d);
-      $("dataDir").value = d.data_dir || "";
-      showGate("setup");
+      openSetup(d); // 首启向导：检测 → 工作目录 → 注册
       return;
     }
 
@@ -214,9 +324,7 @@
     try {
       await cli("uninstall");
       const d = await cli("doctor");
-      renderChecklist(d);
-      $("dataDir").value = d.data_dir || "";
-      showGate("setup");
+      openSetup(d);
     } catch (e) { $("repairErr").textContent = String(e); }
   });
 
