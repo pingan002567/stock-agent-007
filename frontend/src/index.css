@@ -245,7 +245,26 @@ pre {
   border-right: 1px solid var(--line);
   min-height: 0;
 }
-.brand { display: flex; align-items: center; gap: 10px; padding: 16px 16px 12px; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 16px 12px 12px 16px; }
+.brand > div:nth-child(2) { flex: 1; min-width: 0; }
+.brand-status { display: flex; align-items: center; gap: 8px; flex: none; }
+.brand-status-col { display: grid; justify-items: end; gap: 2px; }
+.brand-clock {
+  font-family: var(--mono, ui-monospace, Menlo, monospace);
+  font-size: 10.5px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.brand-ai {
+  display: flex; align-items: center; gap: 4px;
+  font-family: var(--mono, ui-monospace, Menlo, monospace);
+  font-size: 9.5px; color: var(--msg-time);
+}
+.brand-avatar {
+  width: 24px; height: 24px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--blue) 22%, transparent);
+  color: var(--blue); font-size: 11px; font-weight: 700;
+}
 .brand-logo {
   width: 34px; height: 34px; border-radius: 9px; flex: none;
   background: linear-gradient(180deg, #171b26, #0b0d13);

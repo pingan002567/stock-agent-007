@@ -1,6 +1,29 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useCopilotChat } from "@/hooks/useCopilotChat";
 import type { CopilotSession } from "@/api/client";
+
+const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
+
+/** 品牌区状态簇：时钟 + AI 状态 + 头像（原页面 topbar 右侧集群上移至此） */
+function BrandStatus() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} 周${WEEKDAYS[now.getDay()]}`;
+  const time = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  return (
+    <div className="brand-status">
+      <div className="brand-status-col" title={date}>
+        <span className="brand-clock">{time}</span>
+        <span className="brand-ai"><span className="dot-ok"/>AI 就绪</span>
+      </div>
+      <div className="brand-avatar">Z</div>
+    </div>
+  );
+}
 
 /** 三栏布局左栏（doc/design/three-column-mockup.html）：
  * 品牌区 + 新建/搜索 + 按时间分组的会话列表 + 系统设置沉底。
@@ -75,6 +98,7 @@ export function LeftSidebar({ onOpenSettings }: { onOpenSettings: () => void }) 
           <div className="brand-name">Stock Agent</div>
           <div className="brand-sub">local · {window.location.port || "80"}</div>
         </div>
+        <BrandStatus />
       </div>
 
       <div className="left-actions">
@@ -175,7 +199,6 @@ export function LeftSidebar({ onOpenSettings }: { onOpenSettings: () => void }) 
         <button className="foot-item" onClick={onOpenSettings}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           系统设置
-          <span className="foot-status"><span className="dot-ok"/>AI 就绪</span>
         </button>
       </div>
     </aside>
