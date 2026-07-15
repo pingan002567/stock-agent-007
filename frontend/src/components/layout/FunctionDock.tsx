@@ -31,8 +31,7 @@ export function FunctionDock() {
 
   const stripItems = navItems.filter((n) => n.screen !== "chat");
   const panelOpen = detailOpen || currentScreen !== "chat";
-  const screenLabel = stripItems.find((n) => n.screen === currentScreen)?.label
-    ?? (currentScreen === "settings" ? "系统设置" : "");
+  const screenLabel = stripItems.find((n) => n.screen === currentScreen)?.label ?? "";
 
   const handleStrip = (screen: (typeof stripItems)[number]["screen"]) => {
     if (detailOpen) closeDetail();

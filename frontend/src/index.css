@@ -412,6 +412,38 @@ html.resizing { cursor: col-resize; user-select: none; }
 }
 .strip-btn:hover .strip-tip { opacity: 1; transform: translateY(-50%) translateX(0); }
 .strip-gap { flex: 1; }
+
+/* ─── 系统设置：居中悬浮模态（TeamClaw 式） ─── */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(4, 6, 10, 0.62);
+  backdrop-filter: blur(3px);
+  display: grid; place-items: center;
+  animation: backdrop-in 0.18s ease both;
+}
+@keyframes backdrop-in { from { opacity: 0; } }
+.settings-modal {
+  width: min(940px, calc(100vw - 64px));
+  height: min(82vh, 760px);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+  display: grid; grid-template-rows: auto 1fr;
+  overflow: hidden;
+  animation: modal-in 0.22s cubic-bezier(0.3, 0.8, 0.3, 1) both;
+}
+@keyframes modal-in { from { opacity: 0; transform: translateY(10px) scale(0.985); } }
+.settings-modal-head {
+  display: flex; align-items: center;
+  height: 48px; padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-secondary);
+}
+.settings-modal-title { font-size: 13.5px; font-weight: 700; color: var(--ink); }
+.settings-modal-head .func-close { margin-left: auto; }
+.settings-modal-body { min-height: 0; overflow-y: auto; }
+.settings-modal-body .page { min-width: 0; }
 .resize-handle {
   position: absolute;
   left: 0; top: 0; bottom: 0;
