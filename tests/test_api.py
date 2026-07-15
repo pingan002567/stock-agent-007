@@ -3013,3 +3013,64 @@ def test_runtime_mcp_routes_validate_and_degrade_in_stub_mode(tmp_path):
         ).status_code
         == 409
     )
+
+
+def test_upload_text_sniff_edges():
+    from backend.api.routes_copilot import _looks_like_utf8_text
+
+    assert _looks_like_utf8_text(b"hello world")
+    assert _looks_like_utf8_text("中文文本，任意扩展名".encode())
+    assert _looks_like_utf8_text(b"")  # 空文件按文本放行
+    # 嗅探窗口把多字节字符截断在末尾 → 仍判定为文本
+    assert _looks_like_utf8_text(("好" * 100).encode()[:-1])
+    # NUL 字节 → 二进制
+    assert not _looks_like_utf8_text(b"abc\x00def")
+    # 窗口中部出现非法 UTF-8 字节 → 二进制
+    assert not _looks_like_utf8_text(b"\xff\xfe" + b"a" * 100)
+
+
+def test_upload_files_deerflow_capability_gate(tmp_path, monkeypatch):
+    """上传接收范围对齐 DeerFlow 文件能力：文本嗅探放行、Office/图片按扩展名、二进制 415。"""
+    client = make_client(tmp_path)
+    services = client.app.state.services
+    session_id = client.post("/api/copilot/sessions", json={}).json()["session_id"]
+
+    captured: list[list[str]] = []
+
+    def fake_upload(thread_id, paths):
+        captured.append([Path(p).name for p in paths])
+        return {
+            "supported": True,
+            "success": True,
+            "files": [{"filename": Path(p).name} for p in paths],
+        }
+
+    monkeypatch.setattr(services.copilot_service.deerflow, "upload_files", fake_upload)
+
+    # 任意扩展名/无扩展名的 UTF-8 文本 → 放行
+    resp = client.post(
+        f"/api/copilot/sessions/{session_id}/uploads",
+        files=[
+            ("files", ("strategy.py", b"def alpha():\n    return 42\n", "text/x-python")),
+            ("files", ("笔记", "中文无扩展名文本".encode(), "application/octet-stream")),
+        ],
+    )
+    assert resp.status_code == 200
+    assert captured[-1][0] == "strategy.py"
+
+    # 图片/Office 按扩展名放行，不做文本嗅探
+    resp = client.post(
+        f"/api/copilot/sessions/{session_id}/uploads",
+        files=[("files", ("chart.png", b"\x89PNG\r\n\x1a\n" + bytes(32), "image/png"))],
+    )
+    assert resp.status_code == 200
+
+    # 真二进制（含 NUL）→ 415，且不触达 DeerFlow
+    calls_before = len(captured)
+    resp = client.post(
+        f"/api/copilot/sessions/{session_id}/uploads",
+        files=[("files", ("data.sqlite3", b"SQLite format 3\x00" + bytes(64), "application/octet-stream"))],
+    )
+    assert resp.status_code == 415
+    assert "unsupported binary file" in resp.json()["detail"]
+    assert len(captured) == calls_before

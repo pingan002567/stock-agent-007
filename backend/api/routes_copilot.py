@@ -58,14 +58,27 @@ def delete_session(session_id: str, request: Request, services: AppServices = De
     return {"status": "deleted"}
 
 
-# 允许的研报/资料类型：PDF/Office 会被 DeerFlow 自动转 Markdown，纯文本直接可读；
-# 图片（K线截图/研报图表）由 view_image 工具读取，需模型 supports_vision
-_UPLOAD_ALLOWED_EXTENSIONS = {
-    ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx",
-    ".md", ".txt", ".csv",
-    ".png", ".jpg", ".jpeg", ".webp",
-}
+# 按 DeerFlow 实际文件能力三档放行（对齐其实现但不 import 其内部）：
+# 1) Office/PDF —— upload_files 自动转 Markdown（对应 file_conversion.CONVERTIBLE_EXTENSIONS）
+# 2) 图片 —— view_image 工具可读（仅 jpg/png/webp，gif 不支持），需模型 supports_vision
+# 3) 任意 UTF-8 文本 —— read_file/grep 直接可读，不限扩展名，按内容嗅探判定
+# 其余二进制（zip/sqlite/音视频…）沙箱只读工具读不了，拒收
+_CONVERTIBLE_EXTENSIONS = {".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"}
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 _UPLOAD_MAX_BYTES = 50 * 1024 * 1024
+_TEXT_SNIFF_BYTES = 64 * 1024
+
+
+def _looks_like_utf8_text(sample: bytes) -> bool:
+    """含 NUL 或非 UTF-8 视为二进制；嗅探窗口截断多字节字符尾部时放行。"""
+    if b"\x00" in sample:
+        return False
+    try:
+        sample.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        # UTF-8 单字符最长 4 字节，仅当解码错误落在窗口末尾（截断导致）才算文本
+        return exc.start >= len(sample) - 3
+    return True
 
 
 @router.post("/sessions/{session_id}/uploads")
@@ -75,20 +88,17 @@ def upload_session_files(
     request: Request,
     services: AppServices = Depends(get_services),
 ):
-    """上传研报/年报等资料到会话线程，供 AI 在后续对话中直接读取。"""
+    """上传文件到会话线程，供 AI 在后续对话中直接读取。
+
+    接收范围即 DeerFlow 可消费范围：Office/PDF（自动转 Markdown）、
+    图片（view_image）、任意 UTF-8 文本（read_file/grep，扩展名不限）。
+    """
     try:
         services.copilot_service.get_session(session_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
     if not files:
         raise HTTPException(status_code=422, detail="no files provided")
-    for f in files:
-        suffix = Path(f.filename or "").suffix.lower()
-        if suffix not in _UPLOAD_ALLOWED_EXTENSIONS:
-            raise HTTPException(
-                status_code=415,
-                detail=f"unsupported file type: {f.filename}（支持 {'/'.join(sorted(_UPLOAD_ALLOWED_EXTENSIONS))}）",
-            )
 
     with tempfile.TemporaryDirectory(prefix="copilot-upload-") as tmp_dir:
         local_paths: list[str] = []
@@ -105,6 +115,19 @@ def upload_session_files(
                             detail=f"file too large: {f.filename}（上限 50MB）",
                         )
                     out.write(chunk)
+            # Office/PDF/图片按扩展名放行；其余落盘后嗅探内容，仅拒真二进制
+            suffix = dest.suffix.lower()
+            if suffix not in _CONVERTIBLE_EXTENSIONS and suffix not in _IMAGE_EXTENSIONS:
+                with dest.open("rb") as fh:
+                    sample = fh.read(_TEXT_SNIFF_BYTES)
+                if not _looks_like_utf8_text(sample):
+                    raise HTTPException(
+                        status_code=415,
+                        detail=(
+                            f"unsupported binary file: {f.filename}"
+                            "（AI 可读：任意文本文件、PDF/Word/Excel/PPT、png/jpg/webp 图片）"
+                        ),
+                    )
             local_paths.append(str(dest))
         result = services.copilot_service.deerflow.upload_files(session_id, local_paths)
 

@@ -27,7 +27,7 @@
 
 | 能力 | DeerFlow 位置 | 对投研的价值 | 成本 |
 |---|---|---|---|
-| **文件上传 / RAG**(PDF/Excel/Word→MD) | ✅ 已接线（2026-07-02）：`POST /api/copilot/sessions/{id}/uploads` + 输入框附件按钮；沙箱只读文件工具(ls/glob/grep/read_file)已注册进 config，UploadsMiddleware 自动注入文件清单 | ⭐⭐⭐ 上传**研报/年报/招股书/财报 PDF** 让 AI 直接读 | 已完成 |
+| **文件上传 / RAG**(PDF/Excel/Word→MD) | ✅ 已接线（2026-07-02）：`POST /api/copilot/sessions/{id}/uploads` + 输入框附件按钮；沙箱只读文件工具(ls/glob/grep/read_file)已注册进 config，UploadsMiddleware 自动注入文件清单。2026-07-14 接收范围对齐 DeerFlow 全量文件能力：Office/PDF（转 MD）+ 图片（view_image，png/jpg/webp）按扩展名放行，**任意 UTF-8 文本不限扩展名**（代码/日志/JSON…，内容嗅探判定），仅真二进制（zip/sqlite/音视频等）拒收 | ⭐⭐⭐ 上传**研报/年报/招股书/财报 PDF 及任意文本资料** 让 AI 直接读 | 已完成 |
 | **Sandbox 代码执行**(Python/pandas/matplotlib) | `deerflow.sandbox`(Local/Docker/K8s)+ `data-analysis`/`chart-visualization` skills | ⭐⭐⭐ 让 AI 跑真实数据做**自定义回测/画图/因子计算**，不再只调固定工具 | 中高 |
 | **多模态 / 看图**(view_image) | ✅ 已接线（2026-07-02）：上传白名单加图片(png/jpg/webp)；模型 `supports_vision` 按模型名自动判定（`WORKBENCH_AI_VISION` 可覆盖），命中后 harness 自动挂 view_image 工具+中间件；顺带修了 config 模型名与 stream 不一致导致按模型能力判定失效的 bug | ⭐⭐ 上传 **K 线截图/研报图表** 做视觉分析 | 已完成 |
 | **MCP 集成** | ✅ 已接线（2026-07-02）：`/api/runtime/mcp` GET/PUT + 设置页「MCP 服务器」区块（增删/启停/stdio+sse+http）；写入 `extensions_config.json`，harness 按 mtime 自动重载工具缓存，保存后下一轮对话生效。MCP 接入后可再开 tool_search 省 prompt | ⭐⭐ 无需写代码即可接 **Wind/Choice/内部数据源/外部工具** | 已完成 |

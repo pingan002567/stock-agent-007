@@ -435,13 +435,12 @@ export function CopilotPanel({ open, onToggle }: { open: boolean; onToggle: () =
             ref={fileInputRef}
             type="file"
             multiple
-            accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.md,.txt,.csv,.png,.jpg,.jpeg,.webp"
             style={{ display: "none" }}
             onChange={(e) => handleUpload(e.target.files)}
           />
           <button
             className="ghost"
-            title="上传研报/年报/K线截图等资料（PDF/Word/Excel/PPT/图片），AI 可在本会话直接读取"
+            title="上传资料给 AI 在本会话读取：PDF/Word/Excel/PPT 自动转 Markdown，图片（png/jpg/webp）可看图，任意文本文件（代码/日志/JSON…）直接可读；仅其他二进制格式不支持"
             disabled={uploading || sending}
             onClick={() => fileInputRef.current?.click()}
             style={{ height: 40, padding: "0 10px" }}
