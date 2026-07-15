@@ -106,7 +106,9 @@ function pairMessages(msgs: CopilotMessage[]): GroupedItem[] {
   return out;
 }
 
-export function CopilotPanel({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+/** variant="panel"：业务页右侧伴随面板（可折叠）；variant="main"：聊天中心主区
+ * （会话管理交给 SessionListColumn，无折叠/关闭按钮）。两者共享 Provider 状态。 */
+export function CopilotPanel({ open = true, onToggle, variant = "panel" }: { open?: boolean; onToggle?: () => void; variant?: "panel" | "main" }) {
   const {
     copilotContextVersion,
     setCurrentScreen, setStock, appDataCache,
@@ -275,14 +277,14 @@ export function CopilotPanel({ open, onToggle }: { open: boolean; onToggle: () =
     });
   }, [messages, copiedId, handleCopy, handleNavigate, handleApi]);
 
-  if (!open) {
+  if (variant === "panel" && !open) {
     return <button className="copilot-tab" onClick={onToggle} title="展开 AI 对话">‹</button>;
   }
 
   return (
-    <aside className="copilot-panel">
+    <aside className={variant === "main" ? "copilot-panel copilot-panel-main" : "copilot-panel"}>
       <div className="copilot-head">
-        <div ref={sessionRef} style={{ position: "relative" }}>
+        {variant === "panel" && (<div ref={sessionRef} style={{ position: "relative" }}>
           <button
             className="session-trigger"
             onClick={() => setSessionOpen((v) => !v)}
@@ -364,15 +366,17 @@ export function CopilotPanel({ open, onToggle }: { open: boolean; onToggle: () =
               </div>
             </div>
           )}
-        </div>
+        </div>)}
         <div className="copilot-title" style={{ flex: 1, justifyContent: "center" }}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z" fill="currentColor"/>
             <circle cx="12" cy="12" r="3"/>
           </svg>
-          <span>AI Copilot</span>
+          <span>{variant === "main" ? (currentSession?.title || "AI Copilot") : "AI Copilot"}</span>
         </div>
-        <button className="copilot-close-btn" onClick={onToggle} title="关闭 AI Chat">›</button>
+        {variant === "panel" && (
+          <button className="copilot-close-btn" onClick={onToggle} title="关闭 AI Chat">›</button>
+        )}
       </div>
 
       <div className="copilot-body">

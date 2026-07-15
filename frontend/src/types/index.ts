@@ -1,4 +1,5 @@
 export type Screen =
+  | "chat"
   | "overview"
   | "watchlist"
   | "holdings"

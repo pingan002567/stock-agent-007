@@ -3,6 +3,11 @@ import type { Screen } from "@/types";
 import { useMemo, type ReactNode } from "react";
 
 const icons: Record<string, ReactNode> = {
+  chat: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+    </svg>
+  ),
   overview: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <rect x="3" y="3" width="7" height="7" rx="1"/>
@@ -74,6 +79,7 @@ const icons: Record<string, ReactNode> = {
 };
 
 const navItems: { screen: Screen; label: string }[] = [
+  { screen: "chat", label: "对话" },
   { screen: "overview", label: "总览" },
   { screen: "research", label: "个股" },
   { screen: "market", label: "市场" },

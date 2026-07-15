@@ -61,6 +61,7 @@ interface AppStateValue {
 const AppStateContext = createContext<AppStateValue | null>(null);
 
 const screenLabels: Record<Screen, string> = {
+  chat: "对话",
   overview: "总览",
   watchlist: "自选",
   holdings: "持仓",
@@ -83,7 +84,8 @@ function applyDarkClass(dark: boolean) {
 }
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
-  const [currentScreen, setCurrentScreen] = useState<Screen>("overview");
+  // 聊天会话中心：对话即首屏（doc/DESKTOP_APP_PLAN.md §3.4 迁移第 1 步）
+  const [currentScreen, setCurrentScreen] = useState<Screen>("chat");
   const [stock, setStock] = useState("");
   const [copilotStreaming, setCopilotStreaming] = useState(false);
   const [streamingReasoningText, setStreamingReasoningText] = useState("");

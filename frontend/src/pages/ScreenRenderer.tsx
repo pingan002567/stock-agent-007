@@ -2,6 +2,7 @@ import { Suspense, lazy } from "react";
 import { useAppState } from "@/hooks/useAppState";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 
+const Chat = lazy(() => import("./Chat"));
 const Overview = lazy(() => import("./Overview"));
 const Watchlist = lazy(() => import("./Watchlist"));
 const Holdings = lazy(() => import("./Holdings"));
@@ -20,6 +21,7 @@ export function ScreenRenderer() {
   const { currentScreen } = useAppState();
   const page = (() => {
     switch (currentScreen) {
+      case "chat": return <Chat />;
       case "overview": return <Overview />;
       case "watchlist": return <Watchlist />;
       case "holdings": return <Holdings />;

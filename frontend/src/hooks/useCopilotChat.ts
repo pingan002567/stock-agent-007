@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, createContext, useContext, createElement, type ReactNode } from "react";
 import { useAppState } from "@/hooks/useAppState";
 import {
   createSession,
@@ -103,8 +103,10 @@ export function toolLabel(name: string): string {
 }
 
 // ── Hook ──
+// 聊天状态是应用级单例（经 CopilotChatProvider 提供）：聊天主屏与业务页侧栏
+// 共享同一份会话/消息/EventSource，切屏不断流、不状态分裂。
 
-export function useCopilotChat() {
+function useCopilotChatState() {
   const {
     currentScreen, stock,
     setCopilotStreaming,
@@ -517,4 +519,19 @@ export function useCopilotChat() {
     handleCopy,
     toggleToolOpen,
   };
+}
+
+export type CopilotChatValue = ReturnType<typeof useCopilotChatState>;
+
+const CopilotChatContext = createContext<CopilotChatValue | null>(null);
+
+export function CopilotChatProvider({ children }: { children: ReactNode }) {
+  const value = useCopilotChatState();
+  return createElement(CopilotChatContext.Provider, { value }, children);
+}
+
+export function useCopilotChat(): CopilotChatValue {
+  const ctx = useContext(CopilotChatContext);
+  if (!ctx) throw new Error("useCopilotChat must be used within CopilotChatProvider");
+  return ctx;
 }
