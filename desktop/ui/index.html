@@ -10,7 +10,7 @@
     background: #0f1115; color: #e6e6e6;
     font-family: -apple-system, "PingFang SC", sans-serif;
   }
-  .box { text-align: center; }
+  .box { text-align: center; width: 420px; }
   .spinner {
     width: 36px; height: 36px; margin: 0 auto 16px;
     border: 3px solid #2a2e3a; border-top-color: #5b8cff;
@@ -18,35 +18,191 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   .hint { color: #8a8f9c; font-size: 13px; margin-top: 10px; min-height: 20px; }
-  code { color: #b7c4e0; }
+  code, .mono { font-family: ui-monospace, Menlo, monospace; color: #b7c4e0; font-size: 12px; }
+  .gate { display: none; text-align: left; }
+  .gate.active { display: block; }
+  .gate h2 { font-size: 16px; margin: 0 0 14px; text-align: center; }
+  .check { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 13px; }
+  .check .mark { width: 16px; text-align: center; }
+  .check.ok .mark { color: #4caf7d; }
+  .check.bad .mark { color: #e05a5a; }
+  .check.bad { color: #e6b0b0; }
+  label { display: block; font-size: 12px; color: #8a8f9c; margin: 16px 0 6px; }
+  input[type="text"] {
+    width: 100%; box-sizing: border-box; padding: 8px 10px;
+    background: #171a21; border: 1px solid #2a2e3a; border-radius: 7px;
+    color: #e6e6e6; font-size: 13px; font-family: ui-monospace, Menlo, monospace;
+  }
+  button {
+    margin-top: 16px; width: 100%; padding: 9px 0;
+    background: #5b8cff; color: #fff; border: none; border-radius: 7px;
+    font-size: 14px; cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.ghost { background: transparent; border: 1px solid #2a2e3a; color: #8a8f9c; margin-top: 8px; }
+  .err { color: #e05a5a; font-size: 12px; margin-top: 10px; white-space: pre-wrap; word-break: break-all; }
 </style>
 </head>
 <body>
   <div class="box">
-    <div class="spinner"></div>
-    <div>正在连接 Stock Agent 后端…</div>
-    <div class="hint" id="hint"></div>
-  </div>
-<script>
-  // Phase 0：后端由 ./start.sh 手动启动；本页仅探活后跳转。
-  // no-cors 探测：后端可达时 fetch resolve（opaque），连接拒绝时 reject——
-  // 不需要后端加 CORS 头。跳转本身不受同源策略限制。
-  const BACKEND = "http://127.0.0.1:6666";
-  const started = Date.now();
-  const hint = document.getElementById("hint");
+    <!-- 探活/过渡态 -->
+    <div id="gate-splash" class="gate active" style="text-align:center">
+      <div class="spinner"></div>
+      <div id="splash-text">正在连接 Stock Agent 后端…</div>
+      <div class="hint" id="splash-hint"></div>
+    </div>
 
-  async function probe() {
-    try {
-      await fetch(BACKEND + "/api/health", { mode: "no-cors", cache: "no-store" });
-      window.location.replace(BACKEND + "/");
-    } catch (_) {
-      if (Date.now() - started > 8000) {
-        hint.innerHTML = "后端未启动？请在项目目录运行 <code>./start.sh</code>";
-      }
-      setTimeout(probe, 800);
-    }
+    <!-- 闸门：环境检测 + 数据目录 + 服务注册（doc/DESKTOP_APP_PLAN.md §3.1） -->
+    <div id="gate-setup" class="gate">
+      <h2>初始化 Stock Agent</h2>
+      <div id="checklist"></div>
+      <label for="dataDir">数据目录（行情缓存 / 会话 / 报告存放位置）</label>
+      <input type="text" id="dataDir" spellcheck="false" />
+      <button id="installBtn">注册后台服务并启动</button>
+      <div class="err" id="setupErr"></div>
+    </div>
+
+    <!-- 修复向导：自愈失败才出现（§3.1.4 多层自愈，UI 只在失败时打断） -->
+    <div id="gate-repair" class="gate">
+      <h2>服务未响应</h2>
+      <div class="hint" style="text-align:left">
+        后台服务已注册但探活失败。日志：<br/>
+        <span class="mono" id="logPath"></span>
+      </div>
+      <button id="retryBtn">重启服务重试</button>
+      <button id="resetBtn" class="ghost">强制重置（重新注册服务）</button>
+      <div class="err" id="repairErr"></div>
+    </div>
+  </div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
+
+  function showGate(name) {
+    for (const g of document.querySelectorAll(".gate")) g.classList.remove("active");
+    $("gate-" + name).classList.add("active");
   }
-  probe();
+
+  async function cli(...args) { return await invoke("service_cli", { args }); }
+
+  // no-cors 探测：后端可达时 resolve（opaque），连接拒绝时 reject——无需后端 CORS 头
+  async function probe(port) {
+    try {
+      await fetch(`http://127.0.0.1:${port}/api/health`, { mode: "no-cors", cache: "no-store" });
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function enter(port) {
+    localStorage.setItem("sa.lastGoodPort", String(port));
+    window.location.replace(`http://127.0.0.1:${port}/`);
+  }
+
+  const CHECK_LABELS = [
+    ["platform_ok", "macOS 平台"],
+    ["venv_python_exists", "Python 运行时（.venv）"],
+    ["frontend_dist_exists", "前端产物（frontend/dist）"],
+    ["data_dir_writable", "数据目录可写"],
+  ];
+  function renderChecklist(d) {
+    $("checklist").innerHTML = CHECK_LABELS.map(([key, label]) => {
+      const ok = !!d[key];
+      return `<div class="check ${ok ? "ok" : "bad"}"><span class="mark">${ok ? "✓" : "✗"}</span>${label}</div>`;
+    }).join("");
+  }
+
+  async function waitHealthy(port, rounds = 24) {
+    for (let i = 0; i < rounds; i++) {
+      if (await probe(port)) return true;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    return false;
+  }
+
+  // 浏览器直开 ui/index.html（无 Tauri）时退回阶段 0 行为：探活 6666 循环
+  async function legacyLoop() {
+    const started = Date.now();
+    (async function tick() {
+      if (await probe(6666)) return enter(6666);
+      if (Date.now() - started > 8000)
+        $("splash-hint").innerHTML = "后端未启动？请在项目目录运行 <code>./start.sh</code>";
+      setTimeout(tick, 800);
+    })();
+  }
+
+  async function boot() {
+    // 快路径（§3.1.1 冷启动跳过冷 probe）：上次成功端口直接探活
+    const last = Number(localStorage.getItem("sa.lastGoodPort"));
+    if (last && (await probe(last))) return enter(last);
+    if (!invoke) return legacyLoop();
+
+    let d;
+    try { d = await cli("doctor"); }
+    catch (e) { $("splash-hint").textContent = String(e); return; }
+
+    if (d.backend_healthy) return enter(d.port);
+
+    if (!d.service_installed) {
+      // 闸门：首次安装
+      renderChecklist(d);
+      $("dataDir").value = d.data_dir || "";
+      showGate("setup");
+      return;
+    }
+
+    // 已安装但不健康 → 自愈：kickstart -k + 轮询，失败才打断（§3.1.4）
+    $("splash-text").textContent = "服务未响应，正在重启…";
+    try {
+      const r = await cli("restart");
+      if (r.ok && r.backend_healthy) return enter(r.port);
+    } catch (_) { /* fallthrough to repair */ }
+    $("logPath").textContent = (d.state_dir || "") + "/logs/backend.err.log";
+    showGate("repair");
+  }
+
+  $("installBtn").addEventListener("click", async () => {
+    const btn = $("installBtn");
+    btn.disabled = true;
+    btn.textContent = "正在注册并启动…";
+    $("setupErr").textContent = "";
+    const started = Date.now();
+    try {
+      const r = await cli("install", "--data-dir", $("dataDir").value.trim());
+      // 安装动作 padding ~2.5s，防止 checklist "闪一下"（§3.1.1）
+      const elapsed = Date.now() - started;
+      if (elapsed < 2500) await new Promise((res) => setTimeout(res, 2500 - elapsed));
+      if (r.ok && r.backend_healthy) return enter(r.port);
+      if (r.ok && (await waitHealthy(r.port))) return enter(r.port);
+      $("setupErr").textContent = r.error || "服务已注册但探活超时，请查看日志后重试";
+    } catch (e) {
+      $("setupErr").textContent = String(e);
+    }
+    btn.disabled = false;
+    btn.textContent = "注册后台服务并启动";
+  });
+
+  $("retryBtn").addEventListener("click", async () => {
+    $("repairErr").textContent = "";
+    try {
+      const r = await cli("restart");
+      if (r.ok && r.backend_healthy) return enter(r.port);
+      $("repairErr").textContent = r.error || "重启后仍未通过健康检查";
+    } catch (e) { $("repairErr").textContent = String(e); }
+  });
+
+  $("resetBtn").addEventListener("click", async () => {
+    $("repairErr").textContent = "";
+    try {
+      await cli("uninstall");
+      const d = await cli("doctor");
+      renderChecklist(d);
+      $("dataDir").value = d.data_dir || "";
+      showGate("setup");
+    } catch (e) { $("repairErr").textContent = String(e); }
+  });
+
+  boot();
 </script>
 </body>
 </html>
