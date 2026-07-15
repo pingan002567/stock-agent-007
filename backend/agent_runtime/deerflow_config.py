@@ -16,6 +16,7 @@ from typing import Any
 
 import yaml
 
+from backend import paths
 from backend.agent_runtime.tools import get_all_workbench_tools
 
 DEFAULT_MODEL = os.getenv("WORKBENCH_AI_MODEL") or "gpt-4o"
@@ -291,7 +292,7 @@ def generate_config(target_dir: str | Path = "data") -> str:
         "token_usage": {"enabled": True},
         "memory": {
             "enabled": True,
-            "storage_path": "data/deerflow_memory.json",
+            "storage_path": str(paths.data_dir() / "deerflow_memory.json"),
             "debounce_seconds": 30,
             "model_name": None,
             "max_facts": 50,

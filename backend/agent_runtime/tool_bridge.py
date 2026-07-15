@@ -4,6 +4,7 @@ import datetime
 from dataclasses import asdict, dataclass
 from typing import Any, Callable, Dict
 
+from backend import paths
 from backend.app_services.audit_service import AuditService
 from backend.app_services.context_builder import ContextBuilder
 from backend.app_services.decision_journal_service import DecisionJournalService
@@ -112,7 +113,7 @@ class WorkbenchToolBridge:
             monitor_service=self.monitor_service,
             strategy_service=self.strategy_service,
             audit_service=AuditService(repo),
-            file_store=FileStore("data/files"),
+            file_store=FileStore(paths.default_files_root()),
             decision_journal_service=self.decision_journal_service,
         )
         self.review_inbox_service = review_inbox_service or ReviewInboxService(

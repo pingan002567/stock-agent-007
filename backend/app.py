@@ -39,6 +39,7 @@ from backend.api import (
     routes_watchlist,
     routes_worldcup,
 )
+from backend import paths
 from backend.bootstrap import create_services
 from backend.stock_domain.provider_router import provider_router
 
@@ -62,9 +63,14 @@ def _warmup_cache() -> None:
 
 
 def create_app(
-    db_path: str = "data/workbench.sqlite3", files_root: str = "data/files"
+    db_path: str | Path | None = None, files_root: str | Path | None = None
 ) -> FastAPI:
-    services = create_services(db_path=db_path, files_root=files_root)
+    # 缺省路径经 backend.paths 解析（支持 WORKBENCH_DATA_DIR，修 cwd 陷阱）；
+    # 显式传参（测试）行为不变。
+    services = create_services(
+        db_path=db_path if db_path is not None else paths.default_db_path(),
+        files_root=files_root if files_root is not None else paths.default_files_root(),
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -103,7 +109,7 @@ def create_app(
 
     @app.get("/app", include_in_schema=False)
     def app_shell():
-        return FileResponse(Path("frontend/dist/index.html"))
+        return FileResponse(paths.frontend_dist() / "index.html")
 
     for router in [
         routes_audit.router,
@@ -133,7 +139,7 @@ def create_app(
     ]:
         app.include_router(router)
 
-    dist_path = Path("frontend/dist")
+    dist_path = paths.frontend_dist()
     if dist_path.is_dir():
         app.mount(
             "/", StaticFiles(directory=str(dist_path), html=True), name="frontend"

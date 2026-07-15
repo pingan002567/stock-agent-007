@@ -1,0 +1,372 @@
+"""StockAgent launchd 服务管理 CLI（桌面化阶段 1，doc/DESKTOP_APP_PLAN.md §2/§3.1）。
+
+用法::
+
+    python -m backend.service_cli doctor
+    python -m backend.service_cli install [--port 6666] [--data-dir PATH]
+    python -m backend.service_cli status
+    python -m backend.service_cli restart
+    python -m backend.service_cli uninstall
+    python -m backend.service_cli reset [--delete-data]
+
+设计要点（TeamClaw 平移，见计划文档 §3.1）：
+- **doctor 单点判定**：所有环境探测集中在此输出 JSON，壳/引导 UI 只渲染 checklist；
+- **动态端口**：请求端口被占自动向后顺延，结果写进 service.json 供壳读取；
+- **服务状态目录固定**（``~/Library/Application Support/StockAgent``）、数据目录可选；
+- **restart 用 kickstart -k**：原地重启顺带拾取升级后的代码，避开 bootout+bootstrap 竞态；
+- **reset 是统一的卸载入口**（TeamClaw 的教训是卸载逻辑散落三处）。
+
+所有命令输出单个 JSON 对象到 stdout，退出码 0=成功。仅支持 macOS（launchd）。
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import plistlib
+import shutil
+import socket
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+from backend import paths
+
+LABEL = "com.stockagent.backend"
+DEFAULT_PORT = 6666
+PORT_SCAN_RANGE = 50
+HEALTH_TIMEOUT_SEC = 2.0
+STARTUP_WAIT_ROUNDS = 24  # × 0.5s = 12s，对齐计划文档「轮询 12×500ms」
+
+
+def _state_dir() -> Path:
+    return paths.service_state_dir()
+
+
+def _service_json_path() -> Path:
+    return _state_dir() / "service.json"
+
+
+def _plist_path() -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
+
+
+def _launchd_domain() -> str:
+    return f"gui/{os.getuid()}"
+
+
+def _venv_python() -> Path:
+    return paths.REPO_ROOT / ".venv" / "bin" / "python"
+
+
+def read_service_config() -> dict[str, Any] | None:
+    try:
+        return json.loads(_service_json_path().read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def _port_free(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+
+
+def _port_listening(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.3)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def pick_port(requested: int) -> int:
+    """请求端口可用则用之，否则向后顺延（§2 改造清单 2：6666 被占不该让应用打不开）。"""
+    for port in range(requested, requested + PORT_SCAN_RANGE):
+        if _port_free(port):
+            return port
+    raise RuntimeError(f"no free port in [{requested}, {requested + PORT_SCAN_RANGE})")
+
+
+def probe_health(port: int) -> dict[str, Any] | None:
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/health", timeout=HEALTH_TIMEOUT_SEC
+        ) as resp:
+            return json.loads(resp.read())
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+
+
+def _launchctl(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["launchctl", *args], capture_output=True, text=True, timeout=30
+    )
+
+
+def _service_loaded() -> bool:
+    return _launchctl("print", f"{_launchd_domain()}/{LABEL}").returncode == 0
+
+
+def _service_pid() -> int | None:
+    out = _launchctl("print", f"{_launchd_domain()}/{LABEL}").stdout
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("pid = "):
+            try:
+                return int(line.split("=", 1)[1].strip())
+            except ValueError:
+                return None
+    return None
+
+
+def _read_env_file() -> dict[str, str]:
+    """读仓库 .env（阶段 1 开发形态；阶段 2 密钥入库设置页后可移除）。"""
+    env: dict[str, str] = {}
+    env_file = paths.REPO_ROOT / ".env"
+    if not env_file.is_file():
+        return env
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        env[key.strip()] = value.strip().strip('"').strip("'")
+    return env
+
+
+def _service_environment(data_dir: Path) -> dict[str, str]:
+    dotenv = _read_env_file()
+    env = {
+        "WORKBENCH_DATA_DIR": str(data_dir),
+        # 与 start.sh load_env 对齐的 AI 默认值
+        "WORKBENCH_AI_MODE": dotenv.get("WORKBENCH_AI_MODE", "direct"),
+        "OPENAI_BASE_URL": dotenv.get("OPENAI_BASE_URL", "https://api.deepseek.com/v1"),
+        "WORKBENCH_AI_MODEL": dotenv.get("WORKBENCH_AI_MODEL", "deepseek-chat"),
+        "NO_PROXY": dotenv.get(
+            "NO_PROXY", "eastmoney.com,push2.eastmoney.com,finance.sina.com.cn"
+        ),
+    }
+    if dotenv.get("OPENAI_API_KEY"):
+        env["OPENAI_API_KEY"] = dotenv["OPENAI_API_KEY"]
+    return env
+
+
+def validate_data_dir(raw: str | Path) -> Path:
+    """数据目录校验在服务端做（§3.1.3）：拒绝根路径与服务状态目录内部。"""
+    candidate = Path(raw).expanduser().resolve()
+    if candidate == Path("/") or candidate == Path.home():
+        raise ValueError(f"refusing dangerous data dir: {candidate}")
+    state = _state_dir().resolve()
+    if candidate == state or state in candidate.parents:
+        # 允许固定推荐位 state/data，拒绝其余内部路径（防软链循环/误删服务状态）
+        if candidate != paths.default_desktop_data_dir().resolve():
+            raise ValueError(f"data dir must not live inside service state dir: {candidate}")
+    return candidate
+
+
+def _write_plist(port: int, data_dir: Path) -> Path:
+    logs = _state_dir() / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    plist = {
+        "Label": LABEL,
+        "ProgramArguments": [
+            str(_venv_python()),
+            "-m",
+            "uvicorn",
+            "backend.app:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ],
+        "WorkingDirectory": str(paths.REPO_ROOT),
+        "EnvironmentVariables": _service_environment(data_dir),
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "StandardOutPath": str(logs / "backend.out.log"),
+        "StandardErrorPath": str(logs / "backend.err.log"),
+    }
+    path = _plist_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as fh:
+        plistlib.dump(plist, fh)
+    return path
+
+
+# ── commands ──
+
+
+def cmd_doctor(_args: argparse.Namespace) -> dict[str, Any]:
+    config = read_service_config()
+    port = int(config["port"]) if config and config.get("port") else DEFAULT_PORT
+    data_dir = Path(config["data_dir"]) if config and config.get("data_dir") else paths.default_desktop_data_dir()
+    data_dir_writable = False
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+        probe = data_dir / ".write_probe"
+        probe.write_text("ok")
+        probe.unlink()
+        data_dir_writable = True
+    except OSError:
+        pass
+    health = probe_health(port)
+    return {
+        "platform_ok": sys.platform == "darwin",
+        "repo_root": str(paths.REPO_ROOT),
+        "venv_python": str(_venv_python()),
+        "venv_python_exists": _venv_python().is_file(),
+        "frontend_dist_exists": paths.frontend_dist().is_dir(),
+        "service_installed": _plist_path().is_file(),
+        "service_loaded": _service_loaded(),
+        "service_pid": _service_pid(),
+        "port": port,
+        "port_listening": _port_listening(port),
+        "backend_healthy": health is not None,
+        "backend_runtime": (health or {}).get("runtime"),
+        "data_dir": str(data_dir),
+        "data_dir_writable": data_dir_writable,
+        "state_dir": str(_state_dir()),
+    }
+
+
+def cmd_install(args: argparse.Namespace) -> dict[str, Any]:
+    if sys.platform != "darwin":
+        raise RuntimeError("launchd install is macOS-only")
+    if not _venv_python().is_file():
+        raise RuntimeError(f"venv python not found: {_venv_python()} (run ./install.sh first)")
+    data_dir = validate_data_dir(args.data_dir or paths.default_desktop_data_dir())
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    # 已在跑的旧服务先卸载再装（端口探测要看到真实空闲状态）
+    if _service_loaded():
+        _launchctl("bootout", f"{_launchd_domain()}/{LABEL}")
+        time.sleep(0.5)
+
+    port = pick_port(args.port or DEFAULT_PORT)
+    plist_path = _write_plist(port, data_dir)
+
+    # 先写配置、后 bootstrap（§3.1.2：不装出没配置好的空服务）
+    _state_dir().mkdir(parents=True, exist_ok=True)
+    _service_json_path().write_text(json.dumps({
+        "label": LABEL,
+        "port": port,
+        "data_dir": str(data_dir),
+        "plist": str(plist_path),
+        "repo_root": str(paths.REPO_ROOT),
+    }, indent=2, ensure_ascii=False))
+
+    result = _launchctl("bootstrap", _launchd_domain(), str(plist_path))
+    if result.returncode != 0:
+        raise RuntimeError(f"launchctl bootstrap failed: {result.stderr.strip()}")
+
+    healthy = False
+    for _ in range(STARTUP_WAIT_ROUNDS):
+        if probe_health(port):
+            healthy = True
+            break
+        time.sleep(0.5)
+    return {
+        "installed": True,
+        "port": port,
+        "data_dir": str(data_dir),
+        "plist": str(plist_path),
+        "backend_healthy": healthy,
+    }
+
+
+def cmd_status(_args: argparse.Namespace) -> dict[str, Any]:
+    config = read_service_config()
+    port = int(config["port"]) if config and config.get("port") else DEFAULT_PORT
+    health = probe_health(port)
+    return {
+        "service_installed": _plist_path().is_file(),
+        "service_loaded": _service_loaded(),
+        "service_pid": _service_pid(),
+        "port": port,
+        "backend_healthy": health is not None,
+        "agent_runtime": (health or {}).get("agent_runtime", {}).get("active_client")
+        if health else None,
+    }
+
+
+def cmd_restart(_args: argparse.Namespace) -> dict[str, Any]:
+    result = _launchctl("kickstart", "-k", f"{_launchd_domain()}/{LABEL}")
+    if result.returncode != 0:
+        raise RuntimeError(f"launchctl kickstart failed: {result.stderr.strip()}")
+    config = read_service_config()
+    port = int(config["port"]) if config and config.get("port") else DEFAULT_PORT
+    healthy = False
+    for _ in range(STARTUP_WAIT_ROUNDS):
+        if probe_health(port):
+            healthy = True
+            break
+        time.sleep(0.5)
+    return {"restarted": True, "port": port, "backend_healthy": healthy}
+
+
+def cmd_uninstall(_args: argparse.Namespace) -> dict[str, Any]:
+    was_loaded = _service_loaded()
+    if was_loaded:
+        _launchctl("bootout", f"{_launchd_domain()}/{LABEL}")
+    plist_existed = _plist_path().is_file()
+    _plist_path().unlink(missing_ok=True)
+    return {"uninstalled": True, "was_loaded": was_loaded, "plist_removed": plist_existed}
+
+
+def cmd_reset(args: argparse.Namespace) -> dict[str, Any]:
+    out = cmd_uninstall(args)
+    config = read_service_config()
+    _service_json_path().unlink(missing_ok=True)
+    data_deleted = False
+    if args.delete_data and config and config.get("data_dir"):
+        data_dir = Path(config["data_dir"])
+        try:
+            if data_dir.is_dir():
+                validate_data_dir(data_dir)  # 危险路径直接抛错，宁可留下也不误删
+                shutil.rmtree(data_dir)
+                data_deleted = True
+        except ValueError:
+            pass
+    out.update({"reset": True, "service_json_removed": True, "data_deleted": data_deleted})
+    return out
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="stockagent-service", description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("doctor")
+    p_install = sub.add_parser("install")
+    p_install.add_argument("--port", type=int, default=None)
+    p_install.add_argument("--data-dir", default=None)
+    sub.add_parser("status")
+    sub.add_parser("restart")
+    sub.add_parser("uninstall")
+    p_reset = sub.add_parser("reset")
+    p_reset.add_argument("--delete-data", action="store_true")
+
+    args = parser.parse_args(argv)
+    handlers = {
+        "doctor": cmd_doctor,
+        "install": cmd_install,
+        "status": cmd_status,
+        "restart": cmd_restart,
+        "uninstall": cmd_uninstall,
+        "reset": cmd_reset,
+    }
+    try:
+        result = handlers[args.command](args)
+    except Exception as exc:  # 单一 JSON 出口：壳只需解析 stdout
+        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+        return 1
+    print(json.dumps({"ok": True, **result}, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -154,9 +154,15 @@ def _seed_market_data(repo: WorkbenchRepository, provider_router) -> None:
 
 
 def create_services(
-    db_path: str | Path = "data/workbench.sqlite3",
-    files_root: str | Path = "data/files",
+    db_path: str | Path | None = None,
+    files_root: str | Path | None = None,
 ) -> AppServices:
+    from backend import paths
+
+    if db_path is None:
+        db_path = paths.default_db_path()
+    if files_root is None:
+        files_root = paths.default_files_root()
     repo = WorkbenchRepository(connect(db_path))
     repo.seed_defaults()
     runtime_observer.configure(repo)

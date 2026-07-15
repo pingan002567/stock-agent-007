@@ -404,7 +404,12 @@ SCHEMA: Iterable[str] = (
 )
 
 
-def connect(db_path: str | Path = "data/workbench.sqlite3") -> sqlite3.Connection:
+def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
+    if db_path is None:
+        # 缺省经 backend.paths 解析（WORKBENCH_DATA_DIR），修 cwd 陷阱
+        from backend import paths
+
+        db_path = paths.default_db_path()
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, check_same_thread=False)
