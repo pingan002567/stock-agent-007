@@ -108,7 +108,7 @@ function pairMessages(msgs: CopilotMessage[]): GroupedItem[] {
 export function CopilotPanel({ open = true, onToggle, variant = "panel" }: { open?: boolean; onToggle?: () => void; variant?: "panel" | "main" }) {
   const {
     copilotContextVersion,
-    setCurrentScreen, setStock, appDataCache,
+    setCurrentScreen, setStock,
   } = useAppState();
 
   const {
@@ -413,21 +413,6 @@ export function CopilotPanel({ open = true, onToggle, variant = "panel" }: { ope
                   {s.icon} {s.text}
                 </button>
               ))}
-              {Array.isArray((appDataCache.current.stockFollowups as { items?: Array<{ text: string; icon?: string }> } | undefined)?.items)
-                && (appDataCache.current.stockFollowups as { items?: Array<{ text: string; icon?: string }> }).items!.length > 0 && (
-                <>
-                  <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 12, marginBottom: 6 }}>快捷追问</div>
-                  {(appDataCache.current.stockFollowups as { items?: Array<{ text: string; icon?: string }> }).items!.map((item) => (
-                    <button
-                      key={`${item.icon || ""}-${item.text}`}
-                      className="suggestion-chip"
-                      onClick={() => { setInput(item.text); inputRef.current?.focus(); }}
-                    >
-                      {item.icon ? `${item.icon} ` : ""}{item.text}
-                    </button>
-                  ))}
-                </>
-              )}
               <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 8 }}>或输入消息开始对话</div>
             </div>
           )}
