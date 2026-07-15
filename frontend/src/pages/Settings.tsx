@@ -10,7 +10,6 @@ import {
   type McpServerConfig,
 } from "@/api/runtime";
 import { ErrorMessage, PanelSkeleton, KpiSkeleton } from "@/components/ui/Loading";
-import { RefreshButton } from "@/components/ui/RefreshButton";
 import { useAppState } from "@/hooks/useAppState";
 import ChannelsTab from "./Channels";
 
@@ -1528,11 +1527,10 @@ export default function Settings() {
         </div>
       </nav>
 
-      {/* 右内容区：分区标题 + 刷新 + 内容 */}
+      {/* 右内容区：分区标题 + 内容（模态每次打开都重新挂载并全量加载，无需刷新按钮） */}
       <div className="settings-content">
         <div className="settings-content-head">
           <span className="settings-content-title">{NAV.find((n) => n.key === activeTab)?.label}</span>
-          <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
         </div>
         <div className="settings-content-body">
           {loading && <div className="page-stack"><PanelSkeleton /><KpiSkeleton count={3} /></div>}
