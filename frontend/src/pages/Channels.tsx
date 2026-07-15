@@ -136,7 +136,7 @@ export default function ChannelsTab() {
         </div>
       </div>
 
-      <div className="two-col">
+      <div className="settings-stack">
         <div>
           {providerCard("telegram", "Telegram", "📨", [{ key: "bot_token", label: "Bot Token", placeholder: "123:ABC..." }])}
           {providerCard("slack", "Slack", "💬", [

@@ -1013,7 +1013,7 @@ function StockTab({
             为每个市场选择数据提供源。AKShare 提供 A 股/港股/美股实时行情（需安装 akshare），
             模拟数据用于开发和演示环境。
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
             {["CN", "HK", "US"].map((market) => {
               const cfg = localConfig.providers?.[market] ?? { provider: "mock" };
               const current = cfg.provider;
