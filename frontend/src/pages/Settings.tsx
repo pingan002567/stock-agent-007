@@ -198,7 +198,8 @@ function GeneralTab({
     { mode: "system" as const, icon: "💻", label: "跟随系统" },
   ];
   return (
-    <div className="two-col">
+    // 通用分区：全部模块单列竖排（设置模态宽度下两栏过挤）
+    <div className="settings-stack">
       <div>
         <SectionCard title="外观设置" subtitle="theme">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
@@ -209,6 +210,7 @@ function GeneralTab({
                 style={{
                   padding: "12px 8px", borderRadius: 8, cursor: "pointer",
                   display: "grid", justifyItems: "center", gap: 6,
+                  height: "auto", // 覆盖全局 button 32px 定高，避免图标+文字被裁
                   background: themeMode === opt.mode ? "var(--blue-soft)" : "var(--bg-tertiary)",
                   border: `1px solid ${themeMode === opt.mode ? "var(--blue)" : "transparent"}`,
                   color: "var(--ink)", font: "inherit",

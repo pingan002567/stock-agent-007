@@ -325,7 +325,12 @@ pre {
   background: var(--blue); color: #fff; font-weight: 600; font-size: 13px;
   transition: filter 0.15s;
 }
-.new-chat:hover { filter: brightness(1.1); }
+/* 全局 button:hover 的背景特异性更高，主按钮 hover 需显式锁定蓝底白字 */
+.new-chat:hover {
+  filter: brightness(1.08);
+  background: var(--blue); color: #fff;
+  border-color: transparent; box-shadow: none;
+}
 .side-icon-btn {
   width: 34px; height: 34px; flex: none;
   display: grid; place-items: center; cursor: pointer;
@@ -551,6 +556,7 @@ html.resizing { cursor: col-resize; user-select: none; }
   font: inherit; color: var(--blue);
 }
 .settings-check-update:hover { text-decoration: underline; }
+.settings-stack { display: grid; grid-template-columns: 1fr; gap: 0; }
 .settings-content { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
 .settings-content-head {
   display: flex; align-items: center; justify-content: space-between;
