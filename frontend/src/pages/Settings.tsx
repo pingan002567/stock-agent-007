@@ -192,29 +192,34 @@ function GeneralTab({
   settings: SettingsData;
   runtimeMetrics: RuntimeMetricSnapshot | null;
 }) {
-  const { darkMode, toggleDarkMode } = useAppState();
+  const { themeMode, setThemeMode } = useAppState();
+  const THEME_OPTIONS = [
+    { mode: "light" as const, icon: "☀️", label: "白天模式" },
+    { mode: "dark" as const, icon: "🌙", label: "夜晚模式" },
+    { mode: "system" as const, icon: "💻", label: "跟随系统" },
+  ];
   return (
     <div className="two-col">
       <div>
         <SectionCard title="外观设置" subtitle="theme">
-          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, background: "var(--bg-tertiary)", borderRadius: 8, cursor: "pointer" }} onClick={toggleDarkMode}>
-            <div style={{ fontSize: 22, lineHeight: 1 }}>{darkMode ? "🌙" : "☀️"}</div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600, fontSize: 14 }}>{darkMode ? "暗色模式" : "亮色模式"}</div>
-              <div style={{ fontSize: 12, color: "var(--muted)" }}>点击切换主题偏好</div>
-            </div>
-            <div style={{
-              width: 44, height: 24, borderRadius: 12, padding: 2,
-              background: darkMode ? "var(--blue)" : "var(--line)",
-              transition: "background .15s ease",
-            }}>
-              <div style={{
-                width: 20, height: 20, borderRadius: "50%", background: "#fff",
-                transform: darkMode ? "translateX(20px)" : "translateX(0)",
-                transition: "transform .15s ease",
-                boxShadow: "0 1px 3px rgba(0,0,0,.2)",
-              }} />
-            </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+            {THEME_OPTIONS.map((opt) => (
+              <button
+                key={opt.mode}
+                onClick={() => setThemeMode(opt.mode)}
+                style={{
+                  padding: "12px 8px", borderRadius: 8, cursor: "pointer",
+                  display: "grid", justifyItems: "center", gap: 6,
+                  background: themeMode === opt.mode ? "var(--blue-soft)" : "var(--bg-tertiary)",
+                  border: `1px solid ${themeMode === opt.mode ? "var(--blue)" : "transparent"}`,
+                  color: "var(--ink)", font: "inherit",
+                  transition: "background .15s, border-color .15s",
+                }}
+              >
+                <span style={{ fontSize: 20, lineHeight: 1 }}>{opt.icon}</span>
+                <span style={{ fontSize: 12.5, fontWeight: themeMode === opt.mode ? 650 : 400 }}>{opt.label}</span>
+              </button>
+            ))}
           </div>
         </SectionCard>
 

@@ -49,8 +49,9 @@ interface AppStateValue {
   setStreamingReasoningText: Dispatch<SetStateAction<string>>;
   copilotContextVersion: number;
   refreshCopilotContext: () => void;
+  themeMode: ThemeMode;
+  setThemeMode: (mode: ThemeMode) => void;
   darkMode: boolean;
-  toggleDarkMode: () => void;
   globalLoading: boolean;
   appDataCache: React.MutableRefObject<AppDataCache>;
   refreshAll: () => Promise<void>;
@@ -75,13 +76,32 @@ const screenLabels: Record<Screen, string> = {
   worldcup: "世界杯",
 };
 
-function getInitialDarkMode(): boolean {
-  try { return localStorage.getItem("stock-agent-dark") === "1"; } catch { return false; }
+// ── 主题：白天 / 夜晚 / 跟随系统 ──
+export type ThemeMode = "light" | "dark" | "system";
+
+const THEME_KEY = "stock-agent-theme";
+const systemDarkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+
+function getInitialThemeMode(): ThemeMode {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === "light" || saved === "dark" || saved === "system") return saved;
+  } catch { /* ignore */ }
+  return "system";
 }
 
-function applyDarkClass(dark: boolean) {
-  document.documentElement.classList.toggle("dark", dark);
+function resolveDark(mode: ThemeMode): boolean {
+  return mode === "dark" || (mode === "system" && systemDarkQuery.matches);
 }
+
+function applyTheme(mode: ThemeMode) {
+  const dark = resolveDark(mode);
+  document.documentElement.classList.toggle("dark", dark);
+  document.documentElement.classList.toggle("light", !dark);
+}
+
+// 模块加载时立即应用（非 React 挂载后），防止启动闪错主题（TeamClaw §3.2）
+applyTheme(getInitialThemeMode());
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
   // 聊天会话中心：对话即首屏（doc/DESKTOP_APP_PLAN.md §3.4 迁移第 1 步）
@@ -89,7 +109,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [stock, setStock] = useState("");
   const [copilotStreaming, setCopilotStreaming] = useState(false);
   const [streamingReasoningText, setStreamingReasoningText] = useState("");
-  const [darkMode, setDarkMode] = useState(getInitialDarkMode);
+  const [themeMode, setThemeModeState] = useState<ThemeMode>(getInitialThemeMode);
   const [isInitialized, setIsInitialized] = useState(false);
   const [lastRefreshTime, setLastRefreshTime] = useState<string | null>(null);
   const [copilotContextVersion, setCopilotContextVersion] = useState(0);
@@ -99,15 +119,19 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { stockRef.current = stock; }, [stock]);
 
-  useEffect(() => { applyDarkClass(darkMode); }, [darkMode]);
+  useEffect(() => {
+    applyTheme(themeMode);
+    // 跟随系统：监听系统明暗变化实时切换
+    if (themeMode !== "system") return;
+    const onChange = () => applyTheme("system");
+    systemDarkQuery.addEventListener("change", onChange);
+    return () => systemDarkQuery.removeEventListener("change", onChange);
+  }, [themeMode]);
 
-  const toggleDarkMode = () => {
-    setDarkMode((prev) => {
-      const next = !prev;
-      try { localStorage.setItem("stock-agent-dark", next ? "1" : "0"); } catch { /* ignore */ }
-      return next;
-    });
-  };
+  const setThemeMode = useCallback((mode: ThemeMode) => {
+    setThemeModeState(mode);
+    try { localStorage.setItem(THEME_KEY, mode); } catch { /* ignore */ }
+  }, []);
 
   const refreshAll = useCallback(async () => {
     const { apiGet } = await import("@/api/client");
@@ -225,8 +249,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         setStreamingReasoningText,
         copilotContextVersion,
         refreshCopilotContext,
-        darkMode,
-        toggleDarkMode,
+        themeMode,
+        setThemeMode,
+        darkMode: resolveDark(themeMode),
         globalLoading,
         appDataCache,
         refreshAll,

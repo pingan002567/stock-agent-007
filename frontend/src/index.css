@@ -120,6 +120,49 @@
   color-scheme: dark;
 }
 
+/* 白天模式：纸感浅色（红绿语义色加深一档保对比度） */
+:root.light {
+  --bg: #f4f6f9;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #eef1f6;
+  --panel: #ffffff;
+  --panel-alt: #f1f4f8;
+  --ink: #1a2333;
+  --muted: #5b6577;
+  --line: rgba(15, 23, 42, 0.10);
+  --soft: #eef1f6;
+  --blue: #2f6fed;
+  --blue-hover: #2563eb;
+  --blue-soft: rgba(47, 111, 237, 0.10);
+  --blue-glow: rgba(47, 111, 237, 0.14);
+  --green: #0a8a5f;
+  --green-soft: rgba(10, 138, 95, 0.10);
+  --red: #d63a41;
+  --red-soft: rgba(214, 58, 65, 0.10);
+  --amber: #b16a04;
+  --amber-soft: rgba(177, 106, 4, 0.10);
+  --rail: #ffffff;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.08);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.10);
+  --shadow-lg: 0 8px 32px rgba(15, 23, 42, 0.14);
+  --shadow-glow: 0 0 20px rgba(47, 111, 237, 0.15);
+  --overlay: rgba(244, 246, 249, 0.96);
+  --msg-user: rgba(177, 106, 4, 0.07);
+  --msg-ai: rgba(47, 111, 237, 0.06);
+  --msg-event: rgba(100, 116, 139, 0.08);
+  --msg-time: #8a93a5;
+  --skeleton: #e2e8f0;
+  --ticket-bg: rgba(47, 111, 237, 0.06);
+  --ticket-border: rgba(47, 111, 237, 0.22);
+  --bar-bg: #e2e8f0;
+  --hover-row: rgba(47, 111, 237, 0.05);
+  --active-row: rgba(47, 111, 237, 0.10);
+  --pre-bg: #f1f4f8;
+  --pre-color: #1e293b;
+  --tag-bg: transparent;
+  color-scheme: light;
+}
+
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 * { box-sizing: border-box; }
