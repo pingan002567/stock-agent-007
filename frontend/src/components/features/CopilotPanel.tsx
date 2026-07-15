@@ -103,8 +103,8 @@ function pairMessages(msgs: CopilotMessage[]): GroupedItem[] {
   return out;
 }
 
-/** variant="panel"：业务页右侧伴随面板（可折叠）；variant="main"：聊天中心主区
- * （会话管理交给 SessionListColumn，无折叠/关闭按钮）。两者共享 Provider 状态。 */
+/** variant="main"：三栏布局的中栏常驻聊天（会话管理在 LeftSidebar，无折叠按钮）；
+ * variant="panel"：历史形态的可折叠伴随面板，当前布局未使用但保留能力。 */
 export function CopilotPanel({ open = true, onToggle, variant = "panel" }: { open?: boolean; onToggle?: () => void; variant?: "panel" | "main" }) {
   const {
     copilotContextVersion,

@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useChatDetail } from "@/hooks/useChatDetail";
-import { useCopilotChat, toolLabel } from "@/hooks/useCopilotChat";
-import { ResizeHandle } from "@/components/ui/ResizeHandle";
+
+/** 工具结果详情视图（由 FunctionDock 宿主渲染）。
+ * JSON 结果结构化：对象→KV 树、对象数组→表格；非 JSON 全文展示。 */
 
 /** 值 → 展示节点：对象/数组递归结构化，原始值直出。深层直接 JSON 兜底避免无限嵌套。 */
 function renderValue(value: unknown, depth: number): React.ReactNode {
@@ -59,7 +59,7 @@ function renderValue(value: unknown, depth: number): React.ReactNode {
   );
 }
 
-function DetailBody({ resultText }: { resultText?: string }) {
+export function DetailBody({ resultText }: { resultText?: string }) {
   const [showRaw, setShowRaw] = useState(false);
   if (!resultText) return <div className="detail-empty">该工具没有返回内容</div>;
 
@@ -78,39 +78,5 @@ function DetailBody({ resultText }: { resultText?: string }) {
         {showRaw ? "结构化视图" : "查看原始 JSON"}
       </button>
     </>
-  );
-}
-
-/** 聊天中心右栏：工具卡展开详情（迁移第 2 步）。折叠走宽度/透明度过渡，
- * 不卸载 —— 流式进行中收起再展开，内容与滚动位置都还在。 */
-export function ChatDetailPanel() {
-  const { detail, open, closeDetail } = useChatDetail();
-  const { currentSession } = useCopilotChat();
-
-  // 会话切换后旧详情失去上下文，直接收起（render 期派生状态，避免 effect 级联渲染）
-  const sid = currentSession?.session_id ?? null;
-  const [detailSessionId, setDetailSessionId] = useState<string | null>(sid);
-  if (sid !== detailSessionId) {
-    setDetailSessionId(sid);
-    if (open) closeDetail();
-  }
-
-  return (
-    <aside className={`chat-detail${open ? "" : " collapsed"}`}>
-      {open && <ResizeHandle cssVar="--chat-detail-w" storageKey="chat-detail-w" min={300} max={720} />}
-      <div className="chat-detail-inner">
-        <div className="chat-detail-head">
-          <span className={`tool-dot ${detail?.status === "failed" ? "fail" : detail?.status === "done" ? "ok" : "busy"}`} />
-          <span className="chat-detail-title">{detail ? toolLabel(detail.name) : "详情"}</span>
-          {detail && <span className="chat-detail-sub">{detail.name}</span>}
-          <button className="chat-detail-close" onClick={closeDetail} title="收起详情">›</button>
-        </div>
-        <div className="chat-detail-body">
-          {detail
-            ? <DetailBody key={detail.id} resultText={detail.resultText} />
-            : <div className="detail-empty">点击聊天里的工具卡查看详情</div>}
-        </div>
-      </div>
-    </aside>
   );
 }

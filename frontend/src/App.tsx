@@ -1,35 +1,32 @@
-import { useEffect, useState } from "react";
-import { AppStateProvider, useAppState } from "@/hooks/useAppState";
+import { useEffect } from "react";
+import { AppStateProvider } from "@/hooks/useAppState";
 import { CopilotChatProvider } from "@/hooks/useCopilotChat";
 import { ChatDetailProvider } from "@/hooks/useChatDetail";
-import { Rail } from "@/components/layout/Rail";
-import { ScreenRenderer } from "@/pages/ScreenRenderer";
+import { LeftSidebar } from "@/components/layout/LeftSidebar";
+import { FunctionDock } from "@/components/layout/FunctionDock";
 import { CopilotPanel } from "@/components/features/CopilotPanel";
-import { LoadingOverlay } from "@/components/ui/LoadingOverlay";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ToastProvider, useToast } from "@/hooks/useToast";
 import { setOnApiError } from "@/api/client";
 
+/** 三栏骨架（doc/design/three-column-mockup.html）：
+ * 左栏会话+设置 │ 中栏常驻聊天 │ 右侧功能坞（图标条 + 可展开业务面板）。
+ * currentScreen 语义 = 右栏面板内容，"chat" 表示面板收起。 */
 function AppShell() {
-  const [copilotOpen, setCopilotOpen] = useState(true);
-  const { currentScreen } = useAppState();
   const { showToast } = useToast();
-  // 聊天中心主屏（chat）里聊天就是主区，不再渲染右侧伴随面板；
-  // 业务页保持原有可折叠侧栏。两处共享 CopilotChatProvider，切换不断流。
-  const isChatScreen = currentScreen === "chat";
   return (
-    <div className={`app${isChatScreen ? " chat-mode" : copilotOpen ? "" : " copilot-closed"}`}>
-      <Rail />
-      <main className="main">
+    <div className="app">
+      <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
+        <LeftSidebar />
+      </ErrorBoundary>
+      <main className="center">
         <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
-          <ScreenRenderer />
+          <CopilotPanel variant="main" />
         </ErrorBoundary>
       </main>
-      {!isChatScreen && (
-        <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
-          <CopilotPanel open={copilotOpen} onToggle={() => setCopilotOpen((v) => !v)} />
-        </ErrorBoundary>
-      )}
+      <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
+        <FunctionDock />
+      </ErrorBoundary>
     </div>
   );
 }
@@ -48,7 +45,6 @@ function AppContent() {
     <AppStateProvider>
       <CopilotChatProvider>
         <ChatDetailProvider>
-          <LoadingOverlay />
           <AppShell />
         </ChatDetailProvider>
       </CopilotChatProvider>
