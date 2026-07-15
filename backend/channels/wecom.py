@@ -127,6 +127,11 @@ class WeComChannel(Channel):
             except Exception:
                 logger.exception("[wecom] reply_stream finalize failed; falling back to send_message")
         # Proactive (alert) or expired frame → send by chat id (WeCom userid).
+        # send_message 仅支持 markdown / template_card（text 会被拒：errcode=40008），
+        # 且消息体必须带 msgtype 字段。
         await self._send_with_retry(
-            lambda: self._client.send_message(msg.chat_id, {"text": {"content": msg.text}})
+            lambda: self._client.send_message(
+                msg.chat_id,
+                {"msgtype": "markdown", "markdown": {"content": msg.text}},
+            )
         )

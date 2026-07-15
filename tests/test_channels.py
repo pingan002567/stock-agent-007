@@ -176,3 +176,33 @@ def test_notifier_skips_alerts_disabled_bindings():
 
     channel = asyncio.run(run())
     assert {m.chat_id for m in channel.sent} == {"c1"}  # only the opted-in chat
+
+
+def test_wecom_proactive_alert_uses_markdown_msgtype():
+    """主动推送必须用带 msgtype 的 markdown 消息体——send_message 不支持 text
+    （企业微信 40008 invalid message type）。"""
+    from backend.channels.wecom import WeComChannel
+
+    async def run():
+        channel = WeComChannel(MessageBus(), {"bot_id": "b", "bot_secret": "s"})
+        sent: list[tuple[str, dict]] = []
+
+        class FakeClient:
+            async def send_message(self, chatid, body):
+                sent.append((chatid, body))
+
+        channel._client = FakeClient()
+        await channel.send(
+            OutboundMessage(
+                channel_name="wecom",
+                chat_id="ZhangWanHui",
+                text="🔴 盯盘告警 · 测试",
+                metadata={"kind": "alert"},
+            )
+        )
+        return sent
+
+    sent = asyncio.run(run())
+    assert sent == [
+        ("ZhangWanHui", {"msgtype": "markdown", "markdown": {"content": "🔴 盯盘告警 · 测试"}})
+    ]
