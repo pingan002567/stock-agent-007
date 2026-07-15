@@ -80,7 +80,11 @@ const screenLabels: Record<Screen, string> = {
 export type ThemeMode = "light" | "dark" | "system";
 
 const THEME_KEY = "stock-agent-theme";
-const systemDarkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+// jsdom（vitest）没有 matchMedia，兜底为常暗、不派发变化事件
+const systemDarkQuery: Pick<MediaQueryList, "matches" | "addEventListener" | "removeEventListener"> =
+  typeof window.matchMedia === "function"
+    ? window.matchMedia("(prefers-color-scheme: dark)")
+    : { matches: true, addEventListener: () => {}, removeEventListener: () => {} };
 
 function getInitialThemeMode(): ThemeMode {
   try {
