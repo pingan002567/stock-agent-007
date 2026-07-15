@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Stock Agent · 三栏布局设计稿 v1</title>
+<style>
+/* ═══════════════ 表面语义 token（TeamClaw 纪律 §3.3）═══════════════
+   bg(画布) → panel(侧栏) → paper(卡片) → selected(选中)
+   强调色预算：蓝仅用于「当前/主操作」；红绿只留给涨跌语义 */
+:root {
+  --bg: #0b0d12;
+  --panel: #0f1219;
+  --paper: #151a24;
+  --paper-hi: #1a2030;
+  --selected: rgba(91, 140, 255, 0.10);
+  --line: rgba(148, 163, 199, 0.13);
+  --line-soft: rgba(148, 163, 199, 0.06);
+  --ink: #e7ebf4;
+  --ink-2: #b9c1d4;
+  --muted: #7e879c;
+  --faint: #565f73;
+  --blue: #5b8cff;
+  --blue-soft: rgba(91, 140, 255, 0.14);
+  --up: #4cb782;      /* 涨跌语义色，别处禁用 */
+  --down: #e0565c;
+  --mono: "SF Mono", ui-monospace, Menlo, monospace;
+  --r-panel: 14px; --r-bubble: 16px; --r-btn: 8px; --r-chip: 4px;
+  --left-w: 272px;
+  --right-w: 424px;
+  --strip-w: 52px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 13.5px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(148,163,199,.14); border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ═══════════════ 三栏骨架 ═══════════════ */
+.app {
+  display: grid;
+  grid-template-columns: var(--left-w) minmax(0, 1fr) auto;
+  height: 100vh;
+  background:
+    radial-gradient(1200px 700px at 85% -10%, rgba(91,140,255,.05), transparent 60%),
+    var(--bg);
+}
+
+/* ─────────── 左栏：会话 + 设置 ─────────── */
+.left {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  background: var(--panel);
+  border-right: 1px solid var(--line-soft);
+  min-height: 0;
+}
+.brand {
+  display: flex; align-items: center; gap: 10px;
+  padding: 16px 16px 12px;
+}
+.brand-logo { width: 34px; height: 34px; border-radius: 9px;
+  background: linear-gradient(180deg, #171b26, #0b0d13);
+  box-shadow: 0 0 18px rgba(91,140,255,.28), inset 0 0 0 1px rgba(255,255,255,.05);
+  display: grid; place-items: center; flex: none;
+}
+.brand-name { font-weight: 700; font-size: 14px; letter-spacing: .2px; }
+.brand-sub { font-family: var(--mono); font-size: 10px; color: var(--faint); margin-top: 1px; }
+
+.left-actions { display: flex; gap: 6px; padding: 0 12px 10px; }
+.new-chat {
+  flex: 1; display: flex; align-items: center; gap: 8px;
+  height: 34px; padding: 0 12px;
+  border-radius: var(--r-btn);
+  background: var(--blue); color: #fff; font-weight: 600; font-size: 13px;
+  transition: filter .15s;
+}
+.new-chat:hover { filter: brightness(1.1); }
+.icon-btn {
+  width: 34px; height: 34px; flex: none;
+  display: grid; place-items: center;
+  border-radius: var(--r-btn); color: var(--muted);
+  border: 1px solid var(--line-soft);
+  transition: background .15s, color .15s;
+}
+.icon-btn:hover { background: var(--paper); color: var(--ink); }
+
+.sessions { min-height: 0; overflow-y: auto; padding: 2px 8px 8px; }
+.sess-group {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .12em;
+  color: var(--faint); text-transform: uppercase;
+  padding: 12px 10px 6px;
+}
+.sess {
+  position: relative;
+  display: block; width: 100%; text-align: left;
+  padding: 8px 10px 8px 14px; border-radius: var(--r-btn);
+  transition: background .15s;
+  animation: rise .35s cubic-bezier(.2,.7,.3,1) both;
+}
+.sess:nth-child(2) { animation-delay: .03s; } .sess:nth-child(3) { animation-delay: .06s; }
+.sess:nth-child(4) { animation-delay: .09s; } .sess:nth-child(5) { animation-delay: .12s; }
+.sess:nth-child(6) { animation-delay: .15s; } .sess:nth-child(7) { animation-delay: .18s; }
+@keyframes rise { from { opacity: 0; transform: translateY(5px); } }
+.sess:hover { background: var(--paper); }
+.sess.active { background: var(--selected); }
+.sess.active::before {
+  content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px;
+  border-radius: 1px; background: var(--blue);
+}
+.sess-title {
+  font-size: 13px; color: var(--ink-2); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sess.active .sess-title { color: var(--ink); font-weight: 550; }
+.sess-meta { font-family: var(--mono); font-size: 10.5px; color: var(--faint); margin-top: 2px; }
+
+.left-foot { border-top: 1px solid var(--line-soft); padding: 8px; }
+.foot-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 10px; border-radius: var(--r-btn); color: var(--ink-2);
+  transition: background .15s;
+}
+.foot-item:hover { background: var(--paper); }
+.foot-item svg { color: var(--muted); flex: none; }
+.foot-status { margin-left: auto; display: flex; align-items: center; gap: 5px;
+  font-family: var(--mono); font-size: 10px; color: var(--muted); }
+.dot-ok { width: 6px; height: 6px; border-radius: 50%; background: var(--blue);
+  box-shadow: 0 0 6px rgba(91,140,255,.8); }
+
+/* ─────────── 中栏：聊天 ─────────── */
+.center { display: grid; grid-template-rows: auto 1fr auto; min-height: 0; min-width: 0; }
+.chat-head {
+  display: flex; align-items: center; gap: 10px;
+  height: 48px; padding: 0 18px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.chat-title { font-weight: 650; font-size: 13.5px; }
+.chat-head .time { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+.head-spacer { flex: 1; }
+.annot-toggle {
+  font-family: var(--mono); font-size: 11px; color: var(--faint);
+  border: 1px dashed var(--line); border-radius: var(--r-chip); padding: 3px 8px;
+}
+.annot-toggle:hover, .annot-toggle.on { color: var(--blue); border-color: var(--blue); }
+
+.msgs { min-height: 0; overflow-y: auto; padding: 26px 24px 12px; }
+.msgs-inner { max-width: 820px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+.divider {
+  display: flex; align-items: center; gap: 12px;
+  font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+}
+.divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
+
+.msg { max-width: 86%; }
+.msg.user { align-self: flex-end; }
+.msg.ai { align-self: flex-start; width: 100%; max-width: 100%; }
+.bubble-u {
+  background: var(--blue-soft);
+  border: 1px solid rgba(91,140,255,.22);
+  border-radius: var(--r-bubble) 6px var(--r-bubble) var(--r-bubble); /* 小角指向发言者 */
+  padding: 11px 14px; color: var(--ink);
+}
+.bubble-a {
+  background: var(--paper);
+  border: 1px solid var(--line-soft);
+  border-radius: 6px var(--r-bubble) var(--r-bubble) var(--r-bubble);
+  padding: 13px 16px;
+}
+.msg-time { font-family: var(--mono); font-size: 10px; color: var(--faint); margin-top: 5px; }
+.msg.user .msg-time { text-align: right; }
+.ai-label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+.ai-label .dot-ok { width: 5px; height: 5px; }
+
+/* 工具卡：状态用墨色不用绿（强调色预算），点击 → 右栏 */
+.toolcard {
+  display: flex; align-items: center; gap: 9px;
+  background: var(--bg); border: 1px solid var(--line-soft);
+  border-radius: var(--r-btn); padding: 8px 11px; margin: 4px 0 10px;
+  cursor: pointer; transition: border-color .15s, background .15s;
+}
+.toolcard:hover { border-color: var(--blue); background: var(--paper-hi); }
+.toolcard .t-name { font-size: 12.5px; color: var(--ink-2); }
+.toolcard .t-mono { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
+.toolcard .t-state { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.toolcard .chev { color: var(--faint); font-size: 11px; }
+
+.quote-row { display: flex; gap: 14px; align-items: baseline; margin: 10px 0 2px;
+  font-variant-numeric: tabular-nums; }
+.quote-px { font-family: var(--mono); font-size: 22px; font-weight: 600; }
+.quote-chg { font-family: var(--mono); font-size: 13px; color: var(--up); }
+.meta-row { display: flex; gap: 8px; margin-top: 12px; align-items: center; }
+.chip {
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+  border: 1px solid var(--line-soft); border-radius: var(--r-chip); padding: 2px 7px;
+}
+
+.composer { padding: 10px 24px 18px; }
+.composer-inner {
+  max-width: 820px; margin: 0 auto;
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--r-panel); padding: 10px 12px 8px;
+  transition: border-color .15s;
+}
+.composer-inner:focus-within { border-color: rgba(91,140,255,.45); }
+.composer textarea {
+  width: 100%; background: none; border: none; outline: none; resize: none;
+  color: var(--ink); font: inherit; min-height: 22px;
+}
+.composer textarea::placeholder { color: var(--faint); }
+.composer-bar { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.model-pill {
+  display: flex; align-items: center; gap: 5px;
+  font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+  border: 1px solid var(--line-soft); border-radius: 20px; padding: 3px 10px;
+  transition: color .15s, border-color .15s;
+}
+.model-pill:hover { color: var(--ink-2); border-color: var(--line); }
+.send {
+  margin-left: auto; width: 30px; height: 30px; border-radius: var(--r-btn);
+  background: var(--blue); color: #fff; display: grid; place-items: center;
+  transition: filter .15s;
+}
+.send:hover { filter: brightness(1.12); }
+
+/* ─────────── 右栏：功能面板（默认收起为图标条）─────────── */
+.right { display: flex; min-height: 0; }
+.func-panel {
+  width: 0; opacity: 0; overflow: hidden;
+  background: var(--panel);
+  border-left: 1px solid var(--line-soft);
+  transition: width .26s cubic-bezier(.3,.8,.3,1), opacity .2s;
+  display: grid; grid-template-rows: auto 1fr;
+}
+.app.panel-open .func-panel { width: var(--right-w); opacity: 1; }
+.func-inner { width: var(--right-w); min-height: 0; display: grid; grid-template-rows: auto 1fr; }
+.func-head {
+  display: flex; align-items: center; gap: 8px;
+  height: 48px; padding: 0 16px; border-bottom: 1px solid var(--line-soft);
+}
+.func-title { font-weight: 650; font-size: 13px; }
+.func-sub { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+.func-close { margin-left: auto; width: 26px; height: 26px; border-radius: var(--r-btn);
+  display: grid; place-items: center; color: var(--muted); }
+.func-close:hover { background: var(--paper); color: var(--ink); }
+.func-body { min-height: 0; overflow-y: auto; padding: 14px 16px 20px; }
+.func-view { display: none; animation: fadein .25s ease both; }
+.func-view.on { display: block; }
+@keyframes fadein { from { opacity: 0; transform: translateX(8px); } }
+
+.card {
+  background: var(--paper); border: 1px solid var(--line-soft);
+  border-radius: var(--r-panel); padding: 14px; margin-bottom: 12px;
+}
+.card-title { font-size: 11px; color: var(--muted); letter-spacing: .06em; margin-bottom: 10px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px;
+  font-variant-numeric: tabular-nums; }
+.kv .k { color: var(--muted); font-size: 12px; }
+.kv .v { font-family: var(--mono); font-size: 12px; text-align: right; }
+.v.up { color: var(--up); } .v.down { color: var(--down); }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th { font-family: var(--mono); font-size: 10px; color: var(--faint); font-weight: 500;
+  text-align: right; padding: 4px 0; letter-spacing: .08em; }
+th:first-child, td:first-child { text-align: left; }
+td { font-size: 12px; padding: 7px 0; border-top: 1px solid var(--line-soft); text-align: right; }
+td .mono { font-family: var(--mono); font-size: 11.5px; }
+
+/* 图标条（常驻，即"收起态"）*/
+.strip {
+  width: var(--strip-w); flex: none;
+  background: var(--panel);
+  border-left: 1px solid var(--line-soft);
+  display: flex; flex-direction: column; align-items: center;
+  padding: 10px 0; gap: 2px;
+}
+.strip-btn {
+  position: relative;
+  width: 38px; height: 38px; border-radius: 10px;
+  display: grid; place-items: center; color: var(--muted);
+  transition: background .15s, color .15s;
+}
+.strip-btn:hover { background: var(--paper); color: var(--ink); }
+.strip-btn.active { background: var(--selected); color: var(--blue); }
+.strip-btn .badge {
+  position: absolute; top: 5px; right: 5px; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--down);
+}
+.strip-btn .tip {
+  position: absolute; right: 46px; top: 50%; transform: translateY(-50%) translateX(4px);
+  background: var(--paper-hi); border: 1px solid var(--line);
+  color: var(--ink-2); font-size: 11px; padding: 3px 8px; border-radius: var(--r-chip);
+  white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .12s, transform .12s;
+}
+.strip-btn:hover .tip { opacity: 1; transform: translateY(-50%) translateX(0); }
+.strip-gap { flex: 1; }
+
+/* ─────────── 设计标注 ─────────── */
+.pin {
+  position: absolute; z-index: 40; width: 20px; height: 20px; border-radius: 50%;
+  background: #ffb454; color: #1a1205; font: 700 11px/20px var(--mono); text-align: center;
+  box-shadow: 0 0 0 3px rgba(255,180,84,.25); cursor: default;
+  display: none;
+}
+body.annot .pin { display: block; }
+.annot-legend {
+  position: fixed; right: 16px; bottom: 16px; z-index: 50; width: 360px;
+  background: var(--paper-hi); border: 1px solid rgba(255,180,84,.4);
+  border-radius: var(--r-panel); padding: 14px 16px; font-size: 12px; color: var(--ink-2);
+  display: none; box-shadow: 0 12px 40px rgba(0,0,0,.5);
+}
+body.annot .annot-legend { display: block; }
+.annot-legend b { color: #ffb454; font-family: var(--mono); }
+.annot-legend li { margin: 5px 0 5px 2px; list-style: none; }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ═══ 左栏 ═══ -->
+  <aside class="left">
+    <div class="brand">
+      <div class="brand-logo">
+        <svg width="22" height="22" viewBox="0 0 100 100">
+          <defs><linearGradient id="lg" x1="0" y1="1" x2="1" y2="0">
+            <stop offset="0" stop-color="#3a6aec"/><stop offset="1" stop-color="#89a8ff"/>
+          </linearGradient></defs>
+          <g opacity=".6">
+            <rect x="26" y="60" width="9" height="18" rx="2.5" fill="#4aa07a"/>
+            <rect x="41" y="65" width="9" height="13" rx="2.5" fill="#cc5c5c"/>
+            <rect x="56" y="55" width="9" height="23" rx="2.5" fill="#4aa07a"/>
+          </g>
+          <polyline points="18,72 42,55 53,61 74,32" fill="none" stroke="url(#lg)"
+            stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="74" cy="32" r="8.5" fill="#89a8ff"/><circle cx="74" cy="32" r="4.6" fill="#f0f6ff"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-name">Stock Agent</div>
+        <div class="brand-sub">local · 8686</div>
+      </div>
+    </div>
+    <div class="pin" style="left: 250px; top: 20px;">1</div>
+
+    <div class="left-actions">
+      <button class="new-chat">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+        新建对话
+      </button>
+      <button class="icon-btn" title="搜索会话">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      </button>
+    </div>
+
+    <nav class="sessions">
+      <div class="sess-group">今天</div>
+      <button class="sess active">
+        <div class="sess-title">AAPL 财报后走势与风险</div>
+        <div class="sess-meta">14:32 · 12 条</div>
+      </button>
+      <button class="sess">
+        <div class="sess-title">调仓草案：减持茅台加仓腾讯</div>
+        <div class="sess-meta">11:07 · 8 条</div>
+      </button>
+      <div class="sess-group">本周</div>
+      <button class="sess">
+        <div class="sess-title">均线策略回测（沪深300）</div>
+        <div class="sess-meta">周一 · 23 条</div>
+      </button>
+      <button class="sess">
+        <div class="sess-title">盯盘规则：茅台跌破 1600 提醒</div>
+        <div class="sess-meta">周一 · 5 条</div>
+      </button>
+      <div class="sess-group">更早</div>
+      <button class="sess">
+        <div class="sess-title">半导体行业格局梳理</div>
+        <div class="sess-meta">07/08 · 31 条</div>
+      </button>
+      <button class="sess">
+        <div class="sess-title">6 月组合月报生成</div>
+        <div class="sess-meta">07/01 · 9 条</div>
+      </button>
+    </nav>
+    <div class="pin" style="left: 250px; top: 148px;">2</div>
+
+    <div class="left-foot">
+      <button class="foot-item">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        系统设置
+        <span class="foot-status"><span class="dot-ok"></span>AI 就绪</span>
+      </button>
+    </div>
+    <div class="pin" style="left: 250px; bottom: 14px; top: auto;">3</div>
+  </aside>
+
+  <!-- ═══ 中栏 ═══ -->
+  <main class="center">
+    <header class="chat-head">
+      <span class="chat-title">AAPL 财报后走势与风险</span>
+      <span class="time">12 条消息</span>
+      <div class="head-spacer"></div>
+      <button class="annot-toggle" id="annotBtn">◈ 设计标注</button>
+    </header>
+
+    <div class="msgs">
+      <div class="msgs-inner">
+        <div class="divider">今天 14:30</div>
+
+        <div class="msg user">
+          <div class="bubble-u">分析一下 AAPL 财报后的走势，重点看回调风险</div>
+          <div class="msg-time">14:31:02</div>
+        </div>
+
+        <div class="msg ai">
+          <div class="bubble-a">
+            <div class="ai-label"><span class="dot-ok"></span>AI Copilot</div>
+
+            <div class="toolcard" onclick="openPanel('research')">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--muted)"><path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/></svg>
+              <span class="t-name">个股分析</span>
+              <span class="t-mono">get_stock_context</span>
+              <span class="t-state">✓ 完成</span>
+              <span class="chev">展开 ›</span>
+            </div>
+            <div class="pin" style="right: 40px; margin-top: -36px;">4</div>
+
+            <p>财报超预期后 AAPL 已连涨三日，短期涨幅集中在服务业务重估。当前位置需要注意两个回调信号：</p>
+            <div class="quote-row">
+              <span class="quote-px">$231.48</span>
+              <span class="quote-chg">+2.84% ▲</span>
+              <span class="chip">RSI 71 · 超买区</span>
+            </div>
+            <p style="margin-top: 10px; color: var(--ink-2)">
+              ① RSI 已进入超买区，历史上财报后三日 RSI&gt;70 的情形，两周内平均回撤 3.2%；
+              ② 机构期权隐含波动率仍在高位，未随股价消化，说明市场对回调有对冲需求。
+              建议持仓者暂不加仓，可设置 $224 支撑位提醒。
+            </p>
+            <div class="meta-row">
+              <span class="chip" style="color: #d9a04e; border-color: rgba(217,160,78,.35)">信心度 中</span>
+              <span class="chip">引用来源 4</span>
+              <span class="chip" onclick="openPanel('monitor')" style="cursor: pointer">＋ 创建盯盘规则</span>
+            </div>
+          </div>
+          <div class="msg-time">14:32:17</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="composer-inner">
+        <textarea rows="1" placeholder="输入问题，或让 AI 帮你盯盘、回测、生成报告…"></textarea>
+        <div class="composer-bar">
+          <button class="icon-btn" style="width: 28px; height: 28px; border: none" title="上传资料">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          </button>
+          <button class="model-pill">
+            <span class="dot-ok" style="width: 5px; height: 5px"></span>
+            deepseek-chat <span style="color: var(--faint)">▾</span>
+          </button>
+          <button class="send">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22,2 15,22 11,13 2,9"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="pin" style="left: 50%; margin-top: -30px;">5</div>
+    </div>
+  </main>
+
+  <!-- ═══ 右栏：功能面板 + 常驻图标条 ═══ -->
+  <div class="right">
+    <section class="func-panel">
+      <div class="func-inner">
+        <div class="func-head">
+          <span class="func-title" id="funcTitle">个股 · AAPL</span>
+          <span class="func-sub" id="funcSub">research</span>
+          <button class="func-close" onclick="closePanel()" title="收起">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
+        </div>
+        <div class="func-body">
+
+          <!-- 个股 -->
+          <div class="func-view on" data-view="research">
+            <div class="card">
+              <div class="card-title">APPLE INC · NASDAQ</div>
+              <div class="quote-row" style="margin: 0 0 8px">
+                <span class="quote-px">$231.48</span>
+                <span class="quote-chg">+6.40 (+2.84%)</span>
+              </div>
+              <svg width="100%" height="72" viewBox="0 0 380 72" preserveAspectRatio="none">
+                <defs><linearGradient id="sp" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="rgba(76,183,130,.30)"/><stop offset="1" stop-color="rgba(76,183,130,0)"/>
+                </linearGradient></defs>
+                <path d="M0,58 L30,52 L60,55 L90,44 L120,48 L150,38 L180,42 L210,30 L240,34 L270,22 L300,26 L330,14 L360,18 L380,8"
+                  fill="none" stroke="#4cb782" stroke-width="2"/>
+                <path d="M0,58 L30,52 L60,55 L90,44 L120,48 L150,38 L180,42 L210,30 L240,34 L270,22 L300,26 L330,14 L360,18 L380,8 L380,72 L0,72 Z"
+                  fill="url(#sp)"/>
+              </svg>
+            </div>
+            <div class="card">
+              <div class="card-title">关键指标</div>
+              <div class="kv">
+                <span class="k">RSI(14)</span><span class="v" style="color: #d9a04e">71.2 超买</span>
+                <span class="k">市盈率 TTM</span><span class="v">35.8</span>
+                <span class="k">财报后涨幅</span><span class="v up">+8.7%</span>
+                <span class="k">期权 IV</span><span class="v">32.4%</span>
+                <span class="k">支撑位</span><span class="v">$224.00</span>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title">AI 引用的情报 · 4</div>
+              <div style="font-size: 12px; color: var(--ink-2); display: grid; gap: 8px">
+                <div>· 服务业务收入同比 +14%，超一致预期 2.1pct</div>
+                <div>· 大摩上调目标价至 $250，维持增持</div>
+                <div>· 财报电话会：AI 功能带动换机周期提前</div>
+                <div>· 北向资金连续 3 日净流入消费电子</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 持仓 -->
+          <div class="func-view" data-view="holdings">
+            <div class="card">
+              <div class="card-title">组合概览</div>
+              <div class="kv">
+                <span class="k">总资产</span><span class="v">¥345,804.00</span>
+                <span class="k">今日盈亏</span><span class="v up">+¥2,410 (+0.70%)</span>
+                <span class="k">最大权重</span><span class="v">AAPL 18.6%</span>
+                <span class="k">现金比例</span><span class="v">9.8%</span>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title">持仓明细 · 3</div>
+              <table>
+                <tr><th>标的</th><th>市值</th><th>权重</th><th>今日</th></tr>
+                <tr><td>AAPL</td><td class="mono">$23,244</td><td class="mono">18.6%</td><td class="mono" style="color: var(--up)">+2.84%</td></tr>
+                <tr><td>贵州茅台</td><td class="mono">¥167,840</td><td class="mono">14.2%</td><td class="mono" style="color: var(--down)">-0.62%</td></tr>
+                <tr><td>腾讯控股</td><td class="mono">HK$154,720</td><td class="mono">11.8%</td><td class="mono" style="color: var(--up)">+1.05%</td></tr>
+              </table>
+            </div>
+          </div>
+
+          <!-- 盯盘 -->
+          <div class="func-view" data-view="monitor">
+            <div class="card">
+              <div class="card-title">活跃规则 · 4</div>
+              <table>
+                <tr><th>规则</th><th>状态</th></tr>
+                <tr><td>茅台 跌破 ¥1,600</td><td class="mono" style="color: var(--muted)">监控中</td></tr>
+                <tr><td>AAPL 跌破 $224</td><td class="mono" style="color: var(--blue)">刚创建</td></tr>
+                <tr><td>组合回撤 &gt; 5%</td><td class="mono" style="color: var(--muted)">监控中</td></tr>
+                <tr><td>腾讯 放量 2×</td><td class="mono" style="color: var(--muted)">监控中</td></tr>
+              </table>
+            </div>
+            <div class="card">
+              <div class="card-title">今日事件 · 2</div>
+              <div style="font-size: 12px; color: var(--ink-2); display: grid; gap: 8px">
+                <div>13:02 · 贵州茅台 今日价格波动关注 <span class="chip" style="margin-left: 4px">中</span></div>
+                <div>09:41 · 系统启动：数据层运行正常</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 其余入口的占位视图 -->
+          <div class="func-view" data-view="more">
+            <div class="card"><div class="card-title">此功能页在右栏中的形态与上述一致</div>
+              <div style="font-size: 12px; color: var(--muted)">市场 / 自选 / 策略回测 / 任务 / 报告
+                复用同一面板容器；重内容（报告全文、回测曲线）提供「⛶ 分屏展开」进入中栏 split 模式（迁移第 3 步）。</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <aside class="strip">
+      <button class="strip-btn" data-panel="research" onclick="togglePanel('research')">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <span class="tip">个股</span>
+      </button>
+      <button class="strip-btn" data-panel="holdings" onclick="togglePanel('holdings')">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="5" width="3" height="13"/></svg>
+        <span class="tip">持仓</span>
+      </button>
+      <button class="strip-btn" data-panel="monitor" onclick="togglePanel('monitor')">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span class="badge"></span>
+        <span class="tip">盯盘 · 1 条高优</span>
+      </button>
+      <button class="strip-btn" data-panel="more" onclick="togglePanel('more')">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>
+        <span class="tip">市场</span>
+      </button>
+      <button class="strip-btn" data-panel="more" onclick="togglePanel('more')">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2l3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1z"/></svg>
+        <span class="tip">自选</span>
+      </button>
+      <button class="strip-btn" data-panel="more" onclick="togglePanel('more')">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 20h20"/><path d="M5 20V8l6-4 6 4v12"/></svg>
+        <span class="tip">策略</span>
+      </button>
+      <button class="strip-btn" data-panel="more" onclick="togglePanel('more')">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+        <span class="tip">报告</span>
+      </button>
+      <div class="strip-gap"></div>
+      <div class="pin" style="right: 56px; bottom: 60px; top: auto;">6</div>
+    </aside>
+  </div>
+</div>
+
+<!-- 标注图例 -->
+<div class="annot-legend">
+  <div style="font-weight: 700; margin-bottom: 8px; color: var(--ink)">◈ 设计标注</div>
+  <ul>
+    <li><b>1</b> 品牌区：桌面图标同款徽标；mono 小字显示运行端口（桌面版此处留红绿灯 68px spacer）</li>
+    <li><b>2</b> 会话列表 = 一级导航。按时间分组，active 用左侧 2px 蓝条 + selected 面色，不用整块高亮</li>
+    <li><b>3</b> 系统设置沉底 + AI 就绪状态灯，替代原 rail 的设置入口</li>
+    <li><b>4</b> 工具卡点击 → 右栏展开对应功能页（联动已实现的 ChatDetail 机制升级为完整功能页）</li>
+    <li><b>5</b> 输入区：模型 pill 内嵌（点击切换），上传/发送收进同一容器</li>
+    <li><b>6</b> 右侧常驻 52px 图标条 = 「平时收起」的功能入口；点击展开 424px 面板，再点或 › 收起；红点 = 盯盘高优事件；重内容视图内提供「⛶ 分屏展开」进中栏 split（第 3 步）</li>
+  </ul>
+</div>
+
+<script>
+const app = document.getElementById("app");
+let current = null;
+
+function showView(name) {
+  document.querySelectorAll(".func-view").forEach((v) => v.classList.toggle("on", v.dataset.view === name));
+  document.querySelectorAll(".strip-btn").forEach((b) => b.classList.toggle("active", b.dataset.panel === name && b.querySelector(".tip").textContent.length > 0));
+  const titles = { research: ["个股 · AAPL", "research"], holdings: ["持仓", "holdings"],
+    monitor: ["盯盘", "monitor"], more: ["功能页", "…"] };
+  const [t, s] = titles[name] || ["", ""];
+  document.getElementById("funcTitle").textContent = t;
+  document.getElementById("funcSub").textContent = s;
+}
+function openPanel(name) { current = name; showView(name); app.classList.add("panel-open"); }
+function closePanel() {
+  current = null; app.classList.remove("panel-open");
+  document.querySelectorAll(".strip-btn").forEach((b) => b.classList.remove("active"));
+}
+function togglePanel(name) {
+  if (app.classList.contains("panel-open") && current === name) return closePanel();
+  openPanel(name);
+}
+document.getElementById("annotBtn").addEventListener("click", () => {
+  document.body.classList.toggle("annot");
+  document.getElementById("annotBtn").classList.toggle("on");
+});
+</script>
+</body>
+</html>
