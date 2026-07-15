@@ -94,9 +94,14 @@
     } catch (_) { return false; }
   }
 
-  function enter(port) {
+  async function enter(port) {
     localStorage.setItem("sa.lastGoodPort", String(port));
-    window.location.replace(`http://127.0.0.1:${port}/`);
+    const url = `http://127.0.0.1:${port}/`;
+    // WKWebView 拦截 tauri://→http:// 的 JS 顶层跳转（静默失败），优先走 Rust 原生导航
+    if (invoke) {
+      try { await invoke("navigate", { url }); return; } catch (_) { /* fall through */ }
+    }
+    window.location.replace(url);
   }
 
   const CHECK_LABELS = [
@@ -135,13 +140,26 @@
     // 快路径（§3.1.1 冷启动跳过冷 probe）：上次成功端口直接探活
     const last = Number(localStorage.getItem("sa.lastGoodPort"));
     if (last && (await probe(last))) return enter(last);
-    if (!invoke) return legacyLoop();
+    if (!invoke) {
+      $("splash-hint").textContent = "（浏览器模式：等待 6666 后端）";
+      return legacyLoop();
+    }
 
+    $("splash-hint").textContent = "正在检测环境（doctor）…";
     let d;
     try { d = await cli("doctor"); }
-    catch (e) { $("splash-hint").textContent = String(e); return; }
+    catch (e) { $("splash-hint").textContent = "doctor 失败: " + String(e); return; }
+    $("splash-hint").textContent = "";
 
-    if (d.backend_healthy) return enter(d.port);
+    if (d.backend_healthy) {
+      // 服务端探活通过还不够：端口必须对 webview 可达（6666 这类端口在
+      // WebKit/Chromium 受限名单里，服务健康但页面永远打不开）。不可达走
+      // 修复向导，强制重置后重装会自动选可用端口。
+      if (await probe(d.port)) return enter(d.port);
+      $("logPath").textContent = `端口 ${d.port} 对应用视图不可达（可能是浏览器引擎受限端口）`;
+      showGate("repair");
+      return;
+    }
 
     if (!d.service_installed) {
       // 闸门：首次安装

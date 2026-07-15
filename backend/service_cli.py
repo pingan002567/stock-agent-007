@@ -37,7 +37,12 @@ from typing import Any
 from backend import paths
 
 LABEL = "com.stockagent.backend"
-DEFAULT_PORT = 6666
+# 桌面服务默认端口。不能用 6666：6665-6669 在 WebKit/Chromium 的受限端口名单
+# （IRC 保留），WKWebView 对其 fetch/导航一律静默失败——实测踩坑，见
+# doc/DESKTOP_APP_PLAN.md §2。浏览器开发流（8888 代理 6666）不受影响。
+DEFAULT_PORT = 8686
+# WebKit/Chromium 共同封锁的常见回环端口（节选自 fetch spec bad ports）
+BLOCKED_PORTS = {6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697, 10080}
 PORT_SCAN_RANGE = 50
 HEALTH_TIMEOUT_SEC = 2.0
 STARTUP_WAIT_ROUNDS = 24  # × 0.5s = 12s，对齐计划文档「轮询 12×500ms」
@@ -86,9 +91,10 @@ def _port_listening(port: int) -> bool:
 
 
 def pick_port(requested: int) -> int:
-    """请求端口可用则用之，否则向后顺延（§2 改造清单 2：6666 被占不该让应用打不开）。"""
+    """请求端口可用则用之，否则向后顺延（§2 改造清单 2：端口被占不该让应用打不开）。
+    跳过浏览器引擎封锁端口——webview 连不上等于服务白装。"""
     for port in range(requested, requested + PORT_SCAN_RANGE):
-        if _port_free(port):
+        if port not in BLOCKED_PORTS and _port_free(port):
             return port
     raise RuntimeError(f"no free port in [{requested}, {requested + PORT_SCAN_RANGE})")
 

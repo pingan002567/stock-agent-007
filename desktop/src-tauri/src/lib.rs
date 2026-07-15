@@ -26,6 +26,14 @@ fn service_cli(args: Vec<String>) -> Result<serde_json::Value, String> {
         .map_err(|e| format!("bad cli json ({e}): {stdout}"))
 }
 
+/// 引导页 → 后端主界面的跳转。WKWebView 对 `tauri://` 页面发起的 `http://`
+/// 顶层跳转会静默拦截（location.replace 无效也无报错），必须走 Rust 侧原生导航。
+#[tauri::command]
+fn navigate(webview_window: tauri::WebviewWindow, url: String) -> Result<(), String> {
+    let parsed: tauri::Url = url.parse().map_err(|e| format!("bad url: {e}"))?;
+    webview_window.navigate(parsed).map_err(|e| e.to_string())
+}
+
 fn repo_root() -> std::path::PathBuf {
     // 开发形态：desktop/src-tauri 相对仓库根固定为 ../..；可用 STOCKAGENT_REPO_ROOT 覆盖
     if let Ok(dir) = std::env::var("STOCKAGENT_REPO_ROOT") {
@@ -40,8 +48,30 @@ fn repo_root() -> std::path::PathBuf {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![service_cli])
+        .invoke_handler(tauri::generate_handler![service_cli, navigate])
         .setup(|app| {
+            // 空白页自愈：实测两种情况会让 webview 停在 about:blank——
+            // (1) wry 初始导航偶发不触发（启动竞态）；(2) navigate 到不可达端口
+            // 加载失败。轮询检测到 blank 就拉回引导页，引导页自会重新决策。
+            {
+                let handle = app.handle().clone();
+                let home_url = app
+                    .config()
+                    .build
+                    .dev_url
+                    .clone()
+                    .map(|u| u.to_string())
+                    .unwrap_or_else(|| "tauri://localhost".into());
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(3));
+                    if let Some(w) = handle.get_webview_window("main") {
+                        let url = w.url().map(|u| u.to_string()).unwrap_or_default();
+                        if url == "about:blank" {
+                            let _ = w.navigate(home_url.parse().unwrap());
+                        }
+                    }
+                });
+            }
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()

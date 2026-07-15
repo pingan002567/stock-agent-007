@@ -49,7 +49,7 @@ launchd (macOS) ── KeepAlive/RunAtLoad ──► Python 后端 (FastAPI+Deer
 ### 关键工程点（改造清单）
 
 1. **cwd 陷阱（必改）**：`db.py:407`、`app.py:136` 均为 cwd 相对路径（`data/workbench.sqlite3`、`frontend/dist`）。需支持 `WORKBENCH_DATA_DIR` 环境变量，经 launchd plist `EnvironmentVariables` 下发。
-2. **动态端口**：6666 被占则应用打不开；端口由壳/服务分配后注入。⚠️ 实测发现：6666 在 Chromium unsafe-port 名单（IRC 保留，`ERR_UNSAFE_PORT`），Chrome/Edge 直开 `127.0.0.1:6666` 会被拒；Tauri 的 WKWebView 与 Safari 不受限，Vite dev（8888 代理）也不受影响。打包发布时默认端口宜避开该名单（如 8686）。
+2. **动态端口**：端口被占则应用打不开；端口由壳/服务分配后注入（service.json）。⚠️ 实测踩坑（阶段 1）：**6666 在 WebKit 与 Chromium 共同的受限端口名单**（fetch spec bad ports，IRC 保留 6665-6669）——WKWebView 对它 fetch/导航一律**静默失败**（无报错、落 about:blank），Chromium 报 `ERR_UNSAFE_PORT`。桌面服务默认端口已改 **8686**，`pick_port` 跳过封锁名单；浏览器开发流（8888 Vite 代理 6666）不受影响。同场景另两个坑：`tauri://` 页面的 JS `location.replace` 跳 `http://` 被静默拦（须走 Rust `WebviewWindow::navigate`）；wry 初始导航偶发不触发停在 about:blank（壳内 3s 轮询自愈拉回引导页）。webview 探活必须由页面自身 fetch 判定，服务端 doctor 健康 ≠ webview 可达。
 3. **密钥入库**：`.env` 的 `OPENAI_API_KEY` 迁到设置页（`repo_config` 机制现成），首启引导填写。
 4. **集成形态**：webview 直接加载后端 URL（后端已托管 `frontend/dist`），同源无 CORS，SSE 行为与浏览器一致，前端零改动。方案对比时已否决"Tauri 托管前端 + 跨源 fetch"。
 5. **关窗即隐藏 + 托盘**：`CloseRequested → prevent_close + hide`，托盘 Show/Quit。
@@ -59,7 +59,7 @@ launchd (macOS) ── KeepAlive/RunAtLoad ──► Python 后端 (FastAPI+Deer
 | 阶段 | 内容 | 量级 | 状态 |
 |---|---|---|---|
 | 0 | Tauri 壳 + 探活闪屏直连现有后端，全功能验证 | 0.5-1 天 | ✅ 完成（`desktop/`，闪屏 no-cors 探测 `/api/health` 后跳转） |
-| 1 | launchd 服务注册、数据目录环境变量改造、动态端口、托盘、首启引导（见 §3.2） | 2-3 天 + 1 周 | 🔶 代码完成（后端 `8eaa746`：paths.py + service_cli.py；壳侧 `f551d4c`：托盘/关窗隐藏/闸门引导，cargo check + mock Playwright 8/8）。待实机：launchd install 周期（需用户批准）+ `tauri dev` 全流程走查 |
+| 1 | launchd 服务注册、数据目录环境变量改造、动态端口、托盘、首启引导（见 §3.2） | 2-3 天 + 1 周 | ✅ 完成（2026-07-15）。后端 `8eaa746`（paths.py + service_cli.py），壳侧 `f551d4c` + 受限端口修复。实机验证：launchd install/status/reset 周期通过；`tauri dev` 全流程走查通过（修复页→强制重置→重装 8686→进主界面） |
 | 2 | portable Python runtime 打包 + 蓝绿更新 | ~1 周（风险集中在 akshare/deerflow 真机回归） | 未开始 |
 | 3 | 签名/公证、Tauri updater；Windows（Task Scheduler/NSSM）最后 | 3-5 天 | 未开始 |
 
