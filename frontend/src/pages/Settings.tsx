@@ -9,7 +9,6 @@ import {
   type RegressionCase, type ConnectionTestResult, type MemoryStatus,
   type McpServerConfig,
 } from "@/api/runtime";
-import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, PanelSkeleton, KpiSkeleton } from "@/components/ui/Loading";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { useAppState } from "@/hooks/useAppState";
@@ -1348,14 +1347,29 @@ function RawTab({ data }: { data: SettingsData }) {
 
 /* ==================== MAIN ==================== */
 
-const TABS: { key: SettingTab; label: string }[] = [
-  { key: "general", label: "通用" },
-  { key: "ai", label: "AI" },
-  { key: "risk", label: "风控" },
-  { key: "stock", label: "数据源" },
-  { key: "channels", label: "渠道" },
-  { key: "raw", label: "原始 JSON" },
+/** 左导航分区（TeamClaw 式设置页：左侧分区列表 + 右侧内容 + 底部版本） */
+const NAV: { key: SettingTab; label: string; icon: React.ReactNode }[] = [
+  { key: "general", label: "通用", icon: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+  ) },
+  { key: "ai", label: "AI 模型", icon: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg>
+  ) },
+  { key: "stock", label: "数据源", icon: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+  ) },
+  { key: "risk", label: "风控", icon: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+  ) },
+  { key: "channels", label: "消息渠道", icon: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+  ) },
+  { key: "raw", label: "高级", icon: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polyline points="16,18 22,12 16,6"/><polyline points="8,6 2,12 8,18"/></svg>
+  ) },
 ];
+
+const APP_VERSION = "0.1.0";
 
 export default function Settings() {
   const [settings, setSettings] = useState<SettingsData | null>(null);
@@ -1480,125 +1494,50 @@ export default function Settings() {
     }
   };
 
-  const runtimeStatus = settings?.agent_runtime?.status ?? (settings?.agent_runtime?.available ? "running" : "unknown");
-  const activePolicyCount = riskPolicies.filter(p => p.is_active).length;
-  const marketCount = Object.keys(settings?.data_sources?.providers ?? {}).length;
+  const runtimeOk = !!settings?.agent_runtime?.available;
 
   return (
-    <PageContainer>
-      <div className="page-stack fade-in">
-        <div className="market-hero">
-          <div className="market-hero-header">
-            <div className="market-title">
-              <h1>系统配置</h1>
-              <p>管理 AI 模型、数据源、风控策略和系统参数。</p>
-            </div>
-            <div className="hero-actions">
-              <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
-            </div>
-          </div>
-          <div className="market-stats">
-            <div className="market-stat">
-              <span className="market-stat-label">Runtime</span>
-              <span className={`market-stat-value ${settings?.agent_runtime?.available ? "up" : ""}`}>
-                {settings?.agent_runtime?.available ? "运行中" : "未知"}
-              </span>
-              <span className={`market-stat-change ${settings?.agent_runtime?.available ? "up" : "neutral"}`}>
-                {settings?.agent_runtime?.available ? "● 正常运行" : "● 未知"}
-              </span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">AI 模型</span>
-              <span className="market-stat-value">{settings?.agent_runtime?.model_name ?? "未配置"}</span>
-              <span className="market-stat-change up">● 已连接</span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">数据源</span>
-              <span className="market-stat-value">{marketCount} 市场</span>
-              <span className="market-stat-change up">● 全部可用</span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">风控策略</span>
-              <span className="market-stat-value">{riskPolicies.length} 条</span>
-              <span className="market-stat-change neutral">{activePolicyCount} 激活</span>
-            </div>
-          </div>
+    <div className="settings-layout">
+      {/* 左导航：分区 + 底部版本（TeamClaw 式） */}
+      <nav className="settings-nav">
+        {NAV.map((item) => (
+          <button
+            key={item.key}
+            className={`settings-nav-item${activeTab === item.key ? " active" : ""}`}
+            onClick={() => setActiveTab(item.key)}
+            type="button"
+          >
+            {item.icon}
+            {item.label}
+          </button>
+        ))}
+        <div className="settings-nav-gap" />
+        <div className="settings-nav-foot">
+          <span className={`settings-runtime-dot${runtimeOk ? " ok" : ""}`} />
+          <span>{runtimeOk ? "服务运行中" : "服务未连接"}</span>
         </div>
-
-        <div className="kpi-grid">
-          <div className="kpi-card">
-            <div className="kpi-header">
-              <span className="kpi-label">Runtime</span>
-              <div className={`kpi-icon ${settings?.agent_runtime?.available ? "green" : "amber"}`}>●</div>
-            </div>
-            <div className="kpi-value" style={{ color: settings?.agent_runtime?.available ? "var(--green)" : "var(--amber)" }}>
-              {settings?.agent_runtime?.available ? "运行中" : "未知"}
-            </div>
-            <div className="kpi-change neutral">正常运行</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-header">
-              <span className="kpi-label">AI 模型</span>
-              <div className="kpi-icon blue">🤖</div>
-            </div>
-            <div className="kpi-value">{settings?.agent_runtime?.model_name ?? "未配置"}</div>
-            <div className="kpi-change up">● 已连接</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-header">
-              <span className="kpi-label">数据源</span>
-              <div className="kpi-icon amber">📊</div>
-            </div>
-            <div className="kpi-value">{marketCount} 市场</div>
-            <div className="kpi-change up">● 全部可用</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-header">
-              <span className="kpi-label">风控策略</span>
-              <div className="kpi-icon" style={{ background: "rgba(139, 92, 246, 0.12)", color: "#8b5cf6" }}>🛡️</div>
-            </div>
-            <div className="kpi-value">{riskPolicies.length} 条</div>
-            <div className="kpi-change neutral">{activePolicyCount} 激活</div>
-          </div>
+        <div className="settings-nav-foot">
+          <span>Stock Agent v{APP_VERSION}</span>
+          <button
+            className="settings-check-update"
+            type="button"
+            onClick={() => window.alert("自动更新随桌面打包（阶段 3）提供")}
+          >检查更新</button>
         </div>
+      </nav>
 
-        <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--bg-secondary)", borderRadius: 12, border: "1px solid var(--line)" }}>
-          {TABS.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              type="button"
-              style={{
-                flex: 1,
-                padding: 10,
-                background: activeTab === tab.key ? "var(--blue)" : "transparent",
-                color: activeTab === tab.key ? "white" : "var(--muted)",
-                border: "none",
-                borderRadius: 8,
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: "pointer",
-                transition: "all 0.2s ease",
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
+      {/* 右内容区：分区标题 + 刷新 + 内容 */}
+      <div className="settings-content">
+        <div className="settings-content-head">
+          <span className="settings-content-title">{NAV.find((n) => n.key === activeTab)?.label}</span>
+          <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
         </div>
-
-        {loading ? (
-          <div className="page-stack">
-            <PanelSkeleton /><KpiSkeleton count={3} /><PanelSkeleton />
-          </div>
-        ) : null}
-        {!loading && error ? <ErrorMessage message={error} /> : null}
-
-        {!loading && !error && settings ? (
-          <div className="fade-in">
-            {renderTab()}
-          </div>
-        ) : null}
+        <div className="settings-content-body">
+          {loading && <div className="page-stack"><PanelSkeleton /><KpiSkeleton count={3} /></div>}
+          {!loading && error && <ErrorMessage message={error} />}
+          {!loading && !error && settings && <div className="fade-in">{renderTab()}</div>}
+        </div>
       </div>
-    </PageContainer>
+    </div>
   );
 }
