@@ -1971,6 +1971,8 @@ html.resizing { cursor: col-resize; user-select: none; }
   background: var(--panel); font-size: 12px; line-height: 1.6;
   animation: fade-in .2s ease both;
 }
+/* 纯动态信息卡：没有任何可展示内容时整卡隐藏 */
+.context-card:empty { display: none; }
 .context-card-page {
   display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--ink);
   margin-bottom: 8px; font-size: 13px;

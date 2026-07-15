@@ -16,36 +16,25 @@ interface MonitorEventItem {
   [key: string]: unknown;
 }
 
-const pageIcons: Record<string, string> = {
-  overview: "📊", watchlist: "⭐", holdings: "💼",
-  research: "🔍", market: "📈", monitor: "👁",
-  strategies: "📐", tasks: "📋", reports: "📄", settings: "⚙",
-}
-
 function formatNum(n: number): string {
   if (n >= 1_0000_0000) return (n / 1_0000_0000).toFixed(1) + "亿"
   if (n >= 1_0000) return (n / 1_0000).toFixed(1) + "万"
   return n.toLocaleString()
 }
 
+/** 聊天顶部的动态信息卡：只展示实时状态（个股/持仓/盯盘/待办/运行时），
+ * 不随右栏打开的页面变化。 */
 export function ContextCard() {
-  const { currentScreen, currentScreenLabel, stock, appDataCache } = useAppState()
+  const { stock, appDataCache } = useAppState()
   const cache = appDataCache.current
   const health = cache.health as Record<string, unknown> | undefined
 
-  const icon = pageIcons[currentScreen] || "📄"
   const degraded = health?.degraded as boolean | undefined
 
   return (
     <div className="context-card">
-      <div className="context-card-page">
-        <span>{icon}</span>
-        <span>{currentScreenLabel}</span>
-        {degraded && <span className="context-card-badge mock">mock</span>}
-      </div>
-
       {/* Stock context if available */}
-      {stock && currentScreen !== "overview" && (
+      {stock && (
         (() => {
           const ctx = cache.stockContext as Record<string, PriceInfo> | undefined
           if (!ctx?.price) return null
