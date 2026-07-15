@@ -418,11 +418,9 @@ html.resizing { cursor: col-resize; user-select: none; }
   width: 44px; height: 44px; margin: 14px auto 10px;
   display: grid; place-items: center;
   border-radius: 12px;
-  font-weight: 800; 
-  background: linear-gradient(135deg, var(--blue), #8b5cf6);
-  color: white;
+  /* 与桌面图标同源的深底（icon.png 的背景渐变） */
+  background: linear-gradient(180deg, #171b26, #0b0d13);
   box-shadow: var(--shadow-glow);
-  font-size: 16px;
 }
 .rail-nav {
   padding: 8px; overflow-y: auto;

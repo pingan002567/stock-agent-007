@@ -101,7 +101,34 @@ export function Rail() {
 
   return (
     <aside className={`rail${globalLoading ? " rail-loading" : ""}`}>
-      <div className="rail-logo">AI</div>
+      {/* 与桌面应用图标同款「辉光上行」徽标（desktop/icon.png 的 SVG 简化版） */}
+      <div className="rail-logo" title="Stock Agent">
+        <svg width="100%" height="100%" viewBox="0 0 100 100">
+          <defs>
+            <linearGradient id="logo-line" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0" stopColor="#3a6aec"/>
+              <stop offset="1" stopColor="#89a8ff"/>
+            </linearGradient>
+            <radialGradient id="logo-glow">
+              <stop offset="0" stopColor="rgba(137,168,255,0.55)"/>
+              <stop offset="1" stopColor="rgba(137,168,255,0)"/>
+            </radialGradient>
+          </defs>
+          <g opacity="0.62">
+            <rect x="26" y="60" width="9" height="18" rx="2.5" fill="#4aa07a"/>
+            <rect x="41" y="65" width="9" height="13" rx="2.5" fill="#cc5c5c"/>
+            <rect x="56" y="55" width="9" height="23" rx="2.5" fill="#4aa07a"/>
+          </g>
+          <circle cx="74" cy="32" r="22" fill="url(#logo-glow)"/>
+          <polyline
+            points="18,72 42,55 53,61 74,32"
+            fill="none" stroke="url(#logo-line)" strokeWidth="9"
+            strokeLinecap="round" strokeLinejoin="round"
+          />
+          <circle cx="74" cy="32" r="8.5" fill="#89a8ff"/>
+          <circle cx="74" cy="32" r="4.6" fill="#f0f6ff"/>
+        </svg>
+      </div>
       <nav className="rail-nav">
         {navItems.map((item) => (
           <button
