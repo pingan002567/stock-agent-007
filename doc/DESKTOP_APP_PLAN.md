@@ -59,7 +59,7 @@ launchd (macOS) ── KeepAlive/RunAtLoad ──► Python 后端 (FastAPI+Deer
 | 阶段 | 内容 | 量级 | 状态 |
 |---|---|---|---|
 | 0 | Tauri 壳 + 探活闪屏直连现有后端，全功能验证 | 0.5-1 天 | ✅ 完成（`desktop/`，闪屏 no-cors 探测 `/api/health` 后跳转） |
-| 1 | launchd 服务注册、数据目录环境变量改造、动态端口、托盘、首启引导（见 §3.2） | 2-3 天 + 1 周 | 未开始 |
+| 1 | launchd 服务注册、数据目录环境变量改造、动态端口、托盘、首启引导（见 §3.2） | 2-3 天 + 1 周 | 🔶 后端地基完成（`8eaa746`：paths.py + service_cli.py 六命令，逻辑级验证通过；launchd 实机周期待跑）；托盘/首启引导未开始 |
 | 2 | portable Python runtime 打包 + 蓝绿更新 | ~1 周（风险集中在 akshare/deerflow 真机回归） | 未开始 |
 | 3 | 签名/公证、Tauri updater；Windows（Task Scheduler/NSSM）最后 | 3-5 天 | 未开始 |
 
