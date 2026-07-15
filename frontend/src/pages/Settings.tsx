@@ -226,7 +226,7 @@ function GeneralTab({
 
         {settings.trading_controls && (
           <SectionCard title="交易控制" subtitle="trading safety">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               {Object.entries(settings.trading_controls).map(([k, v]) => (
                 <div key={k} style={{ padding: 12, background: "var(--bg-tertiary)", borderRadius: 8 }}>
                   <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>{k.replace(/_/g, " ")}</div>
@@ -241,7 +241,7 @@ function GeneralTab({
 
         {settings.agent_runtime && (
           <SectionCard title="Runtime 状态" subtitle="connection">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
               {Object.entries(settings.agent_runtime).slice(0, 6).map(([k, v]) => (
                 <div key={k} style={{ padding: 12, background: "var(--bg-tertiary)", borderRadius: 8, textAlign: "center" }}>
                   <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>{k.replace(/_/g, " ")}</div>
@@ -258,7 +258,7 @@ function GeneralTab({
       <div>
         {runtimeMetrics && (
           <SectionCard title="运行摘要" subtitle="24小时">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
               <div style={{ padding: 12, background: "var(--bg-tertiary)", borderRadius: 8 }}>
                 <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>数据源调用</div>
                 <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "var(--font-mono)" }}>{runtimeMetrics.payload.provider?.total_calls ?? 0}</div>
@@ -283,7 +283,7 @@ function GeneralTab({
 
         {runtimeMetrics?.payload.copilot && (
           <SectionCard title="AI 评测摘要" subtitle="质量指标">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
               <div style={{ padding: 12, background: "var(--bg-tertiary)", borderRadius: 8, textAlign: "center" }}>
                 <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>总运行</div>
                 <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "var(--font-mono)" }}>{runtimeMetrics.payload.copilot.total_runs ?? 0}</div>
