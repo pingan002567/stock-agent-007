@@ -77,6 +77,9 @@ def read_service_config() -> dict[str, Any] | None:
 
 def _port_free(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        # SO_REUSEADDR 对齐 uvicorn 的绑定语义：旧进程退出后的 TIME_WAIT
+        # 端口对新服务是可用的，探测不设此选项会误判占用导致端口顺延
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("127.0.0.1", port))
             return True
@@ -117,6 +120,14 @@ def _launchctl(*args: str) -> subprocess.CompletedProcess:
 
 def _service_loaded() -> bool:
     return _launchctl("print", f"{_launchd_domain()}/{LABEL}").returncode == 0
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
 
 
 def _service_pid() -> int | None:
@@ -222,6 +233,10 @@ def _write_plist(port: int, data_dir: Path) -> Path:
             "127.0.0.1",
             "--port",
             str(port),
+            # 重启/切换场景 5 秒内强制断掉 in-flight 请求，避免旧进程占着端口
+            # 等 AKShare 长任务收尾（实测会让切换后端口漂移）
+            "--timeout-graceful-shutdown",
+            "5",
         ],
         "WorkingDirectory": str(paths.REPO_ROOT),
         "EnvironmentVariables": _service_environment(data_dir),
@@ -281,10 +296,35 @@ def cmd_install(args: argparse.Namespace) -> dict[str, Any]:
     data_dir = validate_data_dir(args.data_dir or paths.default_desktop_data_dir())
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    # 已在跑的旧服务先卸载再装（端口探测要看到真实空闲状态）
+    # 切换场景：旧档案也写入注册表，否则无法从切换器一键切回
+    previous = read_service_config()
+    if previous and previous.get("data_dir") and previous["data_dir"] != str(data_dir):
+        try:
+            _update_workspace_registry(Path(previous["data_dir"]), int(previous.get("port") or DEFAULT_PORT))
+        except Exception:
+            pass
+
+    # 已在跑的旧服务先卸载再装。必须坚持等到请求端口真正释放：
+    # 端口顺延会让停在旧端口的前端全线断连（实测踩坑）。
     if _service_loaded():
+        old_pid = _service_pid()
         _launchctl("bootout", f"{_launchd_domain()}/{LABEL}")
-        time.sleep(0.5)
+        requested = args.port or DEFAULT_PORT
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            if _port_free(requested):
+                break
+            if old_pid and not _pid_alive(old_pid):
+                break  # 旧进程已死但端口仍被占 = 第三方占用，交给 pick_port 顺延
+            time.sleep(0.5)
+        else:
+            # 优雅期用尽仍不退（如卡在长任务的旧 uvicorn）：强杀兜底
+            if old_pid and _pid_alive(old_pid):
+                try:
+                    os.kill(old_pid, 9)
+                except OSError:
+                    pass
+                time.sleep(1.0)
 
     port = pick_port(args.port or DEFAULT_PORT)
     plist_path = _write_plist(port, data_dir)
@@ -300,9 +340,17 @@ def cmd_install(args: argparse.Namespace) -> dict[str, Any]:
     }, indent=2, ensure_ascii=False))
     _update_workspace_registry(data_dir, port)
 
-    result = _launchctl("bootstrap", _launchd_domain(), str(plist_path))
-    if result.returncode != 0:
-        raise RuntimeError(f"launchctl bootstrap failed: {result.stderr.strip()}")
+    # bootout 后同 label 立即 bootstrap 会撞 launchd 竞态（I/O error，
+    # 见 DESKTOP_APP_PLAN §3.1.4 对 kickstart 的取舍说明）——重试退避
+    last_err = ""
+    for attempt in range(6):
+        result = _launchctl("bootstrap", _launchd_domain(), str(plist_path))
+        if result.returncode == 0:
+            break
+        last_err = result.stderr.strip() or result.stdout.strip()
+        time.sleep(1.0 + attempt * 0.5)
+    else:
+        raise RuntimeError(f"launchctl bootstrap failed after retries: {last_err}")
 
     healthy = False
     for _ in range(STARTUP_WAIT_ROUNDS):

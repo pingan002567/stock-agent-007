@@ -44,11 +44,13 @@ def _registry() -> list[dict]:
 def workspace_info():
     data_dir = paths.data_dir().resolve()
     current = str(data_dir)
+    config = service_cli.read_service_config()
     recents = [w for w in _registry() if w.get("dir") and w["dir"] != current]
     return {
         "name": _workspace_name(data_dir),
         "data_dir": current,
-        "switchable": service_cli.read_service_config() is not None,
+        "port": (config or {}).get("port"),
+        "switchable": config is not None,
         "recents": recents,
     }
 
@@ -74,7 +76,11 @@ def workspace_switch(payload: dict):
         return {"ok": True, "switching": False, "detail": "已在该工作区"}
 
     # 分离子进程执行重装：install 会 bootout 当前服务（本进程随之退出），
-    # start_new_session 让子进程脱离本服务的进程组、在 bootout 后存活完成 bootstrap。
+    # start_new_session 让子进程脱离本服务的进程组、在 bootout 后存活完成
+    # bootstrap。输出落状态目录 switch.log 供事后排障。
+    log_dir = paths.service_state_dir() / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    switch_log = open(log_dir / "switch.log", "ab")
     subprocess.Popen(
         [
             sys.executable, "-m", "backend.service_cli", "install",
@@ -83,7 +89,7 @@ def workspace_switch(payload: dict):
         ],
         cwd=str(paths.REPO_ROOT),
         start_new_session=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=switch_log,
+        stderr=switch_log,
     )
     return {"ok": True, "switching": True, "target": str(target)}

@@ -4,13 +4,17 @@ import { apiGet, apiPost } from "@/api/client";
 interface WorkspaceInfo {
   name: string;
   data_dir: string;
+  port?: number | null;
   switchable: boolean;
   recents: { dir: string; name: string; last_used?: string }[];
 }
 
 declare global {
   interface Window {
-    __TAURI__?: { dialog?: { open?: (opts: Record<string, unknown>) => Promise<string | null> } };
+    __TAURI__?: {
+      dialog?: { open?: (opts: Record<string, unknown>) => Promise<string | null> };
+      core?: { invoke?: (cmd: string, payload?: Record<string, unknown>) => Promise<unknown> };
+    };
   }
 }
 
@@ -36,16 +40,37 @@ export function WorkspaceModal({ open, onClose }: { open: boolean; onClose: () =
     setError("");
     setSwitching(true);
     try {
+      const invoke = window.__TAURI__?.core?.invoke;
+      if (invoke) {
+        // 桌面：切换在壳进程里执行（service_cli install），天然不受后端
+        // bootout 影响；完成后按返回的最终端口原生导航（端口漂移也能跟上）
+        const r = await invoke("service_cli", {
+          args: ["install", "--port", String(info?.port ?? 8686), "--data-dir", dir],
+        }) as { ok?: boolean; port?: number; backend_healthy?: boolean; error?: string };
+        if (!r?.ok) throw new Error(r?.error || "切换失败");
+        await invoke("navigate", { url: `http://127.0.0.1:${r.port}/` });
+        return;
+      }
+
+      // 浏览器：后端分离子进程重装（install 内已等待端口释放,端口保持不变），
+      // 同源轮询健康后整页重载
       const r = await apiPost<{ ok: boolean; switching: boolean; detail?: string }>(
         "/api/workspace/switch", { data_dir: dir });
       if (!r.switching) { setSwitching(false); onClose(); return; }
-      // 服务正在 bootout→bootstrap,轮询健康后整页重载进入新档案
+      // 必须确认 data_dir 已经变成目标目录才 reload——旧进程优雅退出期间
+      // /api/health 仍会应答,单看健康会提前重载回旧档案（实测踩坑）
       const deadline = Date.now() + 40000;
       await new Promise((r) => setTimeout(r, 1500));
       while (Date.now() < deadline) {
         try {
-          const res = await fetch("/api/health", { cache: "no-store" });
-          if (res.ok) { window.location.reload(); return; }
+          const res = await fetch("/api/workspace", { cache: "no-store" });
+          if (res.ok) {
+            const w = await res.json() as { data_dir?: string };
+            if (w.data_dir === dir || w.data_dir === dir.replace(/\/$/, "")) {
+              window.location.reload();
+              return;
+            }
+          }
         } catch { /* 服务重启中 */ }
         await new Promise((r) => setTimeout(r, 600));
       }
@@ -55,7 +80,7 @@ export function WorkspaceModal({ open, onClose }: { open: boolean; onClose: () =
       setError(e instanceof Error ? e.message : String(e));
       setSwitching(false);
     }
-  }, [onClose]);
+  }, [onClose, info]);
 
   const browse = useCallback(async () => {
     const dialogOpen = window.__TAURI__?.dialog?.open;
