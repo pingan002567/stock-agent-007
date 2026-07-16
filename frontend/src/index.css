@@ -299,18 +299,23 @@ pre {
 .topbar3 {
   grid-column: 1 / -1;
   display: grid;
-  /* 左段保底宽度:左栏折叠后折叠钮仍需容身 */
-  grid-template-columns: max(var(--left-sidebar-w, 272px), 44px) minmax(0, 1fr) auto;
+  /* 左段保底宽度:左栏折叠后折叠钮仍需容身;右段与功能坞同宽(列头对齐) */
+  grid-template-columns: max(var(--left-sidebar-w, 272px), var(--topbar-left-min, 44px)) minmax(0, 1fr) var(--topbar-right-col, 52px);
   height: 40px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--line);
   transition: grid-template-columns 0.22s cubic-bezier(0.3, 0.8, 0.3, 1);
 }
 .topbar3-seg { display: flex; align-items: center; min-width: 0; }
-.topbar3-left { padding: 0 8px; border-right: 1px solid var(--line-soft); }
-.app.left-collapsed .topbar3-left { border-right: none; }
+.topbar3-left { padding: 0 8px; border-right: 1px solid var(--line); justify-content: flex-end; }
+.app.left-collapsed .topbar3-left { border-right: none; justify-content: flex-start; }
 .topbar3-center { padding: 0 14px; }
-.topbar3-right { padding: 0 8px; justify-content: flex-end; }
+.topbar3-right {
+  padding: 0 12px 0 0;
+  justify-content: flex-end;
+  border-left: 1px solid var(--line);
+}
+.app.dock-collapsed .topbar3-right { border-left: none; padding-right: 8px; }
 .topbar3-title {
   font-size: 13px; font-weight: 650; color: var(--ink);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -326,7 +331,10 @@ pre {
 .topbar3-btn.on { color: var(--muted); }
 /* 桌面态:红绿灯住在顶栏左端 */
 html.desktop .topbar3-left { padding-left: 84px; }
-html.desktop .topbar3 { grid-template-columns: max(var(--left-sidebar-w, 272px), 120px) minmax(0, 1fr) auto; }
+html.desktop { --topbar-left-min: 120px; }
+/* 功能坞状态 → 顶栏右段列宽(线随分割线移动) */
+.app.dock-collapsed { --topbar-right-col: 44px; }
+.app.panel-open { --topbar-right-col: calc(var(--func-panel-w, 424px) + 52px); }
 .center { min-height: 0; min-width: 0; overflow: hidden; display: flex; }
 .center .copilot-panel { flex: 1; border-left: none; }
 

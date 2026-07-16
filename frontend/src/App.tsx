@@ -18,8 +18,8 @@ import { setOnApiError } from "@/api/client";
  * 系统设置走独立悬浮模态（TeamClaw 式），不占功能坞。 */
 function AppShell() {
   const { showToast } = useToast();
-  const { setCurrentScreen } = useAppState();
-  const { closeDetail } = useChatDetail();
+  const { currentScreen, setCurrentScreen } = useAppState();
+  const { open: detailOpen, closeDetail } = useChatDetail();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
 
@@ -47,8 +47,17 @@ function AppShell() {
     if (window.__TAURI__) document.documentElement.classList.add("desktop");
   }, []);
 
+  // 顶栏右段列宽与功能坞同步（列头对齐）：面板开 = 52+面板宽,坞收 = 仅按钮位
+  const panelOpen = !dockCollapsed && (detailOpen || currentScreen !== "chat");
+  const appCls = [
+    "app",
+    leftCollapsed ? "left-collapsed" : "",
+    dockCollapsed ? "dock-collapsed" : "",
+    panelOpen ? "panel-open" : "",
+  ].filter(Boolean).join(" ");
+
   return (
-    <div className={`app${leftCollapsed ? " left-collapsed" : ""}`}>
+    <div className={appCls}>
       <TopBar
         leftCollapsed={leftCollapsed}
         onToggleLeft={toggleLeft}
