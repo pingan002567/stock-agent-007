@@ -341,9 +341,9 @@ html.desktop .topbar3 { grid-template-columns: max(var(--left-sidebar-w, 272px),
   border-right: 1px solid var(--line);
   min-height: 0;
 }
-.brand { display: flex; align-items: center; gap: 10px; padding: 16px 12px 12px 16px; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 12px 14px 8px; }
 .brand > div:nth-child(2) { flex: 1; min-width: 0; }
-.brand-status { display: flex; align-items: center; gap: 8px; flex: none; }
+.brand-status { display: flex; align-items: center; gap: 8px; flex: 1; justify-content: space-between; }
 .brand-status-col { display: grid; justify-items: end; gap: 2px; }
 .brand-clock {
   font-family: var(--mono, ui-monospace, Menlo, monospace);

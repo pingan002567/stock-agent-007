@@ -88,31 +88,8 @@ export function LeftSidebar({ onOpenSettings, onOpenWorkspace }: {
 
   return (
     <aside className="left-sidebar">
+      {/* 顶行只留状态簇（时钟/AI 状态/头像）;品牌标识随统一顶栏化简去除 */}
       <div className="brand" data-tauri-drag-region="">
-        {/* 与桌面应用图标同款「辉光上行」徽标 */}
-        <div className="brand-logo" title="Stock Agent">
-          <svg width="22" height="22" viewBox="0 0 100 100">
-            <defs>
-              <linearGradient id="brand-line" x1="0" y1="1" x2="1" y2="0">
-                <stop offset="0" stopColor="#3a6aec"/>
-                <stop offset="1" stopColor="#89a8ff"/>
-              </linearGradient>
-            </defs>
-            <g opacity="0.62">
-              <rect x="26" y="60" width="9" height="18" rx="2.5" fill="#4aa07a"/>
-              <rect x="41" y="65" width="9" height="13" rx="2.5" fill="#cc5c5c"/>
-              <rect x="56" y="55" width="9" height="23" rx="2.5" fill="#4aa07a"/>
-            </g>
-            <polyline points="18,72 42,55 53,61 74,32" fill="none" stroke="url(#brand-line)"
-              strokeWidth="9" strokeLinecap="round" strokeLinejoin="round"/>
-            <circle cx="74" cy="32" r="8.5" fill="#89a8ff"/>
-            <circle cx="74" cy="32" r="4.6" fill="#f0f6ff"/>
-          </svg>
-        </div>
-        <div>
-          <div className="brand-name">Stock Agent</div>
-          <div className="brand-sub">local · {window.location.port || "80"}</div>
-        </div>
         <BrandStatus />
       </div>
 
