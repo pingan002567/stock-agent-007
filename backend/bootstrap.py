@@ -291,12 +291,10 @@ def create_services(
         risk_policy_service=risk_policy_service,
         review_inbox_service=review_inbox_service,
     )
-    # Accept both shapes (matches CopilotService.reconnect_runtime): settings saved
-    # via PUT /runtime are stored flat (api_key/base_url/... at top level), while older
-    # data may wrap them under a "config" key. Reading only "config" silently dropped
-    # the page-saved runtime config on startup → Copilot fell back to stub after restart.
-    _raw_runtime = repo.get_config("runtime", {})
-    runtime_config = _raw_runtime.get("config", _raw_runtime) or DEFAULT_RUNTIME_CONFIG
+    # 分层合成：档案 DB 覆盖 > 用户级 credentials.json > env（见 config/credentials.py）
+    from backend.config.credentials import effective_runtime_config
+
+    runtime_config = effective_runtime_config(repo)
     execution_policy = ExecutionPolicy()
     tool_bridge = WorkbenchToolBridge(
         context_builder=context_builder,

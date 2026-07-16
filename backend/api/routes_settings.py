@@ -48,10 +48,10 @@ def get_settings(request: Request, services: AppServices = Depends(get_services)
             "real_order": "blocked",
         },
         # 兼容两种配置格式：直接在顶层或在 config 子键下
-        "runtime_config": (
-            services.repo.get_config("runtime", {}).get("config")
-            or services.repo.get_config("runtime", DEFAULT_RUNTIME_CONFIG)
-        ),
+        # 展示分层合成后的有效配置（用户级凭证 + 档案覆盖），表单回显一致
+        "runtime_config": __import__(
+            "backend.config.credentials", fromlist=["effective_runtime_config"]
+        ).effective_runtime_config(services.repo),
         "agent_runtime": services.copilot_service.deerflow.status().to_dict(),
         "data_provider": provider_router.status().to_dict(),
         "data_sources": services.repo.get_config("data_sources", DEFAULT_DATA_SOURCES),
@@ -101,6 +101,13 @@ def put_runtime(
     payload: dict, request: Request, services: AppServices = Depends(get_services)
 ):
     services.audit_service.record("settings runtime updated", "runtime")
+    # 凭证分层：api_key/base_url 跟人走（用户级 credentials.json），
+    # 档案 DB 只存偏好（模型/思维链等）。base_url 与 key 配套故同归用户级。
+    from backend.config.credentials import save_credentials
+
+    cred_part = {k: payload.pop(k) for k in ("api_key", "base_url") if payload.get(k)}
+    if cred_part:
+        save_credentials(cred_part)
     result = services.repo.set_config("runtime", payload)
     # Auto-reconnect so the new config takes effect immediately
     status = services.copilot_service.reconnect_runtime()

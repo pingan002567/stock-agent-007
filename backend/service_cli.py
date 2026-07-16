@@ -158,20 +158,16 @@ def _read_env_file() -> dict[str, str]:
 
 
 def _service_environment(data_dir: Path) -> dict[str, str]:
+    """plist 只携带非机密项。AI 密钥/模型走用户级 credentials.json 与档案 DB
+    的分层（backend/config/credentials.py），不再从 .env 拷进 plist 明文。"""
     dotenv = _read_env_file()
-    env = {
+    return {
         "WORKBENCH_DATA_DIR": str(data_dir),
-        # 与 start.sh load_env 对齐的 AI 默认值
         "WORKBENCH_AI_MODE": dotenv.get("WORKBENCH_AI_MODE", "direct"),
-        "OPENAI_BASE_URL": dotenv.get("OPENAI_BASE_URL", "https://api.deepseek.com/v1"),
-        "WORKBENCH_AI_MODEL": dotenv.get("WORKBENCH_AI_MODEL", "deepseek-chat"),
         "NO_PROXY": dotenv.get(
             "NO_PROXY", "eastmoney.com,push2.eastmoney.com,finance.sina.com.cn"
         ),
     }
-    if dotenv.get("OPENAI_API_KEY"):
-        env["OPENAI_API_KEY"] = dotenv["OPENAI_API_KEY"]
-    return env
 
 
 def validate_data_dir(raw: str | Path) -> Path:

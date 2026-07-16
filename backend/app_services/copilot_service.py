@@ -96,9 +96,9 @@ class CopilotService:
         Called after settings change so the runtime transitions from stub to
         embedded without a server restart.
         """
-        # 兼容两种配置格式：直接在顶层或在 config 子键下
-        raw_config = self.repo.get_config("runtime", {})
-        runtime_config = raw_config.get("config", raw_config)
+        from backend.config.credentials import effective_runtime_config
+
+        runtime_config = effective_runtime_config(self.repo)
         new_adapter = DeerFlowClientAdapter.from_env(
             tool_bridge=self.deerflow.tool_bridge,
             runtime_config=runtime_config,
