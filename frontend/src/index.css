@@ -282,18 +282,57 @@ pre {
   border: 1px solid var(--line);
 }
 
-/* ═══ 三栏骨架（doc/design/three-column-mockup.html）：左会话 │ 中聊天 │ 右功能坞 ═══ */
+/* ═══ 三栏骨架 + 统一顶栏（TeamClaw 式）═══ */
 .app {
   height: 100vh;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   grid-template-columns: var(--left-sidebar-w, 272px) minmax(0, 1fr) auto;
   background: var(--bg);
+  transition: grid-template-columns 0.22s cubic-bezier(0.3, 0.8, 0.3, 1);
 }
+.app.left-collapsed { --left-sidebar-w: 0px; }
+.app.left-collapsed .left-sidebar { border-right: none; }
+.left-sidebar { min-width: 0; }
+
+/* 顶栏：贯通三栏,整条可拖拽(桌面);分段与列对齐 */
+.topbar3 {
+  grid-column: 1 / -1;
+  display: grid;
+  /* 左段保底宽度:左栏折叠后折叠钮仍需容身 */
+  grid-template-columns: max(var(--left-sidebar-w, 272px), 44px) minmax(0, 1fr) auto;
+  height: 40px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--line);
+  transition: grid-template-columns 0.22s cubic-bezier(0.3, 0.8, 0.3, 1);
+}
+.topbar3-seg { display: flex; align-items: center; min-width: 0; }
+.topbar3-left { padding: 0 8px; border-right: 1px solid var(--line-soft); }
+.app.left-collapsed .topbar3-left { border-right: none; }
+.topbar3-center { padding: 0 14px; }
+.topbar3-right { padding: 0 8px; justify-content: flex-end; }
+.topbar3-title {
+  font-size: 13px; font-weight: 650; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.topbar3-btn {
+  width: 28px; height: 28px; padding: 0; flex: none;
+  display: grid; place-items: center;
+  border: none; border-radius: var(--radius);
+  background: transparent; color: var(--faint);
+  transition: background 0.2s, color 0.2s;
+}
+.topbar3-btn:hover { background: var(--soft); color: var(--ink); border: none; box-shadow: none; }
+.topbar3-btn.on { color: var(--muted); }
+/* 桌面态:红绿灯住在顶栏左端 */
+html.desktop .topbar3-left { padding-left: 84px; }
+html.desktop .topbar3 { grid-template-columns: max(var(--left-sidebar-w, 272px), 120px) minmax(0, 1fr) auto; }
 .center { min-height: 0; min-width: 0; overflow: hidden; display: flex; }
 .center .copilot-panel { flex: 1; border-left: none; }
 
 /* ─── 左栏：品牌 + 会话 + 设置 ─── */
 .left-sidebar {
+  overflow: hidden;
   display: grid;
   grid-template-rows: auto auto auto 1fr auto;
   background: var(--bg-secondary);
@@ -3512,22 +3551,9 @@ html.resizing { cursor: col-resize; user-select: none; }
 @keyframes ws-spin { to { transform: rotate(360deg); } }
 
 /* ─── 功能坞整栏收起/展开 ─── */
-.strip-divider { width: 24px; height: 1px; background: var(--line); margin: 4px 0 6px; }
-.dock-expand {
-  position: fixed; right: 0; top: 50%; transform: translateY(-50%);
-  width: 16px; height: 64px; padding: 0;
-  display: grid; place-items: center;
-  border: 1px solid var(--line); border-right: none;
-  border-radius: 8px 0 0 8px;
-  background: var(--bg-secondary); color: var(--muted);
-  z-index: 40;
-}
-.dock-expand:hover { color: var(--ink); background: var(--soft); box-shadow: none; border-color: var(--line); }
 
-/* ─── 桌面态（Tauri Overlay 标题栏）：品牌区让位红绿灯,头部可拖拽 ─── */
-html.desktop .brand { padding-top: 42px; }
-html.desktop .brand,
-html.desktop .copilot-head,
+/* 桌面态:顶栏及各头部禁选中(拖拽体验) */
+html.desktop .topbar3,
 html.desktop .func-head { -webkit-user-select: none; user-select: none; }
 
 /* ═══ 微交互纪律（TeamClaw 惯例）═══ */

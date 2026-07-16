@@ -15,18 +15,6 @@ export function FunctionDock() {
   const { detail, open: detailOpen, openDetail, closeDetail } = useChatDetail();
   const { currentSession } = useCopilotChat();
 
-  // 整栏收起/展开（持久化）；收起时业务面板一并关闭
-  const [dockCollapsed, setDockCollapsed] = useState(
-    () => localStorage.getItem("func-dock-collapsed") === "1",
-  );
-  const toggleDock = () => {
-    setDockCollapsed((v) => {
-      const next = !v;
-      try { localStorage.setItem("func-dock-collapsed", next ? "1" : "0"); } catch { /* ignore */ }
-      if (next) { closeDetail(); setCurrentScreen("chat"); }
-      return next;
-    });
-  };
 
   // 会话切换后旧工具详情失去上下文，自动收起（render 期派生状态）
   const sid = currentSession?.session_id ?? null;
@@ -60,14 +48,6 @@ export function FunctionDock() {
     setCurrentScreen("chat");
   };
 
-  if (dockCollapsed) {
-    return (
-      <button className="dock-expand" onClick={toggleDock} title="展开功能栏">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
-      </button>
-    );
-  }
-
   return (
     <div className="func-dock">
       <section className={`func-panel${panelOpen ? " open" : ""}`}>
@@ -96,10 +76,6 @@ export function FunctionDock() {
       </section>
 
       <aside className="func-strip">
-        <button className="strip-btn" onClick={toggleDock} title="收起功能栏">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
-        </button>
-        <div className="strip-divider" />
         {stripItems.map((item) => (
           <button
             key={item.screen}

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { AppStateProvider } from "@/hooks/useAppState";
+import { AppStateProvider, useAppState } from "@/hooks/useAppState";
 import { CopilotChatProvider } from "@/hooks/useCopilotChat";
-import { ChatDetailProvider } from "@/hooks/useChatDetail";
+import { ChatDetailProvider, useChatDetail } from "@/hooks/useChatDetail";
+import { TopBar } from "@/components/layout/TopBar";
 import { LeftSidebar } from "@/components/layout/LeftSidebar";
 import { FunctionDock } from "@/components/layout/FunctionDock";
 import { CopilotPanel } from "@/components/features/CopilotPanel";
@@ -17,16 +18,43 @@ import { setOnApiError } from "@/api/client";
  * 系统设置走独立悬浮模态（TeamClaw 式），不占功能坞。 */
 function AppShell() {
   const { showToast } = useToast();
+  const { setCurrentScreen } = useAppState();
+  const { closeDetail } = useChatDetail();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
 
-  // 桌面壳（Tauri 远程 IPC 已授权）：标记 desktop 态——品牌区让位红绿灯、头部可拖拽
+  // 顶栏统一控制左右栏折叠（TeamClaw 式），状态持久化
+  const [leftCollapsed, setLeftCollapsed] = useState(
+    () => localStorage.getItem("left-sidebar-collapsed") === "1",
+  );
+  const [dockCollapsed, setDockCollapsed] = useState(
+    () => localStorage.getItem("func-dock-collapsed") === "1",
+  );
+  const toggleLeft = () => setLeftCollapsed((v) => {
+    const next = !v;
+    try { localStorage.setItem("left-sidebar-collapsed", next ? "1" : "0"); } catch { /* ignore */ }
+    return next;
+  });
+  const toggleDock = () => setDockCollapsed((v) => {
+    const next = !v;
+    try { localStorage.setItem("func-dock-collapsed", next ? "1" : "0"); } catch { /* ignore */ }
+    if (next) { closeDetail(); setCurrentScreen("chat"); } // 收起时联动关闭业务面板
+    return next;
+  });
+
+  // 桌面壳（Tauri 远程 IPC 已授权）：desktop 态——红绿灯住进顶栏、顶栏可拖拽
   useEffect(() => {
     if (window.__TAURI__) document.documentElement.classList.add("desktop");
   }, []);
 
   return (
-    <div className="app">
+    <div className={`app${leftCollapsed ? " left-collapsed" : ""}`}>
+      <TopBar
+        leftCollapsed={leftCollapsed}
+        onToggleLeft={toggleLeft}
+        dockCollapsed={dockCollapsed}
+        onToggleDock={toggleDock}
+      />
       <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
         <LeftSidebar
           onOpenSettings={() => setSettingsOpen(true)}
@@ -39,7 +67,7 @@ function AppShell() {
         </ErrorBoundary>
       </main>
       <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
-        <FunctionDock />
+        {!dockCollapsed && <FunctionDock />}
       </ErrorBoundary>
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <WorkspaceModal open={workspaceOpen} onClose={() => setWorkspaceOpen(false)} />

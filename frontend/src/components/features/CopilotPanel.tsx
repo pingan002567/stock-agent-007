@@ -303,6 +303,8 @@ export function CopilotPanel({ open = true, onToggle, variant = "panel" }: { ope
 
   return (
     <aside className={variant === "main" ? "copilot-panel copilot-panel-main" : "copilot-panel"}>
+      {/* main 变体的标题已上移统一顶栏,仅侧栏形态保留头部 */}
+      {variant === "panel" && (
       <div className="copilot-head" data-tauri-drag-region="">
         {variant === "panel" && (<div ref={sessionRef} style={{ position: "relative" }}>
           <button
@@ -398,6 +400,7 @@ export function CopilotPanel({ open = true, onToggle, variant = "panel" }: { ope
           <button className="copilot-close-btn" onClick={onToggle} title="关闭 AI Chat">›</button>
         )}
       </div>
+      )}
 
       <div className="copilot-body">
         <div className="messages">
