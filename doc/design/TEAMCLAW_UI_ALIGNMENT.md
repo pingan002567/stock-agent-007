@@ -1,6 +1,6 @@
 # UI 向 TeamClaw 对齐 —— 调研分析
 
-**Status:** 调研完成，待拍板实施范围（2026-07-16）
+**Status:** 已实施 P0-P3（2026-07-16：`4f23e95` token 地基 / `b6befa8` 聊天三件套 / `990057c` Composer+微交互）。未做：设置三原语（SettingCard/SectionHeader/ToggleSwitch 精细化）、头像色板（单人场景弱需求）
 **素材:** TeamClaw `AGENTS.md` §1-§8（设计规范原文）+ `packages/app/` 实现实测（globals.css / App.tsx / message.tsx / ToolCallCard.tsx / Settings.tsx / button.tsx 等）
 
 ---
