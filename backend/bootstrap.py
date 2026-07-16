@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 from dataclasses import dataclass
 from pathlib import Path
 
+from backend import paths
 from backend.agent_runtime.deerflow_client import DeerFlowClientAdapter
 from backend.agent_runtime import tools as workbench_tools
 from backend.agent_runtime.result_normalizer import ResultNormalizer
@@ -153,16 +154,53 @@ def _seed_market_data(repo: WorkbenchRepository, provider_router) -> None:
         _log.exception("HK/US master import failed")
 
 
+def ensure_workspace_files() -> None:
+    """工作目录档案文件保障（幂等）：
+
+    1. ``workspace.json``：档案元信息（名称/创建时间/schema 版本）——多工作区
+       切换器的显示名与将来数据迁移的版本依据。
+    2. ``extensions_config.json``（MCP 服务器配置）：用户配置属于工作目录。
+       历史位置在仓库根——首次运行时做一次性拷贝迁移；两处都没有则写空配置
+       （DeerFlow 在显式指定路径时要求文件存在）。随后经
+       ``DEER_FLOW_EXTENSIONS_CONFIG_PATH`` 把本进程内所有读写（含 embedded
+       DeerFlow harness）统一指到工作目录；已显式设置该 env 时尊重外部值。
+    """
+    import json
+    from datetime import datetime, timezone
+
+    data_dir = paths.data_dir()
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    meta = paths.workspace_meta_path()
+    if not meta.exists():
+        # 目录名作默认档案名；桌面默认位置 …/StockAgent/data 取父级名更可读
+        name = data_dir.name if data_dir.name != "data" else data_dir.parent.name
+        meta.write_text(json.dumps({
+            "name": name,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "schema_version": 1,
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    mcp_target = paths.extensions_config_path()
+    if not mcp_target.exists():
+        legacy = paths.REPO_ROOT / "extensions_config.json"
+        if legacy.is_file():
+            mcp_target.write_text(legacy.read_text(encoding="utf-8"), encoding="utf-8")
+            _log.info("migrated extensions_config.json into workspace: %s", mcp_target)
+        else:
+            mcp_target.write_text('{\n  "mcpServers": {}\n}\n', encoding="utf-8")
+    os.environ.setdefault("DEER_FLOW_EXTENSIONS_CONFIG_PATH", str(mcp_target))
+
+
 def create_services(
     db_path: str | Path | None = None,
     files_root: str | Path | None = None,
 ) -> AppServices:
-    from backend import paths
-
     if db_path is None:
         db_path = paths.default_db_path()
     if files_root is None:
         files_root = paths.default_files_root()
+    ensure_workspace_files()
     repo = WorkbenchRepository(connect(db_path))
     repo.seed_defaults()
     runtime_observer.configure(repo)

@@ -38,6 +38,17 @@ def frontend_dist() -> Path:
     return Path(env).expanduser() if env else REPO_ROOT / "frontend" / "dist"
 
 
+def extensions_config_path() -> Path:
+    """MCP 服务器配置：用户配置属于工作目录（随档案迁移/备份）。
+    历史位置在仓库根，由 bootstrap.ensure_workspace_files() 做一次性迁移。"""
+    return data_dir() / "extensions_config.json"
+
+
+def workspace_meta_path() -> Path:
+    """档案元信息（名称/创建时间/schema 版本），多工作区切换器的显示与迁移依据。"""
+    return data_dir() / "workspace.json"
+
+
 def service_state_dir() -> Path:
     """服务状态目录（固定）：service.json + 日志。macOS 约定位置。"""
     return Path.home() / "Library" / "Application Support" / APP_NAME

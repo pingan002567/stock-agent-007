@@ -166,9 +166,8 @@ def _has_enabled_mcp_server() -> bool:
     """extensions_config.json 里是否有启用的 MCP server（直接读文件，不 import DeerFlow）。"""
     import json
 
-    path = os.getenv("DEER_FLOW_EXTENSIONS_CONFIG_PATH") or str(
-        Path(__file__).resolve().parents[2] / "extensions_config.json"
-    )
+    # 兜底与 bootstrap.ensure_workspace_files 一致：MCP 配置在工作目录
+    path = os.getenv("DEER_FLOW_EXTENSIONS_CONFIG_PATH") or str(paths.extensions_config_path())
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except Exception:
