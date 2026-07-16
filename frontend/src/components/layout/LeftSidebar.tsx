@@ -46,11 +46,26 @@ function sessTime(s: CopilotSession): string {
     : `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export function LeftSidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
+export function LeftSidebar({ onOpenSettings, onOpenWorkspace }: {
+  onOpenSettings: () => void;
+  onOpenWorkspace: () => void;
+}) {
   const {
     sessions, currentSession,
     switchSession, handleNewSession, handleRenameSession, handleDeleteSession,
   } = useCopilotChat();
+
+  // 当前工作区名（vault 切换器按钮文本）
+  const [workspaceName, setWorkspaceName] = useState("工作区");
+  useEffect(() => {
+    let alive = true;
+    import("@/api/client").then(({ apiGet }) =>
+      apiGet<{ name: string }>("/api/workspace")
+        .then((w) => { if (alive && w.name) setWorkspaceName(w.name); })
+        .catch(() => { /* 旧后端无此接口时保持默认 */ })
+    );
+    return () => { alive = false; };
+  }, []);
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -73,7 +88,7 @@ export function LeftSidebar({ onOpenSettings }: { onOpenSettings: () => void }) 
 
   return (
     <aside className="left-sidebar">
-      <div className="brand">
+      <div className="brand" data-tauri-drag-region="">
         {/* 与桌面应用图标同款「辉光上行」徽标 */}
         <div className="brand-logo" title="Stock Agent">
           <svg width="22" height="22" viewBox="0 0 100 100">
@@ -199,10 +214,15 @@ export function LeftSidebar({ onOpenSettings }: { onOpenSettings: () => void }) 
         ))}
       </nav>
 
+      {/* 底部并排：系统设置 │ 工作区切换（按钮文本 = 当前工作区名） */}
       <div className="left-foot">
         <button className="foot-item" onClick={onOpenSettings}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           系统设置
+        </button>
+        <button className="foot-item" onClick={onOpenWorkspace} title={`工作区：${workspaceName}`}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          <span className="foot-item-text">{workspaceName}</span>
         </button>
       </div>
     </aside>

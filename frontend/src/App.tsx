@@ -6,6 +6,7 @@ import { LeftSidebar } from "@/components/layout/LeftSidebar";
 import { FunctionDock } from "@/components/layout/FunctionDock";
 import { CopilotPanel } from "@/components/features/CopilotPanel";
 import { SettingsModal } from "@/components/features/SettingsModal";
+import { WorkspaceModal } from "@/components/features/WorkspaceModal";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ToastProvider, useToast } from "@/hooks/useToast";
 import { setOnApiError } from "@/api/client";
@@ -17,10 +18,20 @@ import { setOnApiError } from "@/api/client";
 function AppShell() {
   const { showToast } = useToast();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+
+  // 桌面壳（Tauri 远程 IPC 已授权）：标记 desktop 态——品牌区让位红绿灯、头部可拖拽
+  useEffect(() => {
+    if (window.__TAURI__) document.documentElement.classList.add("desktop");
+  }, []);
+
   return (
     <div className="app">
       <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
-        <LeftSidebar onOpenSettings={() => setSettingsOpen(true)} />
+        <LeftSidebar
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenWorkspace={() => setWorkspaceOpen(true)}
+        />
       </ErrorBoundary>
       <main className="center">
         <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
@@ -31,6 +42,7 @@ function AppShell() {
         <FunctionDock />
       </ErrorBoundary>
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <WorkspaceModal open={workspaceOpen} onClose={() => setWorkspaceOpen(false)} />
     </div>
   );
 }

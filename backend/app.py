@@ -37,6 +37,7 @@ from backend.api import (
     routes_strategy,
     routes_tasks,
     routes_watchlist,
+    routes_workspace,
     routes_worldcup,
 )
 from backend import paths
@@ -135,6 +136,7 @@ def create_app(
         routes_settings.router,
         routes_copilot.router,
         routes_channels.router,
+        routes_workspace.router,
         routes_worldcup.router,
     ]:
         app.include_router(router)

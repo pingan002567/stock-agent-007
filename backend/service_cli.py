@@ -176,6 +176,38 @@ def validate_data_dir(raw: str | Path) -> Path:
     return candidate
 
 
+def _update_workspace_registry(data_dir: Path, port: int) -> None:
+    """状态目录 workspaces.json：最近工作区注册表（vault 切换器的数据源）。
+    去重后按 last_used 倒序，保留最近 10 条。"""
+    from datetime import datetime, timezone
+
+    registry_path = _state_dir() / "workspaces.json"
+    try:
+        items = json.loads(registry_path.read_text(encoding="utf-8"))
+        if not isinstance(items, list):
+            items = []
+    except (OSError, ValueError):
+        items = []
+
+    name = data_dir.name if data_dir.name != "data" else data_dir.parent.name
+    try:
+        meta = json.loads((data_dir / "workspace.json").read_text(encoding="utf-8"))
+        name = str(meta.get("name") or name)
+    except (OSError, ValueError):
+        pass
+
+    entry = {
+        "dir": str(data_dir),
+        "name": name,
+        "port": port,
+        "last_used": datetime.now(timezone.utc).isoformat(),
+    }
+    items = [entry] + [w for w in items if w.get("dir") != str(data_dir)]
+    registry_path.write_text(
+        json.dumps(items[:10], ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
 def _write_plist(port: int, data_dir: Path) -> Path:
     logs = _state_dir() / "logs"
     logs.mkdir(parents=True, exist_ok=True)
@@ -266,6 +298,7 @@ def cmd_install(args: argparse.Namespace) -> dict[str, Any]:
         "plist": str(plist_path),
         "repo_root": str(paths.REPO_ROOT),
     }, indent=2, ensure_ascii=False))
+    _update_workspace_registry(data_dir, port)
 
     result = _launchctl("bootstrap", _launchd_domain(), str(plist_path))
     if result.returncode != 0:

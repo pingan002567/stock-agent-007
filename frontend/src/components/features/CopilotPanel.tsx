@@ -303,7 +303,7 @@ export function CopilotPanel({ open = true, onToggle, variant = "panel" }: { ope
 
   return (
     <aside className={variant === "main" ? "copilot-panel copilot-panel-main" : "copilot-panel"}>
-      <div className="copilot-head">
+      <div className="copilot-head" data-tauri-drag-region="">
         {variant === "panel" && (<div ref={sessionRef} style={{ position: "relative" }}>
           <button
             className="session-trigger"

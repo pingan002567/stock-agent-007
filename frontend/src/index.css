@@ -401,14 +401,15 @@ pre {
 }
 .sess-empty-hint { font-size: 12px; color: var(--msg-time); }
 
-.left-foot { border-top: 1px solid var(--line); padding: 8px; }
+.left-foot { border-top: 1px solid var(--line); padding: 8px; display: flex; gap: 4px; }
 .foot-item {
-  display: flex; align-items: center; gap: 10px; width: 100%;
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
   padding: 8px 10px; border: none; background: none; cursor: pointer;
   border-radius: var(--radius); color: var(--muted); font-size: 13px;
   transition: background 0.15s, color 0.15s;
 }
 .foot-item:hover { background: var(--soft); color: var(--ink); }
+.foot-item-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .foot-status {
   margin-left: auto; display: flex; align-items: center; gap: 5px;
   font-family: var(--mono, ui-monospace, Menlo, monospace); font-size: 10px; color: var(--msg-time);
@@ -3449,6 +3450,85 @@ html.resizing { cursor: col-resize; user-select: none; }
   background: var(--soft);
   border-radius: 4px;
 }
+
+/* ─── 工作区切换弹窗（vault 式） ─── */
+.ws-modal {
+  width: min(520px, calc(100vw - 64px));
+  max-height: 70vh;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+  display: grid; grid-template-rows: auto 1fr;
+  overflow: hidden;
+  animation: modal-in 0.22s cubic-bezier(0.3, 0.8, 0.3, 1) both;
+}
+.ws-body { min-height: 0; overflow-y: auto; padding: 14px 16px 18px; }
+.ws-current {
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--paper); padding: 10px 12px; margin-bottom: 12px;
+}
+.ws-row-name { font-size: 13.5px; font-weight: 650; color: var(--ink); display: flex; align-items: center; gap: 8px; }
+.ws-badge {
+  font-family: var(--mono); font-size: 9.5px; color: var(--blue);
+  border: 1px solid color-mix(in srgb, var(--blue) 40%, transparent);
+  border-radius: 4px; padding: 1px 6px;
+}
+.ws-row-dir, .ws-item-dir {
+  font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+  margin-top: 3px; word-break: break-all;
+}
+.ws-group {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
+  color: var(--msg-time); margin: 12px 2px 6px;
+}
+.ws-item {
+  display: block; width: 100%; text-align: left;
+  border: 1px solid var(--line-soft); border-radius: 10px;
+  background: transparent; padding: 9px 12px; margin-bottom: 6px;
+  transition: background 0.2s, border-color 0.2s;
+  height: auto;
+}
+.ws-item:hover { background: var(--soft); border-color: var(--line); box-shadow: none; }
+.ws-item:disabled { opacity: 0.5; }
+.ws-item-name { font-size: 13px; color: var(--ink); display: block; }
+.ws-manual { display: flex; gap: 8px; }
+.ws-manual input {
+  flex: 1; background: var(--paper); border: 1px solid var(--line); border-radius: 8px;
+  color: var(--ink); font-family: var(--mono); font-size: 12px; padding: 7px 10px; outline: none;
+}
+.ws-manual input:focus { border-color: var(--blue); }
+.ws-error { color: var(--red); font-size: 12px; margin-top: 10px; word-break: break-all; }
+.ws-hint { font-size: 12px; color: var(--muted); }
+.ws-switching {
+  display: grid; justify-items: center; gap: 10px;
+  padding: 48px 24px; color: var(--ink); font-size: 13.5px;
+}
+.spinner-ring {
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 3px solid var(--line); border-top-color: var(--blue);
+  animation: ws-spin 0.9s linear infinite;
+}
+@keyframes ws-spin { to { transform: rotate(360deg); } }
+
+/* ─── 功能坞整栏收起/展开 ─── */
+.strip-divider { width: 24px; height: 1px; background: var(--line); margin: 4px 0 6px; }
+.dock-expand {
+  position: fixed; right: 0; top: 50%; transform: translateY(-50%);
+  width: 16px; height: 64px; padding: 0;
+  display: grid; place-items: center;
+  border: 1px solid var(--line); border-right: none;
+  border-radius: 8px 0 0 8px;
+  background: var(--bg-secondary); color: var(--muted);
+  z-index: 40;
+}
+.dock-expand:hover { color: var(--ink); background: var(--soft); box-shadow: none; border-color: var(--line); }
+
+/* ─── 桌面态（Tauri Overlay 标题栏）：品牌区让位红绿灯,头部可拖拽 ─── */
+html.desktop .brand { padding-top: 42px; }
+html.desktop .brand,
+html.desktop .copilot-head,
+html.desktop .func-head { -webkit-user-select: none; user-select: none; }
 
 /* ═══ 微交互纪律（TeamClaw 惯例）═══ */
 /* 原生感：交互元素不用 web 手型 */
