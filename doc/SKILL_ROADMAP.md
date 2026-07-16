@@ -38,6 +38,7 @@ research-only（不出买卖/精确目标价；risk 给仓位区间而非指令�
 - ✅ **INTENT_PLANS → INTENT_BUDGETS**：必跑技能链降级为委派预算 `{allowed_skills 白名单, max_subagents 上限, authority_cap 权限帽, required_skills 合规必跑}`。主模型在预算内按需委派（简单问题零委派），预算随 envelope `delegation_budget` 下发（v0.22）。
 - ✅ **委派全量开启**：`SUBAGENT_INTENTS` 表删除，任何预算 >0 的 intent 都开子代理委派（成本由预算兜住）；`report_write` 的关键词硬选管道删除。
 - ✅ **skill_trace 从"预告"变"实录"**：trace 行随 `task` 工具事件推进（available/required → delegated → done）；预算外委派标 `over_budget` 并审计；收口时 `required_skills` 缺席 → final 挂 `budget_compliance` 警示 + 行标 `missed`（rebalance/pre-trade 的 risk-officer 不可被省略）。
+- ✅ **兜底轻量化**：`copilot_chat` 上下文零预取——不再每轮预注入全景 overview（6 段摘要），模型需要时用工具按需自取；锚定 symbol 的聊天仍带 `symbol_summary`；"chat" 纳入合法页面（此前归一化成 overview 触发页面级兜底）。
 - 缓议 P3（路由智能化）：预算语义下误路由的代价已从"跑错管道"降为"预算略宽/窄"，正则保留为零成本 fast-path。
 
 ## 落地记录

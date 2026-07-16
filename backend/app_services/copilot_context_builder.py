@@ -25,8 +25,11 @@ INTENT_TO_CONTEXT_SECTIONS: dict[str, set[str]] = {
     "decision_journal_review":  {"journal"},
     "paper_portfolio_review":   {"paper_portfolio"},
     "pre_trade_review":         {"holdings", "risk_policy"},
-    "execution_request":        {},    # blocked — minimal context
-    "copilot_chat":             {"overview"},
+    "execution_request":        set(),  # blocked — minimal context
+    # 兜底轻量化：闲聊零预取——不再每轮预注入全景 overview，模型需要时用
+    # 工具按需自取（get_stock_context / 组合与监控工具都在白名单内）。
+    # 锚定了 symbol 的聊天仍带 symbol_summary（见 build 的 symbol 分支）。
+    "copilot_chat":             set(),
 }
 
 
@@ -58,12 +61,19 @@ class CopilotContextBuilder:
             "stock",
             "journal",
             "inbox",
+            # 聊天页是合法页面：不得归一化成 overview,否则页面级兜底会给
+            # 每轮闲聊预注入全景 overview(与 copilot_chat 零预取冲突)
+            "chat",
         } else "overview"
         # Determine which sections to load based on intent
         sections = INTENT_TO_CONTEXT_SECTIONS.get(intent, {normalized_page}) if intent else {normalized_page}
         payload: dict[str, Any] = {"page": normalized_page}
 
-        if symbol and (sections & {"holdings", "stock", "risk_policy"} or normalized_page == "stock"):
+        if symbol and (
+            sections & {"holdings", "stock", "risk_policy"}
+            or normalized_page == "stock"
+            or intent == "copilot_chat"
+        ):
             payload["symbol_summary"] = self._symbol_summary(symbol)
 
         if "holdings" in sections:

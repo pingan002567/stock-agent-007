@@ -26,6 +26,21 @@ def test_build_overview_page(tmp_path):
     assert "inbox" in overview
 
 
+def test_copilot_chat_context_is_minimal(tmp_path):
+    """P2 兜底轻量化：闲聊零预取——不再预注入全景 overview,模型按需用工具自取。"""
+    services = _make_services(tmp_path)
+    ctx = services.copilot_context_builder.build(page="chat", symbol=None, intent="copilot_chat")
+    assert ctx == {"page": "chat"}  # 只有页面标识,零预取
+
+
+def test_copilot_chat_context_keeps_symbol_anchor(tmp_path):
+    """锚定 symbol 的聊天仍带 symbol_summary（对话上下文不能丢锚点）。"""
+    services = _make_services(tmp_path)
+    ctx = services.copilot_context_builder.build(page="chat", symbol="600519", intent="copilot_chat")
+    assert "symbol_summary" in ctx
+    assert "overview" not in ctx
+
+
 def test_build_with_symbol_includes_summary(tmp_path, monkeypatch):
     # Make the quote hermetic — the live provider returns nothing offline, which would
     # otherwise leave price.last == 0.0.
