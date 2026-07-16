@@ -8,7 +8,6 @@ from backend.config.models import DEFAULT_MODELS
 from backend.config.profiles import DEFAULT_PROFILES
 from backend.config.providers import DEFAULT_PROVIDERS
 from backend.config.runtime import DEFAULT_RUNTIME_CONFIG
-from backend.config.skills import DEFAULT_SKILL_CONFIG
 from backend.config.tools import DEFAULT_TOOLS
 from backend.config.data_sources import AVAILABLE_PROVIDERS, DEFAULT_DATA_SOURCES
 from backend.config.intel_sources import (
@@ -16,6 +15,7 @@ from backend.config.intel_sources import (
     AVAILABLE_SENTIMENT_PROVIDERS,
     DEFAULT_INTEL_SOURCES,
 )
+from backend.agent_runtime import extensions_store
 from backend.stock_domain.provider_router import provider_router
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -35,9 +35,8 @@ def get_settings(request: Request, services: AppServices = Depends(get_services)
         "models": services.repo.get_config("models", {"items": DEFAULT_MODELS})[
             "items"
         ],
-        "skills": services.repo.get_config("skills", {"items": DEFAULT_SKILL_CONFIG})[
-            "items"
-        ],
+        # 技能启停单一属主 = extensions_config.json（DeerFlow 直接消费）
+        "skills": extensions_store.skills_view(),
         "profiles": services.repo.get_config("profiles", {"items": DEFAULT_PROFILES})[
             "items"
         ],
@@ -82,10 +81,17 @@ def put_models(
 
 @router.put("/skills")
 def put_skills(
-    payload: dict, request: Request, services: AppServices = Depends(get_services)
+    payload: dict, services: AppServices = Depends(get_services)
 ):
-    services.audit_service.record("settings skills updated", "skills")
-    return services.repo.set_config("skills", payload)
+    """技能启停：写 extensions_config.json（单一属主）并重建 runtime。"""
+    name = str(payload.get("name") or "")
+    try:
+        extensions_store.set_skill_enabled(name, bool(payload.get("enabled")))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    services.audit_service.record(f"skill {name} -> {payload.get('enabled')}", "skills")
+    status = services.copilot_service.reconnect_runtime()
+    return {"skills": extensions_store.skills_view(), "agent_runtime": status}
 
 
 @router.put("/profiles")

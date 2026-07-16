@@ -66,21 +66,17 @@ interface SettingsData {
   risk_policy?: Record<string, unknown>;
   profiles?: Array<{ name?: string; description?: string }>;
   trading_controls?: { paper_trading?: string; real_order?: string };
+  skills?: SkillInfo[];
+}
+
+interface SkillInfo {
+  name: string; label: string; description: string;
+  authority: string; enabled: boolean; locked: boolean;
 }
 
 type SettingTab = "general" | "ai" | "risk" | "stock" | "channels" | "raw";
 
 /* ---------- Helpers ---------- */
-
-function ConfigRow({ label, value, mono }: { label: string; value: string | number; mono?: boolean }) {
-  return (
-    <div className="barline" style={{ padding: "6px 0" }}>
-      <span className="muted" style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
-      <span />
-      <span className={mono ? "num" : ""} style={{ textAlign: "right", wordBreak: "break-all" }}>{String(value)}</span>
-    </div>
-  );
-}
 
 /** 设置卡原语（TeamClaw SettingCard/SectionHeader 形态）：
  * 头部 = 可选图标盒 + 标题/描述 + 右侧 mono 徽标；去掉了此前每卡雷同的齿轮图标。 */
@@ -102,27 +98,6 @@ function SectionCard({ title, subtitle, description, icon, children }: {
         {subtitle && <span className="setting-card-badge">{subtitle}</span>}
       </div>
       <div className="setting-card-body">{children}</div>
-    </div>
-  );
-}
-
-function ConfigList({ data, showAll }: { data: Record<string, unknown>; showAll?: boolean }) {
-  const entries = showAll ? Object.entries(data) : Object.entries(data).filter(([, v]) => v != null);
-  if (entries.length === 0) return <div className="muted" style={{ padding: 8 }}>暂无数据</div>;
-  return (
-    <div className="page-stack" style={{ gap: 3 }}>
-      {entries.map(([key, value]) => {
-        const display = typeof value === "object" && value !== null ? JSON.stringify(value) : String(value ?? "");
-        const isMulti = display.length > 80;
-        return isMulti ? (
-          <div key={key} style={{ padding: 10, borderRadius: 7, border: "1px solid var(--line)" }}>
-            <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>{key}</div>
-            <pre style={{ maxHeight: 160, fontSize: 11, margin: 0 }}>{display}</pre>
-          </div>
-        ) : (
-          <ConfigRow key={key} label={key} value={display} mono />
-        );
-      })}
     </div>
   );
 }
@@ -621,6 +596,59 @@ function McpSection() {
   );
 }
 
+/** 技能启停（TeamClaw 单一属主）：写 PUT /api/settings/skills →
+ * 后端落 extensions_config.json 并重建 runtime，响应回传最新视图。 */
+function SkillsSection({ initial }: { initial: SkillInfo[] }) {
+  const [skills, setSkills] = useState<SkillInfo[]>(initial);
+  const [busy, setBusy] = useState<string | null>(null);
+  // props 变化时在渲染期间重置（react.dev「adjusting state when props change」）
+  const [prevInitial, setPrevInitial] = useState(initial);
+  if (prevInitial !== initial) { setPrevInitial(initial); setSkills(initial); }
+
+  const toggle = async (name: string, enabled: boolean) => {
+    setBusy(name);
+    // 乐观更新，失败回滚为响应/原值
+    setSkills((prev) => prev.map((s) => (s.name === name ? { ...s, enabled } : s)));
+    try {
+      const res = await apiPut<{ skills: SkillInfo[] }>("/api/settings/skills", { name, enabled });
+      if (Array.isArray(res.skills)) setSkills(res.skills);
+    } catch (err) {
+      setSkills((prev) => prev.map((s) => (s.name === name ? { ...s, enabled: !enabled } : s)));
+      window.alert(err instanceof Error ? err.message : "切换技能失败");
+    } finally { setBusy(null); }
+  };
+
+  if (skills.length === 0) return null;
+  return (
+    <SectionCard title="技能" subtitle={`${skills.filter((s) => s.enabled).length}/${skills.length} 启用`}
+      description="控制 AI 可委派的子代理技能；开关即时生效并重建运行时">
+      <div className="page-stack" style={{ gap: 6 }}>
+        {skills.map((s) => (
+          <div key={s.name} className="card" style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", opacity: s.locked ? 0.55 : 1 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>{s.label}</span>
+                <span className="num muted" style={{ fontSize: 11 }}>{s.name}</span>
+                <span className="tag" style={{ fontSize: 10 }}>{s.authority}</span>
+                {s.locked && <span className="tag" style={{ fontSize: 10 }}>锁定</span>}
+              </div>
+              {s.description && (
+                <div className="muted" style={{ fontSize: 11, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.description}</div>
+              )}
+            </div>
+            <ToggleSwitch
+              checked={s.enabled}
+              disabled={s.locked || busy === s.name}
+              title={s.locked ? "该技能已锁定" : undefined}
+              onChange={(v) => void toggle(s.name, v)}
+            />
+          </div>
+        ))}
+      </div>
+    </SectionCard>
+  );
+}
+
 function AiTab({
   settings, copilotRuns, runtimeMetrics, regressionCases, onSaveRuntimeConfig,
 }: {
@@ -839,10 +867,8 @@ function AiTab({
       {/* MCP 服务器 */}
       <McpSection />
 
-      {/* Skills */}
-      <SectionCard title="Skills" subtitle="AI 能力">
-        <ConfigList data={settings as unknown as Record<string, unknown>} />
-      </SectionCard>
+      {/* Skills：启停单一属主 = 工作区 extensions_config.json，此处是无状态视图 */}
+      <SkillsSection initial={settings.skills ?? []} />
 
       {/* Copilot Runs */}
       {copilotRuns.length > 0 && (
