@@ -2274,11 +2274,13 @@ html.resizing { cursor: col-resize; user-select: none; }
 .code-copy-btn:hover { background: rgba(255,255,255,.2); color: #fff; }
 
 /* ===== copilot ===== */
+/* flex 纵排：头部在 main 变体不渲染时行分配依然正确——消息区恒为弹性区
+ * (顶栏到输入条之间的固定范围)内部滚动,输入条恒钉在底部 */
 .copilot-panel {
   background: var(--bg-secondary);
-  height: 100vh;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   animation: fade-in .2s ease both;
   border-left: 1px solid var(--line);
@@ -2348,6 +2350,7 @@ html.resizing { cursor: col-resize; user-select: none; }
   background: var(--blue-soft);
 }
 .copilot-body {
+  flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 12px;
