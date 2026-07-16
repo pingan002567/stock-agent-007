@@ -37,13 +37,12 @@ function groupLabel(dateStr: string): "今天" | "本周" | "更早" {
   return "更早";
 }
 
-function sessMeta(s: CopilotSession): string {
+function sessTime(s: CopilotSession): string {
   const d = new Date(s.created_at);
   const now = new Date();
-  const time = d.toDateString() === now.toDateString()
+  return d.toDateString() === now.toDateString()
     ? `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`
     : `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
-  return `${time} · ${s.message_count ?? 0} 条`;
 }
 
 export function LeftSidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
@@ -160,8 +159,12 @@ export function LeftSidebar({ onOpenSettings }: { onOpenSettings: () => void }) 
                     className={`sess${s.session_id === currentSession?.session_id ? " active" : ""}`}
                     onClick={() => switchSession(s.session_id)}
                   >
-                    <div className="sess-title">{s.title}</div>
-                    <div className="sess-meta">{sessMeta(s)}</div>
+                    {/* 标题行右侧挂 mono 时间（TeamClaw 卡片解剖）,hover 时让位给操作按钮 */}
+                    <div className="sess-head">
+                      <div className="sess-title">{s.title}</div>
+                      <span className="sess-time">{sessTime(s)}</span>
+                    </div>
+                    <div className="sess-meta">{s.message_count ?? 0} 条消息</div>
                     <div className="sess-actions">
                       <button
                         className="session-action-btn" title="重命名"

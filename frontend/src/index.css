@@ -376,11 +376,18 @@ pre {
   content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px;
   border-radius: 1px; background: var(--blue);
 }
+.sess-head { display: flex; align-items: baseline; gap: 8px; }
 .sess-title {
+  flex: 1; min-width: 0;
   font-size: 13px; color: var(--muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  padding-right: 40px;
 }
+.sess-time {
+  flex: none;
+  font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+  transition: opacity 0.2s;
+}
+.sess:hover .sess-time { opacity: 0; }
 .sess.active .sess-title { color: var(--ink); font-weight: 550; }
 .sess-meta { font-family: var(--mono, ui-monospace, Menlo, monospace); font-size: 10.5px; color: var(--msg-time); margin-top: 2px; }
 .sess-actions {
@@ -2319,7 +2326,7 @@ html.resizing { cursor: col-resize; user-select: none; }
   gap: 4px;
 }
 .tool-count-ok {
-  color: var(--green);
+  color: var(--muted);
 }
 .tool-count-fail {
   color: var(--red);
@@ -2540,30 +2547,66 @@ html.resizing { cursor: col-resize; user-select: none; }
   white-space: nowrap;
 }
 .upload-chip-ok {
-  color: var(--green);
+  color: var(--muted);
 }
+/* Composer：纸面卡（TeamClaw §4）——上区 textarea、下区工具行以软线分隔 */
 .copilot-input {
-  padding: 10px;
-  border-top: 1px solid var(--line);
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
-  align-items: end;
-  background: var(--bg-secondary);
+  padding: 8px 10px 14px;
 }
+.composer-card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px 12px 8px;
+  box-shadow: 0 4px 16px -10px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.2s;
+}
+.composer-card:focus-within { border-color: color-mix(in srgb, var(--blue) 45%, transparent); }
+.composer-card .upload-chips { margin-bottom: 8px; }
 .copilot-input textarea {
-  border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 10px 14px;
-  font-size: 13px; font-family: var(--sans); resize: none; min-height: 40px; max-height: 120px;
-  line-height: 1.5; width: 100%; box-sizing: border-box; display: block;
-  background: var(--bg-tertiary); color: var(--ink); transition: all 0.2s;
+  border: none; padding: 2px 2px 8px;
+  font-size: 13.5px; font-family: var(--sans); resize: none; min-height: 24px; max-height: 120px;
+  line-height: 1.6; width: 100%; box-sizing: border-box; display: block;
+  background: transparent; color: var(--ink);
 }
-.copilot-input textarea:focus { outline: none; border-color: var(--blue); box-shadow: var(--shadow-glow); }
-.copilot-input textarea::placeholder { color: var(--muted); }
-.copilot-input button { height: 40px; padding: 0 18px; white-space: nowrap; }
-.copilot-input .btn-stop {
-  background: var(--red); color: #fff; border: none;
+.copilot-input textarea:focus { outline: none; }
+.copilot-input textarea::placeholder { color: var(--faint); }
+.composer-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
 }
-.copilot-input .btn-stop:hover { opacity: .85; }
+.composer-icon-btn {
+  width: 28px; height: 28px; padding: 0;
+  display: grid; place-items: center;
+  border: none; border-radius: var(--radius);
+  background: transparent; color: var(--muted); cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+.composer-icon-btn:hover { background: var(--soft); color: var(--ink); border: none; box-shadow: none; }
+.model-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 24px; padding: 0 10px;
+  border: 1px solid var(--line-soft); border-radius: 20px;
+  font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+  user-select: none;
+}
+.composer-hint {
+  margin-left: auto;
+  font-family: var(--mono); font-size: 11px; color: var(--faint);
+  user-select: none;
+}
+.composer-send {
+  width: 32px; height: 32px; padding: 0; flex: none;
+  display: grid; place-items: center;
+  border: none; border-radius: var(--radius);
+  background: var(--blue); color: #fff; cursor: pointer;
+  transition: filter 0.2s;
+}
+.composer-send:hover { filter: brightness(1.1); background: var(--blue); border: none; box-shadow: none; }
+.composer-send:disabled { opacity: 0.4; cursor: default; }
+.composer-send.stop { background: var(--red); }
+.composer-send.stop:hover { background: var(--red); opacity: 0.85; }
 
 /* ===== messages ===== */
 .messages { display: grid; gap: 10px; }
@@ -3351,4 +3394,28 @@ html.resizing { cursor: col-resize; user-select: none; }
   color: var(--ink);
   background: var(--soft);
   border-radius: 4px;
+}
+
+/* ═══ 微交互纪律（TeamClaw 惯例）═══ */
+/* 原生感：交互元素不用 web 手型 */
+button, [role="button"], .sess, .tool-card.clickable, .foot-item,
+.suggestion-chip, .session-item, .msg-copy, .strip-btn, .settings-nav-item,
+.new-chat, .composer-icon-btn, .composer-send, .side-icon-btn {
+  cursor: default;
+}
+input, textarea { cursor: text; }
+
+/* focus 可见性：键盘导航 1.5px 环，鼠标点击不打扰 */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--blue) 50%, transparent);
+}
+
+/* 减少动态偏好：动画/过渡全局降级 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

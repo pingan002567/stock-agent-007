@@ -207,7 +207,7 @@ function GeneralTab({
                 key={opt.mode}
                 onClick={() => setThemeMode(opt.mode)}
                 style={{
-                  padding: "12px 8px", borderRadius: 8, cursor: "pointer",
+                  padding: "12px 8px", borderRadius: 8,
                   display: "grid", justifyItems: "center", gap: 6,
                   height: "auto", // 覆盖全局 button 32px 定高，避免图标+文字被裁
                   background: themeMode === opt.mode ? "var(--blue-soft)" : "var(--bg-tertiary)",
@@ -774,7 +774,7 @@ function AiTab({
               </div>
             );
           })()}
-          <div className="card" style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", cursor: "pointer" }}
+          <div className="card" style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px" }}
             onClick={() => { setThinking(!thinking); markDirty(); }}>
             <span style={{ fontWeight: 600, fontSize: 13 }}>Thinking (推理)</span>
             <div style={{ marginLeft: "auto", width: 40, height: 22, borderRadius: 999, padding: 2,

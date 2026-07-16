@@ -108,8 +108,10 @@ function pairMessages(msgs: CopilotMessage[]): GroupedItem[] {
 export function CopilotPanel({ open = true, onToggle, variant = "panel" }: { open?: boolean; onToggle?: () => void; variant?: "panel" | "main" }) {
   const {
     copilotContextVersion,
-    setCurrentScreen, setStock,
+    setCurrentScreen, setStock, appDataCache,
   } = useAppState();
+  const modelName = (appDataCache.current.settings as { agent_runtime?: { model_name?: string } } | undefined)
+    ?.agent_runtime?.model_name || "AI 模型";
 
   const {
     currentSession, sessions,
@@ -425,58 +427,64 @@ export function CopilotPanel({ open = true, onToggle, variant = "panel" }: { ope
         </div>
       </div>
 
+      {/* Composer 纸面卡：上区输入、下区工具行（附件/模型 pill/↵ 提示/图标发送） */}
       <div className="copilot-input">
-        {(sessionFiles.length > 0 || uploading) && (
-          <div className="upload-chips">
-            {sessionFiles.map((f, i) => (
-              <span key={`${f.filename}-${i}`} className="upload-chip" title={f.markdown_file ? `已转 Markdown：${f.markdown_file}` : f.filename}>
-                📄 {f.filename}
-                {f.markdown_file && <span className="upload-chip-ok"> ✓</span>}
-              </span>
-            ))}
-            {uploading && <span className="upload-chip">⏳ 上传中…</span>}
-          </div>
-        )}
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            style={{ display: "none" }}
-            onChange={(e) => handleUpload(e.target.files)}
-          />
-          <button
-            className="ghost"
-            title="上传资料给 AI 在本会话读取：PDF/Word/Excel/PPT 自动转 Markdown，图片（png/jpg/webp）可看图，任意文本文件（代码/日志/JSON…）直接可读；仅其他二进制格式不支持"
-            disabled={uploading || sending}
-            onClick={() => fileInputRef.current?.click()}
-            style={{ height: 40, padding: "0 10px" }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-            </svg>
-          </button>
+        <div className="composer-card">
+          {(sessionFiles.length > 0 || uploading) && (
+            <div className="upload-chips">
+              {sessionFiles.map((f, i) => (
+                <span key={`${f.filename}-${i}`} className="upload-chip" title={f.markdown_file ? `已转 Markdown：${f.markdown_file}` : f.filename}>
+                  📄 {f.filename}
+                  {f.markdown_file && <span className="upload-chip-ok"> ✓</span>}
+                </span>
+              ))}
+              {uploading && <span className="upload-chip">⏳ 上传中…</span>}
+            </div>
+          )}
           <textarea
             ref={inputRef}
-            placeholder="输入您的问题..."
+            placeholder="输入问题，或让 AI 帮你盯盘、回测、生成报告…"
             value={input}
             onChange={(e) => { setInput(e.target.value); autoResize(); }}
             onKeyDown={handleKeyDown}
             rows={1}
-            style={{ flex: 1 }}
           />
-          {sending ? (
-            <button className="btn-stop" onClick={handleStop} title="停止生成" style={{ height: 40, padding: "0 14px" }}>
-              ■
-            </button>
-          ) : (
-            <button className="primary" onClick={handleSend} disabled={sending || !input.trim()} style={{ height: 40, padding: "0 14px" }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="22" y1="2" x2="11" y2="13"/>
-                <polygon points="22,2 15,22 11,13 2,9"/>
+          <div className="composer-bar">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              style={{ display: "none" }}
+              onChange={(e) => handleUpload(e.target.files)}
+            />
+            <button
+              className="composer-icon-btn"
+              title="上传资料给 AI 在本会话读取：PDF/Word/Excel/PPT 自动转 Markdown，图片可看图，任意文本文件直接可读"
+              disabled={uploading || sending}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
               </svg>
             </button>
-          )}
+            <span className="model-pill" title="当前 AI 模型（在 系统设置 → AI 模型 中修改）">
+              <span className="dot-ok" style={{ width: 5, height: 5 }} />
+              {modelName}
+            </span>
+            <span className="composer-hint">↵ 发送</span>
+            {sending ? (
+              <button className="composer-send stop" onClick={handleStop} title="停止生成">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+              </button>
+            ) : (
+              <button className="composer-send" onClick={handleSend} disabled={sending || !input.trim()} title="发送">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="22" y1="2" x2="11" y2="13"/>
+                  <polygon points="22,2 15,22 11,13 2,9"/>
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </aside>
