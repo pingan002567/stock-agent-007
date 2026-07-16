@@ -3,8 +3,17 @@
   "identifier": "remote-backend",
   "description": "主界面由本机后端 URL 承载：授予其 IPC（拖拽区、原生目录选择、service_cli 桥）。仅回环地址。",
   "remote": {
-    "urls": ["http://127.0.0.1:*", "http://localhost:*"]
+    "urls": [
+      "http://127.0.0.1:*",
+      "http://localhost:*"
+    ]
   },
-  "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open"]
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "core:window:allow-start-dragging"
+  ]
 }
