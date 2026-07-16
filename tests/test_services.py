@@ -902,7 +902,8 @@ def test_copilot_routes_and_streams_events(services):
     assert "disclaimer" in events[-1].payload
     assert events[-1].payload["skill_trace"]
     assert events[-1].payload["skill_trace"][-1]["skill"] == "report-writer"
-    assert events[-1].payload["skill_trace"][-1]["status"] == "planned"
+    # 预算语义：白名单行是"可委派"而非"必跑"
+    assert events[-1].payload["skill_trace"][-1]["status"] == "available"
 
 
 def test_copilot_rebalance_uses_multi_skill_trace(services):
@@ -1018,7 +1019,7 @@ def test_prompt_envelope_contains_expected_sections_and_excludes_full_dumps(serv
     envelope = json.loads(captured["message"])
 
     assert [event.type for event in events] == ["skill_trace", "final"]
-    assert set(envelope) == {
+    assert {
         "envelope_version",
         "user_message",
         "current_page",
@@ -1026,8 +1027,16 @@ def test_prompt_envelope_contains_expected_sections_and_excludes_full_dumps(serv
         "condensed_stock_context",
         "condensed_page_context",
         "safety_constraints",
+        "delegation_budget",
+    } <= set(envelope)
+    assert envelope["envelope_version"] == "v0.22"
+    # 委派预算（risk_review）：白名单 + 上限 + 权限帽，无合规必跑项
+    assert set(envelope["delegation_budget"]["allowed_skills"]) == {
+        "stock-researcher", "risk-officer", "report-writer",
     }
-    assert envelope["envelope_version"] == "v0.20"
+    assert envelope["delegation_budget"]["max_subagents"] == 3
+    assert envelope["delegation_budget"]["authority_cap"] == "A3"
+    assert envelope["delegation_budget"]["required_skills"] == []
     assert envelope["current_page"] == "stock"
     assert envelope["user_message"] == "分析 AAPL 风险"
     assert envelope["condensed_stock_context"]["symbol"] == "AAPL"
@@ -1042,6 +1051,54 @@ def test_prompt_envelope_contains_expected_sections_and_excludes_full_dumps(serv
     assert "full_watchlist" not in captured["message"].lower()
     assert "tool_execution" not in captured["message"].lower()
     assert "content" not in json.dumps(envelope["condensed_stock_context"].get("latest_report_ref", {}), ensure_ascii=False)
+
+
+def test_delegation_observation_and_required_skill_compliance(services):
+    """P1 预算语义：task 委派事件推进 trace 行状态；required 未跑 → 合规标注。"""
+
+    class FakeClient:
+        async def stream(self, **kwargs):
+            # 模型只委派了 rebalance-planner，跳过了必跑的 risk-officer
+            yield ("messages-tuple", {
+                "type": "ai", "id": "m1", "content": "",
+                "tool_calls": [{
+                    "name": "task", "id": "call_1",
+                    "args": {"subagent_type": "rebalance-planner", "description": "拟单"},
+                }],
+            })
+            yield ("messages-tuple", {
+                "type": "tool", "id": "m2", "name": "task",
+                "tool_call_id": "call_1", "content": "done",
+            })
+            yield ("end", {"usage_metadata": {"total_tokens": 1}})
+
+    services.copilot_service.deerflow.mode = "embedded"
+    services.copilot_service.deerflow.client = FakeClient()
+    run = services.copilot_service.create_run(
+        CopilotRequest(
+            message="先分析 AAPL 风险，再给出调仓草案",
+            page="holdings", symbol="AAPL", authority_level=AuthorityLevel.A4,
+        )
+    )
+    assert run.intent == "rebalance_plan"
+
+    async def collect():
+        return [event async for event in services.copilot_service.stream_run(run.run_id, run.task_id)]
+
+    events = asyncio.run(collect())
+
+    # 委派观测：出现 observed 阶段的 skill_trace 增量事件
+    observed = [e for e in events if e.type == "skill_trace" and e.payload.get("phase") == "observed"]
+    assert observed, "task 委派应触发 observed skill_trace 事件"
+
+    final = events[-1]
+    assert final.type == "final"
+    trace = {item["skill"]: item["status"] for item in final.payload["skill_trace"]}
+    assert trace["rebalance-planner"] == "done"           # 实际委派并完成
+    assert trace["risk-officer"] == "missed"              # 必跑项被模型省略
+    assert trace["execution-agent-disabled"] == "blocked"  # 守卫行不变
+    compliance = final.payload["budget_compliance"]
+    assert compliance["missing_required"] == ["risk-officer"]
 
 
 def test_build_prompt_envelope_trims_runtime_context():

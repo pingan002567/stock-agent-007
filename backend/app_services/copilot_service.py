@@ -4,7 +4,7 @@ import asyncio
 import json
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, Optional
 from uuid import uuid4
 
@@ -58,6 +58,8 @@ class CopilotRunState:
     intent: str
     skill: str
     skill_trace: list[dict[str, Any]]
+    # 本轮委派预算快照（skill_specs.IntentBudget 的 dict 形态），随 envelope 下发
+    budget: dict[str, Any] = field(default_factory=dict)
 
 
 class CopilotService:
@@ -363,6 +365,7 @@ class CopilotService:
             intent=intent.name,
             skill=intent.skill,
             skill_trace=skill_trace,
+            budget=skill_specs.intent_budget_dict(intent.name),
         )
         skill_names = ",".join(item["skill"] for item in skill_trace)
         self.audit_service.record(
@@ -501,6 +504,7 @@ class CopilotService:
         }
         tool_call_events: list[dict[str, Any]] = []
         tool_result_events: list[dict[str, Any]] = []
+        delegated_calls: dict[str, str] = {}  # task 工具 call_id → 委派技能名
         final_seen = False
         # ask_clarification：ClarificationMiddleware 把反问以同名 ToolMessage 落进
         # 流后直接终止本轮（用户下一条消息即回答）。捕获它以便：
@@ -508,9 +512,10 @@ class CopilotService:
         clarification_payload: Dict[str, Any] | None = None
 
         skill_trace_payload = {
-            "phase": "declared",
+            "phase": "budget",
             "items": state.skill_trace,
-            "note": "声明式 skill trace；实际推理和工具流由 DeerFlow adapter 边界输出。",
+            "budget": state.budget,
+            "note": "委派预算白名单（非必跑链）；实际委派由模型按需发起，行状态随委派事件推进。",
         }
         skill_event = SSEEvent(
             run_id=run_id,
@@ -534,9 +539,16 @@ class CopilotService:
                 session_id=state.session_id,
                 subagent_enabled=skill_specs.subagent_intent_enabled(state.intent),
                 plan_mode=skill_specs.plan_mode_intent_enabled(state.intent),
+                budget=state.budget,
             ):
                 payload = event["payload"]
                 self._capture_tool_result(event, captured)
+                # 实际委派观测：task 工具调用/回执 → skill_trace 行状态推进 + 增量 SSE
+                observed_sse = self._observe_delegation(
+                    state, event, run_id, resolved_task_id, delegated_calls
+                )
+                if observed_sse:
+                    yield observed_sse
                 if (
                     event["type"] == "tool_result"
                     and str(payload.get("tool") or "") == "ask_clarification"
@@ -560,6 +572,9 @@ class CopilotService:
                     try:
                         payload = self.result_normalizer.normalize_final(payload)
                         payload["skill_trace"] = state.skill_trace
+                        compliance = self._budget_compliance(state, delegated_calls)
+                        if compliance:
+                            payload["budget_compliance"] = compliance
                         payload.setdefault(
                             "evidence_refs",
                             self._evidence_refs(state.skill_trace, context),
@@ -897,6 +912,7 @@ class CopilotService:
             intent=intent_name,
             skill=skill_name,
             skill_trace=skill_trace,
+            budget=skill_specs.intent_budget_dict(intent_name),
         )
 
     def _persist_stream_event(self, state: CopilotRunState, event: SSEEvent) -> None:
@@ -1218,19 +1234,21 @@ class CopilotService:
     def _build_skill_trace(
         self, intent_name: str, request: CopilotRequest
     ) -> list[dict[str, Any]]:
-        # Single source of truth: intent→skill plans + per-skill authority come
-        # from skill_specs (same table that drives subagents/registry).
-        plans = skill_specs.intent_plans()
+        # 预算语义（skill_specs.INTENT_BUDGETS）：trace 列出的是"可委派"白名单
+        # 而非必跑链——available=模型可按需拉、required=合规必跑、blocked=阻断占位。
+        # 实际委派发生时由 stream_run 把对应行推进 delegated/done。
+        budget = skill_specs.intent_budget(intent_name)
         authority = skill_specs.skill_authority()
         trace = []
-        plan = self._resolve_plan(intent_name, request, plans)
-        for index, skill_name in enumerate(plan, start=1):
+        rows = [
+            *((name, "required" if name in budget.required_skills else "available")
+              for name in budget.allowed_skills),
+            *((name, "blocked") for name in budget.guard_skills),
+        ]
+        for index, (skill_name, status) in enumerate(rows, start=1):
             spec = self.skill_registry.skills[skill_name]
-            blocked_reason = (
-                "real order execution is disabled in V1"
-                if spec.locked or not spec.enabled
-                else None
-            )
+            if spec.locked or not spec.enabled:
+                status = "blocked"
             trace.append(
                 {
                     "step": index,
@@ -1238,40 +1256,125 @@ class CopilotService:
                     "label": spec.label,
                     "tools": spec.tools,
                     "authority_level": authority[skill_name],
-                    "status": "blocked"
-                    if spec.locked or not spec.enabled
-                    else "planned",
+                    "status": status,
                     "purpose": self._skill_purpose(skill_name),
-                    "handoff": self._handoff(plan[index - 2], skill_name)
-                    if index > 1
-                    else "start",
-                    "blocked_reason": blocked_reason,
+                    "handoff": None,  # 无必跑链即无固定交棒；保留键以兼容消费方
+                    "blocked_reason": "real order execution is disabled in V1"
+                    if status == "blocked"
+                    else None,
                 }
             )
         return trace
 
-    def _resolve_plan(
+    def _observe_delegation(
         self,
-        intent_name: str,
-        request: CopilotRequest,
-        plans: dict[str, list[str]],
-    ) -> list[str]:
-        if intent_name != "report_write":
-            return plans.get(intent_name, plans["copilot_chat"])
-        message = request.message
-        lower = message.lower()
-        if (
-            any(word in message for word in ["盯盘", "异动", "提醒"])
-            or "monitor" in lower
-        ):
-            return ["stock-monitor", "report-writer"]
-        if any(word in message for word in ["回测", "策略"]) or any(
-            word in lower for word in ["backtest", "strategy"]
-        ):
-            return ["strategy-analyst", "report-writer"]
-        if any(word in message for word in ["风险", "风控", "集中度"]):
-            return ["stock-researcher", "risk-officer", "report-writer"]
-        return ["stock-researcher", "report-writer"]
+        state: CopilotRunState,
+        event: dict[str, Any],
+        run_id: str,
+        task_id: str,
+        delegated_calls: dict[str, str],
+    ) -> SSEEvent | None:
+        """把 DeerFlow ``task`` 工具的实际委派映射回 skill_trace 行状态。
+
+        tool_call(task) → 对应行 delegated（预算外则追加 over_budget 行并审计）；
+        tool_result(同 call_id) → done。有变化时返回增量 skill_trace SSE。
+        """
+        etype = event["type"]
+        payload = event["payload"]
+        if etype == "tool_call" and str(payload.get("tool") or "") == "task":
+            args = payload.get("arguments") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except ValueError:
+                    args = {}
+            skill = str(args.get("subagent_type") or "") if isinstance(args, dict) else ""
+            call_id = str(payload.get("call_id") or "")
+            if not skill or not call_id:
+                return None
+            delegated_calls[call_id] = skill
+            row = next((r for r in state.skill_trace if r.get("skill") == skill), None)
+            if row is None:
+                # 预算外委派：prompt 级预算是软约束，越界要看得见并可审计
+                state.skill_trace.append({
+                    "step": len(state.skill_trace) + 1,
+                    "skill": skill,
+                    "label": skill,
+                    "authority_level": skill_specs.skill_authority().get(skill, "?"),
+                    "status": "over_budget",
+                    "purpose": "预算白名单之外的委派",
+                    "handoff": None,
+                    "blocked_reason": None,
+                })
+                self.audit_service.record(
+                    "Copilot delegation over budget", f"{state.intent} -> {skill}"
+                )
+            elif row.get("status") in ("available", "required"):
+                row["status"] = "delegated"
+            max_subagents = int(state.budget.get("max_subagents") or 0)
+            if max_subagents and len(delegated_calls) > max_subagents:
+                self.audit_service.record(
+                    "Copilot delegation count over budget",
+                    f"{state.intent}: {len(delegated_calls)} > {max_subagents}",
+                )
+            return self._skill_trace_sse(state, run_id, task_id)
+        if etype == "tool_result":
+            skill = delegated_calls.get(str(payload.get("call_id") or ""))
+            if not skill:
+                return None
+            row = next(
+                (r for r in state.skill_trace
+                 if r.get("skill") == skill and r.get("status") in ("delegated", "over_budget")),
+                None,
+            )
+            if row is None:
+                return None
+            row["status"] = "done"
+            return self._skill_trace_sse(state, run_id, task_id)
+        return None
+
+    def _skill_trace_sse(
+        self, state: CopilotRunState, run_id: str, task_id: str
+    ) -> SSEEvent:
+        return SSEEvent(
+            run_id=run_id,
+            task_id=task_id,
+            type="skill_trace",
+            payload={
+                "phase": "observed",
+                "items": state.skill_trace,
+                "budget": state.budget,
+                "note": "实际委派进度（由 task 工具事件推进）。",
+            },
+        )
+
+    def _budget_compliance(
+        self, state: CopilotRunState, delegated_calls: dict[str, str]
+    ) -> dict[str, Any] | None:
+        """收口时的预算合规核对：required_skills 未实际委派 → 标注并审计。
+
+        stub 运行时没有真实委派能力，跳过（否则测试/离线模式全部误报）。
+        """
+        if getattr(self.deerflow, "mode", "") == "stub":
+            return None
+        required = [str(s) for s in (state.budget.get("required_skills") or [])]
+        if not required:
+            return None
+        satisfied = set(delegated_calls.values())
+        missing = [s for s in required if s not in satisfied]
+        if not missing:
+            return None
+        for row in state.skill_trace:
+            if row.get("skill") in missing:
+                row["status"] = "missed"
+        self.audit_service.record(
+            "Copilot required skill missed",
+            f"{state.intent}: {','.join(missing)} 未参与本轮结论",
+        )
+        return {
+            "missing_required": missing,
+            "warning": "合规必跑项未参与本轮结论，请谨慎采信；建议重新发起并要求风控评估。",
+        }
 
     def _suggest_actions(
         self,
@@ -1405,9 +1508,6 @@ class CopilotService:
         return purposes.get(skill_name) or self.skill_registry.skills.get(
             skill_name, type("S", (), {"label": skill_name})
         ).label
-
-    def _handoff(self, previous: str, current: str) -> str:
-        return f"{previous} -> {current}"
 
     def _evidence_refs(
         self, skill_trace: list[dict[str, Any]], context: Dict[str, Any]

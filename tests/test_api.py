@@ -604,7 +604,8 @@ def test_copilot_monitor_report_stream_includes_report_quality_and_disclaimer(
     ).json()
 
     assert run["intent"] == "report_write"
-    assert run["skills"] == ["stock-monitor", "report-writer"]
+    # 预算语义：skills 是 report_write 的委派白名单（非关键词硬选的必跑链）
+    assert "stock-monitor" in run["skills"] and "report-writer" in run["skills"]
 
     with client.stream("GET", f"/api/copilot/stream/{run['run_id']}") as response:
         assert response.status_code == 200

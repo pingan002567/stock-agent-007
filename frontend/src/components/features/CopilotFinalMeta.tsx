@@ -19,6 +19,15 @@ function formatTokens(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 
+// 预算语义状态（available/required=可委派，delegated/done=实际发生，missed=必跑缺席）
+const TRACE_STATUS_CLASS: Record<string, string> = {
+  blocked: " blocked",
+  delegated: " active",
+  done: " done",
+  missed: " missed",
+  over_budget: " missed",
+};
+
 export function SkillTraceChain({ items }: { items: SkillTraceItem[] }) {
   if (items.length === 0) return null;
   return (
@@ -27,8 +36,8 @@ export function SkillTraceChain({ items }: { items: SkillTraceItem[] }) {
         <span key={item.skill || i} className="skill-trace-node">
           {i > 0 && <span className="skill-trace-arrow">→</span>}
           <span
-            className={`skill-trace-chip${item.status === "blocked" ? " blocked" : ""}`}
-            title={[item.purpose, item.blocked_reason].filter(Boolean).join(" · ")}
+            className={`skill-trace-chip${TRACE_STATUS_CLASS[item.status || ""] || ""}`}
+            title={[item.status, item.purpose, item.blocked_reason].filter(Boolean).join(" · ")}
           >
             {item.label || item.skill}
             {item.authority_level && <span className="skill-trace-auth">{item.authority_level}</span>}

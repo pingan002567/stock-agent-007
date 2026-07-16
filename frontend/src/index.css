@@ -2543,6 +2543,8 @@ html.resizing { cursor: col-resize; user-select: none; }
 .skill-trace-arrow {
   color: var(--muted);
 }
+/* 预算语义：默认(available/required)=中性可委派；active=委派中；done=已完成；
+   missed=必跑缺席/预算外；blocked=锁定占位 */
 .skill-trace-chip {
   display: inline-flex;
   align-items: center;
@@ -2550,10 +2552,22 @@ html.resizing { cursor: col-resize; user-select: none; }
   padding: 2px 8px;
   border-radius: 10px;
   border: 1px solid var(--line);
-  background: var(--blue-soft);
-  color: var(--blue);
+  background: var(--panel);
+  color: var(--muted);
   font-weight: 600;
   white-space: nowrap;
+}
+.skill-trace-chip.active {
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+.skill-trace-chip.done {
+  background: var(--green-soft);
+  color: var(--green);
+}
+.skill-trace-chip.missed {
+  background: var(--red-soft);
+  color: var(--red);
 }
 .skill-trace-chip.blocked {
   background: var(--red-soft);

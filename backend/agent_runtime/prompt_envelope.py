@@ -21,9 +21,10 @@ def build_prompt_envelope(
     user_message: str,
     skill_trace: list[dict[str, Any]],
     context: dict[str, Any],
+    budget: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     envelope: dict[str, Any] = {
-        "envelope_version": "v0.21",
+        "envelope_version": "v0.22",
         "user_message": user_message,
         "current_page": context.get("page") or "overview",
         "skill_trace": _trim_skill_trace(skill_trace),
@@ -31,6 +32,21 @@ def build_prompt_envelope(
         "condensed_page_context": _trim_page_context(context),
         "safety_constraints": SAFE_RUNTIME_CONSTRAINTS,
     }
+    # 委派预算（规则做预算，模型做编排）：skill_trace 列出的是"可委派"技能，
+    # 不是必跑链；模型在预算内按需委派，简单问题零委派直接回答。
+    if budget:
+        envelope["delegation_budget"] = {
+            "allowed_skills": list(budget.get("allowed_skills") or []),
+            "max_subagents": budget.get("max_subagents"),
+            "authority_cap": budget.get("authority_cap"),
+            "required_skills": list(budget.get("required_skills") or []),
+            "directive": (
+                "以上是本轮委派预算：只可委派 allowed_skills 中的技能，总次数不超过 "
+                "max_subagents，权限不超过 authority_cap。简单问题请零委派直接回答；"
+                "复杂问题按需并行委派。required_skills 是合规必跑项，收口前必须完成"
+                "并把其结论纳入最终回答，不可省略。"
+            ),
+        }
     # RTO: downstream the planned skills' output schemas so structured output
     # stays consistent even when the SKILL.md body isn't injected this turn.
     plan_skills = [item.get("skill") for item in skill_trace if item.get("skill")]
@@ -59,8 +75,11 @@ def render_prompt_envelope(
     user_message: str,
     skill_trace: list[dict[str, Any]],
     context: dict[str, Any],
+    budget: dict[str, Any] | None = None,
 ) -> str:
-    envelope = build_prompt_envelope(user_message=user_message, skill_trace=skill_trace, context=context)
+    envelope = build_prompt_envelope(
+        user_message=user_message, skill_trace=skill_trace, context=context, budget=budget
+    )
     # 紧凑序列化：发给 LLM 的 prompt 不需要缩进/空格，indent=2 会白白消耗 token。
     return json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
 

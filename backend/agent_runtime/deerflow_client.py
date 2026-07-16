@@ -671,6 +671,7 @@ class DeerFlowClientAdapter:
         session_id: str | None = None,
         subagent_enabled: bool = False,
         plan_mode: bool = False,
+        budget: Dict[str, Any] | None = None,
     ) -> AsyncIterator[Dict[str, Any]]:
         # Both direct and embedded modes use DeerFlowClient.stream()
         if self.client is not None:
@@ -688,6 +689,7 @@ class DeerFlowClientAdapter:
                 user_message=message,
                 skill_trace=skill_trace or [],
                 context=context,
+                budget=budget,
             )
             try:
                 raw_stream = self.client.stream(

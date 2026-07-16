@@ -262,48 +262,73 @@ WORKBENCH_SKILLS: dict[str, WorkbenchSkill] = {
     ),
 }
 
-# Canonical ordered intent → skill plan (single source). Consumed by
-# copilot _build_skill_trace; the set-form INTENT_SKILLS is derived from this.
-INTENT_PLANS: dict[str, tuple[str, ...]] = {
-    "stock_research": ("stock-researcher", "valuation-analyst", "catalyst-tracker", "report-writer"),
-    "strategy_backtest": ("strategy-analyst", "report-writer"),
-    "rebalance_plan": ("stock-researcher", "risk-officer", "rebalance-planner", "report-writer", "execution-agent-disabled"),
-    "risk_review": ("stock-researcher", "risk-officer", "report-writer"),
-    "monitor_event": ("stock-monitor", "stock-researcher", "report-writer"),
-    "copilot_chat": ("stock-researcher", "report-writer"),
-    "review_inbox": ("risk-officer",),
-    "decision_journal_review": ("risk-officer",),
-    "paper_portfolio_review": ("risk-officer",),
-    "pre_trade_review": ("risk-officer", "rebalance-planner", "report-writer", "execution-agent-disabled"),
-    "execution_request": ("execution-agent-disabled",),
+# ── 意图委派预算（「规则做预算，模型做编排」）──
+# 旧 INTENT_PLANS 的语义是「必跑技能链」：正则一旦路由，整条链全量串跑，
+# 简单问题也烧全家桶。预算把编排权交还主模型：白名单圈定可委派的技能，
+# 上限与权限级封顶成本，required_skills 只保住合规必跑项（风控官）。
+@dataclass(frozen=True)
+class IntentBudget:
+    allowed_skills: tuple[str, ...]        # 本轮可委派的子代理白名单（有序，供展示）
+    max_subagents: int                     # 委派次数上限（0 = 本轮不开子代理委派）
+    authority_cap: str                     # 本轮委派权限上限（A2..A5）
+    required_skills: tuple[str, ...] = ()  # 合规必跑项：收口前必须完成，模型不可省略
+    guard_skills: tuple[str, ...] = ()     # 阻断占位（如锁定的执行代理），仅用于展示
+
+
+INTENT_BUDGETS: dict[str, IntentBudget] = {
+    "stock_research": IntentBudget(
+        ("stock-researcher", "valuation-analyst", "catalyst-tracker", "report-writer"), 4, "A2"),
+    "strategy_backtest": IntentBudget(("strategy-analyst", "report-writer"), 2, "A3"),
+    "rebalance_plan": IntentBudget(
+        ("stock-researcher", "risk-officer", "rebalance-planner", "report-writer"), 4, "A4",
+        required_skills=("risk-officer",), guard_skills=("execution-agent-disabled",)),
+    "risk_review": IntentBudget(("stock-researcher", "risk-officer", "report-writer"), 3, "A3"),
+    "monitor_event": IntentBudget(("stock-monitor", "stock-researcher", "report-writer"), 3, "A2"),
+    "copilot_chat": IntentBudget(("stock-researcher", "report-writer"), 2, "A2"),
+    # report_write 原先在 copilot_service 里按关键词硬选管道；现在给全量白名单，
+    # 模型按报告主题自行拉人。
+    "report_write": IntentBudget(
+        ("stock-monitor", "strategy-analyst", "stock-researcher", "risk-officer", "report-writer"), 3, "A3"),
+    "review_inbox": IntentBudget(("risk-officer",), 1, "A3"),
+    "decision_journal_review": IntentBudget(("risk-officer",), 1, "A3"),
+    "paper_portfolio_review": IntentBudget(("risk-officer",), 1, "A3"),
+    "pre_trade_review": IntentBudget(
+        ("risk-officer", "rebalance-planner", "report-writer"), 3, "A4",
+        required_skills=("risk-officer",), guard_skills=("execution-agent-disabled",)),
+    "execution_request": IntentBudget((), 0, "A5", guard_skills=("execution-agent-disabled",)),
 }
 
-# Intents whose plan fans out to multiple research subagents. These turns run
-# with DeerFlow subagent delegation enabled so plan skills execute as parallel
-# nested graphs instead of one serial prompt. Conversational / inbox intents
-# stay off by default — delegation adds latency with no fan-out benefit there.
-SUBAGENT_INTENTS: frozenset[str] = frozenset({
-    "stock_research",
-    "strategy_backtest",
-    "rebalance_plan",
-    "risk_review",
-    "monitor_event",
-    "pre_trade_review",
-})
+
+def intent_budget(intent: str) -> IntentBudget:
+    """Budget for an intent; unknown intents fall back to the chat budget."""
+    return INTENT_BUDGETS.get(intent, INTENT_BUDGETS["copilot_chat"])
+
+
+def intent_budget_dict(intent: str) -> dict[str, object]:
+    """Budget in dict form (run state / prompt envelope 传输形态)。"""
+    budget = intent_budget(intent)
+    return {
+        "allowed_skills": list(budget.allowed_skills),
+        "max_subagents": budget.max_subagents,
+        "authority_cap": budget.authority_cap,
+        "required_skills": list(budget.required_skills),
+    }
 
 
 def subagent_intent_enabled(intent: str) -> bool:
     """Whether this turn's intent should stream with subagent delegation.
 
     ``WORKBENCH_AI_SUBAGENT`` overrides: ``0/false/off`` disables everywhere,
-    ``all`` (or ``1/true/on``) enables every intent; unset uses SUBAGENT_INTENTS.
+    ``all`` (or ``1/true/on``) enables every intent; unset enables delegation
+    for any intent whose budget allows at least one subagent — the model
+    decides on demand within the budget (零委派也合法).
     """
     mode = os.getenv("WORKBENCH_AI_SUBAGENT", "").strip().lower()
     if mode in {"0", "false", "off"}:
         return False
     if mode in {"1", "true", "on", "all"}:
         return True
-    return intent in SUBAGENT_INTENTS
+    return intent_budget(intent).max_subagents > 0
 
 
 def subagent_supported() -> bool:
@@ -382,13 +407,19 @@ def skill_labels() -> dict[str, str]:
 
 
 def intent_plans() -> dict[str, list[str]]:
-    """Ordered intent → skill plan (for copilot skill_trace)."""
-    return {intent: list(plan) for intent, plan in INTENT_PLANS.items()}
+    """Ordered intent → delegation whitelist (+guard rows), derived from budgets.
+
+    历史上这是「必跑链」；现在只是预算白名单的有序展示形态。
+    """
+    return {
+        intent: [*budget.allowed_skills, *budget.guard_skills]
+        for intent, budget in INTENT_BUDGETS.items()
+    }
 
 
 def intent_skills() -> dict[str, set[str]]:
-    """Set-form intent → skills, derived from INTENT_PLANS."""
-    return {intent: set(plan) for intent, plan in INTENT_PLANS.items()}
+    """Set-form intent → skills, derived from INTENT_BUDGETS."""
+    return {intent: set(plan) for intent, plan in intent_plans().items()}
 
 
 def skill_authority() -> dict[str, str]:
