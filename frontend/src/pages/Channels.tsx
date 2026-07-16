@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiPost, apiDelete } from "@/api/client";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { formatTimeAgo } from "@/utils/format";
+import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 
 interface ProviderConfig { enabled?: boolean; bot_token?: string; app_token?: string; bot_id?: string; bot_secret?: string }
 interface ChannelsConfig { require_binding?: boolean; telegram?: ProviderConfig; slack?: ProviderConfig; wecom?: ProviderConfig }
@@ -123,7 +124,7 @@ export default function ChannelsTab() {
           <div className="panel-title">IM 渠道</div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-              <input type="checkbox" checked={config.require_binding ?? true} onChange={(e) => void toggleRequireBinding(e.target.checked)} />
+              <ToggleSwitch checked={config.require_binding ?? true} onChange={(v) => void toggleRequireBinding(v)} />
               要求绑定
             </label>
             <RefreshButton refreshing={loading} onClick={() => void loadAll()} />

@@ -35,10 +35,11 @@ export function CopilotStreamingMessage({ streamMessage, onToolClick }: Props) {
   return (
     <div className={`msg ai${hasContent ? "" : " streaming"}`}>
       <div className="msg-label">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z" fill="currentColor"/>
-          <circle cx="12" cy="12" r="3"/>
-        </svg>
+        <span className="ai-disc">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+              <polyline points="4,17 10,11 13,14 20,6"/>
+            </svg>
+          </span>
         AI Copilot
         <span style={{ fontSize: 10, color: phaseColor, marginLeft: "auto", display: "flex", alignItems: "center", gap: 4 }}>
           <span style={{

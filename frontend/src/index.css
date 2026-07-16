@@ -576,6 +576,53 @@ html.resizing { cursor: col-resize; user-select: none; }
 }
 .settings-check-update:hover { text-decoration: underline; }
 .settings-stack { display: grid; grid-template-columns: 1fr; gap: 0; }
+
+/* ─── 设置三原语（TeamClaw settings/shared 形态） ─── */
+.setting-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+.setting-card-head { display: flex; align-items: center; gap: 12px; }
+.setting-icon-box {
+  flex: none;
+  width: 38px; height: 38px;
+  display: grid; place-items: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  color: var(--muted);
+}
+.setting-card-heading { flex: 1; min-width: 0; }
+.setting-card-title { font-size: 15px; font-weight: 650; color: var(--ink); }
+.setting-card-desc { font-size: 12.5px; color: var(--muted); margin-top: 2px; line-height: 1.5; }
+.setting-card-badge {
+  flex: none;
+  font-family: var(--mono); font-size: 10px; color: var(--faint);
+  border: 1px solid var(--line-soft); border-radius: 4px; padding: 2px 7px;
+}
+.setting-card-body { margin-top: 14px; }
+
+.toggle-switch {
+  width: 44px; height: 24px; padding: 2px; flex: none;
+  display: inline-flex; align-items: center;
+  border: none; border-radius: 12px;
+  background: var(--bar-bg);
+  transition: background 0.2s;
+}
+.toggle-switch:hover { background: var(--bar-bg); border: none; box-shadow: none; }
+.toggle-switch.on, .toggle-switch.on:hover { background: var(--blue); }
+.toggle-switch:disabled { opacity: 0.4; }
+.toggle-thumb {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--paper);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s;
+}
+.toggle-switch.on .toggle-thumb { transform: translateX(20px); }
+
 .settings-content { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
 .settings-content-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -2636,6 +2683,13 @@ html.resizing { cursor: col-resize; user-select: none; }
   border: none;
   border-radius: 0;
   padding: 4px 0 6px;
+}
+/* AI 身份盘：圆角方块 = AI（人类用圆形），品牌蓝为 AI 固定身份色 */
+.ai-disc {
+  width: 18px; height: 18px; flex: none;
+  border-radius: 5px;
+  background: var(--blue); color: #fff;
+  display: grid; place-items: center;
 }
 .msg-label-time {
   margin-left: auto;

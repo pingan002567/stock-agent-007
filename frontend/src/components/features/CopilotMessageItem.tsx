@@ -136,10 +136,11 @@ export function CopilotMessageItem({ msg, tools, onToolClick }: Props) {
       {/* 便签体头行：身份 + mono 时间（时间归入头行，正文下不再挂时间） */}
       {!isUser && (
         <div className="msg-label">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z" fill="currentColor"/>
-            <circle cx="12" cy="12" r="3"/>
-          </svg>
+          <span className="ai-disc">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+              <polyline points="4,17 10,11 13,14 20,6"/>
+            </svg>
+          </span>
           AI Copilot
           <span className="msg-label-time">{time}</span>
         </div>

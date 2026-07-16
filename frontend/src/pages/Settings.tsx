@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost, apiPut, apiDelete } from "@/api/client";
 import {
   fetchCopilotRuns, fetchProviderEvents, fetchRuntimeMetrics, fetchRegressionCases,
-  reconnectRuntime, testConnection,
+  testConnection,
   fetchMemoryStatus, clearMemory, deleteMemoryFact, updateMemoryFact, createMemoryFact,
   fetchMcpConfig, updateMcpConfig,
   type CopilotRunLog, type ProviderEvent, type RuntimeMetricSnapshot,
@@ -10,6 +10,7 @@ import {
   type McpServerConfig,
 } from "@/api/runtime";
 import { ErrorMessage, PanelSkeleton, KpiSkeleton } from "@/components/ui/Loading";
+import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { useAppState } from "@/hooks/useAppState";
 import ChannelsTab from "./Channels";
 
@@ -81,20 +82,26 @@ function ConfigRow({ label, value, mono }: { label: string; value: string | numb
   );
 }
 
-function SectionCard({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+/** 设置卡原语（TeamClaw SettingCard/SectionHeader 形态）：
+ * 头部 = 可选图标盒 + 标题/描述 + 右侧 mono 徽标；去掉了此前每卡雷同的齿轮图标。 */
+function SectionCard({ title, subtitle, description, icon, children }: {
+  title: string;
+  subtitle?: string;
+  description?: string;
+  icon?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="panel" style={{ marginBottom: 20 }}>
-      <div className="panel-header">
-        <div className="panel-title">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="3"/>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-          </svg>
-          {title}
+    <div className="setting-card">
+      <div className="setting-card-head">
+        {icon && <div className="setting-icon-box">{icon}</div>}
+        <div className="setting-card-heading">
+          <div className="setting-card-title">{title}</div>
+          {description && <div className="setting-card-desc">{description}</div>}
         </div>
-        {subtitle && <span className="panel-badge">{subtitle}</span>}
+        {subtitle && <span className="setting-card-badge">{subtitle}</span>}
       </div>
-      <div className="panel-body">{children}</div>
+      <div className="setting-card-body">{children}</div>
     </div>
   );
 }
@@ -633,7 +640,7 @@ function AiTab({
   const [saving, setSaving] = useState(false);
   const [testConnecting, setTestConnecting] = useState(false);
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
-  const [reconnecting, setReconnecting] = useState(false);
+  const [reconnecting] = useState(false);
 
   const knownModels: ModelOption[] = (settings.models as ModelOption[]) ?? [];
 
@@ -1121,11 +1128,9 @@ function StockTab({
                 return (
                   <div key={prov.id} className="card" style={{ padding: 12 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                      <input
-                        type="checkbox"
+                      <ToggleSwitch
                         checked={isSelected}
                         onChange={() => handleIntelProviderChange(prov.id, isSelected ? "" : prov.id)}
-                        style={{ accentColor: "var(--accent)" }}
                       />
                       <strong style={{ fontSize: 14 }}>{prov.name}</strong>
                       <span className="tag" style={{ fontSize: 10 }}>{prov.category}</span>
@@ -1164,11 +1169,9 @@ function StockTab({
                     return (
                       <div key={prov.id} className="card" style={{ padding: 12 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                          <input
-                            type="checkbox"
+                          <ToggleSwitch
                             checked={isSelected}
                             onChange={() => handleIntelProviderChange(prov.id, isSelected ? "" : prov.id)}
-                            style={{ accentColor: "var(--accent)" }}
                           />
                           <strong style={{ fontSize: 14 }}>{prov.name}</strong>
                           <span className="tag" style={{ fontSize: 10 }}>{prov.category}</span>

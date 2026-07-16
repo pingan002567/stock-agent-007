@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { actorColor } from "@/lib/actorColor";
 import { useCopilotChat } from "@/hooks/useCopilotChat";
 import type { CopilotSession } from "@/api/client";
 
@@ -20,7 +21,7 @@ function BrandStatus() {
         <span className="brand-clock">{time}</span>
         <span className="brand-ai"><span className="dot-ok"/>AI 就绪</span>
       </div>
-      <div className="brand-avatar">Z</div>
+      <div className="brand-avatar" style={{ background: actorColor("local-user"), color: "#fff" }}>Z</div>
     </div>
   );
 }
