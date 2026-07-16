@@ -25,8 +25,8 @@
   --amber-soft: rgba(245, 158, 11, 0.12);
   
   /* 字体 */
-  --mono: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --mono: "JetBrains Mono", "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: "PingFang SC", "Noto Sans SC", "Source Han Sans SC", -apple-system, BlinkMacSystemFont, "Microsoft YaHei", system-ui, sans-serif;
   
   /* 阴影 */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
@@ -36,7 +36,7 @@
   
   /* 圆角 */
   --radius: 8px;
-  --radius-lg: 12px;
+  --radius-lg: 14px; /* 面板/卡片（TeamClaw panel 标度） */
   --radius-xl: 16px;
   
   /* 覆盖层 */
@@ -68,6 +68,13 @@
   
   /* 标签 */
   --tag-bg: transparent;
+
+  /* 表面/墨色/边框语义层（TeamClaw Editorial Calm 对齐,深色映射现有值）*/
+  --paper: var(--panel);
+  --selected: #1c2536;
+  --ink-2: #b9c1d4;
+  --faint: var(--msg-time);
+  --line-soft: rgba(148, 163, 199, 0.05);
 
   font-size: 13px;
   line-height: 1.5;
@@ -120,17 +127,18 @@
   color-scheme: dark;
 }
 
-/* 白天模式：纸感浅色（红绿语义色加深一档保对比度） */
+/* 白天模式：Editorial Calm 纸感（TeamClaw 正典浅色,暖墨中性）
+   红绿语义色加深保对比;蓝为交互强调色(预算:每屏≤2处) */
 :root.light {
-  --bg: #f4f6f9;
-  --bg-secondary: #ffffff;
-  --bg-tertiary: #eef1f6;
+  --bg: #fbfaf7;
+  --bg-secondary: #efece4;
+  --bg-tertiary: #f1eee6;
   --panel: #ffffff;
-  --panel-alt: #f1f4f8;
-  --ink: #1a2333;
-  --muted: #5b6577;
-  --line: rgba(15, 23, 42, 0.10);
-  --soft: #eef1f6;
+  --panel-alt: #f5f2ea;
+  --ink: #1a1a14;
+  --muted: #75736a;
+  --line: rgba(26, 26, 20, 0.08);
+  --soft: #eee9df;
   --blue: #2f6fed;
   --blue-hover: #2563eb;
   --blue-soft: rgba(47, 111, 237, 0.10);
@@ -141,29 +149,33 @@
   --red-soft: rgba(214, 58, 65, 0.10);
   --amber: #b16a04;
   --amber-soft: rgba(177, 106, 4, 0.10);
-  --rail: #ffffff;
-  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.08);
-  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.10);
-  --shadow-lg: 0 8px 32px rgba(15, 23, 42, 0.14);
-  --shadow-glow: 0 0 20px rgba(47, 111, 237, 0.15);
-  --overlay: rgba(244, 246, 249, 0.96);
-  --msg-user: rgba(177, 106, 4, 0.07);
-  --msg-ai: rgba(47, 111, 237, 0.06);
-  --msg-event: rgba(100, 116, 139, 0.08);
-  --msg-time: #8a93a5;
-  --skeleton: #e2e8f0;
+  --rail: #efece4;
+  --shadow-sm: 0 1px 2px rgba(26, 26, 20, 0.06);
+  --shadow-md: 0 4px 12px rgba(26, 26, 20, 0.08);
+  --shadow-lg: 0 8px 32px rgba(26, 26, 20, 0.12);
+  --shadow-glow: 0 0 20px rgba(47, 111, 237, 0.12);
+  --overlay: rgba(251, 250, 247, 0.96);
+  --msg-user: rgba(47, 111, 237, 0.06);
+  --msg-ai: transparent;
+  --msg-event: rgba(117, 115, 106, 0.08);
+  --msg-time: #a8a6a0;
+  --skeleton: #e7e2d6;
   --ticket-bg: rgba(47, 111, 237, 0.06);
   --ticket-border: rgba(47, 111, 237, 0.22);
-  --bar-bg: #e2e8f0;
-  --hover-row: rgba(47, 111, 237, 0.05);
-  --active-row: rgba(47, 111, 237, 0.10);
-  --pre-bg: #f1f4f8;
-  --pre-color: #1e293b;
+  --bar-bg: #e7e2d6;
+  --hover-row: rgba(26, 26, 20, 0.04);
+  --active-row: rgba(26, 26, 20, 0.07);
+  --pre-bg: #f5f2ea;
+  --pre-color: #3d3c34;
   --tag-bg: transparent;
+  --paper: #ffffff;
+  --selected: #e7e2d6;
+  --ink-2: #3d3c34;
+  --faint: #a8a6a0;
+  --line-soft: rgba(26, 26, 20, 0.05);
   color-scheme: light;
 }
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 * { box-sizing: border-box; }
 html, body { height: 100%; }
