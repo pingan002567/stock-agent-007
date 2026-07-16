@@ -63,6 +63,7 @@ function ToolListSection({ tools, open, onToggle, onToolClick }: {
               <div className="tool-card-header">
                 <span className={`tool-dot ${t.failed ? "fail" : t.done ? "ok" : "busy"}`} />
                 <span className="tool-name">{toolLabel(t.name)}</span>
+                <span className="tool-eng">{t.name}</span>
                 <span className={`tool-status-text ${t.failed ? "failed" : t.done ? "success" : "running"}`}>
                   {t.failed ? "⚠ 失败" : t.done ? "✓ 完成" : "⏳ 进行中"}
                 </span>
@@ -132,6 +133,7 @@ export function CopilotMessageItem({ msg, tools, onToolClick }: Props) {
 
   return (
     <div className={cls}>
+      {/* 便签体头行：身份 + mono 时间（时间归入头行，正文下不再挂时间） */}
       {!isUser && (
         <div className="msg-label">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -139,10 +141,11 @@ export function CopilotMessageItem({ msg, tools, onToolClick }: Props) {
             <circle cx="12" cy="12" r="3"/>
           </svg>
           AI Copilot
+          <span className="msg-label-time">{time}</span>
         </div>
       )}
       {body}
-      <div className="msg-time">{time}</div>
+      {isUser && <div className="msg-time">{time}</div>}
     </div>
   );
 }
