@@ -3706,3 +3706,27 @@ tbody td .row-ops, tbody td button,
 }
 /* 输入类原生可编辑,显式声明防被祖先覆盖 */
 input, textarea { -webkit-user-select: text; user-select: text; }
+
+/* ── 设置页信息架构重排(settings-mockup.html) ── */
+.settings-nav-group {
+  font-size: 10px; color: var(--faint, var(--muted)); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 12px 10px 4px;
+}
+.setting-row {
+  display: flex; align-items: center; gap: 12px;
+  min-height: 40px; padding: 4px 0;
+  border-bottom: 1px solid var(--line-soft, var(--line));
+}
+.setting-row:last-child { border-bottom: none; }
+.setting-row-main { min-width: 0; }
+.setting-row-label { font-size: 12.5px; font-weight: 500; }
+.setting-row-sub { font-size: 11px; color: var(--faint, var(--muted)); margin-top: 1px; }
+.setting-row-ctl { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-shrink: 0; max-width: 60%; }
+.seg-ctl { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg-ctl button {
+  height: 26px; padding: 0 12px; font-size: 12px; border: none; border-radius: 0;
+  background: var(--paper); color: var(--muted);
+}
+.seg-ctl button + button { border-left: 1px solid var(--line); }
+.seg-ctl button.on { background: var(--selected, var(--soft)); color: var(--ink); font-weight: 600; }

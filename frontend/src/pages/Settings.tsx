@@ -74,7 +74,7 @@ interface SkillInfo {
   authority: string; enabled: boolean; locked: boolean;
 }
 
-type SettingTab = "general" | "ai" | "risk" | "stock" | "channels" | "raw";
+type SettingTab = "general" | "channels" | "ai" | "skills" | "mcp" | "data" | "risk" | "diag";
 
 /* ---------- Helpers ---------- */
 
@@ -166,133 +166,61 @@ function PolicyForm({ title, submitLabel, initial, saving, onSubmit, onCancel }:
 
 /* ---------- 通用配置 ---------- */
 
-function GeneralTab({
-  settings, runtimeMetrics,
-}: {
-  settings: SettingsData;
-  runtimeMetrics: RuntimeMetricSnapshot | null;
-}) {
-  const { themeMode, setThemeMode } = useAppState();
-  const THEME_OPTIONS = [
-    { mode: "light" as const, icon: "☀️", label: "白天模式" },
-    { mode: "dark" as const, icon: "🌙", label: "夜晚模式" },
-    { mode: "system" as const, icon: "💻", label: "跟随系统" },
-  ];
+function SettingRow({ label, sub, children }: { label: React.ReactNode; sub?: React.ReactNode; children: React.ReactNode }) {
   return (
-    // 通用分区：全部模块单列竖排（设置模态宽度下两栏过挤）
+    <div className="setting-row">
+      <div className="setting-row-main">
+        <div className="setting-row-label">{label}</div>
+        {sub && <div className="setting-row-sub">{sub}</div>}
+      </div>
+      <div className="setting-row-ctl">{children}</div>
+    </div>
+  );
+}
+
+function GeneralTab({ settings }: { settings: SettingsData }) {
+  const { themeMode, setThemeMode } = useAppState();
+  const [ws, setWs] = useState<{ name?: string; data_dir?: string } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    apiGet<{ name?: string; data_dir?: string }>("/api/workspace")
+      .then((w) => { if (alive) setWs(w); })
+      .catch(() => { /* 旧后端无此接口 */ });
+    return () => { alive = false; };
+  }, []);
+  const tc = settings.trading_controls;
+  return (
     <div className="settings-stack">
-      <div>
-        <SectionCard title="外观设置" subtitle="theme">
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-            {THEME_OPTIONS.map((opt) => (
-              <button
-                key={opt.mode}
-                onClick={() => setThemeMode(opt.mode)}
-                style={{
-                  padding: "12px 8px", borderRadius: 8,
-                  display: "grid", justifyItems: "center", gap: 6,
-                  height: "auto", // 覆盖全局 button 32px 定高，避免图标+文字被裁
-                  background: themeMode === opt.mode ? "var(--blue-soft)" : "var(--bg-tertiary)",
-                  border: `1px solid ${themeMode === opt.mode ? "var(--blue)" : "transparent"}`,
-                  color: "var(--ink)", font: "inherit",
-                  transition: "background .15s, border-color .15s",
-                }}
-              >
-                <span style={{ fontSize: 20, lineHeight: 1 }}>{opt.icon}</span>
-                <span style={{ fontSize: 12.5, fontWeight: themeMode === opt.mode ? 650 : 400 }}>{opt.label}</span>
-              </button>
+      <SectionCard title="外观" description="明暗主题跟随">
+        <SettingRow label="主题模式" sub="跟随系统时随 macOS 自动切换">
+          <div className="seg-ctl">
+            {([["light", "白天"], ["dark", "夜晚"], ["system", "跟随系统"]] as const).map(([mode, label]) => (
+              <button key={mode} type="button" className={themeMode === mode ? "on" : ""}
+                onClick={() => setThemeMode(mode)}>{label}</button>
             ))}
           </div>
+        </SettingRow>
+      </SectionCard>
+
+      {tc && (
+        <SectionCard title="交易控制" subtitle="V1 锁定" description="research-only 安全护栏">
+          <SettingRow label="纸上交易" sub="模拟撮合,不触真钱">
+            <span className="tag" style={{ color: "var(--green)" }}>{String(tc.paper_trading ?? "-")}</span>
+          </SettingRow>
+          <SettingRow label="真实下单" sub="执行代理锁定 A5,本版本不可开启">
+            <span className="tag" style={{ color: "var(--red)" }}>{String(tc.real_order ?? "blocked")}</span>
+          </SettingRow>
         </SectionCard>
+      )}
 
-        {settings.trading_controls && (
-          <SectionCard title="交易控制" subtitle="trading safety">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              {Object.entries(settings.trading_controls).map(([k, v]) => (
-                <div key={k} style={{ padding: 12, background: "var(--bg-tertiary)", borderRadius: 8 }}>
-                  <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>{k.replace(/_/g, " ")}</div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: v === "blocked" ? "var(--red)" : v === "sandbox_only" ? "var(--green)" : "var(--ink)" }}>
-                    {String(v)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </SectionCard>
-        )}
-
-        {settings.agent_runtime && (
-          <SectionCard title="Runtime 状态" subtitle="connection">
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-              {Object.entries(settings.agent_runtime).slice(0, 6).map(([k, v]) => (
-                <div key={k} style={{ padding: 12, background: "var(--bg-tertiary)", borderRadius: 8, textAlign: "center" }}>
-                  <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>{k.replace(/_/g, " ")}</div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: k === "available" || k === "degraded" ? (v ? "var(--red)" : "var(--green)") : "var(--ink)" }}>
-                    {typeof v === "boolean" ? (v ? "是" : "否") : String(v ?? "-")}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </SectionCard>
-        )}
-      </div>
-
-      <div>
-        {runtimeMetrics && (
-          <SectionCard title="运行摘要" subtitle="24小时">
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
-              <div style={{ padding: 12, background: "var(--bg-tertiary)", borderRadius: 8 }}>
-                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>数据源调用</div>
-                <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "var(--font-mono)" }}>{runtimeMetrics.payload.provider?.total_calls ?? 0}</div>
-                <div style={{ fontSize: 11, color: "var(--muted)" }}>失败 {runtimeMetrics.payload.provider?.failure_count ?? 0} · 回退 {runtimeMetrics.payload.provider?.fallback_count ?? 0}</div>
-              </div>
-              <div style={{ padding: 12, background: "var(--bg-tertiary)", borderRadius: 8 }}>
-                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>平均耗时</div>
-                <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "var(--font-mono)" }}>{runtimeMetrics.payload.provider?.avg_duration_ms ?? 0}毫秒</div>
-              </div>
-              <div style={{ padding: 12, background: "var(--bg-tertiary)", borderRadius: 8 }}>
-                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>Copilot 运行</div>
-                <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "var(--font-mono)" }}>{runtimeMetrics.payload.copilot?.total_runs ?? 0}</div>
-                <div style={{ fontSize: 11, color: "var(--muted)" }}>失败 {runtimeMetrics.payload.copilot?.failure_count ?? 0} · {runtimeMetrics.payload.copilot?.avg_tool_calls ?? 0} 工具/次</div>
-              </div>
-              <div style={{ padding: 12, background: "var(--bg-tertiary)", borderRadius: 8 }}>
-                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>总成本</div>
-                <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "var(--font-mono)" }}>${runtimeMetrics.payload.copilot?.total_cost?.toFixed(4) ?? "0.0000"}</div>
-              </div>
-            </div>
-          </SectionCard>
-        )}
-
-        {runtimeMetrics?.payload.copilot && (
-          <SectionCard title="AI 评测摘要" subtitle="质量指标">
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-              <div style={{ padding: 12, background: "var(--bg-tertiary)", borderRadius: 8, textAlign: "center" }}>
-                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>总运行</div>
-                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "var(--font-mono)" }}>{runtimeMetrics.payload.copilot.total_runs ?? 0}</div>
-              </div>
-              <div style={{ padding: 12, background: "var(--bg-tertiary)", borderRadius: 8, textAlign: "center" }}>
-                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>失败</div>
-                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "var(--font-mono)", color: "var(--red)" }}>{runtimeMetrics.payload.copilot.failure_count ?? 0}</div>
-              </div>
-              <div style={{ padding: 12, background: "var(--bg-tertiary)", borderRadius: 8, textAlign: "center" }}>
-                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>平均延迟</div>
-                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "var(--font-mono)" }}>{runtimeMetrics.payload.copilot.avg_latency_ms?.toFixed(0) ?? 0}毫秒</div>
-              </div>
-              <div style={{ padding: 12, background: "var(--bg-tertiary)", borderRadius: 8, textAlign: "center" }}>
-                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>Token 输入</div>
-                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "var(--font-mono)" }}>{(runtimeMetrics.payload.copilot.usage_input_tokens ?? 0).toLocaleString()}</div>
-              </div>
-              <div style={{ padding: 12, background: "var(--bg-tertiary)", borderRadius: 8, textAlign: "center" }}>
-                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>Token 输出</div>
-                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "var(--font-mono)" }}>{(runtimeMetrics.payload.copilot.usage_output_tokens ?? 0).toLocaleString()}</div>
-              </div>
-              <div style={{ padding: 12, background: "var(--bg-tertiary)", borderRadius: 8, textAlign: "center" }}>
-                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>平均成本</div>
-                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "var(--font-mono)" }}>${runtimeMetrics.payload.copilot.avg_cost?.toFixed(6) ?? "0.000000"}</div>
-              </div>
-            </div>
-          </SectionCard>
-        )}
-      </div>
+      <SectionCard title="工作区" description="当前档案与数据目录;切换入口在左栏底部">
+        <SettingRow label="当前工作区">
+          <span className="num" style={{ fontSize: 12 }}>{ws?.name ?? "-"}</span>
+        </SettingRow>
+        <SettingRow label="数据目录">
+          <span className="num" style={{ fontSize: 11, color: "var(--muted)", wordBreak: "break-all", textAlign: "right" }}>{ws?.data_dir ?? "-"}</span>
+        </SettingRow>
+      </SectionCard>
     </div>
   );
 }
@@ -650,12 +578,9 @@ function SkillsSection({ initial }: { initial: SkillInfo[] }) {
 }
 
 function AiTab({
-  settings, copilotRuns, runtimeMetrics, regressionCases, onSaveRuntimeConfig,
+  settings, onSaveRuntimeConfig,
 }: {
   settings: SettingsData;
-  copilotRuns: CopilotRunLog[];
-  runtimeMetrics: RuntimeMetricSnapshot | null;
-  regressionCases: RegressionCase[];
   onSaveRuntimeConfig: (config: Record<string, unknown>) => Promise<void>;
 }) {
   const rc = settings.runtime_config ?? {};
@@ -732,8 +657,6 @@ function AiTab({
       setTestResult({ ok: false, error: err instanceof Error ? err.message : "连接测试失败" });
     } finally { setTestConnecting(false); }
   };
-
-  const ar = settings.agent_runtime;
 
   return (
     <div className="page-stack">
@@ -843,124 +766,6 @@ function AiTab({
         </div>
       </SectionCard>
 
-      {/* Runtime 状态 */}
-      {ar && (
-        <SectionCard title="Runtime 状态" subtitle="current connection">
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 8 }}>
-            {Object.entries(ar).map(([k, v]) => (
-              <div key={k} className="card" style={{ padding: 10 }}>
-                <h3>{k.replace(/_/g, " ")}</h3>
-                <p>
-                  <span className={`num ${k === "available" || k === "degraded" ? (v ? "down" : "up") : ""}`}>
-                    {typeof v === "boolean" ? (v ? "是" : "否") : String(v ?? "-")}
-                  </span>
-                </p>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-      )}
-
-      {/* AI 记忆 */}
-      <MemorySection />
-
-      {/* MCP 服务器 */}
-      <McpSection />
-
-      {/* Skills：启停单一属主 = 工作区 extensions_config.json，此处是无状态视图 */}
-      <SkillsSection initial={settings.skills ?? []} />
-
-      {/* Copilot Runs */}
-      {copilotRuns.length > 0 && (
-        <SectionCard title="Copilot 运行记录" subtitle={`最新 ${Math.min(copilotRuns.length, 10)} 条`}>
-          {copilotRuns.slice(0, 10).map((item) => (
-            <div key={item.run_id} className="check" style={{ marginBottom: 3 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span className="num" style={{ fontSize: 12 }}>{item.run_id.slice(0, 14)}</span>
-                  <span className={`tag ${item.status === "completed" ? "green" : "red"}`} style={{ fontSize: 11 }}>{item.status}</span>
-                  {item.error_category && <span className="tag" style={{ fontSize: 11, background: "var(--amber-soft)", color: "var(--amber)" }}>{item.error_category}</span>}
-                </div>
-                <span className="muted" style={{ fontSize: 11 }}>{item.active_client} · {item.model_name ?? "default"} · {item.tool_call_count} tools</span>
-                {item.cost != null && <span className="muted" style={{ fontSize: 11 }}> · ${item.cost.toFixed(6)}</span>}
-                {item.latency_ms != null && <span className="muted" style={{ fontSize: 11 }}> · {item.latency_ms.toFixed(0)}ms</span>}
-              </div>
-            </div>
-          ))}
-        </SectionCard>
-      )}
-
-      {/* AI 评测摘要 */}
-      {runtimeMetrics?.payload.copilot && (
-        <SectionCard title="AI 评测摘要" subtitle="质量指标">
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 8 }}>
-            <div className="card" style={{ padding: 10 }}>
-              <h3>总运行</h3>
-              <p><span className="num">{runtimeMetrics.payload.copilot.total_runs ?? 0}</span></p>
-            </div>
-            <div className="card" style={{ padding: 10 }}>
-              <h3>失败</h3>
-              <p><span className="num" style={{ color: "var(--red)" }}>{runtimeMetrics.payload.copilot.failure_count ?? 0}</span></p>
-            </div>
-            <div className="card" style={{ padding: 10 }}>
-              <h3>总成本</h3>
-              <p><span className="num">${runtimeMetrics.payload.copilot.total_cost?.toFixed(4) ?? "0.0000"}</span></p>
-            </div>
-            <div className="card" style={{ padding: 10 }}>
-              <h3>平均成本</h3>
-              <p><span className="num">${runtimeMetrics.payload.copilot.avg_cost?.toFixed(6) ?? "0.000000"}</span></p>
-            </div>
-            <div className="card" style={{ padding: 10 }}>
-              <h3>平均延迟</h3>
-              <p><span className="num">{runtimeMetrics.payload.copilot.avg_latency_ms?.toFixed(0) ?? 0} ms</span></p>
-            </div>
-            <div className="card" style={{ padding: 10 }}>
-              <h3>Token 输入</h3>
-              <p><span className="num">{(runtimeMetrics.payload.copilot.usage_input_tokens ?? 0).toLocaleString()}</span></p>
-            </div>
-            <div className="card" style={{ padding: 10 }}>
-              <h3>Token 输出</h3>
-              <p><span className="num">{(runtimeMetrics.payload.copilot.usage_output_tokens ?? 0).toLocaleString()}</span></p>
-            </div>
-          </div>
-          {runtimeMetrics.payload.copilot.error_distribution && Object.keys(runtimeMetrics.payload.copilot.error_distribution).length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              <h3 style={{ marginBottom: 8 }}>错误分布</h3>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {Object.entries(runtimeMetrics.payload.copilot.error_distribution).map(([cat, count]) => (
-                  <div key={cat} className="card" style={{ padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
-                    <span className="tag" style={{ background: "var(--red-soft)", color: "var(--red)" }}>{cat}</span>
-                    <span className="num">{count}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </SectionCard>
-      )}
-
-      {/* 回归评测用例 */}
-      {regressionCases.length > 0 && (
-        <SectionCard title="回归评测用例" subtitle={`共 ${regressionCases.length} 个`}>
-          {regressionCases.map((c) => (
-            <div key={c.case_id} className="check" style={{ marginBottom: 3 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span className="num" style={{ fontSize: 12 }}>{c.case_id}</span>
-                  <span className="tag" style={{ fontSize: 11, background: c.mode === "full" ? "var(--amber-soft)" : "var(--blue-soft)", color: c.mode === "full" ? "var(--amber)" : "var(--blue)" }}>
-                    {c.mode === "full" ? "full" : "structural"}
-                  </span>
-                  {c.requires_deerflow && <span className="tag" style={{ fontSize: 11 }}>需要 DeerFlow</span>}
-                </div>
-                <span className="muted" style={{ fontSize: 11 }}>{c.message} · page: {c.page}{c.symbol ? ` · symbol: ${c.symbol}` : ""}</span>
-                {c.expected_tools && c.expected_tools.length > 0 && (
-                  <span className="muted" style={{ fontSize: 11 }}> · tools: {c.expected_tools.join(", ")}</span>
-                )}
-              </div>
-            </div>
-          ))}
-        </SectionCard>
-      )}
     </div>
   );
 }
@@ -968,11 +773,10 @@ function AiTab({
 /* ---------- 股票配置 ---------- */
 
 function StockTab({
-  settings, providerEvents, dataSources, availableProviders, onSaveDataSources, savingDataSources,
+  settings, dataSources, availableProviders, onSaveDataSources, savingDataSources,
   intelSources, availableIntelProviders, availableSentimentProviders, onSaveIntelSources, savingIntelSources,
 }: {
   settings: SettingsData;
-  providerEvents: ProviderEvent[];
   dataSources: DataSourcesConfig;
   availableProviders: AvailableDataProvider[];
   onSaveDataSources: (config: DataSourcesConfig) => Promise<void>;
@@ -1241,60 +1045,6 @@ function StockTab({
         </div>
       </SectionCard>
 
-      {/* Tools */}
-      {settings.tools && (
-        <SectionCard title="工具注册表" subtitle="workbench tools">
-          {(() => {
-            const items = Array.isArray(settings.tools)
-              ? settings.tools
-              : Object.entries(settings.tools).map(([k, v]) => ({ name: k, ...(v as object) }));
-            if (items.length === 0) return <div className="muted">暂无工具</div>;
-            return (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
-                {items.map((t: Record<string, unknown>, i: number) => {
-                  const status = String(t.status ?? "-");
-                  const isBlocked = status === "blocked";
-                  const isActive = status === "enabled";
-                  return (
-                    <div key={i} className="card" style={{ padding: 11 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                        <span style={{
-                          width: 8, height: 8, borderRadius: "50%", display: "inline-block", flexShrink: 0,
-                          background: isBlocked ? "var(--red)" : isActive ? "var(--green)" : "var(--muted)",
-                        }} />
-                        <span className="num" style={{ fontSize: 12 }}>{String(t.name ?? `tool-${i}`)}</span>
-                        <span className={`tag ${isBlocked ? "red" : isActive ? "green" : ""}`} style={{ marginLeft: "auto", fontSize: 11 }}>{status}</span>
-                      </div>
-                      <div className="muted" style={{ fontSize: 11, lineHeight: 1.5 }}>
-                        {t.description ? String(t.description) : `domain: ${String(t.domain ?? "-")} · risk: ${String(t.risk ?? "-")}`}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })()}
-        </SectionCard>
-      )}
-
-      {/* Provider Events */}
-      {providerEvents.length > 0 && (
-        <SectionCard title="Provider 事件" subtitle={`最新 ${Math.min(providerEvents.length, 8)} 条`}>
-          {providerEvents.slice(0, 8).map((item) => (
-            <div key={item.call_id} className="check" style={{ marginBottom: 3 }}>
-              <div>
-                <strong>{item.capability}</strong>
-                <span className="muted" style={{ marginLeft: 6, fontSize: 11 }}>{item.provider}</span>
-                <br /><span className="muted" style={{ fontSize: 11 }}>{item.market ?? "global"} · {item.created_at?.slice(11, 19) ?? ""}</span>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span className={`tag ${item.status === "success" ? "green" : item.status === "failed" ? "red" : ""}`} style={{ fontSize: 11 }}>{item.status}</span>
-                <span className="num" style={{ fontSize: 11 }}>{item.duration_ms.toFixed(0)} ms</span>
-              </div>
-            </div>
-          ))}
-        </SectionCard>
-      )}
     </div>
   );
 }
@@ -1371,33 +1121,227 @@ function RiskTab({
 
 /* ---------- RAW JSON ---------- */
 
-function RawTab({ data }: { data: SettingsData }) {
-  return <pre style={{ maxHeight: 600, fontSize: 11, lineHeight: 1.6 }}>{JSON.stringify(data, null, 2)}</pre>;
+/* ---------- 技能与记忆 / MCP / 诊断 ---------- */
+
+function SkillsMemoryTab({ settings }: { settings: SettingsData }) {
+  return (
+    <div className="settings-stack">
+      <SkillsSection initial={settings.skills ?? []} />
+      <MemorySection />
+    </div>
+  );
 }
+
+function McpTab() {
+  return <div className="settings-stack"><McpSection /></div>;
+}
+
+/* 诊断:只读观测区——Runtime 状态 / 运行记录 / 评测 / 回归 / Provider 事件 / 工具注册表 / 原始配置 */
+function DiagTab({ settings, copilotRuns, runtimeMetrics, regressionCases, providerEvents }: {
+  settings: SettingsData;
+  copilotRuns: CopilotRunLog[];
+  runtimeMetrics: RuntimeMetricSnapshot | null;
+  regressionCases: RegressionCase[];
+  providerEvents: ProviderEvent[];
+}) {
+  const ar = settings.agent_runtime;
+  const [rawOpen, setRawOpen] = useState(false);
+  return (
+    <div className="settings-stack">
+      {/* Runtime 状态 */}
+      {ar && (
+        <SectionCard title="Runtime 状态" subtitle="current connection">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 8 }}>
+            {Object.entries(ar).map(([k, v]) => (
+              <div key={k} className="card" style={{ padding: 10 }}>
+                <h3>{k.replace(/_/g, " ")}</h3>
+                <p>
+                  <span className={`num ${k === "available" || k === "degraded" ? (v ? "down" : "up") : ""}`}>
+                    {typeof v === "boolean" ? (v ? "是" : "否") : String(v ?? "-")}
+                  </span>
+                </p>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      )}
+      {/* Copilot Runs */}
+      {copilotRuns.length > 0 && (
+        <SectionCard title="Copilot 运行记录" subtitle={`最新 ${Math.min(copilotRuns.length, 10)} 条`}>
+          {copilotRuns.slice(0, 10).map((item) => (
+            <div key={item.run_id} className="check" style={{ marginBottom: 3 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span className="num" style={{ fontSize: 12 }}>{item.run_id.slice(0, 14)}</span>
+                  <span className={`tag ${item.status === "completed" ? "green" : "red"}`} style={{ fontSize: 11 }}>{item.status}</span>
+                  {item.error_category && <span className="tag" style={{ fontSize: 11, background: "var(--amber-soft)", color: "var(--amber)" }}>{item.error_category}</span>}
+                </div>
+                <span className="muted" style={{ fontSize: 11 }}>{item.active_client} · {item.model_name ?? "default"} · {item.tool_call_count} tools</span>
+                {item.cost != null && <span className="muted" style={{ fontSize: 11 }}> · ${item.cost.toFixed(6)}</span>}
+                {item.latency_ms != null && <span className="muted" style={{ fontSize: 11 }}> · {item.latency_ms.toFixed(0)}ms</span>}
+              </div>
+            </div>
+          ))}
+        </SectionCard>
+      )}
+      {/* AI 评测摘要 */}
+      {runtimeMetrics?.payload.copilot && (
+        <SectionCard title="AI 评测摘要" subtitle="质量指标">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 8 }}>
+            <div className="card" style={{ padding: 10 }}>
+              <h3>总运行</h3>
+              <p><span className="num">{runtimeMetrics.payload.copilot.total_runs ?? 0}</span></p>
+            </div>
+            <div className="card" style={{ padding: 10 }}>
+              <h3>失败</h3>
+              <p><span className="num" style={{ color: "var(--red)" }}>{runtimeMetrics.payload.copilot.failure_count ?? 0}</span></p>
+            </div>
+            <div className="card" style={{ padding: 10 }}>
+              <h3>总成本</h3>
+              <p><span className="num">${runtimeMetrics.payload.copilot.total_cost?.toFixed(4) ?? "0.0000"}</span></p>
+            </div>
+            <div className="card" style={{ padding: 10 }}>
+              <h3>平均成本</h3>
+              <p><span className="num">${runtimeMetrics.payload.copilot.avg_cost?.toFixed(6) ?? "0.000000"}</span></p>
+            </div>
+            <div className="card" style={{ padding: 10 }}>
+              <h3>平均延迟</h3>
+              <p><span className="num">{runtimeMetrics.payload.copilot.avg_latency_ms?.toFixed(0) ?? 0} ms</span></p>
+            </div>
+            <div className="card" style={{ padding: 10 }}>
+              <h3>Token 输入</h3>
+              <p><span className="num">{(runtimeMetrics.payload.copilot.usage_input_tokens ?? 0).toLocaleString()}</span></p>
+            </div>
+            <div className="card" style={{ padding: 10 }}>
+              <h3>Token 输出</h3>
+              <p><span className="num">{(runtimeMetrics.payload.copilot.usage_output_tokens ?? 0).toLocaleString()}</span></p>
+            </div>
+          </div>
+          {runtimeMetrics.payload.copilot.error_distribution && Object.keys(runtimeMetrics.payload.copilot.error_distribution).length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <h3 style={{ marginBottom: 8 }}>错误分布</h3>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {Object.entries(runtimeMetrics.payload.copilot.error_distribution).map(([cat, count]) => (
+                  <div key={cat} className="card" style={{ padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
+                    <span className="tag" style={{ background: "var(--red-soft)", color: "var(--red)" }}>{cat}</span>
+                    <span className="num">{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </SectionCard>
+      )}
+      {/* 回归评测用例 */}
+      {regressionCases.length > 0 && (
+        <SectionCard title="回归评测用例" subtitle={`共 ${regressionCases.length} 个`}>
+          {regressionCases.map((c) => (
+            <div key={c.case_id} className="check" style={{ marginBottom: 3 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span className="num" style={{ fontSize: 12 }}>{c.case_id}</span>
+                  <span className="tag" style={{ fontSize: 11, background: c.mode === "full" ? "var(--amber-soft)" : "var(--blue-soft)", color: c.mode === "full" ? "var(--amber)" : "var(--blue)" }}>
+                    {c.mode === "full" ? "full" : "structural"}
+                  </span>
+                  {c.requires_deerflow && <span className="tag" style={{ fontSize: 11 }}>需要 DeerFlow</span>}
+                </div>
+                <span className="muted" style={{ fontSize: 11 }}>{c.message} · page: {c.page}{c.symbol ? ` · symbol: ${c.symbol}` : ""}</span>
+                {c.expected_tools && c.expected_tools.length > 0 && (
+                  <span className="muted" style={{ fontSize: 11 }}> · tools: {c.expected_tools.join(", ")}</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </SectionCard>
+      )}
+      {/* Tools */}
+      {settings.tools && (
+        <SectionCard title="工具注册表" subtitle="workbench tools">
+          {(() => {
+            const items = Array.isArray(settings.tools)
+              ? settings.tools
+              : Object.entries(settings.tools).map(([k, v]) => ({ name: k, ...(v as object) }));
+            if (items.length === 0) return <div className="muted">暂无工具</div>;
+            return (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
+                {items.map((t: Record<string, unknown>, i: number) => {
+                  const status = String(t.status ?? "-");
+                  const isBlocked = status === "blocked";
+                  const isActive = status === "enabled";
+                  return (
+                    <div key={i} className="card" style={{ padding: 11 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                        <span style={{
+                          width: 8, height: 8, borderRadius: "50%", display: "inline-block", flexShrink: 0,
+                          background: isBlocked ? "var(--red)" : isActive ? "var(--green)" : "var(--muted)",
+                        }} />
+                        <span className="num" style={{ fontSize: 12 }}>{String(t.name ?? `tool-${i}`)}</span>
+                        <span className={`tag ${isBlocked ? "red" : isActive ? "green" : ""}`} style={{ marginLeft: "auto", fontSize: 11 }}>{status}</span>
+                      </div>
+                      <div className="muted" style={{ fontSize: 11, lineHeight: 1.5 }}>
+                        {t.description ? String(t.description) : `domain: ${String(t.domain ?? "-")} · risk: ${String(t.risk ?? "-")}`}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </SectionCard>
+      )}
+      {/* Provider Events */}
+      {providerEvents.length > 0 && (
+        <SectionCard title="Provider 事件" subtitle={`最新 ${Math.min(providerEvents.length, 8)} 条`}>
+          {providerEvents.slice(0, 8).map((item) => (
+            <div key={item.call_id} className="check" style={{ marginBottom: 3 }}>
+              <div>
+                <strong>{item.capability}</strong>
+                <span className="muted" style={{ marginLeft: 6, fontSize: 11 }}>{item.provider}</span>
+                <br /><span className="muted" style={{ fontSize: 11 }}>{item.market ?? "global"} · {item.created_at?.slice(11, 19) ?? ""}</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span className={`tag ${item.status === "success" ? "green" : item.status === "failed" ? "red" : ""}`} style={{ fontSize: 11 }}>{item.status}</span>
+                <span className="num" style={{ fontSize: 11 }}>{item.duration_ms.toFixed(0)} ms</span>
+              </div>
+            </div>
+          ))}
+        </SectionCard>
+      )}
+      <SectionCard title="原始配置" subtitle={rawOpen ? "收起 ▾" : "展开 ▸"} description="settings 全量 JSON(排障用)">
+        <button className="ghost" style={{ height: 26, fontSize: 12 }} type="button" onClick={() => setRawOpen((v) => !v)}>
+          {rawOpen ? "收起" : "展开"}
+        </button>
+        {rawOpen && <pre style={{ maxHeight: 360, overflow: "auto", fontSize: 11, marginTop: 8 }}>{JSON.stringify(settings, null, 2)}</pre>}
+      </SectionCard>
+    </div>
+  );
+}
+
 
 /* ==================== MAIN ==================== */
 
 /** 左导航分区（TeamClaw 式设置页：左侧分区列表 + 右侧内容 + 底部版本） */
-const NAV: { key: SettingTab; label: string; icon: React.ReactNode }[] = [
-  { key: "general", label: "通用", icon: (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-  ) },
-  { key: "ai", label: "AI 模型", icon: (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg>
-  ) },
-  { key: "stock", label: "数据源", icon: (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-  ) },
-  { key: "risk", label: "风控", icon: (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-  ) },
-  { key: "channels", label: "消息渠道", icon: (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-  ) },
-  { key: "raw", label: "高级", icon: (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polyline points="16,18 22,12 16,6"/><polyline points="8,6 2,12 8,18"/></svg>
-  ) },
+const NAV_GROUPS: { group: string; items: { key: SettingTab; label: string }[] }[] = [
+  { group: "应用", items: [
+    { key: "general", label: "通用" },
+    { key: "channels", label: "通知与通道" },
+  ]},
+  { group: "智能", items: [
+    { key: "ai", label: "AI 接入" },
+    { key: "skills", label: "技能与记忆" },
+    { key: "mcp", label: "MCP 扩展" },
+  ]},
+  { group: "数据与风控", items: [
+    { key: "data", label: "数据源" },
+    { key: "risk", label: "风控策略" },
+  ]},
+  { group: "系统", items: [
+    { key: "diag", label: "诊断" },
+  ]},
 ];
+const NAV_LABELS: Record<SettingTab, string> = Object.fromEntries(
+  NAV_GROUPS.flatMap((g) => g.items.map((i) => [i.key, i.label]))
+) as Record<SettingTab, string>;
 
 const APP_VERSION = "0.1.0";
 
@@ -1502,12 +1446,14 @@ export default function Settings() {
   const renderTab = () => {
     if (!settings) return null;
     switch (activeTab) {
-      case "general": return <GeneralTab settings={settings} runtimeMetrics={runtimeMetrics} />;
-      case "ai": return <AiTab settings={settings} copilotRuns={copilotRuns} runtimeMetrics={runtimeMetrics} regressionCases={regressionCases} onSaveRuntimeConfig={submitRuntimeConfig} />;
-      case "risk": return <RiskTab riskPolicies={riskPolicies} showCreateForm={showCreateForm} setShowCreateForm={setShowCreateForm} editPolicyId={editPolicyId} setEditPolicyId={setEditPolicyId} savingPolicy={savingPolicy} submitCreatePolicy={submitCreatePolicy} submitEditPolicy={submitEditPolicy} activatePolicy={activatePolicy} deletePolicy={deletePolicy} />;      case "stock": return (
+      case "general": return <GeneralTab settings={settings} />;
+      case "channels": return <ChannelsTab />;
+      case "ai": return <AiTab settings={settings} onSaveRuntimeConfig={submitRuntimeConfig} />;
+      case "skills": return <SkillsMemoryTab settings={settings} />;
+      case "mcp": return <McpTab />;
+      case "data": return (
         <StockTab
           settings={settings}
-          providerEvents={providerEvents}
           dataSources={settings.data_sources ?? { providers: { CN: { provider: "akshare" }, HK: { provider: "akshare" }, US: { provider: "mock" } } }}
           availableProviders={settings.available_data_providers ?? []}
           onSaveDataSources={submitDataSources}
@@ -1519,8 +1465,8 @@ export default function Settings() {
           savingIntelSources={savingIntelSources}
         />
       );
-      case "channels": return <ChannelsTab />;
-      case "raw": return <RawTab data={settings} />;
+      case "risk": return <RiskTab riskPolicies={riskPolicies} showCreateForm={showCreateForm} setShowCreateForm={setShowCreateForm} editPolicyId={editPolicyId} setEditPolicyId={setEditPolicyId} savingPolicy={savingPolicy} submitCreatePolicy={submitCreatePolicy} submitEditPolicy={submitEditPolicy} activatePolicy={activatePolicy} deletePolicy={deletePolicy} />;
+      case "diag": return <DiagTab settings={settings} copilotRuns={copilotRuns} runtimeMetrics={runtimeMetrics} regressionCases={regressionCases} providerEvents={providerEvents} />;
     }
   };
 
@@ -1530,16 +1476,20 @@ export default function Settings() {
     <div className="settings-layout">
       {/* 左导航：分区 + 底部版本（TeamClaw 式） */}
       <nav className="settings-nav">
-        {NAV.map((item) => (
-          <button
-            key={item.key}
-            className={`settings-nav-item${activeTab === item.key ? " active" : ""}`}
-            onClick={() => setActiveTab(item.key)}
-            type="button"
-          >
-            {item.icon}
-            {item.label}
-          </button>
+        {NAV_GROUPS.map((g) => (
+          <div key={g.group}>
+            <div className="settings-nav-group">{g.group}</div>
+            {g.items.map((item) => (
+              <button
+                key={item.key}
+                className={`settings-nav-item${activeTab === item.key ? " active" : ""}`}
+                onClick={() => setActiveTab(item.key)}
+                type="button"
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         ))}
         <div className="settings-nav-gap" />
         <div className="settings-nav-foot">
@@ -1559,7 +1509,7 @@ export default function Settings() {
       {/* 右内容区：分区标题 + 内容（模态每次打开都重新挂载并全量加载，无需刷新按钮） */}
       <div className="settings-content">
         <div className="settings-content-head">
-          <span className="settings-content-title">{NAV.find((n) => n.key === activeTab)?.label}</span>
+          <span className="settings-content-title">{NAV_LABELS[activeTab]}</span>
         </div>
         <div className="settings-content-body">
           {loading && <div className="page-stack"><PanelSkeleton /><KpiSkeleton count={3} /></div>}
