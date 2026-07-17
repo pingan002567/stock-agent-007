@@ -2677,10 +2677,8 @@ def test_settings_expose_tool_bridge_registry_without_enabling_real_orders(tmp_p
         "confirm_rebalance_draft",
         "create_paper_portfolio_snapshot",
         "create_pre_trade_review",
-        "create_worldcup_bet",
-        "create_worldcup_prediction",
+
         "delete_monitor_rule",
-        "delete_worldcup_bet",
         "dismiss_inbox_item",
         "evaluate_monitor_rules",
         "evaluate_policy_risk",
@@ -2699,9 +2697,8 @@ def test_settings_expose_tool_bridge_registry_without_enabling_real_orders(tmp_p
         "get_report_quality",
         "get_stock_context",
         "get_stock_financial",
-        "get_worldcup_analysis",
-        "get_worldcup_matches",
-        "get_worldcup_odds",
+
+
         "list_decision_journal",
         "list_paper_orders",
         "list_pre_trade_reviews",
@@ -2710,7 +2707,6 @@ def test_settings_expose_tool_bridge_registry_without_enabling_real_orders(tmp_p
         "list_review_inbox",
         "list_risk_policies",
         "list_strategies",
-        "list_worldcup_bets",
         "mark_inbox_item_done",
         "place_real_order",
         "reject_rebalance_draft",
@@ -2720,7 +2716,6 @@ def test_settings_expose_tool_bridge_registry_without_enabling_real_orders(tmp_p
         "snooze_inbox_item",
         "summarize_decision_outcomes",
         "summarize_review_inbox",
-        "update_worldcup_bet",
         "upsert_holding",
         "upsert_monitor_rule",
     }

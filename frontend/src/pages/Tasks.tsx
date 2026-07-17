@@ -1,18 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiGet } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
-import { ErrorMessage, TableSkeleton, PanelSkeleton } from "@/components/ui/Loading";
+import { ErrorMessage } from "@/components/ui/Loading";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Pagination } from "@/components/ui/Pagination";
 import { formatTimeAgo } from "@/utils/format";
-import { useAppState } from "@/hooks/useAppState";
 
 interface TaskItem { task_id: string; title: string; status?: string; source?: string; progress?: number; current_step?: string; created_at?: string }
 interface TaskStep { step_id?: string; name?: string; status?: string; skill?: string; tool?: string; duration_ms?: number }
 interface ToolExecution { execution_id?: string; tool_name?: string; status?: string; domain?: string; arguments?: Record<string, unknown> }
 
 export default function Tasks() {
-  const { appDataCache, globalLoading } = useAppState();
   const [items, setItems] = useState<TaskItem[]>([]);
   const [selectedTask, setSelectedTask] = useState<TaskItem | null>(null);
   const [steps, setSteps] = useState<TaskStep[]>([]);
@@ -53,6 +51,7 @@ export default function Tasks() {
   return (
     <PageContainer>
       <div className="page-stack fade-in">
+        {error && <ErrorMessage message={error} />}
         <div className="market-hero">
           <div className="market-hero-header">
             <div className="market-title">

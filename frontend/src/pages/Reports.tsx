@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
-import { ErrorMessage, TableSkeleton, PanelSkeleton } from "@/components/ui/Loading";
+import { ErrorMessage } from "@/components/ui/Loading";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Pagination } from "@/components/ui/Pagination";
 import { formatTimeAgo } from "@/utils/format";
@@ -13,7 +13,7 @@ interface ReportTemplate { template_id: string; name: string; report_type: strin
 interface ReportQuality { score?: number; checks?: Array<{ check?: string; passed?: boolean; detail?: string }> }
 
 export default function Reports() {
-  const { stock, appDataCache, globalLoading } = useAppState();
+  const { stock } = useAppState();
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [templates, setTemplates] = useState<ReportTemplate[]>([]);
   const [selectedReport, setSelectedReport] = useState<ReportItem | null>(null);
@@ -90,6 +90,7 @@ export default function Reports() {
   return (
     <PageContainer>
       <div className="page-stack fade-in">
+        {error && <ErrorMessage message={error} />}
         <div className="market-hero">
           <div className="market-hero-header">
             <div className="market-title">

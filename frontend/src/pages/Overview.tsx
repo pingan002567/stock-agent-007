@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { apiGet, apiPost, type HealthCheck } from "@/api/client";
-import { fetchRuntimeMetrics, type RuntimeMetricSnapshot } from "@/api/runtime";
+import { apiGet, apiPost } from "@/api/client";
 import { useAppState } from "@/hooks/useAppState";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, OverviewSkeleton } from "@/components/ui/Loading";
@@ -9,46 +8,26 @@ import { inferMarket, marketMoney, pct, changeCls } from "@/utils/market";
 interface PortfolioSummary {
   total_value?: number; positions?: number; max_weight_pct?: number; cash_pct?: number;
 }
-interface FocusStock {
-  symbol: string; name?: string; sector?: string;
-  price?: { last?: number; change_pct?: number };
-}
 interface WatchItem { symbol: string; name?: string; group?: string; monitored?: boolean }
 interface HoldingSummary { symbol: string; name?: string; market_value?: number; weight_pct?: number; market?: string }
 interface TaskItem { task_id: string; title: string; status?: string; created_at?: string }
 interface MonitorEvent { event_id: string; title?: string; severity?: string; symbol?: string; triggered_at?: string }
-interface InboxItem { item_key: string; title?: string; status?: string; priority?: string; source_label?: string }
-interface DraftItem { draft_id: string; symbol: string; action?: string; status?: string; target_weight_pct?: number; created_at?: string }
 interface OverviewData {
-  portfolio_summary?: PortfolioSummary; focus_stock?: FocusStock;
+  portfolio_summary?: PortfolioSummary;
   watchlist?: WatchItem[]; holdings?: HoldingSummary[];
   tasks?: TaskItem[]; monitor_summary?: { event_count?: number; high_count?: number };
   market?: string;
 }
-interface AuditEntry { audit_id: string; action?: string; summary?: string; created_at?: string }
+interface IndexInfo { code?: string; name?: string; last?: number; change_pct?: number }
 
 export default function Overview() {
   const { appDataCache, globalLoading } = useAppState();
   const [data, setData] = useState<OverviewData | null>(null);
   const [events, setEvents] = useState<MonitorEvent[]>([]);
-  const [inboxSummary, setInboxSummary] = useState<{ open_count?: number; high_count?: number; overdue_count?: number } | null>(null);
-  const [inboxList, setInboxList] = useState<InboxItem[]>([]);
-  const [drafts, setDrafts] = useState<DraftItem[]>([]);
-  const [audit, setAudit] = useState<AuditEntry[]>([]);
-  const [health, setHealth] = useState<HealthCheck | null>(null);
-  const [runtimeMetrics, setRuntimeMetrics] = useState<RuntimeMetricSnapshot | null>(null);
-  const [draftSymbol, setDraftSymbol] = useState("AAPL");
-  const [draftTarget, setDraftTarget] = useState(15);
-  const [draftResult, setDraftResult] = useState<string | null>(null);
-  const [draftBusy, setDraftBusy] = useState(false);
-  const [inboxBusyKey, setInboxBusyKey] = useState<string | null>(null);
-  const [inboxFeedback, setInboxFeedback] = useState<Record<string, string>>({});
-  const [snoozeEditingKey, setSnoozeEditingKey] = useState<string | null>(null);
-  const [snoozeValues, setSnoozeValues] = useState<Record<string, string>>({});
+  const [indices, setIndices] = useState<IndexInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
-  const [inboxFilter, setInboxFilter] = useState<"all" | "high" | "open">("all");
 
   // Populate from global cache once initial load completes
   useEffect(() => {
@@ -57,12 +36,7 @@ export default function Overview() {
     if (cache.overview) {
       setData(cache.overview as OverviewData);
       setEvents((cache.monitorEvents as { items: MonitorEvent[] })?.items ?? []);
-      setInboxSummary(cache.inboxSummary as { open_count?: number; high_count?: number; overdue_count?: number } | null);
-      setInboxList((cache.inboxList as { items: InboxItem[] })?.items ?? []);
-      setDrafts((cache.drafts as { items: DraftItem[] })?.items ?? []);
-      setAudit((cache.audit as { items: AuditEntry[] })?.items ?? []);
-      setHealth(cache.health as HealthCheck | null);
-      setRuntimeMetrics(cache.runtimeMetrics as RuntimeMetricSnapshot | null);
+      setIndices(((cache.marketReview as { indices?: IndexInfo[] })?.indices ?? []));
       setLoading(false);
     }
   }, [globalLoading, appDataCache]);
@@ -70,66 +44,16 @@ export default function Overview() {
   const loadAll = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const [ov, ev, ibs, ibl, dr, au, hc, metrics] = await Promise.all([
+      const [ov, ev, mr] = await Promise.all([
         apiGet<OverviewData>("/api/overview"),
         apiGet<{ items: MonitorEvent[] }>("/api/monitor/events").catch(() => ({ items: [] })),
-        apiGet<{ open_count?: number; high_count?: number; overdue_count?: number }>("/api/review-inbox/summary").catch(() => ({})),
-        apiGet<{ items: InboxItem[] }>("/api/review-inbox").catch(() => ({ items: [] })),
-        apiGet<{ items: DraftItem[] }>("/api/rebalance-drafts").catch(() => ({ items: [] })),
-        apiGet<{ items: AuditEntry[] }>("/api/audit").catch(() => ({ items: [] })),
-        apiGet<HealthCheck>("/api/health").catch(() => null),
-        fetchRuntimeMetrics().catch(() => null),
+        apiGet<{ indices?: IndexInfo[] }>("/api/market/review").catch(() => ({ indices: [] })),
       ]);
-      setData(ov); setEvents(ev.items ?? []); setInboxSummary(ibs);
-      setInboxList(ibl.items ?? []); setDrafts(dr.items ?? []); setAudit(au.items ?? []);
-      setHealth(hc); setRuntimeMetrics(metrics);
+      setData(ov); setEvents(ev.items ?? []); setIndices(mr.indices ?? []);
     } catch (err) { setError(err instanceof Error ? err.message : "加载总览失败"); } finally { setLoading(false); }
   }, []);
 
   const handleRiskScan = async () => { setScanning(true); try { await apiPost("/api/holdings/risk"); await loadAll(); } catch { /* ignore */ } finally { setScanning(false); } };
-  const handleCreateDraft = async () => {
-    setDraftBusy(true); setDraftResult(null);
-    try {
-      const res = await apiPost<{ draft_id: string }>("/api/rebalance-drafts", { symbol: draftSymbol, target_weight_pct: draftTarget });
-      setDraftResult(`草案 ${res.draft_id} 已生成`); await loadAll();
-    } catch (err) { setDraftResult(err instanceof Error ? err.message : "生成草案失败"); } finally { setDraftBusy(false); }
-  };
-  const handleInboxAction = async (itemKey: string, action: "dismiss" | "mark-done", feedback: string) => {
-    setInboxBusyKey(itemKey);
-    setInboxFeedback((prev) => ({ ...prev, [itemKey]: "" }));
-    try {
-      await apiPost(`/api/review-inbox/${encodeURIComponent(itemKey)}/${action}`, { note: "" });
-      setInboxFeedback((prev) => ({ ...prev, [itemKey]: feedback }));
-      setSnoozeEditingKey((prev) => (prev === itemKey ? null : prev));
-      await loadAll();
-    } catch (err) {
-      setInboxFeedback((prev) => ({ ...prev, [itemKey]: err instanceof Error ? err.message : "操作失败" }));
-    } finally {
-      setInboxBusyKey(null);
-    }
-  };
-  const handleInboxSnooze = async (itemKey: string) => {
-    const value = snoozeValues[itemKey];
-    if (!value) {
-      setInboxFeedback((prev) => ({ ...prev, [itemKey]: "请选择时间" }));
-      return;
-    }
-    setInboxBusyKey(itemKey);
-    setInboxFeedback((prev) => ({ ...prev, [itemKey]: "" }));
-    try {
-      await apiPost(`/api/review-inbox/${encodeURIComponent(itemKey)}/snooze`, {
-        snoozed_until: new Date(value).toISOString(),
-        note: "",
-      });
-      setInboxFeedback((prev) => ({ ...prev, [itemKey]: "已稍后提醒" }));
-      setSnoozeEditingKey(null);
-      await loadAll();
-    } catch (err) {
-      setInboxFeedback((prev) => ({ ...prev, [itemKey]: err instanceof Error ? err.message : "操作失败" }));
-    } finally {
-      setInboxBusyKey(null);
-    }
-  };
 
   return (
     <PageContainer>
@@ -164,6 +88,21 @@ export default function Overview() {
               <button onClick={() => void handleRiskScan()} disabled={scanning} type="button">{scanning ? "扫描中…" : "持仓风险扫描"}</button>
             </div>
           </section>
+
+          {/* 指数条（原市场页并入：每股一列 mono 点位+涨跌） */}
+          {indices.length > 0 && (
+            <div className="panel">
+              <div className="panel-body" style={{ display: "flex", padding: "10px 4px" }}>
+                {indices.slice(0, 5).map((idx, i) => (
+                  <div key={idx.code ?? idx.name ?? i} style={{ flex: 1, padding: "0 12px", borderLeft: i > 0 ? "1px solid var(--line-soft, var(--line))" : "none" }}>
+                    <div className="muted" style={{ fontSize: 11 }}>{idx.name ?? idx.code}</div>
+                    <div className="num" style={{ fontSize: 14, fontWeight: 600 }}>{idx.last?.toLocaleString() ?? "-"}</div>
+                    <div className={`num ${changeCls(idx.change_pct)}`} style={{ fontSize: 11 }}>{pct(idx.change_pct)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="kpi-grid">
             <div className="kpi-card">
@@ -283,28 +222,6 @@ export default function Overview() {
                     <div className="event-time">{ev.triggered_at?.slice(5, 16) ?? ""}</div>
                   </div>
                 ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="panel">
-            <div className="panel-header">
-              <div className="panel-title">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/>
-                </svg>
-                收益曲线
-              </div>
-              <div className="panel-actions">
-                <button className="small primary">1 月</button>
-                <button className="small">3 月</button>
-                <button className="small">1 年</button>
-              </div>
-            </div>
-            <div className="panel-body">
-              <div className="chart-placeholder">
-                <div className="chart-line"></div>
-                <span style={{ position: "relative", zIndex: 1 }}>收益趋势图表</span>
               </div>
             </div>
           </div>

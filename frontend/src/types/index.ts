@@ -4,13 +4,11 @@ export type Screen =
   | "watchlist"
   | "holdings"
   | "research"
-  | "market"
   | "monitor"
   | "strategies"
   | "tasks"
   | "reports"
-  | "settings"
-  | "worldcup";
+  | "settings";
 
 export interface AppState {
   currentScreen: Screen;

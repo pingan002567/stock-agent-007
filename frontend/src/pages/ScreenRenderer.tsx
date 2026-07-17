@@ -6,13 +6,11 @@ const Overview = lazy(() => import("./Overview"));
 const Watchlist = lazy(() => import("./Watchlist"));
 const Holdings = lazy(() => import("./Holdings"));
 const Research = lazy(() => import("./Research"));
-const Market = lazy(() => import("./Market"));
 const Monitor = lazy(() => import("./Monitor"));
 const Strategies = lazy(() => import("./Strategies"));
 const Tasks = lazy(() => import("./Tasks"));
 const Reports = lazy(() => import("./Reports"));
 const Settings = lazy(() => import("./Settings"));
-const WorldCup = lazy(() => import("./WorldCup"));
 
 const LOADING = <div className="page-loading">加载中…</div>;
 
@@ -25,13 +23,11 @@ export function ScreenRenderer() {
       case "watchlist": return <Watchlist />;
       case "holdings": return <Holdings />;
       case "research": return <Research />;
-      case "market": return <Market />;
       case "monitor": return <Monitor />;
       case "strategies": return <Strategies />;
       case "tasks": return <Tasks />;
       case "reports": return <Reports />;
       case "settings": return <Settings />;
-      case "worldcup": return <WorldCup />;
     }
   })();
   // key=currentScreen ensures ErrorBoundary remounts on page switch,

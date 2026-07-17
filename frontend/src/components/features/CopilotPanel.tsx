@@ -394,7 +394,8 @@ export function CopilotPanel({ open = true, onToggle, variant = "panel" }: { ope
             <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z" fill="currentColor"/>
             <circle cx="12" cy="12" r="3"/>
           </svg>
-          <span>{variant === "main" ? (currentSession?.title || "AI Copilot") : "AI Copilot"}</span>
+          {/* 此分支仅 panel 变体渲染(main 的标题在统一顶栏) */}
+          <span>AI Copilot</span>
         </div>
         {variant === "panel" && (
           <button className="copilot-close-btn" onClick={onToggle} title="关闭 AI Chat">›</button>

@@ -20,7 +20,6 @@ from backend.app_services.review_inbox_service import ReviewInboxService
 from backend.app_services.risk_policy_service import RiskPolicyService
 from backend.app_services.strategy_service import StrategyService
 from backend.app_services.tool_execution_service import ToolExecutionService
-from backend.app_services.worldcup_service import WorldCupService
 from backend.persistence.file_store import FileStore
 from backend.persistence.repositories import WorkbenchRepository
 from backend.schemas import AuthorityLevel, HoldingPosition, RebalanceDraftDecisionNoteRequest, RebalanceDraftStatus, ReportGenerateRequest, model_to_dict
@@ -63,7 +62,6 @@ class WorkbenchToolBridge:
         report_service: ReportService | None = None,
         decision_journal_service: DecisionJournalService | None = None,
         review_inbox_service: ReviewInboxService | None = None,
-        worldcup_service: WorldCupService | None = None,
         permission_guard: PermissionGuard,
         tool_execution_service: ToolExecutionService | None = None,
         execution_policy: ExecutionPolicy | None = None,
@@ -123,7 +121,6 @@ class WorkbenchToolBridge:
             monitor_service=self.monitor_service,
             paper_portfolio_service=self.paper_portfolio_service,
         )
-        self.worldcup_service = worldcup_service or WorldCupService(repo=repo)
         self.permission_guard = permission_guard
         self.tool_execution_service = tool_execution_service
         self.execution_policy = execution_policy or ExecutionPolicy()
@@ -172,14 +169,6 @@ class WorkbenchToolBridge:
             "remove_watchlist_item": self._remove_watchlist_item,
             "upsert_holding": self._upsert_holding,
             "place_real_order": self._place_real_order,
-            "get_worldcup_matches": self._get_worldcup_matches,
-            "get_worldcup_odds": self._get_worldcup_odds,
-            "get_worldcup_analysis": self._get_worldcup_analysis,
-            "create_worldcup_prediction": self._create_worldcup_prediction,
-            "create_worldcup_bet": self._create_worldcup_bet,
-            "update_worldcup_bet": self._update_worldcup_bet,
-            "delete_worldcup_bet": self._delete_worldcup_bet,
-            "list_worldcup_bets": self._list_worldcup_bets,
         }
         self._specs = {
             "get_stock_context": ToolSpec(
@@ -603,78 +592,6 @@ class WorkbenchToolBridge:
                 False,
                 {"symbol": "str", "quantity": "float"},
                 ["permission_guard:real_order_disabled"],
-            ),
-            "get_worldcup_matches": ToolSpec(
-                "get_worldcup_matches",
-                "worldcup",
-                AuthorityLevel.A2,
-                "low",
-                True,
-                {"match_id": "str?", "stage": "str?", "status": "str?"},
-                ["worldcup_match"],
-            ),
-            "get_worldcup_odds": ToolSpec(
-                "get_worldcup_odds",
-                "worldcup",
-                AuthorityLevel.A2,
-                "low",
-                True,
-                {"match_id": "str"},
-                ["worldcup_odds", "worldcup_match"],
-            ),
-            "get_worldcup_analysis": ToolSpec(
-                "get_worldcup_analysis",
-                "worldcup",
-                AuthorityLevel.A2,
-                "low",
-                True,
-                {"match_id": "str"},
-                ["worldcup_match", "worldcup_odds", "worldcup_analysis"],
-            ),
-            "create_worldcup_prediction": ToolSpec(
-                "create_worldcup_prediction",
-                "worldcup",
-                AuthorityLevel.A3,
-                "medium",
-                True,
-                {"match_id": "str", "home_score": "int", "away_score": "int", "confidence": "float?"},
-                ["worldcup_prediction", "worldcup_match"],
-            ),
-            "create_worldcup_bet": ToolSpec(
-                "create_worldcup_bet",
-                "worldcup",
-                AuthorityLevel.A3,
-                "medium",
-                True,
-                {"match_id": "str", "bet_type": "str", "odds": "float", "stake": "float", "probability": "float"},
-                ["worldcup_bet", "worldcup_match", "worldcup_odds"],
-            ),
-            "update_worldcup_bet": ToolSpec(
-                "update_worldcup_bet",
-                "worldcup",
-                AuthorityLevel.A3,
-                "medium",
-                True,
-                {"bet_id": "str", "status": "str", "profit": "float?"},
-                ["worldcup_bet"],
-            ),
-            "delete_worldcup_bet": ToolSpec(
-                "delete_worldcup_bet",
-                "worldcup",
-                AuthorityLevel.A3,
-                "medium",
-                True,
-                {"bet_id": "str"},
-                ["worldcup_bet"],
-            ),
-            "list_worldcup_bets": ToolSpec(
-                "list_worldcup_bets",
-                "worldcup",
-                AuthorityLevel.A2,
-                "low",
-                True,
-                {"status": "str?", "limit": "int?"},
-                ["worldcup_bet"],
             ),
         }
 
@@ -1163,68 +1080,3 @@ class WorkbenchToolBridge:
     def _place_real_order(self, arguments: dict[str, Any]) -> dict[str, Any]:
         self.permission_guard.block_real_order()
         return {}
-
-    def _get_worldcup_matches(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        match_id = str(arguments.get("match_id") or "") or None
-        stage = str(arguments.get("stage") or "") or None
-        status = str(arguments.get("status") or "") or None
-        items = self.worldcup_service.get_matches(
-            match_id=match_id,
-            stage=stage,
-            status=status,
-        )
-        return {"items": items, "count": len(items)}
-
-    def _get_worldcup_odds(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        match_id = str(arguments.get("match_id") or "")
-        return self.worldcup_service.get_odds(match_id)
-
-    def _get_worldcup_analysis(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        match_id = str(arguments.get("match_id") or "")
-        return self.worldcup_service.get_analysis(match_id)
-
-    def _create_worldcup_prediction(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        match_id = str(arguments.get("match_id") or "")
-        home_score = int(arguments.get("home_score") or 0)
-        away_score = int(arguments.get("away_score") or 0)
-        confidence = float(arguments.get("confidence") or 0.5)
-        return self.worldcup_service.create_prediction(
-            match_id=match_id,
-            home_score=home_score,
-            away_score=away_score,
-            confidence=confidence,
-        )
-
-    def _create_worldcup_bet(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        match_id = str(arguments.get("match_id") or "")
-        bet_type = str(arguments.get("bet_type") or "home")
-        odds = float(arguments.get("odds") or 1.0)
-        stake = float(arguments.get("stake") or 0)
-        probability = float(arguments.get("probability") or 50)
-        return self.worldcup_service.create_bet(
-            match_id=match_id,
-            bet_type=bet_type,
-            odds=odds,
-            stake=stake,
-            probability=probability,
-        )
-
-    def _update_worldcup_bet(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        bet_id = str(arguments.get("bet_id") or "")
-        status = str(arguments.get("status") or "pending")
-        profit = arguments.get("profit")
-        return self.worldcup_service.update_bet(
-            bet_id=bet_id,
-            status=status,
-            profit=profit,
-        )
-
-    def _delete_worldcup_bet(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        bet_id = str(arguments.get("bet_id") or "")
-        return self.worldcup_service.delete_bet(bet_id)
-
-    def _list_worldcup_bets(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        status = str(arguments.get("status") or "") or None
-        limit = int(arguments.get("limit") or 20)
-        items = self.worldcup_service.list_bets(status=status, limit=limit)
-        return {"items": items, "count": len(items)}

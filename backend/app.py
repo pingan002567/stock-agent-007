@@ -38,7 +38,6 @@ from backend.api import (
     routes_tasks,
     routes_watchlist,
     routes_workspace,
-    routes_worldcup,
 )
 from backend import paths
 from backend.bootstrap import create_services
@@ -137,7 +136,6 @@ def create_app(
         routes_copilot.router,
         routes_channels.router,
         routes_workspace.router,
-        routes_worldcup.router,
     ]:
         app.include_router(router)
 

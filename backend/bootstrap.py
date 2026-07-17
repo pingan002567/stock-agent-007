@@ -38,7 +38,6 @@ from backend.app_services.runtime_observer import runtime_observer, RuntimeObser
 from backend.app_services.strategy_service import StrategyService
 from backend.app_services.task_service import TaskService
 from backend.app_services.tool_execution_service import ToolExecutionService
-from backend.app_services.worldcup_service import WorldCupService
 from backend.config.data_sources import DEFAULT_DATA_SOURCES
 from backend.config.runtime import DEFAULT_RUNTIME_CONFIG
 from backend.stock_domain.multi_providers import create_provider
@@ -69,7 +68,6 @@ class AppServices:
     permission_guard: PermissionGuard
     tool_execution_service: ToolExecutionService
     runtime_observer: RuntimeObserver
-    worldcup_service: WorldCupService
     channel_service: "ChannelService"
     channel_binding_store: "BindingStore"
 
@@ -283,7 +281,6 @@ def create_services(
         monitor_service=monitor_service,
         paper_portfolio_service=paper_portfolio_service,
     )
-    worldcup_service = WorldCupService(repo=repo)
     copilot_context_builder = CopilotContextBuilder(
         repo=repo,
         context_builder=context_builder,
@@ -309,7 +306,6 @@ def create_services(
         report_service=report_service,
         decision_journal_service=decision_journal_service,
         review_inbox_service=review_inbox_service,
-        worldcup_service=worldcup_service,
         permission_guard=permission_guard,
         tool_execution_service=tool_execution_service,
         execution_policy=execution_policy,
@@ -368,7 +364,6 @@ def create_services(
         permission_guard=permission_guard,
         tool_execution_service=tool_execution_service,
         runtime_observer=runtime_observer,
-        worldcup_service=worldcup_service,
         channel_service=channel_service,
         channel_binding_store=channel_binding_store,
     )

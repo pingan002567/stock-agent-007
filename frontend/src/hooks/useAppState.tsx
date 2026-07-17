@@ -67,13 +67,11 @@ const screenLabels: Record<Screen, string> = {
   watchlist: "自选",
   holdings: "持仓",
   research: "个股",
-  market: "市场",
   monitor: "盯盘",
   strategies: "策略",
   tasks: "任务",
   reports: "报告",
   settings: "设置",
-  worldcup: "世界杯",
 };
 
 // ── 主题：白天 / 夜晚 / 跟随系统 ──
@@ -221,7 +219,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   // 全量数据后台自动刷新（首次加载完成后启动，每 60 秒一次）
   // refreshAll is stable (useCallback with []) — safe to omit from deps
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   useEffect(() => {
     if (!isInitialized) return;
     refreshIntervalRef.current = setInterval(() => {

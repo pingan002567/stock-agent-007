@@ -1,5 +1,3 @@
-import React from "react";
-
 interface PaginationProps {
   total: number;
   pageSize: number;

@@ -2,8 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiDelete, apiGet, apiPost } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, PanelSkeleton, KpiSkeleton } from "@/components/ui/Loading";
-import { Pagination } from "@/components/ui/Pagination";
-import { formatTimeAgo } from "@/utils/format";
 import { useAppState } from "@/hooks/useAppState";
 import { useToast } from "@/hooks/useToast";
 import { MarkdownRenderer as Markdown } from "@/components/features/MarkdownRenderer";
@@ -99,10 +97,10 @@ export default function Research() {
     const cache = appDataCache.current;
     if (cache.stockContext && stockCacheSymbol !== stock) {
       setContext(cache.stockContext as StockContext); // eslint-disable-line react-hooks/set-state-in-effect
-      setHistory((cache.stockHistory as { items: HistoryItem[] })?.items ?? []); // eslint-disable-line react-hooks/set-state-in-effect
-      setIntel((cache.stockIntel as { items: IntelItem[] })?.items ?? []); // eslint-disable-line react-hooks/set-state-in-effect
-      setFinancial((cache.stockFinancial as { items: FinancialItem[] })?.items ?? []); // eslint-disable-line react-hooks/set-state-in-effect
-      setFollowups((cache.stockFollowups as { items: FollowupItem[] })?.items ?? []); // eslint-disable-line react-hooks/set-state-in-effect
+      setHistory((cache.stockHistory as { items: HistoryItem[] })?.items ?? []);  
+      setIntel((cache.stockIntel as { items: IntelItem[] })?.items ?? []);  
+      setFinancial((cache.stockFinancial as { items: FinancialItem[] })?.items ?? []);  
+      setFollowups((cache.stockFollowups as { items: FollowupItem[] })?.items ?? []);  
       setStockCacheSymbol(stock);
       setLoading(false);
     }

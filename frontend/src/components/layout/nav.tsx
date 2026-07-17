@@ -22,14 +22,6 @@ export const icons: Record<string, ReactNode> = {
       <path d="M21 21l-4.35-4.35"/>
     </svg>
   ),
-  market: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M3 3v18h18"/>
-      <path d="M18 17V9"/>
-      <path d="M13 17V5"/>
-      <path d="M8 17v-3"/>
-    </svg>
-  ),
   watchlist: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/>
@@ -69,25 +61,16 @@ export const icons: Record<string, ReactNode> = {
       <polyline points="10,9 9,9 8,9"/>
     </svg>
   ),
-  worldcup: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="10"/>
-      <path d="M2 12h20"/>
-      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-    </svg>
-  ),
 };
 
 export const navItems: { screen: Screen; label: string }[] = [
   { screen: "chat", label: "对话" },
   { screen: "overview", label: "总览" },
   { screen: "research", label: "个股" },
-  { screen: "market", label: "市场" },
   { screen: "watchlist", label: "自选" },
   { screen: "holdings", label: "持仓" },
   { screen: "monitor", label: "盯盘" },
   { screen: "strategies", label: "策略" },
   { screen: "tasks", label: "任务" },
   { screen: "reports", label: "报告" },
-  { screen: "worldcup", label: "世界杯" },
 ];

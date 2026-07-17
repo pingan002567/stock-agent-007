@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost, apiDelete } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
-import { ErrorMessage, TableSkeleton, PanelSkeleton } from "@/components/ui/Loading";
+import { ErrorMessage } from "@/components/ui/Loading";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { useAppState } from "@/hooks/useAppState";
 
@@ -9,9 +9,13 @@ interface Strategy {
   strategy_id: string; name: string; description?: string; strategy_type?: string;
   enabled?: boolean; risk_level?: string; tags?: string[];
 }
+interface BacktestMetrics {
+  total_return_pct?: number; max_drawdown_pct?: number; sharpe_ratio?: number;
+  win_rate?: number; volatility_pct?: number; sample_size?: number;
+}
 interface BacktestRun {
   run_id: string; strategy_id?: string; status?: string;
-  metrics?: Record<string, unknown>; signals?: unknown[]; risk_summary?: unknown;
+  metrics?: BacktestMetrics; signals?: unknown[]; risk_summary?: unknown;
   candidate_actions?: unknown[]; created_at?: string;
 }
 
@@ -21,17 +25,16 @@ export default function Strategies() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [backtests, setBacktests] = useState<BacktestRun[]>([]);
   const [latestBacktest, setLatestBacktest] = useState<BacktestRun | null>(null);
-  const [backtestDetail, setBacktestDetail] = useState<BacktestRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
-  const [backtestBusy] = useState(false);
   const [addingStrategy, setAddingStrategy] = useState(false);
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState("sector_watch");
   const [newRisk, setNewRisk] = useState("medium");
-  const [newUniverse, setNewUniverse] = useState("AAPL, HK00700");
-  const [newParams, setNewParams] = useState('{"lookback_days": 14, "momentum_threshold_pct": 2, "sector_limit_pct": 35}');
+  // 新建策略的默认标的池/参数（表单未暴露,后续接 AI 生成）
+  const newUniverse = "AAPL, HK00700";
+  const newParams = '{"lookback_days": 14, "momentum_threshold_pct": 2, "sector_limit_pct": 35}';
 
   // Populate from global cache once initial load completes
   useEffect(() => {
@@ -53,7 +56,6 @@ export default function Strategies() {
     setSelectedId(id);
     setBacktests([]);
     setLatestBacktest(null);
-    setBacktestDetail(null);
     try {
       const [bt, lb] = await Promise.all([
         apiGet<{ items: BacktestRun[] }>(`/api/strategies/${encodeURIComponent(id)}/backtests`).then((r) => r.items).catch(() => []),
@@ -68,7 +70,7 @@ export default function Strategies() {
     setRunningId(id);
     try {
       const result = await apiPost<BacktestRun>(`/api/strategies/${encodeURIComponent(id)}/backtest`, {});
-      if (selectedId === id) { setLatestBacktest(result); setBacktestDetail(result); }
+      if (selectedId === id) setLatestBacktest(result);
     } catch (err) { setError(err instanceof Error ? err.message : "回测失败"); } finally { setRunningId(null); }
   };
 
@@ -92,13 +94,11 @@ export default function Strategies() {
         setSelectedId(null);
         setBacktests([]);
         setLatestBacktest(null);
-        setBacktestDetail(null);
-      }
+          }
       await loadAll();
     } catch (err) { setError(err instanceof Error ? err.message : "删除策略失败"); }
   };
 
-  const handleLoadLatestBacktest = async () => {};
 
   const selected = items.find((s) => s.strategy_id === selectedId);
 
@@ -107,6 +107,7 @@ export default function Strategies() {
   return (
     <PageContainer>
       <div className="page-stack fade-in">
+        {error && <ErrorMessage message={error} />}
         <div className="market-hero">
           <div className="market-hero-header">
             <div className="market-title">
