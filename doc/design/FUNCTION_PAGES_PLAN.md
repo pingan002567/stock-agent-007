@@ -28,11 +28,12 @@
 | 9 | 任务 Tasks | 252 | 合并 | 只留后台/定时任务视角;单次 run 监控归聊天气泡;剩壳则并入盯盘 tab |
 | 10 | 世界杯 WorldCup | — | 下架 | 玩具页,从 nav/ScreenRenderer/pages 移除 |
 
-### 排期
-1. 死代码清理 + 世界杯下架 + Market 并入总览(0.5 天,零功能风险)
-2. Research 锚点跟随 + 各页"问 AI"快捷入口(0.5-1 天)
-3. Holdings 收敛拆分 → Monitor 告警中心(1-2 天)
-4. Overview 重定位 + Tasks 合并 + Reports 小改(1 天)
+### 排期(2026-07-17 交付状态)
+1. ✅ 死代码清理(tsc 86→0)+ 世界杯全竖条下架(前后端)+ Market 并入总览(`2e5116a`)
+2. ✅ AskAiButton 原语 + handleSend symbolOverride + 会话切换锚点恢复,接入七页 hero(`7aca008`)
+3. ✅ Holdings 收敛(草案表单撤下,归聊天 rebalance_plan)→ Monitor 告警中心(待审查面板+事件问 AI 闭环)(`de236ee`)
+4. ✅ Overview 只读化 + 最近报告卡;Reports 已带问 AI 入口(直生成按钮保留:模板路径是确定性功能)。
+   ⏸ Tasks 并入盯盘缓议——页面已清瘦,后台/定时任务视角需后端先区分 cron 任务与聊天 run,届时再并。
 
 ## 三、UI 设计规范(功能坞页面)
 
