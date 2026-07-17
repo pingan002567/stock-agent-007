@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost } from "@/api/client";
 import { useAppState } from "@/hooks/useAppState";
+import { AskAiButton } from "@/components/ui/AskAiButton";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, OverviewSkeleton } from "@/components/ui/Loading";
 import { inferMarket, marketMoney, pct, changeCls } from "@/utils/market";
@@ -86,6 +87,7 @@ export default function Overview() {
             <div className="hero-actions">
               <button className="primary" onClick={() => void loadAll()} disabled={loading} type="button">刷新全部</button>
               <button onClick={() => void handleRiskScan()} disabled={scanning} type="button">{scanning ? "扫描中…" : "持仓风险扫描"}</button>
+              <AskAiButton prompt="今天我的组合表现如何?有什么需要关注的风险或机会?" />
             </div>
           </section>
 

@@ -4,6 +4,7 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage } from "@/components/ui/Loading";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { useAppState } from "@/hooks/useAppState";
+import { AskAiButton } from "@/components/ui/AskAiButton";
 
 interface Strategy {
   strategy_id: string; name: string; description?: string; strategy_type?: string;
@@ -119,6 +120,7 @@ export default function Strategies() {
               <button onClick={() => void handleAddStrategy()} disabled={addingStrategy} type="button">
                 {addingStrategy ? "添加中…" : "新增策略"}
               </button>
+              <AskAiButton prompt="解读最近一次策略回测结果,评估稳健性并指出过拟合风险" />
             </div>
           </div>
           <div className="market-stats">

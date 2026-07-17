@@ -4,6 +4,7 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, TableSkeleton } from "@/components/ui/Loading";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { useAppState } from "@/hooks/useAppState";
+import { AskAiButton } from "@/components/ui/AskAiButton";
 import { pct } from "@/utils/market";
 
 // === Types ===
@@ -165,6 +166,7 @@ export default function Holdings() {
               <button className="primary" disabled={scanning} onClick={() => void handleRiskScan()} type="button">
                 {scanning ? "扫描中…" : "风险扫描"}
               </button>
+              <AskAiButton prompt="重新评估我的持仓风险,并给出调仓建议" />
               <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
             </div>
           </div>

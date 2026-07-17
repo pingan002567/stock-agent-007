@@ -122,7 +122,7 @@ export function extractToolResultText(payload: Record<string, unknown> | null | 
 
 function useCopilotChatState() {
   const {
-    currentScreen, stock,
+    currentScreen, stock, setStock,
     setCopilotStreaming,
     setStreamingReasoningText,
     refreshCopilotContext,
@@ -182,8 +182,11 @@ function useCopilotChatState() {
     setStreamMessage(null);
     setCopilotStreaming(false);
     setSending(false);
+    // 锚点跟随：切换会话时恢复该会话的 symbol 锚点(个股档案等页随 stock 联动)
+    const anchor = sessions.find((s) => s.session_id === id)?.anchor_symbol;
+    if (anchor) setStock(anchor);
     await loadMessages(id);
-  }, [currentSessionId, loadMessages, setCopilotStreaming, setStreamingReasoningText]);
+  }, [currentSessionId, sessions, setStock, loadMessages, setCopilotStreaming, setStreamingReasoningText]);
 
   const handleNewSession = useCallback(async () => {
     eventSourceRef.current?.close();
@@ -233,9 +236,11 @@ function useCopilotChatState() {
     return session.session_id;
   }, [currentScreen, stock]);
 
-  const handleSend = useCallback(async (input: string) => {
+  // symbolOverride:「问 AI」快捷入口按卡片上下文指定锚点,不依赖全局 stock 的当前值
+  const handleSend = useCallback(async (input: string, symbolOverride?: string) => {
     const text = input.trim();
     if (!text || sendingRef.current) return;
+    if (symbolOverride) setStock(symbolOverride);
     sendingRef.current = true;
     setSending(true);
     setCopilotStreaming(true);
@@ -257,7 +262,7 @@ function useCopilotChatState() {
     try {
       const sid = await ensureSession();
 
-      const run = await sendMessage(sid, text, currentScreen, stock);
+      const run = await sendMessage(sid, text, currentScreen, symbolOverride ?? stock);
 
       const userMsg: CopilotMessage = {
         message_id: `msg-${Date.now()}`,

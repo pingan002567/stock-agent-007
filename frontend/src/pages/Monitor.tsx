@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiPost, apiDelete } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
+import { AskAiButton } from "@/components/ui/AskAiButton";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Pagination } from "@/components/ui/Pagination";
 import { formatTimeAgo } from "@/utils/format";
@@ -147,6 +148,7 @@ export default function Monitor() {
               </button>
               <button onClick={() => void handleStart()} type="button">启动盯盘</button>
               <button onClick={() => void handlePause()} type="button">暂停盯盘</button>
+              <AskAiButton prompt="分析当前盯盘告警的根因,并给出处理建议" />
               <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
             </div>
           </div>

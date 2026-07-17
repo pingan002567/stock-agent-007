@@ -6,6 +6,7 @@ import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Pagination } from "@/components/ui/Pagination";
 import { formatTimeAgo } from "@/utils/format";
 import { useAppState } from "@/hooks/useAppState";
+import { AskAiButton } from "@/components/ui/AskAiButton";
 import { MarkdownRenderer } from "@/components/features/MarkdownRenderer";
 
 interface ReportItem { report_id: string; title?: string; report_type?: string; status?: string; quality_score?: number; created_at?: string; source_label?: string }
@@ -104,6 +105,7 @@ export default function Reports() {
               <button disabled={paperReportBusy} onClick={() => void handleGeneratePaperReport()} type="button">
                 {paperReportBusy ? "生成中…" : "生成复盘报告"}
               </button>
+              <AskAiButton prompt="生成一份最新的组合复盘报告" />
               <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
             </div>
           </div>

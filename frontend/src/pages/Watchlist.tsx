@@ -4,6 +4,7 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage } from "@/components/ui/Loading";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { useAppState } from "@/hooks/useAppState";
+import { AskAiButton } from "@/components/ui/AskAiButton";
 import { inferMarket, marketMoney, pct, changeCls } from "@/utils/market";
 
 interface WatchlistItem { symbol: string; name?: string; group?: string; tags?: string[]; monitored?: boolean; ai_score?: number; market?: string; price?: { last?: number; change_pct?: number } }
@@ -88,6 +89,7 @@ export default function Watchlist() {
               <p>管理您的自选股列表，实时追踪关注的股票动态。</p>
             </div>
             <div className="hero-actions">
+              <AskAiButton prompt="点评我的自选池:近期哪些标的值得重点关注?" />
               <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
             </div>
           </div>

@@ -3,6 +3,7 @@ import { apiDelete, apiGet, apiPost } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, PanelSkeleton, KpiSkeleton } from "@/components/ui/Loading";
 import { useAppState } from "@/hooks/useAppState";
+import { AskAiButton } from "@/components/ui/AskAiButton";
 import { useToast } from "@/hooks/useToast";
 import { MarkdownRenderer as Markdown } from "@/components/features/MarkdownRenderer";
 
@@ -256,6 +257,7 @@ export default function Research() {
           </div>
           <div className="hero-actions">
             <button className="primary" disabled={researchBusy} onClick={() => void handleResearch()} type="button">{researchBusy ? "生成中…" : "生成深研报告"}</button>
+            {stock && <AskAiButton prompt={`深入分析 ${stock} 的投资价值与主要风险`} symbol={stock} />}
           </div>
         </section>
 

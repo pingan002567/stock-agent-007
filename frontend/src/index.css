@@ -3606,3 +3606,25 @@ input, textarea { cursor: text; }
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── 「问 AI ↗」快捷入口(功能页 → 聊天):中性 ghost,hover 才见蓝 ── */
+.ask-ai-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ask-ai-btn:hover:not(:disabled) {
+  color: var(--blue);
+  border-color: var(--blue);
+  background: var(--panel);
+}
+.ask-ai-btn:disabled { opacity: 0.5; cursor: default; }
