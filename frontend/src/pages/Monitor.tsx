@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiPost, apiDelete } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { AskAiButton } from "@/components/ui/AskAiButton";
-import { RefreshButton } from "@/components/ui/RefreshButton";
+import { PageHead } from "@/components/ui/PageHead";
+import { StatusDot } from "@/components/ui/StatusDot";
+import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { Pagination } from "@/components/ui/Pagination";
 import { formatTimeAgo } from "@/utils/format";
 import { ChannelBindings } from "@/components/features/ChannelBindings";
@@ -48,7 +50,7 @@ export default function Monitor() {
   const [status, setStatus] = useState<MonitorStatus | null>(null);
   const [evalBusy, setEvalBusy] = useState(false);
   const [evalResult, setEvalResult] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [, setError] = useState<string | null>(null);
   const [expandedEvent, setExpandedEvent] = useState<string | null>(null);
   const [showAddRule, setShowAddRule] = useState(false);
@@ -161,51 +163,25 @@ export default function Monitor() {
   return (
     <PageContainer>
       <div className="page-stack fade-in">
-        <div className="market-hero">
-          <div className="market-hero-header">
-            <div className="market-title">
-              <h1>AI 盯盘中心</h1>
-              <p>实时监控市场动态，智能识别交易机会和风险预警。</p>
-            </div>
-            <div className="hero-actions">
-              <button className="primary" disabled={evalBusy} onClick={() => void handleEval()} type="button">
-                {evalBusy ? "评估中…" : "手动评估"}
-              </button>
-              <button onClick={() => void handleStart()} type="button">启动盯盘</button>
-              <button onClick={() => void handlePause()} type="button">暂停盯盘</button>
-              <AskAiButton prompt="分析当前盯盘告警的根因,并给出处理建议" />
-              <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
-            </div>
-          </div>
-          <div className="market-stats">
-            <div className="market-stat">
-              <span className="market-stat-label">盯盘状态</span>
-              <span className={`market-stat-value ${status?.status === "running" ? "up" : ""}`}>
-                {status?.status === "running" ? "运行中" : "已暂停"}
-              </span>
-              <span className={`market-stat-change ${status?.status === "running" ? "up" : "neutral"}`}>
-                {status?.status === "running" ? "● 正常运行" : "● 已暂停"}
-              </span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">监控周期</span>
-              <span className="market-stat-value">{status?.interval_seconds ?? "-"}s</span>
-              <span className="market-stat-change neutral">每分钟检查</span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">今日事件</span>
-              <span className="market-stat-value">{events.length}</span>
-              <span className="market-stat-change neutral">条事件</span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">高风险</span>
-              <span className={`market-stat-value ${highCount > 0 ? "down" : ""}`}>{highCount}</span>
-              <span className={`market-stat-change ${highCount > 0 ? "down" : "neutral"}`}>
-                {highCount > 0 ? "↓ 需要关注" : "● 无风险"}
-              </span>
-            </div>
-          </div>
-        </div>
+        <PageHead
+          kpis={[
+            { label: "盯盘", value: <StatusDot tone={status?.status === "running" ? "ok" : "off"}>{status?.status === "running" ? "运行中" : "已暂停"}</StatusDot> },
+            { label: "周期", value: `${status?.interval_seconds ?? "-"}s` },
+            { label: "高优待处理", value: highCount, tone: highCount > 0 ? "down" : undefined,
+              prompt: "分析当前高优盯盘告警的根因,并给出处理建议" },
+            { label: "今日事件", value: eventTotal },
+            { label: "运行规则", value: rules.filter((r) => r.enabled).length },
+          ]}
+          actions={<>
+            <button className="small" disabled={evalBusy} onClick={() => void handleEval()} type="button">
+              {evalBusy ? "评估中…" : "手动评估"}
+            </button>
+            {status?.status === "running"
+              ? <button className="small" onClick={() => void handlePause()} type="button">暂停</button>
+              : <button className="small" onClick={() => void handleStart()} type="button">启动</button>}
+            <AskAiButton prompt="分析当前盯盘告警的根因,并给出处理建议" />
+          </>}
+        />
 
         {hasDiagnosis && (
           <div className="ticket fade-in" style={{ borderLeft: "4px solid var(--red)", padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -348,10 +324,8 @@ export default function Monitor() {
                             {rule.symbol ?? "全市场"} · {rule.threshold != null ? `阈值 ${rule.threshold}` : ""} {rule.keyword ? `关键词 ${rule.keyword}` : ""} {rule.cooldown_seconds ? `· ${rule.cooldown_seconds}s冷却` : ""}
                           </div>
                         </div>
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <button className="small" onClick={() => void handleToggleRule(rule)} type="button">
-                            {rule.enabled ? "暂停" : "启用"}
-                          </button>
+                        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                          <ToggleSwitch checked={!!rule.enabled} onChange={() => void handleToggleRule(rule)} title={rule.enabled ? "暂停规则" : "启用规则"} />
                           <button className="small" style={{ color: "var(--red)" }} onClick={() => void handleDeleteRule(rule.rule_id)} type="button">删除</button>
                         </div>
                       </div>

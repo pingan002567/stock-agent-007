@@ -6,6 +6,7 @@ import { icons, navItems } from "@/components/layout/nav";
 import { ScreenRenderer } from "@/pages/ScreenRenderer";
 import { DetailBody } from "@/components/features/ChatDetailPanel";
 import { ResizeHandle } from "@/components/ui/ResizeHandle";
+import { formatTimeAgo } from "@/utils/format";
 
 /** 三栏布局右侧功能坞：52px 常驻图标条（"平时收起"态）+ 可展开功能面板。
  * currentScreen 语义 = 面板内容；"chat" = 面板关闭。业务页面与工具卡详情
@@ -60,6 +61,10 @@ export function FunctionDock() {
               {detailOpen && detail ? toolLabel(detail.name) : screenLabel}
             </span>
             {detailOpen && detail && <span className="func-sub">{detail.name}</span>}
+            {/* 数据新鲜度替代手动刷新按钮(设计规范 3.5) */}
+            {!detailOpen && lastRefreshTime && (
+              <span className="func-fresh">{formatTimeAgo(lastRefreshTime)}</span>
+            )}
             <button className="func-close" onClick={handleClose} title="收起">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
             </button>

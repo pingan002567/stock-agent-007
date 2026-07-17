@@ -250,19 +250,9 @@ export default function Research() {
   return (
     <PageContainer>
       <div className="page-stack">
-        <section className="page-hero">
-          <div>
-            <h2>个股信息与深研</h2>
-            <p>全局搜索进入这里，展示 StockContext，并可生成深研任务和报告。</p>
-          </div>
-          <div className="hero-actions">
-            <button className="primary" disabled={researchBusy} onClick={() => void handleResearch()} type="button">{researchBusy ? "生成中…" : "生成深研报告"}</button>
-            {stock && <AskAiButton prompt={`深入分析 ${stock} 的投资价值与主要风险`} symbol={stock} />}
-          </div>
-        </section>
-
-        {/* autocomplete search */}
-        <div className="stock-search" ref={wrapperRef}>
+        {/* 头部 = 搜索框 + 动作(页名在 func-head;设计稿 02) */}
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+        <div className="stock-search" ref={wrapperRef} style={{ flex: 1 }}>
           <div className="search-wrapper">
             <input
               value={input}
@@ -310,6 +300,11 @@ export default function Research() {
               ))}
             </div>
           )}
+        </div>
+        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+          <button className="small primary" disabled={researchBusy} onClick={() => void handleResearch()} type="button">{researchBusy ? "生成中…" : "深研报告"}</button>
+          {stock && <AskAiButton prompt={`深入分析 ${stock} 的投资价值与主要风险`} symbol={stock} />}
+        </div>
         </div>
 
         {loading && !context ? (

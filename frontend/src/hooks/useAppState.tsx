@@ -209,7 +209,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     if (sfin.status === "fulfilled") cache.stockFinancial = sfin.value;
     if (sfu.status === "fulfilled") cache.stockFollowups = sfu.value;
 
-    setLastRefreshTime(new Date().toLocaleTimeString("zh-CN", { hour12: false }));
+    setLastRefreshTime(new Date().toISOString());
     setIsInitialized(true);
   }, []);
 

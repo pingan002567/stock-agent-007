@@ -4,6 +4,7 @@ import { useAppState } from "@/hooks/useAppState";
 import { AskAiButton } from "@/components/ui/AskAiButton";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, OverviewSkeleton } from "@/components/ui/Loading";
+import { PageHead } from "@/components/ui/PageHead";
 import { inferMarket, marketMoney, pct, changeCls } from "@/utils/market";
 
 interface PortfolioSummary {
@@ -70,32 +71,21 @@ export default function Overview() {
       {!loading && error && !data ? <ErrorMessage message={error} /> : null}
       {data ? (
         <div className="page-stack fade-in">
-          <section className="page-hero">
-            <div className="hero-content">
-              <h2>投资组合概览</h2>
-              <p>您的投资组合今日表现良好，建议关注持仓集中度和风险敞口。</p>
-              <div className="hero-stats">
-                <div className="hero-stat">
-                  <span className="hero-stat-label">总资产</span>
-                  <span className="hero-stat-value">{marketMoney(data.portfolio_summary?.total_value, "CN")}</span>
-                  <span className="hero-stat-change neutral">{data.portfolio_summary?.positions ?? 0} 只持仓</span>
-                </div>
-                <div className="hero-stat">
-                  <span className="hero-stat-label">持仓数量</span>
-                  <span className="hero-stat-value">{data.portfolio_summary?.positions ?? 0}</span>
-                  <span className="hero-stat-change neutral">分散投资</span>
-                </div>
-                <div className="hero-stat">
-                  <span className="hero-stat-label">最大权重</span>
-                  <span className="hero-stat-value">{pct(data.portfolio_summary?.max_weight_pct)}</span>
-                  <span className="hero-stat-change neutral">现金 {pct(data.portfolio_summary?.cash_pct)}</span>
-                </div>
-              </div>
-            </div>
-            <div className="hero-actions">
-              <AskAiButton prompt="今天我的组合表现如何?有什么需要关注的风险或机会?" />
-            </div>
-          </section>
+          <PageHead
+            kpis={[
+              { label: "总资产", value: marketMoney(data.portfolio_summary?.total_value, "CN"),
+                prompt: "我的组合总资产构成如何?最近变化的主要原因是什么?" },
+              { label: "持仓", value: `${data.portfolio_summary?.positions ?? 0} 只` },
+              { label: "最大权重", value: pct(data.portfolio_summary?.max_weight_pct),
+                tone: (data.portfolio_summary?.max_weight_pct ?? 0) >= 15 ? "down" : undefined,
+                prompt: "我的持仓集中度是否过高?哪只需要减仓?" },
+              { label: "现金", value: pct(data.portfolio_summary?.cash_pct) },
+              { label: "高优告警", value: events.filter((e) => e.severity === "high").length,
+                tone: events.some((e) => e.severity === "high") ? "down" : undefined,
+                prompt: "分析当前高优告警的根因,并给出处理建议" },
+            ]}
+            actions={<AskAiButton prompt="今天我的组合表现如何?有什么需要关注的风险或机会?" />}
+          />
 
           {/* 指数条（原市场页并入：每股一列 mono 点位+涨跌） */}
           {indices.length > 0 && (
@@ -111,41 +101,6 @@ export default function Overview() {
               </div>
             </div>
           )}
-
-          <div className="kpi-grid">
-            <div className="kpi-card">
-              <div className="kpi-header">
-                <span className="kpi-label">持仓数量</span>
-                <div className="kpi-icon blue">📊</div>
-              </div>
-              <div className="kpi-value">{data.portfolio_summary?.positions ?? 0}</div>
-              <div className="kpi-change neutral">只股票</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-header">
-                <span className="kpi-label">最大权重</span>
-                <div className="kpi-icon amber">⚖️</div>
-              </div>
-              <div className="kpi-value">{pct(data.portfolio_summary?.max_weight_pct)}</div>
-              <div className="kpi-change neutral">单股集中度</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-header">
-                <span className="kpi-label">现金比例</span>
-                <div className="kpi-icon green">💰</div>
-              </div>
-              <div className="kpi-value">{pct(data.portfolio_summary?.cash_pct)}</div>
-              <div className="kpi-change neutral">可用资金</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-header">
-                <span className="kpi-label">监控事件</span>
-                <div className="kpi-icon red">🔔</div>
-              </div>
-              <div className="kpi-value">{events.length}</div>
-              <div className="kpi-change neutral">条待处理</div>
-            </div>
-          </div>
 
           <div className="two-col">
             <div className="panel">
@@ -222,7 +177,7 @@ export default function Overview() {
                       <div className="event-title">{ev.title ?? ev.event_id}</div>
                       <div className="event-desc">{ev.symbol ?? "全市场"}</div>
                     </div>
-                    <div className="event-time">{ev.triggered_at?.slice(5, 16) ?? ""}</div>
+                    <div className="event-time">{ev.triggered_at?.slice(5, 16).replace("T", " ") ?? ""}</div>
                   </div>
                 ))}
               </div>

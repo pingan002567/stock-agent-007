@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiGet, apiPost, apiDelete } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage } from "@/components/ui/Loading";
-import { RefreshButton } from "@/components/ui/RefreshButton";
+import { PageHead } from "@/components/ui/PageHead";
 import { useAppState } from "@/hooks/useAppState";
 import { AskAiButton } from "@/components/ui/AskAiButton";
 import { inferMarket, marketMoney, pct, changeCls } from "@/utils/market";
@@ -13,7 +13,7 @@ interface WatchlistGroup { name: string; color: string; sort_order: number }
 export default function Watchlist() {
   const { setStock, appDataCache, globalLoading } = useAppState();
   const [items, setItems] = useState<WatchlistItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
   const [groups, setGroups] = useState<WatchlistGroup[]>([]);
@@ -82,44 +82,17 @@ export default function Watchlist() {
     <PageContainer>
       <div className="page-stack fade-in">
         {error && <ErrorMessage message={error} />}
-        <div className="market-hero">
-          <div className="market-hero-header">
-            <div className="market-title">
-              <h1>自选股</h1>
-              <p>管理您的自选股列表，实时追踪关注的股票动态。</p>
-            </div>
-            <div className="hero-actions">
-              <AskAiButton prompt="点评我的自选池:近期哪些标的值得重点关注?" />
-              <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
-            </div>
-          </div>
-          <div className="market-stats">
-            <div className="market-stat">
-              <span className="market-stat-label">自选数量</span>
-              <span className="market-stat-value">{items.length}</span>
-              <span className="market-stat-change neutral">只股票</span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">今日上涨</span>
-              <span className="market-stat-value up">{items.filter(i => (i.price?.change_pct ?? 0) > 0).length}</span>
-              <span className="market-stat-change up">
-                ↑ {items.length > 0 ? Math.round((items.filter(i => (i.price?.change_pct ?? 0) > 0).length / items.length) * 100) : 0}%
-              </span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">今日下跌</span>
-              <span className="market-stat-value down">{items.filter(i => (i.price?.change_pct ?? 0) < 0).length}</span>
-              <span className="market-stat-change down">
-                ↓ {items.length > 0 ? Math.round((items.filter(i => (i.price?.change_pct ?? 0) < 0).length / items.length) * 100) : 0}%
-              </span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">盯盘开启</span>
-              <span className="market-stat-value">{items.filter(i => i.monitored).length}</span>
-              <span className="market-stat-change neutral">只</span>
-            </div>
-          </div>
-        </div>
+        <PageHead
+          kpis={[
+            { label: "自选", value: `${items.length} 只` },
+            { label: "今日上涨", value: items.filter(i => (i.price?.change_pct ?? 0) > 0).length, tone: "up" },
+            { label: "今日下跌", value: items.filter(i => (i.price?.change_pct ?? 0) < 0).length, tone: "down" },
+            { label: "盯盘开启", value: items.filter(i => i.monitored).length },
+          ]}
+          actions={<>
+            <AskAiButton prompt="点评我的自选池:近期哪些标的值得重点关注?" />
+          </>}
+        />
 
         {groups.length > 0 && (
           <div className="panel">

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage } from "@/components/ui/Loading";
-import { RefreshButton } from "@/components/ui/RefreshButton";
+import { PageHead } from "@/components/ui/PageHead";
 import { Pagination } from "@/components/ui/Pagination";
 import { formatTimeAgo } from "@/utils/format";
 import { useAppState } from "@/hooks/useAppState";
@@ -20,7 +20,7 @@ export default function Reports() {
   const [selectedReport, setSelectedReport] = useState<ReportItem | null>(null);
   const [quality, setQuality] = useState<ReportQuality | null>(null);
   const [reportPreview, setReportPreview] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [paperReportBusy, setPaperReportBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -92,46 +92,23 @@ export default function Reports() {
     <PageContainer>
       <div className="page-stack fade-in">
         {error && <ErrorMessage message={error} />}
-        <div className="market-hero">
-          <div className="market-hero-header">
-            <div className="market-title">
-              <h1>报告中心</h1>
-              <p>AI 驱动的智能报告生成系统，支持多种模板和质量检查。</p>
-            </div>
-            <div className="hero-actions">
-              <button className="primary" disabled={generating} onClick={() => void handleGenerateStock()} type="button">
-                {generating ? "生成中…" : "生成股票报告"}
-              </button>
-              <button disabled={paperReportBusy} onClick={() => void handleGeneratePaperReport()} type="button">
-                {paperReportBusy ? "生成中…" : "生成复盘报告"}
-              </button>
-              <AskAiButton prompt="生成一份最新的组合复盘报告" />
-              <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
-            </div>
-          </div>
-          <div className="market-stats">
-            <div className="market-stat">
-              <span className="market-stat-label">总报告</span>
-              <span className="market-stat-value">{reports.length}</span>
-              <span className="market-stat-change neutral">全部报告</span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">平均质量</span>
-              <span className="market-stat-value up">{avgQuality.toFixed(1)} 分</span>
-              <span className="market-stat-change up">↑ 优秀</span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">本月生成</span>
-              <span className="market-stat-value">{thisMonthReports}</span>
-              <span className="market-stat-change neutral">本月</span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">模板数量</span>
-              <span className="market-stat-value">{templates.length}</span>
-              <span className="market-stat-change neutral">可用模板</span>
-            </div>
-          </div>
-        </div>
+        <PageHead
+          kpis={[
+            { label: "报告", value: `${reports.length} 篇` },
+            { label: "平均质量", value: `${avgQuality.toFixed(1)} 分` },
+            { label: "本月", value: thisMonthReports },
+            { label: "模板", value: templates.length },
+          ]}
+          actions={<>
+            <button className="small primary" disabled={generating} onClick={() => void handleGenerateStock()} type="button">
+              {generating ? "生成中…" : "股票报告"}
+            </button>
+            <button className="small" disabled={paperReportBusy} onClick={() => void handleGeneratePaperReport()} type="button">
+              {paperReportBusy ? "生成中…" : "复盘报告"}
+            </button>
+            <AskAiButton prompt="生成一份最新的组合复盘报告" />
+          </>}
+        />
 
         <div className="two-col">
           <div className="panel">

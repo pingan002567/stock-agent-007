@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost, apiDelete } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage } from "@/components/ui/Loading";
-import { RefreshButton } from "@/components/ui/RefreshButton";
+import { PageHead } from "@/components/ui/PageHead";
 import { useAppState } from "@/hooks/useAppState";
 import { AskAiButton } from "@/components/ui/AskAiButton";
 
@@ -26,7 +26,7 @@ export default function Strategies() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [backtests, setBacktests] = useState<BacktestRun[]>([]);
   const [latestBacktest, setLatestBacktest] = useState<BacktestRun | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [addingStrategy, setAddingStrategy] = useState(false);
@@ -109,45 +109,19 @@ export default function Strategies() {
     <PageContainer>
       <div className="page-stack fade-in">
         {error && <ErrorMessage message={error} />}
-        <div className="market-hero">
-          <div className="market-hero-header">
-            <div className="market-title">
-              <h1>策略中心</h1>
-              <p>管理投资策略，运行回测，分析历史表现。</p>
-            </div>
-            <div className="hero-actions">
-              <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
-              <button onClick={() => void handleAddStrategy()} disabled={addingStrategy} type="button">
-                {addingStrategy ? "添加中…" : "新增策略"}
-              </button>
-              <AskAiButton prompt="解读最近一次策略回测结果,评估稳健性并指出过拟合风险" />
-            </div>
-          </div>
-          <div className="market-stats">
-            <div className="market-stat">
-              <span className="market-stat-label">总策略</span>
-              <span className="market-stat-value">{items.length}</span>
-              <span className="market-stat-change neutral">全部策略</span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">启用中</span>
-              <span className="market-stat-value up">{enabledCount}</span>
-              <span className="market-stat-change up">
-                ↑ {items.length > 0 ? Math.round((enabledCount / items.length) * 100) : 0}%
-              </span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">本月回测</span>
-              <span className="market-stat-value">{backtests.length}</span>
-              <span className="market-stat-change neutral">次</span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">最近回测</span>
-              <span className="market-stat-value">{latestBacktest ? "有" : "无"}</span>
-              <span className="market-stat-change neutral">{latestBacktest?.status ?? "-"}</span>
-            </div>
-          </div>
-        </div>
+        <PageHead
+          kpis={[
+            { label: "策略", value: `${items.length} 个` },
+            { label: "启用中", value: enabledCount, tone: enabledCount > 0 ? "up" : undefined },
+            { label: "回测", value: `${backtests.length} 次` },
+          ]}
+          actions={<>
+            <button className="small" onClick={() => void handleAddStrategy()} disabled={addingStrategy} type="button">
+              {addingStrategy ? "添加中…" : "新增策略"}
+            </button>
+            <AskAiButton prompt="解读最近一次策略回测结果,评估稳健性并指出过拟合风险" />
+          </>}
+        />
 
         <div className="kpi-grid">
           <div className="kpi-card">

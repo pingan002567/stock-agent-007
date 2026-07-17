@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { apiGet, apiPost } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, TableSkeleton } from "@/components/ui/Loading";
-import { RefreshButton } from "@/components/ui/RefreshButton";
+import { PageHead } from "@/components/ui/PageHead";
 import { useAppState } from "@/hooks/useAppState";
 import { AskAiButton } from "@/components/ui/AskAiButton";
 import { pct } from "@/utils/market";
@@ -143,78 +143,26 @@ export default function Holdings() {
   return (
     <PageContainer>
       <div className="page-stack fade-in">
-        <div className="market-hero">
-          <div className="market-hero-header">
-            <div className="market-title">
-              <h1>持仓管理</h1>
-              <p>查看和管理您的投资组合，分析持仓风险和收益。</p>
-            </div>
-            <div className="hero-actions">
-              <button className="primary" disabled={scanning} onClick={() => void handleRiskScan()} type="button">
-                {scanning ? "扫描中…" : "风险扫描"}
-              </button>
-              <AskAiButton prompt="重新评估我的持仓风险,并给出调仓建议" />
-              <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
-            </div>
-          </div>
-          <div className="market-stats">
-            <div className="market-stat">
-              <span className="market-stat-label">总资产</span>
-              <span className="market-stat-value">{money(holdings?.summary?.total_value)}</span>
-              <span className="market-stat-change neutral">{holdings?.summary?.positions ?? 0} 只持仓</span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">持仓数量</span>
-              <span className="market-stat-value">{holdings?.summary?.positions ?? holdings?.items.length ?? 0}</span>
-              <span className="market-stat-change neutral">只股票</span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">最大权重</span>
-              <span className="market-stat-value">{pct(holdings?.summary?.max_weight_pct)}</span>
-              <span className="market-stat-change neutral">单股集中度</span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">现金比例</span>
-              <span className="market-stat-value">{pct(holdings?.summary?.cash_pct)}</span>
-              <span className="market-stat-change neutral">可用资金</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="kpi-grid">
-          <div className="kpi-card">
-            <div className="kpi-header">
-              <span className="kpi-label">持仓数量</span>
-              <div className="kpi-icon blue">📊</div>
-            </div>
-            <div className="kpi-value">{holdings?.items.length ?? 0}</div>
-            <div className="kpi-change neutral">只股票</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-header">
-              <span className="kpi-label">总资产</span>
-              <div className="kpi-icon green">💰</div>
-            </div>
-            <div className="kpi-value">{money(holdings?.summary?.total_value)}</div>
-            <div className="kpi-change neutral">当前价值</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-header">
-              <span className="kpi-label">最大权重</span>
-              <div className="kpi-icon amber">⚖️</div>
-            </div>
-            <div className="kpi-value">{pct(holdings?.summary?.max_weight_pct)}</div>
-            <div className="kpi-change neutral">单股集中度</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-header">
-              <span className="kpi-label">风险评分</span>
-              <div className="kpi-icon red">⚡</div>
-            </div>
-            <div className="kpi-value">{risk?.risks?.length ?? 0}</div>
-            <div className="kpi-change neutral">项风险</div>
-          </div>
-        </div>
+        <PageHead
+          kpis={[
+            { label: "总资产", value: money(holdings?.summary?.total_value),
+              prompt: "我的持仓总资产构成如何?" },
+            { label: "持仓", value: `${holdings?.summary?.positions ?? holdings?.items.length ?? 0} 只` },
+            { label: "最大权重", value: pct(holdings?.summary?.max_weight_pct),
+              tone: (holdings?.summary?.max_weight_pct ?? 0) >= 15 ? "down" : undefined,
+              prompt: "我的持仓集中度是否过高?哪只需要减仓?" },
+            { label: "现金", value: pct(holdings?.summary?.cash_pct) },
+            { label: "风险项", value: risk?.risks?.length ?? 0,
+              tone: (risk?.risks?.length ?? 0) > 0 ? "down" : undefined,
+              prompt: "解读当前持仓风险扫描结果,并给出应对建议" },
+          ]}
+          actions={<>
+            <button className="small" disabled={scanning} onClick={() => void handleRiskScan()} type="button">
+              {scanning ? "扫描中…" : "风险扫描"}
+            </button>
+            <AskAiButton prompt="重新评估我的持仓风险,并给出调仓建议" />
+          </>}
+        />
 
         <div className="two-col">
           <div className="panel">
@@ -230,7 +178,7 @@ export default function Holdings() {
             </div>
             <div className="panel-body" style={{ padding: 0 }}>
               {holdings && holdings.items.length > 0 ? (
-                <table>
+                <table className="data-table">
                   <thead>
                     <tr>
                       <th>股票</th>
@@ -241,7 +189,7 @@ export default function Holdings() {
                   </thead>
                   <tbody>
                     {holdings.items.map((item) => (
-                      <tr key={item.symbol}>
+                      <tr key={item.symbol} style={(item.weight_pct ?? 0) >= 15 ? { boxShadow: "inset 2px 0 0 var(--red)" } : undefined}>
                         <td>
                           <div className="stock-info">
                             <div className="stock-icon default">{item.symbol.charAt(0)}</div>

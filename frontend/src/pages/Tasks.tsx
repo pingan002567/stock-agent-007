@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiGet } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage } from "@/components/ui/Loading";
-import { RefreshButton } from "@/components/ui/RefreshButton";
+import { PageHead } from "@/components/ui/PageHead";
 import { Pagination } from "@/components/ui/Pagination";
 import { formatTimeAgo } from "@/utils/format";
 
@@ -16,7 +16,7 @@ export default function Tasks() {
   const [steps, setSteps] = useState<TaskStep[]>([]);
   const [ledger, setLedger] = useState<ToolExecution[]>([]);
   const [taskStream, setTaskStream] = useState<string>("等待选择任务。");
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [taskPage, setTaskPage] = useState(1);
   const [taskTotal, setTaskTotal] = useState(0);
@@ -52,41 +52,15 @@ export default function Tasks() {
     <PageContainer>
       <div className="page-stack fade-in">
         {error && <ErrorMessage message={error} />}
-        <div className="market-hero">
-          <div className="market-hero-header">
-            <div className="market-title">
-              <h1>Agent 任务中心</h1>
-              <p>监控 AI Agent 执行状态，追踪任务进度和工具调用。</p>
-            </div>
-            <div className="hero-actions">
-              <RefreshButton refreshing={loading} onClick={() => void loadAll()} />
-            </div>
-          </div>
-          <div className="market-stats">
-            <div className="market-stat">
-              <span className="market-stat-label">总任务</span>
-              <span className="market-stat-value">{items.length}</span>
-              <span className="market-stat-change neutral">全部任务</span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">运行中</span>
-              <span className="market-stat-value" style={{ color: "var(--blue)" }}>{runningCount}</span>
-              <span className="market-stat-change" style={{ color: "var(--blue)" }}>⏳ 进行中</span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">已完成</span>
-              <span className="market-stat-value up">{completedCount}</span>
-              <span className="market-stat-change up">
-                ↑ {items.length > 0 ? Math.round((completedCount / items.length) * 100) : 0}% 完成率
-              </span>
-            </div>
-            <div className="market-stat">
-              <span className="market-stat-label">失败</span>
-              <span className="market-stat-value down">{failedCount}</span>
-              <span className="market-stat-change down">{failedCount > 0 ? "↓ 需要处理" : "● 无失败"}</span>
-            </div>
-          </div>
-        </div>
+        <PageHead
+          kpis={[
+            { label: "总任务", value: items.length },
+            { label: "运行中", value: runningCount },
+            { label: "已完成", value: completedCount, tone: "up" },
+            { label: "失败", value: failedCount, tone: failedCount > 0 ? "down" : undefined,
+              prompt: "分析最近失败的 AI 任务原因" },
+          ]}
+        />
 
         <div className="kpi-grid">
           <div className="kpi-card">
