@@ -290,7 +290,8 @@ function useCopilotChatState() {
         try {
           const data = JSON.parse((streamEvent as MessageEvent).data);
           const t = (data?.payload?.title as string) || "";
-          if (t && sid) {
+          // 双保险:JSON 形状的标题(prompt envelope 泄漏)不入会话列表
+          if (t && sid && !t.trimStart().startsWith("{") && !t.trimStart().startsWith("[")) {
             setSessions((prev) => prev.map((s) =>
               s.session_id === sid ? { ...s, title: t } : s
             ));
@@ -324,12 +325,12 @@ function useCopilotChatState() {
           const data = JSON.parse((streamEvent as MessageEvent).data);
           const p = (data?.payload || {}) as Record<string, unknown>;
           const t = String(p.text || p.latest_text || "");
-          const display = t || String(p.phase || "");
-          if (display) {
+          // 只展示真实推理文本;裸 phase 名("values" 等快照占位)是噪声,不进气泡
+          if (t) {
             setStreamMessage((prev) => prev ? {
               ...prev,
               phase: "reasoning",
-              reasoningText: display,
+              reasoningText: t,
               // 只累积真实推理文本；跳过 phase 占位与重复快照
               reasoningLog: t && prev.reasoningLog[prev.reasoningLog.length - 1] !== t
                 ? [...prev.reasoningLog, t]

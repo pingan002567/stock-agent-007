@@ -49,6 +49,12 @@ function AppShell() {
 
   // 顶栏右段列宽与功能坞同步（列头对齐）：面板开 = 52+面板宽,坞收 = 仅按钮位
   const panelOpen = !dockCollapsed && (detailOpen || currentScreen !== "chat");
+
+  // 断点降级:窄窗下右栏展开会把中栏聊天挤到不可用,自动临时收起左栏
+  // (不写 localStorage——这是布局联动,不是用户偏好)
+  useEffect(() => {
+    if (panelOpen && window.innerWidth < 1280) setLeftCollapsed(true);
+  }, [panelOpen]);
   const appCls = [
     "app",
     leftCollapsed ? "left-collapsed" : "",

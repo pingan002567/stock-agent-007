@@ -47,6 +47,8 @@ interface StockContext {
   price?: StockPrice;
   relation?: StockRelation;
   holding?: StockHolding;
+  ai_state?: { score?: number; risk_label?: string; stance?: string; confidence?: string };
+  latest_report?: { report_id?: string; generated_at?: string };
 }
 
 interface HistoryItem { date?: string; day?: number; open?: number; high?: number; low?: number; close?: number; volume?: number }
@@ -307,7 +309,15 @@ export default function Research() {
         </div>
         </div>
 
-        {loading && !context ? (
+        {!stock ? (
+          <div className="panel"><div className="panel-body" style={{ textAlign: "center", padding: "40px 20px", color: "var(--muted)" }}>
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ opacity: 0.6, marginBottom: 8 }}>
+              <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+            </svg>
+            <div style={{ fontSize: 13 }}>搜索一只股票开始研究</div>
+            <div style={{ fontSize: 11, color: "var(--faint, var(--muted))", marginTop: 4 }}>也可以在聊天里直接问,会话锚点会自动带到这里</div>
+          </div></div>
+        ) : loading && !context ? (
           <section className="detail-grid">
             <div className="page-stack"><PanelSkeleton /><PanelSkeleton /><PanelSkeleton /></div>
             <div className="page-stack"><PanelSkeleton /><KpiSkeleton count={3} /><PanelSkeleton /></div>
@@ -381,42 +391,30 @@ export default function Research() {
               </div>
             </div>
 
-            <div className="kpi-grid" style={{ marginTop: 24 }}>
-              <div className="kpi-card">
-                <div className="kpi-header">
-                  <span className="kpi-label">持仓数量</span>
-                  <div className="kpi-icon blue">📊</div>
+            {context.ai_state && (
+              <div className="panel" style={{ marginTop: 16 }}>
+                <div className="panel-header">
+                  <div className="panel-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><circle cx="12" cy="12" r="3"/>
+                    </svg>
+                    AI 观点
+                    {context.latest_report?.generated_at && (
+                      <span className="panel-badge">{context.latest_report.generated_at.slice(5, 10)} 复评</span>
+                    )}
+                  </div>
+                  <AskAiButton prompt={`复评 ${context.symbol} 的 AI 观点:当前评分与立场是否仍成立?`} symbol={context.symbol} label="复评" />
                 </div>
-                <div className="kpi-value">{context.holding?.quantity ?? 0}</div>
-                <div className="kpi-change neutral">股</div>
-              </div>
-              <div className="kpi-card">
-                <div className="kpi-header">
-                  <span className="kpi-label">持仓市值</span>
-                  <div className="kpi-icon green">💰</div>
-                </div>
-                <div className="kpi-value">{money(context.holding?.market_value, context.market)}</div>
-                <div className="kpi-change neutral">当前价值</div>
-              </div>
-              <div className="kpi-card">
-                <div className="kpi-header">
-                  <span className="kpi-label">权重占比</span>
-                  <div className="kpi-icon amber">⚖️</div>
-                </div>
-                <div className="kpi-value">{pct(context.holding?.weight_pct)}</div>
-                <div className="kpi-change neutral">组合占比</div>
-              </div>
-              <div className="kpi-card">
-                <div className="kpi-header">
-                  <span className="kpi-label">持仓盈亏</span>
-                  <div className="kpi-icon red">📈</div>
-                </div>
-                <div className="kpi-value">{context.holding?.pnl_pct != null ? pct(context.holding.pnl_pct) : "N/A"}</div>
-                <div className={`kpi-change ${(context.holding?.pnl_pct ?? 0) >= 0 ? "up" : "down"}`}>
-                  {(context.holding?.pnl_pct ?? 0) >= 0 ? "↑ 盈利" : "↓ 亏损"}
+                <div className="panel-body">
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+                    <div><div className="muted" style={{ fontSize: 11 }}>评分</div><div className="num" style={{ fontSize: 16, fontWeight: 700 }}>{context.ai_state.score ?? "-"}</div></div>
+                    <div><div className="muted" style={{ fontSize: 11 }}>立场</div><div style={{ fontSize: 13, fontWeight: 600 }}>{context.ai_state.stance ?? "-"}</div></div>
+                    <div><div className="muted" style={{ fontSize: 11 }}>置信</div><div style={{ fontSize: 13, fontWeight: 600 }}>{context.ai_state.confidence ?? "-"}</div></div>
+                    <div><div className="muted" style={{ fontSize: 11 }}>风险标签</div><div style={{ fontSize: 13, fontWeight: 600, color: context.ai_state.risk_label ? "var(--red)" : undefined }}>{context.ai_state.risk_label ?? "无"}</div></div>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
             <div className="two-col" style={{ gap: 24 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -532,13 +530,13 @@ export default function Research() {
                     {intel.length === 0 ? (
                       <div className="muted">暂无情报</div>
                     ) : intel.slice(0, 5).map((item, i) => (
-                      <div key={i} className="intel-item">
-                        <div className={`intel-dot ${i === 0 ? "warning" : i === 1 ? "info" : "success"}`} />
-                        <div className="intel-content">
-                          <div className="intel-title">{item.title ?? "未命名情报"}</div>
-                          <div className="intel-desc">{item.summary ?? "暂无摘要"}</div>
+                      <div key={i} className="tl-item">
+                        <span className="tl-time">{(item.published_at ?? item.updated_at ?? "").slice(5, 10) || "—"}</span>
+                        <div className="tl-body">
+                          <div className="tl-title">{item.title ?? "未命名情报"}</div>
+                          <div className="tl-desc">{item.summary ?? "暂无摘要"}</div>
+                          {item.source && <div className="tl-src">来源: {item.source}</div>}
                         </div>
-                        <div className="intel-time">{item.published_at ?? item.updated_at ?? ""}</div>
                       </div>
                     ))}
                   </div>

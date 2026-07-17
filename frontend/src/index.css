@@ -3656,3 +3656,18 @@ input, textarea { cursor: text; }
 
 /* func-head 数据新鲜度(替代手动刷新按钮的既定决策) */
 .func-fresh { font-size: 11px; color: var(--faint, var(--muted)); margin-left: 8px; font-weight: 400; }
+
+/* ── 情报时间线(设计稿 02:mono 时间左栏 + 内容右栏) ── */
+.tl-item { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line-soft, var(--line)); }
+.tl-item:last-child { border-bottom: none; }
+.tl-time { flex: none; width: 42px; font-family: var(--mono); font-size: 10.5px; color: var(--faint, var(--muted)); padding-top: 2px; font-variant-numeric: tabular-nums; }
+.tl-body { min-width: 0; }
+.tl-title { font-size: 12.5px; font-weight: 600; }
+.tl-desc { font-size: 12px; color: var(--muted); margin-top: 1px; }
+.tl-src { font-size: 10.5px; color: var(--faint, var(--muted)); margin-top: 2px; }
+
+/* ── 右栏防挤爆:面板宽度不越过视口余量,详情内容强制可折行 ── */
+.func-panel.open { max-width: calc(100vw - 440px); }
+.func-inner { min-width: 0; }
+.detail-host { overflow-wrap: anywhere; }
+.detail-host pre { white-space: pre-wrap; word-break: break-word; max-width: 100%; }

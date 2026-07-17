@@ -177,7 +177,14 @@ class DeerFlowEventMapper:
     def _map_values(self, payload: Any) -> list[dict[str, Any]]:
         events: list[dict[str, Any]] = []
         title = self._get(payload, "title")
-        if title and isinstance(title, str) and title.strip():
+        # DeerFlow 用线程首条 HumanMessage 生成标题,而首条是 prompt envelope
+        # JSON——形如 JSON 的"标题"必须拦下,否则会话标题变成 {"envelope_version"...
+        if (
+            title
+            and isinstance(title, str)
+            and title.strip()
+            and not title.strip().startswith(("{", "["))
+        ):
             events.append({"type": "title", "payload": {"title": title.strip()}})
         summary: dict[str, Any] = {"phase": "values"}
         status = self._get(payload, "status")
