@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>功能坞逐页 UI 设计稿 · Stock Agent</title>
+<style>
+  :root {
+    --background: #fbfaf7;
+    --paper: #ffffff;
+    --panel: #efece4;
+    --selected: #e7e2d6;
+    --line: #e7e2d6;
+    --line-soft: #f0ede5;
+    --ink: #1a1a14;
+    --ink-2: #3d3c34;
+    --muted: #75736a;
+    --faint: #a8a6a0;
+    --blue: #2563eb;
+    --blue-soft: #eaf0fd;
+    --green: #16803c;
+    --green-soft: #e8f4ec;
+    --red: #c03434;
+    --red-soft: #faecec;
+    --amber: #b45309;
+    --amber-soft: #f8f0e3;
+    --mono: "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--background);
+    color: var(--ink);
+    font: 13px/1.5 "PingFang SC", -apple-system, "Helvetica Neue", sans-serif;
+    padding: 40px 48px 80px;
+  }
+  .doc-head { max-width: 960px; margin-bottom: 12px; }
+  .doc-head h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+  .doc-head p { color: var(--muted); margin-top: 6px; font-size: 13px; }
+  .doc-legend {
+    max-width: 960px; margin: 18px 0 36px; padding: 14px 18px;
+    background: var(--paper); border: 1px solid var(--line); border-radius: 14px;
+    color: var(--ink-2); font-size: 12.5px; line-height: 1.8;
+  }
+  .doc-legend b { color: var(--ink); }
+  .board { display: flex; flex-wrap: wrap; gap: 40px; align-items: flex-start; }
+  .frame-wrap { width: 424px; }
+  .frame-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .frame-title .no { color: var(--faint); font-family: var(--mono); font-weight: 400; margin-right: 6px; }
+  .frame-note { color: var(--muted); font-size: 12px; margin-bottom: 10px; line-height: 1.6; min-height: 54px; }
+  .frame {
+    width: 424px; height: 720px; background: var(--background);
+    border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+    display: flex; flex-direction: column;
+    box-shadow: 0 1px 3px rgba(26,26,20,.04), 0 8px 24px rgba(26,26,20,.05);
+  }
+
+  /* ── 统一解剖 ── */
+  .fh {
+    height: 40px; flex: none; display: flex; align-items: center; gap: 8px;
+    padding: 0 12px; border-bottom: 1px solid var(--line-soft); background: var(--background);
+  }
+  .fh-title { font-weight: 700; font-size: 13px; }
+  .fh-fresh { font-size: 11px; color: var(--faint); }
+  .fh-sp { flex: 1; }
+  .ghost-btn {
+    display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px;
+    border: 1px solid var(--line); border-radius: 7px; background: var(--paper);
+    color: var(--muted); font-size: 11px; cursor: pointer; white-space: nowrap;
+  }
+  .ghost-btn.ai:hover { color: var(--blue); border-color: var(--blue); }
+  .ghost-btn.icon { width: 24px; padding: 0; justify-content: center; }
+  .scroll { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+
+  .kpis { display: flex; gap: 18px; padding: 4px 4px 2px; flex-wrap: wrap; }
+  .kpi { min-width: 72px; cursor: pointer; }
+  .kpi .k { font-size: 11px; color: var(--faint); }
+  .kpi .v { font-size: 15px; font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 600; margin-top: 1px; }
+  .up { color: var(--green); } .down { color: var(--red); }
+
+  .card { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .card-h { display: flex; align-items: center; gap: 8px; padding: 10px 14px 0; }
+  .card-h .t { font-weight: 700; font-size: 13px; }
+  .card-h .badge { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--faint); border: 1px solid var(--line-soft); border-radius: 999px; padding: 1px 8px; }
+  .card-b { padding: 8px 14px 12px; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 10.5px; color: var(--faint); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding: 5px 6px; border-bottom: 1px solid var(--line-soft); }
+  td { padding: 0 6px; height: 32px; font-size: 12.5px; border-bottom: 1px solid var(--line-soft); white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  tr.hover-demo td { background: var(--selected); }
+  .row-ops { display: inline-flex; gap: 4px; }
+  .row-ops button { border: none; background: none; color: var(--muted); font-size: 11px; cursor: pointer; padding: 2px 4px; border-radius: 5px; }
+  .row-ops button:hover { background: var(--paper); }
+
+  .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+  .dot.g { background: var(--green); } .dot.r { background: var(--red); }
+  .dot.a { background: var(--amber); } .dot.x { background: var(--faint); }
+
+  .grp { font-size: 10.5px; color: var(--faint); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; padding: 6px 4px 2px; }
+
+  .fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding-top: 6px; }
+  .field .k { font-size: 11px; color: var(--faint); }
+  .field .v { font-size: 13.5px; font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  .pill-row { display: flex; gap: 6px; }
+  .pill { height: 22px; padding: 0 10px; display: inline-flex; align-items: center; border-radius: 999px; border: 1px solid var(--line); background: var(--paper); font-size: 11.5px; color: var(--muted); cursor: pointer; }
+  .pill.on { background: var(--selected); color: var(--ink); font-weight: 600; border-color: var(--selected); }
+
+  .tl { display: flex; flex-direction: column; }
+  .tl-item { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line-soft); }
+  .tl-item:last-child { border-bottom: none; }
+  .tl-time { flex: none; width: 44px; font-family: var(--mono); font-size: 10.5px; color: var(--faint); padding-top: 2px; }
+  .tl-body { font-size: 12.5px; color: var(--ink-2); }
+  .tl-body .src { font-size: 10.5px; color: var(--faint); margin-top: 1px; }
+
+  .weight-bar { position: relative; width: 56px; height: 4px; border-radius: 2px; background: var(--line-soft); display: inline-block; vertical-align: middle; }
+  .weight-bar i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--faint); }
+  .weight-bar.over i { background: var(--red); }
+  tr.risk td:first-child { box-shadow: inset 2px 0 0 var(--red); }
+
+  .alert-item { border-bottom: 1px solid var(--line-soft); padding: 8px 0; }
+  .alert-item:last-child { border-bottom: none; }
+  .alert-line { display: flex; align-items: baseline; gap: 6px; font-size: 12.5px; }
+  .alert-line .time { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
+  .alert-expand { margin: 8px 0 2px 12px; padding: 8px 10px; background: var(--background); border: 1px solid var(--line-soft); border-radius: 8px; font-size: 12px; color: var(--ink-2); }
+  .alert-expand .lbl { font-size: 10.5px; color: var(--faint); }
+  .alert-expand .row + .row { margin-top: 5px; }
+
+  .toggle { display: inline-block; width: 30px; height: 17px; border-radius: 999px; background: var(--green); position: relative; vertical-align: middle; }
+  .toggle::after { content: ""; position: absolute; top: 2px; left: 15px; width: 13px; height: 13px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+  .toggle.off { background: var(--line); }
+  .toggle.off::after { left: 2px; }
+
+  .stock-head { display: flex; align-items: baseline; gap: 10px; padding: 2px 4px; }
+  .stock-head .sym { font-size: 19px; font-weight: 800; letter-spacing: -0.01em; }
+  .stock-head .nm { color: var(--muted); font-size: 12px; }
+  .stock-head .px { margin-left: auto; text-align: right; }
+  .stock-head .px .p { font-size: 19px; font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 700; }
+  .stock-head .px .c { font-size: 12px; font-family: var(--mono); }
+
+  .idx-row { display: flex; gap: 0; }
+  .idx { flex: 1; padding: 2px 6px; }
+  .idx + .idx { border-left: 1px solid var(--line-soft); }
+  .idx .k { font-size: 11px; color: var(--faint); }
+  .idx .v { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 600; }
+  .idx .c { font-family: var(--mono); font-size: 11px; }
+
+  .report-row { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; }
+  .report-row:last-child { border-bottom: none; }
+  .report-row .meta { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 10.5px; font-family: var(--mono); }
+  .report-row .exp { display: inline-flex; gap: 5px; color: var(--muted); font-size: 11px; }
+
+  .empty { text-align: center; color: var(--faint); padding: 26px 0 18px; font-size: 12px; }
+  .empty svg { display: block; margin: 0 auto 8px; opacity: .7; }
+
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding-top: 6px; }
+  .metric { background: var(--background); border: 1px solid var(--line-soft); border-radius: 8px; padding: 6px 8px; }
+  .metric .k { font-size: 10px; color: var(--faint); }
+  .metric .v { font-family: var(--mono); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  .filter-row { display: flex; gap: 6px; align-items: center; }
+  .filter-row input { flex: 1; height: 26px; border: 1px solid var(--line); border-radius: 7px; padding: 0 8px; font-size: 12px; background: var(--paper); color: var(--ink); }
+  .filter-row input::placeholder { color: var(--faint); }
+</style>
+</head>
+<body>
+
+<div class="doc-head">
+  <h1>功能坞逐页 UI 设计稿</h1>
+  <p>424px 真实面板宽 · Editorial Calm 令牌 · 配合 doc/design/FUNCTION_PAGES_PLAN.md 阅读</p>
+</div>
+
+<div class="doc-legend">
+  <b>统一解剖</b>:func-head(标题 + 数据新鲜度 + 问 AI + 收起)→ 可选 KPI 行 → 竖排卡片滚动区。<br>
+  <b>四原语</b>:PageKpiRow(无框指标,点击开聊)· DataTable(32px 行,mono 右对齐,hover 显操作)· StatusDot(绿/红/琥珀/灰)· AskAiButton(问 AI ↗,hover 才见蓝)。<br>
+  <b>强调色预算</b>:蓝 ≤2/屏且仅交互态;绿/红只表达涨跌与告警级别;琥珀=进行中。所有动作按钮的本质都是"带预填问题开聊天"。
+</div>
+
+<div class="board">
+
+<!-- ═══ 1 总览 ═══ -->
+<div class="frame-wrap">
+  <div class="frame-title"><span class="no">01</span>总览 · 早晨一屏</div>
+  <div class="frame-note">纯只读。KPI 行四项(点击=开聊);指数条并入自 Market 页;两张卡各 ≤5 行,行点击跳对应页。全页唯一表单数为零。</div>
+  <div class="frame">
+    <div class="fh"><span class="fh-title">总览</span><span class="fh-fresh">刚刚</span><span class="fh-sp"></span><button class="ghost-btn ai">问 AI ↗</button><button class="ghost-btn icon">✕</button></div>
+    <div class="scroll">
+      <div class="kpis">
+        <div class="kpi"><div class="k">总市值</div><div class="v">¥1,284,300</div></div>
+        <div class="kpi"><div class="k">当日</div><div class="v up">+0.82%</div></div>
+        <div class="kpi"><div class="k">高优告警</div><div class="v down">2</div></div>
+        <div class="kpi"><div class="k">待审查</div><div class="v">1</div></div>
+      </div>
+      <div class="card"><div class="card-b" style="padding-top:10px">
+        <div class="idx-row">
+          <div class="idx"><div class="k">上证</div><div class="v">3,245.61</div><div class="c up">+0.42%</div></div>
+          <div class="idx"><div class="k">深成</div><div class="v">10,882.4</div><div class="c down">−0.18%</div></div>
+          <div class="idx"><div class="k">恒生</div><div class="v">19,320.7</div><div class="c up">+1.05%</div></div>
+          <div class="idx"><div class="k">纳指</div><div class="v">18,504.2</div><div class="c up">+0.66%</div></div>
+        </div>
+      </div></div>
+      <div class="card">
+        <div class="card-h"><span class="t">高优告警</span><span class="badge">2 条</span></div>
+        <div class="card-b">
+          <div class="alert-item"><div class="alert-line"><span><span class="dot r"></span>AAPL 单仓权重 18.5% 超硬限 15%</span><span class="time">09:31</span></div></div>
+          <div class="alert-item"><div class="alert-line"><span><span class="dot r"></span>600519 放量 3.2σ,伴随负面情报</span><span class="time">09:28</span></div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="t">最近报告</span><span class="badge">3 篇</span></div>
+        <div class="card-b">
+          <div class="report-row"><span><span class="dot g"></span>AAPL 深度研究</span><span class="meta">昨天 21:04</span></div>
+          <div class="report-row"><span><span class="dot g"></span>组合周度复盘</span><span class="meta">07/14</span></div>
+          <div class="report-row"><span><span class="dot r"></span>盯盘异动回顾</span><span class="meta">07/13</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 2 个股档案 ═══ -->
+<div class="frame-wrap">
+  <div class="frame-title"><span class="no">02</span>个股档案 · 锚点跟随</div>
+  <div class="frame-note">会话锚定 symbol 时本页自动切换目标(不抢焦点)。大号 mono 现价头 → AI 观点 → 财务(季/年 pill)→ 情报时间线(时间左栏)→ 历史报告。</div>
+  <div class="frame">
+    <div class="fh"><span class="fh-title">个股档案</span><span class="fh-fresh">2 分钟前</span><span class="fh-sp"></span><button class="ghost-btn ai">问 AI ↗</button><button class="ghost-btn icon">✕</button></div>
+    <div class="scroll">
+      <div class="stock-head">
+        <span class="sym">AAPL</span><span class="nm">Apple Inc · NASDAQ</span>
+        <span class="px"><div class="p">213.47</div><div class="c up">+1.24% 今日</div></span>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="t">AI 观点</span><span class="badge">07/16 复评</span></div>
+        <div class="card-b"><div class="fields">
+          <div class="field"><div class="k">评分</div><div class="v">82</div></div>
+          <div class="field"><div class="k">立场</div><div class="v" style="font-family:inherit">谨慎增持</div></div>
+          <div class="field"><div class="k">置信</div><div class="v" style="font-family:inherit">中</div></div>
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:8px">服务业务增速支撑估值,主要风险为单仓集中度已超警戒线。</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="t">财务摘要</span><span class="badge" style="border:none;padding:0"><span class="pill-row"><span class="pill on">季报</span><span class="pill">年报</span></span></span></div>
+        <div class="card-b"><div class="fields">
+          <div class="field"><div class="k">营收</div><div class="v">$94.9B</div></div>
+          <div class="field"><div class="k">净利</div><div class="v">$23.6B</div></div>
+          <div class="field"><div class="k">净利率</div><div class="v">24.9%</div></div>
+          <div class="field"><div class="k">营收同比</div><div class="v up">+4.9%</div></div>
+          <div class="field"><div class="k">负债率</div><div class="v">79.7%</div></div>
+          <div class="field"><div class="k">PE(TTM)</div><div class="v">32.4</div></div>
+        </div></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="t">情报时间线</span><span class="badge">今日 3 条</span></div>
+        <div class="card-b"><div class="tl">
+          <div class="tl-item"><span class="tl-time">10:02</span><div class="tl-body">分析师上调目标价至 $240,理由为服务毛利改善<div class="src">来源: intel · 財聯社</div></div></div>
+          <div class="tl-item"><span class="tl-time">09:15</span><div class="tl-body">供应链传出 Q3 砍单 5%,关注下月指引<div class="src">来源: intel · 路透</div></div></div>
+          <div class="tl-item"><span class="tl-time">08:40</span><div class="tl-body">回购计划执行过半,剩余额度 $42B<div class="src">来源: 公告</div></div></div>
+        </div></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="t">历史报告</span><span class="badge">4 篇</span></div>
+        <div class="card-b">
+          <div class="report-row"><span><span class="dot g"></span>深度研究 · 三情景估值</span><span class="meta">昨天</span></div>
+          <div class="report-row"><span><span class="dot g"></span>财报点评 · FY25Q2</span><span class="meta">05/02</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 3 自选 ═══ -->
+<div class="frame-wrap">
+  <div class="frame-title"><span class="no">03</span>自选 · 看板+管理</div>
+  <div class="frame-note">分组 = faint 大写小节(同左栏会话分组解剖);DataTable 行 hover 底色 --selected 并在行尾显操作(第二行为 hover 演示态)。空分组给引导空态。</div>
+  <div class="frame">
+    <div class="fh"><span class="fh-title">自选</span><span class="fh-fresh">刚刚</span><span class="fh-sp"></span><button class="ghost-btn ai">问 AI ↗</button><button class="ghost-btn icon">✕</button></div>
+    <div class="scroll">
+      <div class="grp">核心持仓池 · 4</div>
+      <div class="card"><div class="card-b" style="padding-top:4px">
+        <table>
+          <tr><th>代码</th><th>名称</th><th class="num">现价</th><th class="num">今日</th><th style="width:70px"></th></tr>
+          <tr><td class="num">AAPL</td><td>Apple</td><td class="num">213.47</td><td class="num up">+1.24%</td><td></td></tr>
+          <tr class="hover-demo"><td class="num">600519</td><td>贵州茅台</td><td class="num">1,428.00</td><td class="num down">−0.87%</td><td><span class="row-ops"><button>↑</button><button>↓</button><button>✕</button><button style="color:var(--blue)">问AI</button></span></td></tr>
+          <tr><td class="num">0700.HK</td><td>腾讯控股</td><td class="num">412.60</td><td class="num up">+2.03%</td><td></td></tr>
+          <tr><td class="num">NVDA</td><td>NVIDIA</td><td class="num">131.18</td><td class="num up">+0.44%</td><td></td></tr>
+        </table>
+      </div></div>
+      <div class="grp">观察 · 2</div>
+      <div class="card"><div class="card-b" style="padding-top:4px">
+        <table>
+          <tr><td class="num">TSLA</td><td>Tesla</td><td class="num">242.13</td><td class="num down">−1.65%</td><td></td></tr>
+          <tr><td class="num">300750</td><td>宁德时代</td><td class="num">188.40</td><td class="num up">+0.31%</td><td></td></tr>
+        </table>
+      </div></div>
+      <div class="grp">新能源候选 · 0</div>
+      <div class="card"><div class="card-b">
+        <div class="empty">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a8a6a0" stroke-width="1.5"><polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/></svg>
+          这个分组还是空的<br><button class="ghost-btn ai" style="margin-top:8px">让 AI 找几只候选 ↗</button>
+        </div>
+      </div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 4 持仓 ═══ -->
+<div class="frame-wrap">
+  <div class="frame-title"><span class="no">04</span>持仓 · 收敛后两块</div>
+  <div class="frame-note">六合一收敛为主表+风险结论。权重列带 4px 细条,超限行左缘 2px 红条(AAPL 行);风险卡只读+时间戳,底部唯一按钮=发话开聊。</div>
+  <div class="frame">
+    <div class="fh"><span class="fh-title">持仓</span><span class="fh-fresh">刚刚</span><span class="fh-sp"></span><button class="ghost-btn ai">问 AI ↗</button><button class="ghost-btn icon">✕</button></div>
+    <div class="scroll">
+      <div class="kpis">
+        <div class="kpi"><div class="k">总市值</div><div class="v">¥1,284,300</div></div>
+        <div class="kpi"><div class="k">总成本</div><div class="v">¥1,158,900</div></div>
+        <div class="kpi"><div class="k">浮动盈亏</div><div class="v up">+10.82%</div></div>
+        <div class="kpi"><div class="k">最大单仓</div><div class="v down">18.5%</div></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="t">持仓明细</span><span class="badge">3 只</span></div>
+        <div class="card-b" style="padding-top:4px">
+        <table>
+          <tr><th>标的</th><th class="num">市值</th><th class="num">盈亏</th><th>权重</th></tr>
+          <tr class="risk"><td class="num">AAPL</td><td class="num">¥237,600</td><td class="num up">+14.2%</td><td><span class="weight-bar over"><i style="width:100%"></i></span> <span class="num" style="font-family:var(--mono);font-size:11px;color:var(--red)">18.5%</span></td></tr>
+          <tr><td class="num">600519</td><td class="num">¥171,400</td><td class="num up">+6.8%</td><td><span class="weight-bar"><i style="width:72%"></i></span> <span style="font-family:var(--mono);font-size:11px">13.3%</span></td></tr>
+          <tr><td class="num">0700.HK</td><td class="num">¥128,400</td><td class="num down">−2.1%</td><td><span class="weight-bar"><i style="width:54%"></i></span> <span style="font-family:var(--mono);font-size:11px">10.0%</span></td></tr>
+        </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="t">风险结论</span><span class="badge">07/17 09:30 扫描</span></div>
+        <div class="card-b">
+          <div class="alert-item"><div class="alert-line"><span><span class="dot r"></span>AAPL 权重 18.5% 超硬限 15%,建议区间 12–15%</span></div></div>
+          <div class="alert-item"><div class="alert-line"><span><span class="dot a"></span>科技板块合计 42%,接近板块上限 45%</span></div></div>
+          <div class="alert-item"><div class="alert-line"><span><span class="dot g"></span>其余 6 项风控规则全部通过</span></div></div>
+          <div style="margin-top:10px"><button class="ghost-btn ai">让 AI 重新评估并给调仓建议 ↗</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 5 盯盘 ═══ -->
+<div class="frame-wrap">
+  <div class="frame-title"><span class="no">05</span>盯盘 · 告警中心</div>
+  <div class="frame-note">升格接收审查流。待处理按 severity 分组,首条展开示意"根因 → 建议 → 问 AI"闭环;规则表用 ToggleSwitch;推送通道沉底。</div>
+  <div class="frame">
+    <div class="fh"><span class="fh-title">盯盘</span><span class="fh-fresh">30 秒前</span><span class="fh-sp"></span><button class="ghost-btn ai">问 AI ↗</button><button class="ghost-btn icon">✕</button></div>
+    <div class="scroll">
+      <div class="kpis">
+        <div class="kpi"><div class="k">高优待处理</div><div class="v down">2</div></div>
+        <div class="kpi"><div class="k">今日事件</div><div class="v">5</div></div>
+        <div class="kpi"><div class="k">运行规则</div><div class="v">4</div></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="t">待处理</span><span class="badge">高 2 · 中 1</span></div>
+        <div class="card-b">
+          <div class="alert-item">
+            <div class="alert-line"><span><span class="dot r"></span>600519 放量 3.2σ 下挫</span><span class="time">09:28</span></div>
+            <div class="alert-expand">
+              <div class="row"><span class="lbl">根因</span> 白酒批价周报走弱 + 北向净卖出,情报面出现 2 条负面</div>
+              <div class="row"><span class="lbl">建议</span> 复核持仓论点;当前权重 13.3% 未超限,可观察不动</div>
+              <div class="row" style="margin-top:8px"><button class="ghost-btn ai">带上下文问 AI ↗</button> <button class="ghost-btn">稍后提醒</button> <button class="ghost-btn">忽略</button></div>
+            </div>
+          </div>
+          <div class="alert-item"><div class="alert-line"><span><span class="dot r"></span>AAPL 单仓权重超硬限</span><span class="time">09:31</span></div></div>
+          <div class="alert-item"><div class="alert-line"><span><span class="dot a"></span>0700.HK 触发均线金叉</span><span class="time">08:55</span></div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="t">规则</span><span class="badge">4 条</span></div>
+        <div class="card-b" style="padding-top:4px">
+        <table>
+          <tr><th>规则</th><th>范围</th><th class="num">冷却</th><th style="width:36px"></th></tr>
+          <tr><td>单仓权重 &gt; 15%</td><td>持仓</td><td class="num">30m</td><td><span class="toggle"></span></td></tr>
+          <tr><td>成交量异常 3σ</td><td>自选</td><td class="num">15m</td><td><span class="toggle"></span></td></tr>
+          <tr><td>均线金叉/死叉</td><td>自选</td><td class="num">1d</td><td><span class="toggle"></span></td></tr>
+          <tr><td>跌幅 &gt; 5% 日内</td><td>全市场</td><td class="num">1h</td><td><span class="toggle off"></span></td></tr>
+        </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="t">推送通道</span><span class="badge">企业微信 · 已连</span></div>
+        <div class="card-b" style="font-size:12px;color:var(--muted)">高优事件即时推送 · 中低优先级每日 17:00 汇总</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 6 策略 ═══ -->
+<div class="frame-wrap">
+  <div class="frame-title"><span class="no">06</span>策略 · 表 + 回测详情</div>
+  <div class="frame-note">主表列出策略与最近回测收益;选中行(--selected 底)下方内联展开回测指标网格,复用聊天工具卡同一渲染;纸上交易区块从持仓页迁来沉底。</div>
+  <div class="frame">
+    <div class="fh"><span class="fh-title">策略</span><span class="fh-fresh">刚刚</span><span class="fh-sp"></span><button class="ghost-btn ai">问 AI ↗</button><button class="ghost-btn icon">✕</button></div>
+    <div class="scroll">
+      <div class="card">
+        <div class="card-h"><span class="t">策略库</span><span class="badge">3 个</span></div>
+        <div class="card-b" style="padding-top:4px">
+        <table>
+          <tr><th>名称</th><th>状态</th><th class="num">最近回测</th><th class="num">年化</th></tr>
+          <tr class="hover-demo"><td>双均线 20/60</td><td><span class="dot g"></span>启用</td><td class="num">07/16</td><td class="num up">+12.4%</td></tr>
+          <tr><td>RSI 超卖反转</td><td><span class="dot g"></span>启用</td><td class="num">07/10</td><td class="num up">+6.1%</td></tr>
+          <tr><td>波动率突破</td><td><span class="dot x"></span>停用</td><td class="num">06/28</td><td class="num down">−3.8%</td></tr>
+        </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="t">双均线 20/60 · 回测</span><span class="badge">2023-01 ~ 2026-07</span></div>
+        <div class="card-b">
+          <div class="metrics">
+            <div class="metric"><div class="k">年化</div><div class="v up">+12.4%</div></div>
+            <div class="metric"><div class="k">最大回撤</div><div class="v down">−14.9%</div></div>
+            <div class="metric"><div class="k">夏普</div><div class="v">1.21</div></div>
+            <div class="metric"><div class="k">胜率</div><div class="v">54%</div></div>
+          </div>
+          <div style="font-size:12px;color:var(--muted);margin-top:8px">对比买入持有 +9.7%;参数敏感性中等,60 日窗口 ±10 影响年化 ±2.1pp。</div>
+          <div style="margin-top:8px"><button class="ghost-btn ai">让 AI 解读这次回测 ↗</button></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="t">纸上交易</span><span class="badge">迁自持仓页</span></div>
+        <div class="card-b"><div class="fields">
+          <div class="field"><div class="k">组合市值</div><div class="v">¥502,100</div></div>
+          <div class="field"><div class="k">现金</div><div class="v">¥97,900</div></div>
+          <div class="field"><div class="k">累计盈亏</div><div class="v up">+4.2%</div></div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 7 报告 ═══ -->
+<div class="frame-wrap">
+  <div class="frame-title"><span class="no">07</span>报告 · 产物库</div>
+  <div class="frame-note">唯一表单 = 顶部筛选(类型 pill + symbol);列表行 = 门禁 StatusDot + 标题 + 导出图标(语音/PPT);点行在本面板内做正文预览(同聊天 Markdown 渲染器)。</div>
+  <div class="frame">
+    <div class="fh"><span class="fh-title">报告</span><span class="fh-fresh">刚刚</span><span class="fh-sp"></span><button class="ghost-btn ai">问 AI ↗</button><button class="ghost-btn icon">✕</button></div>
+    <div class="scroll">
+      <div class="filter-row">
+        <span class="pill on">全部</span><span class="pill">个股</span><span class="pill">复盘</span><span class="pill">盯盘</span>
+        <input placeholder="按 symbol 过滤…">
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="t">全部报告</span><span class="badge">12 篇</span></div>
+        <div class="card-b">
+          <div class="report-row"><span><span class="dot g"></span>AAPL 深度研究 · 三情景估值</span><span class="meta">昨天 21:04 <span class="exp">🔊 📽</span></span></div>
+          <div class="report-row"><span><span class="dot g"></span>组合周度复盘 W29</span><span class="meta">07/14 <span class="exp">🔊 📽</span></span></div>
+          <div class="report-row"><span><span class="dot r"></span>盯盘异动回顾 · 未过门禁</span><span class="meta">07/13</span></div>
+          <div class="report-row"><span><span class="dot g"></span>600519 财报点评</span><span class="meta">07/11 <span class="exp">🔊</span></span></div>
+          <div class="report-row"><span><span class="dot g"></span>0700.HK 深度研究</span><span class="meta">07/08 <span class="exp">🔊 📽</span></span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="t">AAPL 深度研究(预览)</span><span class="badge">质量门禁 通过</span></div>
+        <div class="card-b" style="font-size:12.5px;color:var(--ink-2);line-height:1.7">
+          <b>投资论点</b>:服务业务毛利改善驱动重估…<br>
+          <b>三情景</b>:牛 $260 / 基准 $225 / 熊 $175…<br>
+          <b>反方论据</b>:硬件周期见顶,监管对 App Store 抽成…<br>
+          <span style="color:var(--faint);font-size:11px">[来源: financial · 07/16] [来源: intel · 07/16] …</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 8 任务 ═══ -->
+<div class="frame-wrap">
+  <div class="frame-title"><span class="no">08</span>任务 · 后台视角</div>
+  <div class="frame-note">只留定时/后台两组(单次聊天 run 的监控归聊天气泡)。行 = StatusDot + 名称 + mono 时间。若最终并入盯盘,这两组各成一张 SectionCard。</div>
+  <div class="frame">
+    <div class="fh"><span class="fh-title">任务</span><span class="fh-fresh">刚刚</span><span class="fh-sp"></span><button class="ghost-btn ai">问 AI ↗</button><button class="ghost-btn icon">✕</button></div>
+    <div class="scroll">
+      <div class="card">
+        <div class="card-h"><span class="t">定时任务</span><span class="badge">3 个</span></div>
+        <div class="card-b" style="padding-top:4px">
+        <table>
+          <tr><th>任务</th><th class="num">周期</th><th class="num">下次</th><th>状态</th></tr>
+          <tr><td>盯盘规则评估</td><td class="num">30m</td><td class="num">10:00</td><td><span class="dot g"></span>正常</td></tr>
+          <tr><td>行情缓存预热</td><td class="num">1d</td><td class="num">明 08:30</td><td><span class="dot g"></span>正常</td></tr>
+          <tr><td>周度复盘生成</td><td class="num">周日</td><td class="num">07/20</td><td><span class="dot x"></span>暂停</td></tr>
+        </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="t">后台任务</span><span class="badge">1 进行中</span></div>
+        <div class="card-b">
+          <div class="alert-item">
+            <div class="alert-line"><span><span class="dot a"></span>NVDA 深度研究(委派 3 个子代理)</span><span class="time">进行 4m</span></div>
+            <div style="font-size:11px;color:var(--faint);margin-left:12px;margin-top:2px">研究员 done → 估值分析 running → 报告员 waiting</div>
+          </div>
+          <div class="alert-item"><div class="alert-line"><span><span class="dot g"></span>600519 深研 · 已完成</span><span class="time">昨天</span></div></div>
+          <div class="alert-item"><div class="alert-line"><span><span class="dot r"></span>TSLA 深研 · 失败(数据源降级)</span><span class="time">07/14</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>
