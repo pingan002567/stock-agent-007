@@ -28,8 +28,13 @@ const TRACE_STATUS_CLASS: Record<string, string> = {
   over_budget: " missed",
 };
 
+// 徽章链只在实际发生过委派后出现:纯白名单(available/required)是"额度"
+// 而非执行,闲聊轮展示它只会造成"调用了技能"的误解
+const OBSERVED = new Set(["delegated", "done", "missed", "over_budget"]);
+
 export function SkillTraceChain({ items }: { items: SkillTraceItem[] }) {
   if (items.length === 0) return null;
+  if (!items.some((item) => OBSERVED.has(item.status ?? ""))) return null;
   return (
     <div className="skill-trace-chain">
       {items.map((item, i) => (
