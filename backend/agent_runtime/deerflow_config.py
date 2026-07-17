@@ -115,6 +115,40 @@ for t in A5_BLOCKED:
     TOOL_GROUP_MAP[t] = "a5-blocked"
 
 
+def _sandbox_mode() -> str:
+    """沙箱执行模式:docker(aio 容器隔离) / host(Local 受控 host bash) / readonly。
+
+    默认自动:Docker 守护进程可达 → docker;否则 host——单用户本地工作台的信任
+    模型等同于用户自己在本机跑 agent 工具(SandboxAudit 审计 + 命令/路径安全层
+    仍然生效)。``WORKBENCH_SANDBOX_MODE`` 可强制三者之一;readonly 恢复旧行为
+    (仅只读文件工具,无 bash/写盘)。
+    """
+    forced = os.getenv("WORKBENCH_SANDBOX_MODE", "").strip().lower()
+    if forced in {"docker", "host", "readonly"}:
+        return forced
+    import subprocess
+    try:
+        probe = subprocess.run(
+            ["docker", "info", "--format", "{{.ServerVersion}}"],
+            capture_output=True, timeout=3,
+        )
+        # 某些 docker shim 在守护进程宕机时仍 exit 0:必须校验版本输出非空
+        if probe.returncode == 0 and probe.stdout.strip():
+            return "docker"
+    except Exception:
+        pass
+    return "host"
+
+
+def _sandbox_section(mode: str) -> dict[str, Any]:
+    if mode == "docker":
+        return {"use": "deerflow.community.aio_sandbox.aio_sandbox_provider:AioSandboxProvider"}
+    return {
+        "use": "deerflow.sandbox.local:LocalSandboxProvider",
+        "allow_host_bash": mode == "host",
+    }
+
+
 def _build_tool_configs() -> list[dict[str, Any]]:
     """Build the ``tools`` section from module-level tool instances."""
     configs: list[dict[str, Any]] = []
@@ -133,6 +167,20 @@ def _build_tool_configs() -> list[dict[str, Any]]:
             "name": _file_tool, "group": "files",
             "use": f"deerflow.sandbox.tools:{_file_tool}_tool",
         })
+    # 沙箱代码执行(P0,doc/DEERFLOW_21_RESEARCH.md):bash/写盘让 AI 能"写代码算"
+    # ——自定义指标/归因/压力测试/画图;产物经 present_files 呈现。readonly 模式不注册。
+    if _sandbox_mode() != "readonly":
+        _exec_set = tuple(
+            t.strip() for t in os.getenv(
+                "WORKBENCH_SANDBOX_EXEC_TOOLS", "bash,write_file,str_replace"
+            ).split(",") if t.strip()
+        )
+        for _exec_tool in _exec_set:
+            configs.append({
+                "name": _exec_tool, "group": "sandbox-exec",
+                "use": f"deerflow.sandbox.tools:{_exec_tool}_tool",
+            })
+        # present_files 由 harness 内建自动注册,勿重复(会被去重告警跳过)
     # Web search: a single "web_search" tool backed by the best-configured provider.
     # Tavily / Serper register the same tool name, so we pick one (not all). Tavily and
     # Serper need an API key; DuckDuckGo is the keyless default fallback.
@@ -243,16 +291,14 @@ def generate_config(target_dir: str | Path = "data") -> str:
 
     config: dict[str, Any] = {
         "models": [model_cfg],
-        "sandbox": {
-            "use": "deerflow.sandbox.local:LocalSandboxProvider",
-            "allow_host_bash": False,
-        },
+        "sandbox": _sandbox_section(_sandbox_mode()),
         "tools": _build_tool_configs(),
         "tool_groups": [
             {"name": "a2-research"},
             {"name": "a3-risk"},
             {"name": "a4-planner"},
             {"name": "a5-blocked"},
+            {"name": "sandbox-exec"},
         ],
         "skills": {
             "path": "skills",
@@ -289,6 +335,12 @@ def generate_config(target_dir: str | Path = "data") -> str:
             "recovery_timeout_sec": 60,
         },
         "token_usage": {"enabled": True},
+        # run 级 token 硬预算(意图预算管"能拉谁",这里管"最多烧多少")
+        "token_budget": {
+            "enabled": True,
+            "max_tokens": int(os.getenv("WORKBENCH_RUN_TOKEN_BUDGET", "300000")),
+            "warn_threshold": 0.8,
+        },
         "memory": {
             "enabled": True,
             "storage_path": str(paths.data_dir() / "deerflow_memory.json"),

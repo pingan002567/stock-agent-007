@@ -96,6 +96,10 @@ const TOOL_LABELS: Record<string, string> = {
   glob: "查找文件",
   ls: "浏览目录",
   view_image: "查看图片",
+  bash: "执行代码",
+  write_file: "写文件",
+  str_replace: "编辑文件",
+  present_files: "交付文件",
 };
 
 export function toolLabel(name: string): string {

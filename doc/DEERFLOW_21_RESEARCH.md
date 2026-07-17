@@ -49,7 +49,7 @@
 
 ## 三、集成方案(按优先级)
 
-### P0 沙箱代码执行——给 AI 一个 Python 工作台(1-2 天)
+### P0 沙箱代码执行——给 AI 一个 Python 工作台 ✅ 已落地(2026-07-17)
 投研场景下最大的能力解锁:AI 现在只能调用我们预定义的域工具,开沙箱后可以**写代码算**——
 自定义指标、持仓归因、蒙特卡洛压力测试、matplotlib 画图,算完用 `present_files` 呈现。
 - 路线:优先 `community/aio_sandbox`(Docker 隔离);无 Docker 时 Local provider + 受控放开
@@ -58,7 +58,7 @@
 - 权限映射:bash/write 归 a3 工具组;委派预算的 authority_cap 天然封顶
 - 配套:present_files 产物 → 聊天工具卡 → 右栏详情/下载
 
-### P0.5 启用 token_budget(0.5 天)
+### P0.5 启用 token_budget ✅ 已落地(随 P0,run 级 300k 可 env 调)
 与我们的 INTENT_BUDGETS 委派预算互补:意图预算管"能拉谁",token_budget 管"这轮最多烧多少"。
 `token_budget.enabled + max_tokens`,按 intent 分档(闲聊 50k / 深研 300k)可在 adapter 传参层做。
 
