@@ -61,8 +61,6 @@ export default function Holdings() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
-  const [draftBusy, setDraftBusy] = useState(false);
-  const [draftSymbol, setDraftSymbol] = useState("");
 
   // === loadAll: parallel fetch all data in one shot ===
   const loadAll = async () => {
@@ -116,17 +114,6 @@ export default function Holdings() {
       await loadAll();
     } catch { /* ignore */ }
     finally { setScanning(false); }
-  };
-
-  const handleDraft = async (symbol: string) => {
-    if (!symbol.trim()) return;
-    setDraftBusy(true);
-    try {
-      await apiPost("/api/rebalance-drafts", { symbol, target_weight_pct: 15 });
-      setDraftSymbol("");
-      await loadAll();
-    } catch { /* ignore */ }
-    finally { setDraftBusy(false); }
   };
 
   // === Main render ===
@@ -314,35 +301,6 @@ export default function Holdings() {
           </div>
         </div>
 
-        <div className="panel">
-          <div className="panel-header">
-            <div className="panel-title">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <polyline points="14,2 14,8 20,8"/>
-              </svg>
-              生成调仓草案
-            </div>
-          </div>
-          <div className="panel-body">
-            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              <input
-                value={draftSymbol}
-                onChange={(e) => setDraftSymbol(e.target.value.toUpperCase())}
-                placeholder="输入股票代码，如 AAPL"
-                style={{ flex: 1 }}
-              />
-              <button className="primary" disabled={draftBusy || !draftSymbol.trim()}
-                onClick={() => void handleDraft(draftSymbol.trim())}
-                type="button">
-                {draftBusy ? "生成中…" : "生成草案"}
-              </button>
-            </div>
-            <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-              目标仓位 15%，生成后需人工确认或驳回。
-            </div>
-          </div>
-        </div>
       </div>
     </PageContainer>
   );

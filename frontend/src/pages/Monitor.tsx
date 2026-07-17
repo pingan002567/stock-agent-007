@@ -22,6 +22,10 @@ interface MonitorStatus {
   status?: string; interval_seconds?: number; last_checked_at?: string | null;
   last_matched_at?: string | null; last_error?: string | null;
 }
+interface InboxItem {
+  item_key: string; title?: string; status?: string; priority?: string;
+  source_label?: string; symbol?: string; due_at?: string | null;
+}
 
 const RULE_TYPE_OPTIONS = [
   { value: "single_position_weight_gt", label: "仓位超限" },
@@ -53,6 +57,8 @@ export default function Monitor() {
   const [ruleSaveError, setRuleSaveError] = useState<string | null>(null);
   const [hintDismissed, setHintDismissed] = useState(false);
   const [feedbackDone, setFeedbackDone] = useState<Record<string, boolean>>({});
+  const [inbox, setInbox] = useState<InboxItem[]>([]);
+  const [inboxBusyKey, setInboxBusyKey] = useState<string | null>(null);
   const sseRef = useRef<EventSource | null>(null);
   const [eventPage, setEventPage] = useState(1);
   const [eventTotal, setEventTotal] = useState(0);
@@ -62,12 +68,14 @@ export default function Monitor() {
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const [evResp, rl, st] = await Promise.all([
+      const [evResp, rl, st, ib] = await Promise.all([
         apiGet<{ items: MonitorEvent[]; total: number }>(`/api/monitor/events?page=${page}&page_size=${eventPageSize}`).catch(() => ({ items: [], total: 0 })),
         apiGet<{ items: MonitorRule[] }>("/api/monitor/rules").then((r) => r.items).catch(() => []),
         apiGet<MonitorStatus>("/api/monitor/status").catch(() => null),
+        apiGet<{ items: InboxItem[] }>("/api/review-inbox").then((r) => r.items).catch(() => []),
       ]);
       setEvents(evResp.items); setEventTotal(evResp.total); setRules(rl); setStatus(st);
+      setInbox(ib.filter((item) => item.status !== "done" && item.status !== "dismissed"));
     } catch (err) { setError(err instanceof Error ? err.message : "加载盯盘中心失败"); } finally { if (!silent) setLoading(false); }
   }, [eventPage, eventPageSize]);
 
@@ -107,6 +115,23 @@ export default function Monitor() {
     // force=true so a manual evaluation isn't silently swallowed by cooldown.
     try { const res = await apiPost<Record<string, unknown>>("/api/monitor/evaluate-once", { force: true }); setEvalResult(JSON.stringify(res, null, 2)); await loadAll(); }
     catch (err) { setEvalResult(err instanceof Error ? err.message : "评估失败"); } finally { setEvalBusy(false); }
+  };
+
+  // 审查收件箱动作(自持仓/总览页迁入:告警中心统一处理"待人确认"事项)
+  const handleInboxAction = async (itemKey: string, action: "dismiss" | "mark-done") => {
+    setInboxBusyKey(itemKey);
+    try {
+      await apiPost(`/api/review-inbox/${encodeURIComponent(itemKey)}/${action}`, { note: "" });
+      await loadAll(undefined, true);
+    } catch { void 0; } finally { setInboxBusyKey(null); }
+  };
+  const handleInboxSnooze = async (itemKey: string) => {
+    setInboxBusyKey(itemKey);
+    try {
+      const until = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+      await apiPost(`/api/review-inbox/${encodeURIComponent(itemKey)}/snooze`, { snoozed_until: until, note: "" });
+      await loadAll(undefined, true);
+    } catch { void 0; } finally { setInboxBusyKey(null); }
   };
 
   const handleToggleRule = async (rule: MonitorRule) => {
@@ -182,49 +207,50 @@ export default function Monitor() {
           </div>
         </div>
 
-        <div className="kpi-grid">
-          <div className="kpi-card">
-            <div className="kpi-header">
-              <span className="kpi-label">盯盘状态</span>
-              <div className={`kpi-icon ${status?.status === "running" ? "green" : "amber"}`}>●</div>
-            </div>
-            <div className="kpi-value" style={{ color: status?.status === "running" ? "var(--green)" : "var(--amber)" }}>
-              {status?.status === "running" ? "运行中" : "已暂停"}
-            </div>
-            <div className="kpi-change neutral">正常运行</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-header">
-              <span className="kpi-label">监控周期</span>
-              <div className="kpi-icon blue">⏱</div>
-            </div>
-            <div className="kpi-value">{status?.interval_seconds ?? "-"}s</div>
-            <div className="kpi-change neutral">每分钟检查</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-header">
-              <span className="kpi-label">今日事件</span>
-              <div className="kpi-icon amber">🔔</div>
-            </div>
-            <div className="kpi-value">{events.length}</div>
-            <div className="kpi-change neutral">条事件</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-header">
-              <span className="kpi-label">高风险</span>
-              <div className="kpi-icon red">⚠️</div>
-            </div>
-            <div className="kpi-value" style={{ color: highCount > 0 ? "var(--red)" : undefined }}>{highCount}</div>
-            <div className={`kpi-change ${highCount > 0 ? "down" : "neutral"}`}>
-              {highCount > 0 ? "需要关注" : "无风险"}
-            </div>
-          </div>
-        </div>
-
         {hasDiagnosis && (
           <div className="ticket fade-in" style={{ borderLeft: "4px solid var(--red)", padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span>⚠ 发现 {highCount} 条高风险盯盘事件，建议检查相关持仓风险</span>
             <button className="small" onClick={() => setHintDismissed(true)} type="button">忽略</button>
+          </div>
+        )}
+
+        {/* 待审查(告警中心接收审查流:草案确认/风控复核等"待人确认"事项) */}
+        {inbox.length > 0 && (
+          <div className="panel" style={{ borderLeft: "3px solid var(--amber)" }}>
+            <div className="panel-header">
+              <div className="panel-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M22 12h-6l-2 3h-4l-2-3H2"/>
+                  <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
+                </svg>
+                待审查
+                <span className="panel-badge">{inbox.length} 项</span>
+              </div>
+            </div>
+            <div className="panel-body">
+              {inbox.map((item) => (
+                <div key={item.item_key} className="intel-item">
+                  <div className={`intel-dot ${item.priority === "high" ? "warning" : "info"}`} />
+                  <div className="intel-content">
+                    <div className="intel-title">{item.title ?? item.item_key}</div>
+                    <div className="intel-desc">{item.source_label ?? item.status ?? ""}{item.symbol ? ` · ${item.symbol}` : ""}</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+                    <AskAiButton
+                      prompt={`帮我评估这条待审查事项并给出处理建议:「${item.title ?? item.item_key}」`}
+                      symbol={item.symbol}
+                      label="问 AI"
+                    />
+                    <button className="small" disabled={inboxBusyKey === item.item_key}
+                      onClick={() => void handleInboxAction(item.item_key, "mark-done")} type="button">完成</button>
+                    <button className="small" disabled={inboxBusyKey === item.item_key}
+                      onClick={() => void handleInboxSnooze(item.item_key)} type="button" title="明天再提醒">稍后</button>
+                    <button className="small" disabled={inboxBusyKey === item.item_key}
+                      onClick={() => void handleInboxAction(item.item_key, "dismiss")} type="button">忽略</button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -260,6 +286,14 @@ export default function Monitor() {
                             ))}
                           </div>
                         )}
+                        {/* 闭环:事件 → 带上下文问 AI(根因+建议交给聊天) */}
+                        <div style={{ marginBottom: 8 }}>
+                          <AskAiButton
+                            prompt={`分析这条盯盘告警的根因并给出处理建议:「${ev.title ?? ev.event_id}」(${ev.symbol ?? "全市场"} · ${ruleTypeLabel(ev.rule_type)})`}
+                            symbol={ev.symbol}
+                            label="带上下文问 AI"
+                          />
+                        </div>
                         {ev.rule_id && (
                           <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "var(--muted)" }}>
                             {feedbackDone[ev.event_id] ? (

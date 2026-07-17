@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { apiGet, apiPost } from "@/api/client";
+import { apiGet } from "@/api/client";
 import { useAppState } from "@/hooks/useAppState";
 import { AskAiButton } from "@/components/ui/AskAiButton";
 import { PageContainer } from "@/components/layout/PageContainer";
@@ -20,41 +20,49 @@ interface OverviewData {
   market?: string;
 }
 interface IndexInfo { code?: string; name?: string; last?: number; change_pct?: number }
+interface ReportItem { report_id: string; title?: string; status?: string; created_at?: string }
 
 export default function Overview() {
   const { appDataCache, globalLoading } = useAppState();
   const [data, setData] = useState<OverviewData | null>(null);
   const [events, setEvents] = useState<MonitorEvent[]>([]);
   const [indices, setIndices] = useState<IndexInfo[]>([]);
+  const [reports, setReports] = useState<ReportItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [scanning, setScanning] = useState(false);
+
+  const loadAll = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const [ov, ev, mr, rp] = await Promise.all([
+        apiGet<OverviewData>("/api/overview"),
+        apiGet<{ items: MonitorEvent[] }>("/api/monitor/events").catch(() => ({ items: [] })),
+        apiGet<{ indices?: IndexInfo[] }>("/api/market/review").catch(() => ({ indices: [] })),
+        apiGet<{ items: ReportItem[] }>("/api/reports").catch(() => ({ items: [] })),
+      ]);
+      setData(ov); setEvents(ev.items ?? []); setIndices(mr.indices ?? []);
+      setReports((rp.items ?? []).slice(0, 3));
+    } catch (err) { setError(err instanceof Error ? err.message : "加载总览失败"); } finally { setLoading(false); }
+  }, []);
 
   // Populate from global cache once initial load completes
   useEffect(() => {
     if (globalLoading) return;
     const cache = appDataCache.current;
     if (cache.overview) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 既有 cache-first 水合模式
       setData(cache.overview as OverviewData);
       setEvents((cache.monitorEvents as { items: MonitorEvent[] })?.items ?? []);
       setIndices(((cache.marketReview as { indices?: IndexInfo[] })?.indices ?? []));
+      setReports((((cache.reports as { items?: ReportItem[] })?.items) ?? []).slice(0, 3));
       setLoading(false);
     }
-  }, [globalLoading, appDataCache]);
+    // 缓存兜底后仍拉一次最新(报告/事件此页刻度较粗,静默刷新)
+    void loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [globalLoading]);
 
-  const loadAll = useCallback(async () => {
-    setLoading(true); setError(null);
-    try {
-      const [ov, ev, mr] = await Promise.all([
-        apiGet<OverviewData>("/api/overview"),
-        apiGet<{ items: MonitorEvent[] }>("/api/monitor/events").catch(() => ({ items: [] })),
-        apiGet<{ indices?: IndexInfo[] }>("/api/market/review").catch(() => ({ indices: [] })),
-      ]);
-      setData(ov); setEvents(ev.items ?? []); setIndices(mr.indices ?? []);
-    } catch (err) { setError(err instanceof Error ? err.message : "加载总览失败"); } finally { setLoading(false); }
-  }, []);
 
-  const handleRiskScan = async () => { setScanning(true); try { await apiPost("/api/holdings/risk"); await loadAll(); } catch { /* ignore */ } finally { setScanning(false); } };
 
   return (
     <PageContainer>
@@ -85,8 +93,6 @@ export default function Overview() {
               </div>
             </div>
             <div className="hero-actions">
-              <button className="primary" onClick={() => void loadAll()} disabled={loading} type="button">刷新全部</button>
-              <button onClick={() => void handleRiskScan()} disabled={scanning} type="button">{scanning ? "扫描中…" : "持仓风险扫描"}</button>
               <AskAiButton prompt="今天我的组合表现如何?有什么需要关注的风险或机会?" />
             </div>
           </section>
@@ -151,11 +157,6 @@ export default function Overview() {
                   </svg>
                   持仓明细
                   <span className="panel-badge">{(data.holdings ?? []).length} 只</span>
-                </div>
-                <div className="panel-actions">
-                  <button className="small" onClick={() => void handleRiskScan()} disabled={scanning} type="button">
-                    {scanning ? "扫描中…" : "风险扫描"}
-                  </button>
                 </div>
               </div>
               <div className="panel-body" style={{ padding: 0 }}>
@@ -227,6 +228,32 @@ export default function Overview() {
               </div>
             </div>
           </div>
+
+          {reports.length > 0 && (
+            <div className="panel">
+              <div className="panel-header">
+                <div className="panel-title">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14,2 14,8 20,8"/>
+                  </svg>
+                  最近报告
+                  <span className="panel-badge">{reports.length} 篇</span>
+                </div>
+              </div>
+              <div className="panel-body">
+                {reports.map((r) => (
+                  <div key={r.report_id} className="event-item">
+                    <div className={`event-dot ${r.status === "passed" || r.status === "completed" ? "info" : "warning"}`} />
+                    <div className="event-content">
+                      <div className="event-title">{r.title ?? r.report_id}</div>
+                    </div>
+                    <div className="event-time">{r.created_at?.slice(5, 16) ?? ""}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       ) : null}
     </PageContainer>
