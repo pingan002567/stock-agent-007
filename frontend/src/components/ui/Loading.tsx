@@ -3,7 +3,7 @@ export function Loading({ text = "加载中…" }: { text?: string }) {
 }
 
 export function ErrorMessage({ message }: { message: string }) {
-  return <div style={{ textAlign: "center", color: "var(--red)", padding: "24px 0", fontSize: 13 }}>⚠️ {message}</div>;
+  return <div className="error-inline" style={{ textAlign: "center", color: "var(--red)", padding: "24px 0", fontSize: 13 }}>⚠️ {message}</div>;
 }
 
 /* ---------- Skeletons ---------- */

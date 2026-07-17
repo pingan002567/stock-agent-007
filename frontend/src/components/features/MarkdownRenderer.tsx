@@ -261,5 +261,5 @@ export function MarkdownRenderer({ text }: MarkdownRendererProps) {
     }
   }
 
-  return <>{elements}</>;
+  return <div className="md-content">{elements}</div>;
 }

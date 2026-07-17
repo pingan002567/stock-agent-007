@@ -3671,3 +3671,38 @@ input, textarea { cursor: text; }
 .func-inner { min-width: 0; }
 .detail-host { overflow-wrap: anywhere; }
 .detail-host pre { white-space: pre-wrap; word-break: break-word; max-width: 100%; }
+
+/* ── 文本选择策略(桌面惯例):骨架默认禁选,内容白名单放行 ──
+   判断标准 = 用户有没有理由复制它。白名单打在"内容渲染器"层,
+   新页面复用渲染器即自动继承正确行为。 */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* 内容白名单 */
+.md-content,                 /* Markdown 渲染器(聊天正文/报告预览) */
+.msg,                        /* 聊天气泡(用户消息为纯文本,不经渲染器) */
+.detail-host,                /* 右栏工具详情 */
+.tool-result-detail,         /* 工具卡展开结果 */
+tbody td,                    /* 数据表格值(代码/价格/权重) */
+pre, code,                   /* 代码与原文块 */
+.tl-body,                    /* 情报时间线正文 */
+.intel-content, .event-content, /* 事件/情报文本 */
+.setting-card-body,          /* 设置值区(路径/密钥回显/模型名) */
+.toast-message,              /* 提醒文本 */
+.error-inline,               /* 错误信息 */
+.clarification-card {        /* AI 反问卡 */
+  -webkit-user-select: text;
+  user-select: text;
+}
+/* 气泡与内容区里的"框架件"回收禁选 */
+.msg-label, .msg-time, .msg-ai-tools-header,
+.tool-card, .skill-trace-chain, .plan-todos,
+tbody td .row-ops, tbody td button,
+.setting-card-body button, .setting-card-body .toggle,
+.md-content .code-copy-btn {
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* 输入类原生可编辑,显式声明防被祖先覆盖 */
+input, textarea { -webkit-user-select: text; user-select: text; }
