@@ -736,6 +736,8 @@ class CopilotSession(BaseModel):
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
     last_message_at: Optional[str] = None
+    # 列表视图元信息:用户可见消息数(user_message + final_answer)
+    message_count: int = 0
 
 
 class CopilotSessionCreateRequest(BaseModel):

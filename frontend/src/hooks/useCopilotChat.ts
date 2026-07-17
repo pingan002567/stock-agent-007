@@ -141,6 +141,8 @@ function useCopilotChatState() {
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const sendingRef = useRef(false);
+  // 「新建对话」不立即建库(否则积累空会话):置起意向标记,首条消息时才真正创建
+  const pendingNewRef = useRef(false);
 
   const currentSession = sessions.find((s) => s.session_id === currentSessionId);
 
@@ -176,6 +178,7 @@ function useCopilotChatState() {
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
     sendingRef.current = false;
+    pendingNewRef.current = false;
     setCurrentSessionId(id);
     setMessages([]);
     setStreamingReasoningText("");
@@ -192,17 +195,16 @@ function useCopilotChatState() {
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
     sendingRef.current = false;
-    try {
-      const session = await createSession("新会话", currentScreen, stock || null);
-      setSessions((prev) => [session, ...prev]);
-      setCurrentSessionId(session.session_id);
-      setMessages([]);
-      setStreamingReasoningText("");
-      setStreamMessage(null);
-      setCopilotStreaming(false);
-      setSending(false);
-    } catch { /* empty */ }
-  }, [currentScreen, stock, setCopilotStreaming, setStreamingReasoningText]);
+    // 懒建:只清空视图并置新建意向,首条消息时 ensureSession 才创建会话
+    pendingNewRef.current = true;
+    currentSessionIdRef.current = null;
+    setCurrentSessionId(null);
+    setMessages([]);
+    setStreamingReasoningText("");
+    setStreamMessage(null);
+    setCopilotStreaming(false);
+    setSending(false);
+  }, [setCopilotStreaming, setStreamingReasoningText]);
 
   const handleRenameSession = useCallback(async (sid: string, val: string) => {
     const trimmed = val.trim();
@@ -229,8 +231,16 @@ function useCopilotChatState() {
   // 确保有当前会话（发消息/上传附件共用）：无则复用最近会话或新建
   const ensureSession = useCallback(async (): Promise<string> => {
     if (currentSessionIdRef.current) return currentSessionIdRef.current;
-    const existing = await fetchSessions();
-    const session = existing[0] ?? await createSession(`${stock} 对话`, currentScreen, stock || null);
+    let session: CopilotSession | undefined;
+    if (!pendingNewRef.current) {
+      const existing = await fetchSessions();
+      session = existing[0];
+    }
+    if (!session) {
+      session = await createSession("新会话", currentScreen, stock || null);
+      setSessions((prev) => [session!, ...prev]);
+    }
+    pendingNewRef.current = false;
     currentSessionIdRef.current = session.session_id;
     setCurrentSessionId(session.session_id);
     return session.session_id;

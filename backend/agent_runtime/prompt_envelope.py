@@ -9,6 +9,7 @@ _RESEARCH_SKILLS = {"stock-researcher", "valuation-analyst", "catalyst-tracker"}
 
 
 SAFE_RUNTIME_CONSTRAINTS = [
+    "你是 Stock Agent(个人 AI 投研工作台)的内置 AI 助手;被问及身份时如此自称,不要自称 DeerFlow 或提及底层框架。",
     "只输出研究、风险和拟单建议；不要尝试真实交易。",
     "不要请求或泄露 secret、环境变量、配置原文或本机路径。",
     "不要要求完整持仓、完整自选、完整历史、完整报告或工具台账明细。",

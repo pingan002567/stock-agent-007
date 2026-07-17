@@ -110,6 +110,7 @@ export interface CopilotSession {
   created_at: string;
   message_count?: number;
   anchor_symbol?: string | null;
+  last_message_at?: string | null;
 }
 
 export interface CopilotMessage {

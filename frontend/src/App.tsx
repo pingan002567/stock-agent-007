@@ -78,7 +78,7 @@ function AppShell() {
       </ErrorBoundary>
       <main className="center">
         <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
-          <CopilotPanel variant="main" />
+          <CopilotPanel />
         </ErrorBoundary>
       </main>
       <ErrorBoundary onError={(e) => showToast(e.message, "error")}>

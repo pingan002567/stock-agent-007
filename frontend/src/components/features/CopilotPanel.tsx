@@ -34,10 +34,10 @@ type ToolItem = {
 };
 
 type GroupedItem =
-  | { t: "msg"; msg: CopilotMessage }
+  | { t: "msg"; msg: CopilotMessage; aborted?: boolean }
   | { t: "ai"; msg: CopilotMessage; tools: ToolItem[] };
 
-function pairMessages(msgs: CopilotMessage[]): GroupedItem[] {
+function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null): GroupedItem[] {
   // 识别已完成的 run（有 final_answer 或 error），并按 call_id 预收集 tool_result。
   // 不能按相邻位置配对：模型常一次批量发多个 tool_call，顺序是 call×N 再 result×N，
   // 相邻配对会全部落空、把成功的工具误判为失败。改为按 call_id 匹配。
@@ -96,71 +96,60 @@ function pairMessages(msgs: CopilotMessage[]): GroupedItem[] {
       pendingTools.delete(rid);
       out.push({ t: "ai", msg, tools });
     } else if (msg.role === "user") {
-      out.push({ t: "msg", msg });
+      // 无终局(final/error)且非进行中的 run:流被中断,给占位说明,别让消息悬空
+      const aborted = !!msg.run_id && !completedRuns.has(msg.run_id) && msg.run_id !== activeRunId;
+      out.push({ t: "msg", msg, aborted });
     }
   }
 
   return out;
 }
 
-/** variant="main"：三栏布局的中栏常驻聊天（会话管理在 LeftSidebar，无折叠按钮）；
- * variant="panel"：历史形态的可折叠伴随面板，当前布局未使用但保留能力。 */
-export function CopilotPanel({ open = true, onToggle, variant = "panel" }: { open?: boolean; onToggle?: () => void; variant?: "panel" | "main" }) {
+/** 三栏布局的中栏常驻聊天(会话管理在 LeftSidebar;历史 panel 折叠变体已随布局定型移除) */
+export function CopilotPanel() {
   const {
     copilotContextVersion,
-    setCurrentScreen, setStock, appDataCache,
+    setCurrentScreen, setStock, appDataCache, globalLoading,
   } = useAppState();
-  const modelName = (appDataCache.current.settings as { agent_runtime?: { model_name?: string } } | undefined)
-    ?.agent_runtime?.model_name || "AI 模型";
+  // globalLoading 变化触发重读:否则首屏渲染时 settings 缓存未就绪,pill 永远停在兜底文案
+  const modelName = useMemo(() => {
+    void globalLoading;
+    return (appDataCache.current.settings as { agent_runtime?: { model_name?: string } } | undefined)
+      ?.agent_runtime?.model_name || "AI 模型";
+  }, [appDataCache, globalLoading]);
 
   const {
-    currentSession, sessions,
+    currentSession,
     messages,
     sending, streamMessage, copiedId,
-    switchSession, handleNewSession, handleRenameSession, handleDeleteSession,
     handleSend: sendMessage, handleStop,
     handleCopy, ensureSession,
   } = useCopilotChat();
 
   const { openDetail } = useChatDetail();
-  // 工具卡 → 右栏详情联动只在聊天中心主区生效；业务页侧栏没有右栏，保持原样
+  // 工具卡 → 右栏详情联动
   const handleToolClick = useMemo(() => {
-    if (variant !== "main") return undefined;
     return (t: ToolInfo) => openDetail({
       id: t.id,
       name: t.name,
       status: t.failed ? "failed" : t.done ? "done" : "running",
       resultText: t.resultText,
     });
-  }, [variant, openDetail]);
+  }, [openDetail]);
   const handleStreamToolClick = useMemo(() => {
-    if (variant !== "main") return undefined;
     return (t: StreamToolCall) => openDetail({
       id: t.callId,
       name: t.name,
       status: t.status,
       resultText: t.resultText,
     });
-  }, [variant, openDetail]);
+  }, [openDetail]);
 
   const [input, setInput] = useState("");
   const [uploading, setUploading] = useState(false);
   const [sessionFiles, setSessionFiles] = useState<UploadedFileInfo[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [sessionOpen, setSessionOpen] = useState(false);
-  const [sessionRename, setSessionRename] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const [sessionDelete, setSessionDelete] = useState<string | null>(null);
-
-  const suggestions = [
-    { text: "分析 AAPL 风险", icon: "📊" },
-    { text: "查看持仓概况", icon: "💰" },
-    { text: "今日市场动态", icon: "📈" },
-    { text: "检查监控告警", icon: "🔔" },
-  ];
-
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const sessionRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = useCallback(() => {
@@ -175,15 +164,6 @@ export function CopilotPanel({ open = true, onToggle, variant = "panel" }: { ope
   }, []);
 
   useEffect(() => { scrollToBottom(); }, [messages, streamMessage, scrollToBottom]);
-
-  useEffect(() => {
-    if (!sessionOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (sessionRef.current && !sessionRef.current.contains(e.target as Node)) setSessionOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [sessionOpen]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -244,7 +224,7 @@ export function CopilotPanel({ open = true, onToggle, variant = "panel" }: { ope
   }, []);
 
   const messageElements = useMemo(() => {
-    const paired = pairMessages(messages);
+    const paired = pairMessages(messages, streamMessage?.runId);
     /** Compute date-header flags by index — avoids let-reassignment in render */
     const dateFlags = new Array<boolean>(paired.length);
     let prevDate = "";
@@ -292,134 +272,24 @@ export function CopilotPanel({ open = true, onToggle, variant = "panel" }: { ope
               {copiedId === item.msg.message_id ? "已复制" : "复制"}
             </button>
           </div>
+          {item.t === "msg" && item.aborted && (
+            <div className="msg-aborted">— 本轮已中断,未生成回答 —</div>
+          )}
         </React.Fragment>
       );
     });
-  }, [messages, copiedId, handleCopy, handleNavigate, handleApi, handleToolClick]);
-
-  if (variant === "panel" && !open) {
-    return <button className="copilot-tab" onClick={onToggle} title="展开 AI 对话">‹</button>;
-  }
+  }, [messages, streamMessage?.runId, copiedId, handleCopy, handleNavigate, handleApi, handleToolClick]);
 
   return (
-    <aside className={variant === "main" ? "copilot-panel copilot-panel-main" : "copilot-panel"}>
-      {/* main 变体的标题已上移统一顶栏,仅侧栏形态保留头部 */}
-      {variant === "panel" && (
-      <div className="copilot-head" data-tauri-drag-region="">
-        {variant === "panel" && (<div ref={sessionRef} style={{ position: "relative" }}>
-          <button
-            className="session-trigger"
-            onClick={() => setSessionOpen((v) => !v)}
-            title="会话管理"
-          >
-            <span className="session-trigger-dot" />
-            <span className="session-trigger-text">{currentSession?.title || "选择会话"}</span>
-            <span className="session-trigger-arrow">▾</span>
-          </button>
-          {sessionOpen && (
-            <div className="session-dropdown" style={{ right: 'auto', left: 0 }}>
-              <div className="session-dropdown-header">
-                <span className="session-dropdown-title">会话管理</span>
-                <button className="session-dropdown-new" onClick={handleNewSession}>+ 新建</button>
-              </div>
-              <div className="session-dropdown-list">
-                {sessions.map((s) => (
-                  <div key={s.session_id}>
-                    {sessionRename === s.session_id ? (
-                      <div className="session-rename">
-                        <input
-                          className="session-rename-input"
-                          value={renameValue}
-                          onChange={(e) => setRenameValue(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") handleRenameSession(s.session_id, renameValue);
-                            if (e.key === "Escape") setSessionRename(null);
-                          }}
-                          onBlur={() => { handleRenameSession(s.session_id, renameValue); setSessionRename(null); }}
-                          autoFocus
-                        />
-                      </div>
-                    ) : (
-                      <div
-                        className={`session-item${s.session_id === currentSession?.session_id ? " active" : ""}`}
-                        onClick={() => switchSession(s.session_id)}
-                      >
-                        <div className="session-item-content">
-                          <div className="session-item-title">{s.title}</div>
-                          <div className="session-item-meta">
-                            {s.message_count ?? 0} 条消息
-                          </div>
-                        </div>
-                        <div className="session-item-actions">
-                          <button
-                            className="session-action-btn"
-                            title="重命名"
-                            onClick={(e) => { e.stopPropagation(); setSessionRename(s.session_id); setRenameValue(s.title); }}
-                          >✎</button>
-                          <button
-                            className="session-action-btn danger"
-                            title="删除"
-                            onClick={(e) => { e.stopPropagation(); setSessionDelete(s.session_id); }}
-                          >✕</button>
-                        </div>
-                      </div>
-                    )}
-                    {sessionDelete === s.session_id && (
-                      <div className="session-delete-modal">
-                        <div className="session-delete-content">
-                          <div className="session-delete-icon">⚠️</div>
-                          <div className="session-delete-title">删除会话</div>
-                          <div className="session-delete-desc">
-                            确定要删除会话「{s.title}」吗？此操作将删除该会话下的所有消息，且不可恢复。
-                          </div>
-                          <div className="session-delete-actions">
-                            <button className="session-delete-cancel" onClick={() => setSessionDelete(null)}>取消</button>
-                            <button className="session-delete-confirm" onClick={() => { handleDeleteSession(s.session_id); setSessionDelete(null); }}>确认删除</button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-              <div className="session-dropdown-footer">
-                <button className="session-dropdown-clear">清空所有会话</button>
-                <button className="session-dropdown-manage">管理</button>
-              </div>
-            </div>
-          )}
-        </div>)}
-        <div className="copilot-title" style={{ flex: 1, justifyContent: "center" }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z" fill="currentColor"/>
-            <circle cx="12" cy="12" r="3"/>
-          </svg>
-          {/* 此分支仅 panel 变体渲染(main 的标题在统一顶栏) */}
-          <span>AI Copilot</span>
-        </div>
-        {variant === "panel" && (
-          <button className="copilot-close-btn" onClick={onToggle} title="关闭 AI Chat">›</button>
-        )}
-      </div>
-      )}
-
+    <aside className="copilot-panel copilot-panel-main">
       <div className="copilot-body">
         <div className="messages">
           <ContextCard key={`ctx-${copilotContextVersion}`} />
 
           {messages.length === 0 && !sending && (
             <div className="empty-state">
-              <div style={{ fontWeight: 600, marginBottom: 8 }}>AI 对话助手</div>
-              {suggestions.map((s) => (
-                <button
-                  key={s.text}
-                  className="suggestion-chip"
-                  onClick={() => { setInput(s.text); inputRef.current?.focus(); }}
-                >
-                  {s.icon} {s.text}
-                </button>
-              ))}
-              <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 8 }}>或输入消息开始对话</div>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>开始一段对话</div>
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>研究个股、检查持仓风险、跑回测,或随便聊聊</div>
             </div>
           )}
 

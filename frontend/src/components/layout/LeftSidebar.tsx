@@ -30,6 +30,12 @@ function BrandStatus() {
  * 品牌区 + 新建/搜索 + 按时间分组的会话列表 + 系统设置沉底。
  * 会话即一级导航；业务页面入口在右侧 FunctionDock。 */
 
+/** 会话活跃时间:与后端排序键一致(last_message_at ?? created_at),
+ * 分组与显示若用 created_at 会和排序两把尺子,产出重复组头 */
+function activityTime(s: CopilotSession): string {
+  return s.last_message_at ?? s.created_at;
+}
+
 function groupLabel(dateStr: string): "今天" | "本周" | "更早" {
   const d = new Date(dateStr);
   const now = new Date();
@@ -39,7 +45,7 @@ function groupLabel(dateStr: string): "今天" | "本周" | "更早" {
 }
 
 function sessTime(s: CopilotSession): string {
-  const d = new Date(s.created_at);
+  const d = new Date(activityTime(s));
   const now = new Date();
   return d.toDateString() === now.toDateString()
     ? `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`
@@ -78,7 +84,7 @@ export function LeftSidebar({ onOpenSettings, onOpenWorkspace }: {
     const filtered = q ? sessions.filter((s) => s.title.toLowerCase().includes(q)) : sessions;
     const out: { label: string; items: CopilotSession[] }[] = [];
     for (const s of filtered) {
-      const label = groupLabel(s.created_at);
+      const label = groupLabel(activityTime(s));
       const g = out[out.length - 1];
       if (g && g.label === label) g.items.push(s);
       else out.push({ label, items: [s] });
@@ -157,7 +163,7 @@ export function LeftSidebar({ onOpenSettings, onOpenWorkspace }: {
                       <div className="sess-title">{s.title}</div>
                       <span className="sess-time">{sessTime(s)}</span>
                     </div>
-                    <div className="sess-meta">{s.message_count ?? 0} 条消息</div>
+                    <div className="sess-meta">{(s.message_count ?? 0) > 0 ? `${s.message_count} 条消息` : "未开始"}</div>
                     <div className="sess-actions">
                       <button
                         className="session-action-btn" title="重命名"

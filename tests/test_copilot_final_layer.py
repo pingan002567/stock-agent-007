@@ -82,8 +82,10 @@ def test_copilot_session_message_history_and_persisted_stream_recovery(tmp_path)
     messages = client.get(f"/api/copilot/sessions/{session['session_id']}/messages")
     assert messages.status_code == 200
     items = messages.json()["items"]
-    assert [item["role"] for item in items[:2]] == ["user", "system"]
-    assert {item["kind"] for item in items} >= {"user_message", "skill_trace", "final_answer"}
+    # 预算声明 skill_trace 只进流不落库(final 里已带 trace),历史里没有 system 行
+    assert items[0]["role"] == "user"
+    assert {item["kind"] for item in items} >= {"user_message", "final_answer"}
+    assert all(item["kind"] != "skill_trace" for item in items)
     assert any(item["run_id"] == run["run_id"] and item["task_id"] == run["task_id"] for item in items)
     assert any(item["client_message_id"] == "client-msg-001" for item in items)
 

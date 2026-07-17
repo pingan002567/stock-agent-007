@@ -329,7 +329,16 @@ class CopilotRepoMixin:
         return session
 
     def list_copilot_sessions(self, limit: int | None = 50) -> List[CopilotSession]:
-        query = "SELECT * FROM copilot_session ORDER BY COALESCE(last_message_at, updated_at) DESC, created_at DESC"
+        # message_count 只数用户可见消息(user_message/final_answer),排除 system 行
+        query = (
+            "SELECT s.*, ("
+            " SELECT COUNT(*) FROM copilot_message m"
+            " WHERE m.session_id = s.session_id"
+            " AND m.kind IN ('user_message', 'final_answer')"
+            ") AS message_count"
+            " FROM copilot_session s"
+            " ORDER BY COALESCE(s.last_message_at, s.updated_at) DESC, s.created_at DESC"
+        )
         params: list[Any] = []
         if limit is not None:
             query += " LIMIT ?"
@@ -469,6 +478,7 @@ class CopilotRepoMixin:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             last_message_at=row["last_message_at"],
+            message_count=(row["message_count"] if "message_count" in row.keys() else 0),
         )
 
     def _row_to_copilot_message(self, row: sqlite3.Row) -> CopilotMessage:

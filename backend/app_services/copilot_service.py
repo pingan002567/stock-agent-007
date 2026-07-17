@@ -523,7 +523,8 @@ class CopilotService:
             type="skill_trace",
             payload=skill_trace_payload,
         )
-        self._persist_stream_event(state, skill_event)
+        # 只进流不落库:预算声明是瞬态提示,final 里已带完整 trace,
+        # 落库只会在每轮留下一条前端永不渲染的 system 行
         yield skill_event
         self._update_task_step(resolved_task_id, "skill_trace_declared", 20)
 

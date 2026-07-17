@@ -2,6 +2,7 @@ import { useState } from "react";
 import { parseCopilotEvent } from "@/api/copilot";
 import type { CopilotMessage } from "@/api/client";
 import { MarkdownRenderer } from "@/components/features/MarkdownRenderer";
+import { formatLocalTime } from "@/utils/format";
 import { CopilotFinalMeta } from "@/components/features/CopilotFinalMeta";
 import { toolLabel } from "@/hooks/useCopilotChat";
 
@@ -129,7 +130,7 @@ export function CopilotMessageItem({ msg, tools, onToolClick }: Props) {
     return null;
   }
 
-  const time = (msg.created_at || "").slice(11, 19) || "";
+  const time = formatLocalTime(msg.created_at);
 
   return (
     <div className={cls}>

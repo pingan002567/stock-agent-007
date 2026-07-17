@@ -42,3 +42,12 @@ export function formatDate(dateStr?: string): string {
   if (!dateStr) return "";
   return dateStr.slice(0, 10);
 }
+
+/** UTC ISO 串 → 本地 HH:MM:SS(消息气泡用;裸 slice 会显示 UTC 时刻) */
+export function formatLocalTime(dateStr?: string): string {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "";
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+}
