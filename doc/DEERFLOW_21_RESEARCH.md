@@ -62,7 +62,7 @@
 与我们的 INTENT_BUDGETS 委派预算互补:意图预算管"能拉谁",token_budget 管"这轮最多烧多少"。
 `token_budget.enabled + max_tokens`,按 intent 分档(闲聊 50k / 深研 300k)可在 adapter 传参层做。
 
-### P1 定时任务(1-2 天,不依赖 DeerFlow)
+### P1 定时任务 ✅ 已落地(2026-07-19,自建 scheduler_service)
 harness 里没有 scheduler(Gateway 专属),但我们后端已有 monitor 循环的成熟模式——自建
 cron 表(repo + scheduler service)定时 `create_run`(盘前简报/周度复盘/收盘复评)。
 这正好解锁功能页规划里缓议的「任务页 = 后台/定时视角」。

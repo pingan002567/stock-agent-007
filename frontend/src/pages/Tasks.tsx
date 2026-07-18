@@ -5,10 +5,96 @@ import { ErrorMessage } from "@/components/ui/Loading";
 import { PageHead } from "@/components/ui/PageHead";
 import { Pagination } from "@/components/ui/Pagination";
 import { formatTimeAgo } from "@/utils/format";
+import { apiPost, apiDelete } from "@/api/client";
+import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
+import { StatusDot } from "@/components/ui/StatusDot";
 
 interface TaskItem { task_id: string; title: string; status?: string; source?: string; progress?: number; current_step?: string; created_at?: string }
 interface TaskStep { step_id?: string; name?: string; status?: string; skill?: string; tool?: string; duration_ms?: number }
 interface ToolExecution { execution_id?: string; tool_name?: string; status?: string; domain?: string; arguments?: Record<string, unknown> }
+interface ScheduledTask {
+  task_id: string; name: string; prompt?: string; schedule: string; enabled: boolean;
+  next_run_at?: string | null; last_run_at?: string | null; last_status?: string | null; last_error?: string | null;
+}
+
+const SCHEDULE_LABEL = (s: string): string => {
+  const [kind, ...rest] = s.split("@");
+  if (kind === "daily") return `每天 ${rest[0] ?? ""}`;
+  if (kind === "weekly") return `每周${"一二三四五六日"[Number(rest[0]) - 1] ?? "?"} ${rest[1] ?? ""}`;
+  if (kind === "every") return `每 ${rest[0] ?? ""}`;
+  return s;
+};
+
+/** 定时任务卡(mockup 08):到点自动发起 Copilot run,产物落聊天会话 */
+function ScheduledTasksCard() {
+  const [tasks, setTasks] = useState<ScheduledTask[]>([]);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    try { setTasks((await apiGet<{ items: ScheduledTask[] }>("/api/scheduled-tasks")).items); }
+    catch { /* 旧后端无此接口 */ }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const toggle = async (t: ScheduledTask) => {
+    setBusyId(t.task_id);
+    try { await apiPost(`/api/scheduled-tasks/${t.task_id}/toggle`, { enabled: !t.enabled }); await load(); }
+    catch { /* ignore */ } finally { setBusyId(null); }
+  };
+  const runNow = async (t: ScheduledTask) => {
+    setBusyId(t.task_id);
+    setTasks((prev) => prev.map((x) => x.task_id === t.task_id ? { ...x, last_status: "running" } : x));
+    try { await apiPost(`/api/scheduled-tasks/${t.task_id}/run-now`); } catch { /* ignore */ }
+    finally { setBusyId(null); await load(); }
+  };
+  const remove = async (t: ScheduledTask) => {
+    if (!window.confirm(`删除定时任务「${t.name}」?`)) return;
+    try { await apiDelete(`/api/scheduled-tasks/${t.task_id}`); await load(); } catch { /* ignore */ }
+  };
+
+  if (tasks.length === 0) return null;
+  return (
+    <div className="panel">
+      <div className="panel-header">
+        <div className="panel-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/>
+          </svg>
+          定时任务
+          <span className="panel-badge">{tasks.filter((t) => t.enabled).length}/{tasks.length} 启用</span>
+        </div>
+      </div>
+      <div className="panel-body" style={{ padding: 0 }}>
+        <table className="data-table">
+          <thead>
+            <tr><th>任务</th><th>周期</th><th className="num">下次</th><th>上次结果</th><th style={{ width: 150 }}></th></tr>
+          </thead>
+          <tbody>
+            {tasks.map((t) => (
+              <tr key={t.task_id}>
+                <td title={t.prompt}>{t.name}</td>
+                <td>{SCHEDULE_LABEL(t.schedule)}</td>
+                <td className="num">{t.enabled ? (t.next_run_at ?? "").slice(5, 16).replace("T", " ") : "—"}</td>
+                <td>
+                  {t.last_status === "running" ? <StatusDot tone="busy">运行中</StatusDot>
+                    : t.last_status === "completed" ? <StatusDot tone="ok">成功 · {formatTimeAgo(t.last_run_at ?? undefined)}</StatusDot>
+                    : t.last_status === "failed" ? <StatusDot tone="bad">失败</StatusDot>
+                    : <span className="muted" style={{ fontSize: 12 }}>未运行</span>}
+                </td>
+                <td>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "flex-end", paddingRight: 6 }}>
+                    <button className="small" disabled={busyId === t.task_id} onClick={() => void runNow(t)} type="button">立即运行</button>
+                    <button className="small" style={{ color: "var(--red)" }} onClick={() => void remove(t)} type="button">✕</button>
+                    <ToggleSwitch checked={t.enabled} disabled={busyId === t.task_id} onChange={() => void toggle(t)} />
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 export default function Tasks() {
   const [items, setItems] = useState<TaskItem[]>([]);
@@ -61,6 +147,8 @@ export default function Tasks() {
               prompt: "分析最近失败的 AI 任务原因" },
           ]}
         />
+
+        <ScheduledTasksCard />
 
         <div className="kpi-grid">
           <div className="kpi-card">

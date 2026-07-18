@@ -32,6 +32,7 @@ from backend.api import (
     routes_reports,
     routes_review_inbox,
     routes_runtime,
+    routes_scheduled_tasks,
     routes_settings,
     routes_stock,
     routes_strategy,
@@ -75,6 +76,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await services.monitor_service.startup()
+        await services.scheduler_service.startup()
         await services.data_collector.startup()
         try:
             await services.channel_service.start()
@@ -85,6 +87,7 @@ def create_app(
         try:
             yield
         finally:
+            await services.scheduler_service.shutdown()
             await services.monitor_service.shutdown()
             await services.data_collector.shutdown()
             try:
@@ -132,6 +135,7 @@ def create_app(
         routes_reports.router,
         routes_reports.templates_router,
         routes_runtime.router,
+        routes_scheduled_tasks.router,
         routes_settings.router,
         routes_copilot.router,
         routes_channels.router,

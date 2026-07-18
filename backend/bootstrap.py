@@ -57,6 +57,7 @@ class AppServices:
     report_service: ReportService
     risk_policy_service: RiskPolicyService
     copilot_service: CopilotService
+    scheduler_service: "SchedulerService"
     monitor_service: MonitorService
     strategy_service: StrategyService
     rebalance_draft_service: RebalanceDraftService
@@ -335,6 +336,13 @@ def create_services(
     )
     monitor_service.alert_sink = channel_notifier.push
 
+    # 定时任务:按日程自动发起 Copilot run(盘前简报/周度复盘)
+    from backend.app_services.scheduler_service import SchedulerService
+
+    scheduler_service = SchedulerService(
+        repo=repo, copilot_service=copilot_service, audit_service=audit_service
+    )
+
     # Cleanup old logs on startup
     try:
         deleted = repo.cleanup_provider_call_logs(keep_days=7)
@@ -353,6 +361,7 @@ def create_services(
         report_service=report_service,
         risk_policy_service=risk_policy_service,
         copilot_service=copilot_service,
+        scheduler_service=scheduler_service,
         monitor_service=monitor_service,
         strategy_service=strategy_service,
         rebalance_draft_service=rebalance_draft_service,
