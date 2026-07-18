@@ -19,7 +19,14 @@ export interface StreamToolCall {
   name: string;
   status: "running" | "done" | "failed";
   resultText?: string;
+  /** task 委派时的子代理类型(subagent_type) */
+  subagentType?: string;
 }
+
+/** 思维链时间线步骤(deer-flow ChainOfThought 借鉴):推理与工具按到达顺序交错 */
+export type StreamStep =
+  | { kind: "reasoning"; id: string; text: string }
+  | { kind: "tool"; id: string; tool: StreamToolCall };
 
 export interface PlanTodo {
   content: string;
@@ -36,6 +43,8 @@ export interface StreamMessage {
   reasoningLog: string[];
   skillTrace: SkillTraceItem[];
   tools: StreamToolCall[];
+  /** 有序步骤流(时间线渲染用;tools 保留供旧消费方) */
+  steps: StreamStep[];
   answerText: string;
   /** AI 反问澄清的问题文本（ask_clarification）；出现即等待用户下一条消息回答 */
   clarificationText: string | null;
@@ -267,6 +276,7 @@ function useCopilotChatState() {
       skillTrace: [],
       todos: [],
       tools: [],
+      steps: [],
       answerText: "",
       clarificationText: null,
       finalPayload: null,
@@ -341,15 +351,25 @@ function useCopilotChatState() {
           const t = String(p.text || p.latest_text || "");
           // 只展示真实推理文本;裸 phase 名("values" 等快照占位)是噪声,不进气泡
           if (t) {
-            setStreamMessage((prev) => prev ? {
-              ...prev,
-              phase: "reasoning",
-              reasoningText: t,
-              // 只累积真实推理文本；跳过 phase 占位与重复快照
-              reasoningLog: t && prev.reasoningLog[prev.reasoningLog.length - 1] !== t
-                ? [...prev.reasoningLog, t]
-                : prev.reasoningLog,
-            } : prev);
+            setStreamMessage((prev) => {
+              if (!prev) return prev;
+              const isNew = prev.reasoningLog[prev.reasoningLog.length - 1] !== t;
+              const last = prev.steps[prev.steps.length - 1];
+              let steps = prev.steps;
+              if (isNew) {
+                // 相邻推理步合并更新(快照会增量变长),遇到工具步后才开新推理步
+                steps = last?.kind === "reasoning"
+                  ? [...prev.steps.slice(0, -1), { ...last, text: t }]
+                  : [...prev.steps, { kind: "reasoning" as const, id: `r-${prev.steps.length}`, text: t }];
+              }
+              return {
+                ...prev,
+                phase: "reasoning",
+                reasoningText: t,
+                reasoningLog: isNew ? [...prev.reasoningLog, t] : prev.reasoningLog,
+                steps,
+              };
+            });
           }
         } catch { /* empty */ }
       });
@@ -373,10 +393,24 @@ function useCopilotChatState() {
             }
             return;
           }
+          let subagentType: string | undefined;
+          if (name === "task") {
+            let args = p.arguments;
+            if (typeof args === "string") {
+              try { args = JSON.parse(args); } catch { args = {}; }
+            }
+            subagentType = String((args as { subagent_type?: string })?.subagent_type || "") || undefined;
+          }
           setStreamMessage((prev) => {
             if (!prev) return prev;
             if (prev.tools.some((t) => t.callId === callId)) return prev;
-            return { ...prev, phase: "tools", tools: [...prev.tools, { callId, name, status: "running" }] };
+            const tool: StreamToolCall = { callId, name, status: "running", subagentType };
+            return {
+              ...prev,
+              phase: "tools",
+              tools: [...prev.tools, tool],
+              steps: [...prev.steps, { kind: "tool", id: callId, tool }],
+            };
           });
         } catch { /* empty */ }
       });
@@ -391,6 +425,8 @@ function useCopilotChatState() {
           setStreamMessage((prev) => prev ? {
             ...prev,
             tools: prev.tools.map((t) => t.callId === callId ? { ...t, status: "done", resultText } : t),
+            steps: prev.steps.map((st) => st.kind === "tool" && st.tool.callId === callId
+              ? { ...st, tool: { ...st.tool, status: "done" as const, resultText } } : st),
           } : prev);
         } catch { /* empty */ }
       });

@@ -113,7 +113,7 @@ describe("CopilotToolCard", () => {
 });
 
 function makeStream(overrides: Partial<StreamMessage> = {}): StreamMessage {
-  return {
+  const base: StreamMessage = {
     runId: "r-1",
     phase: "reasoning",
     reasoningText: "",
@@ -121,12 +121,19 @@ function makeStream(overrides: Partial<StreamMessage> = {}): StreamMessage {
     skillTrace: [],
     todos: [],
     tools: [],
+    steps: [],
     answerText: "",
     clarificationText: null,
     finalPayload: null,
     errorText: null,
     ...overrides,
   };
+  // 时间线渲染读 steps:夹具从旧字段派生,保持用例只声明 reasoningText/tools
+  if (base.steps.length === 0) {
+    if (base.reasoningText) base.steps.push({ kind: "reasoning", id: "r-0", text: base.reasoningText });
+    for (const tool of base.tools) base.steps.push({ kind: "tool", id: tool.callId, tool });
+  }
+  return base;
 }
 
 describe("CopilotStreamingMessage", () => {
@@ -166,6 +173,7 @@ describe("CopilotStreamingMessage", () => {
       tools: [{ callId: "c1", name: "get_stock_context", status: "done" }],
     });
     const { container } = render(<CopilotStreamingMessage streamMessage={sm} />);
-    expect(container.textContent).toContain("完成");
+    // 时间线里完成态显示 ✓(紧凑步行,非文字标签)
+    expect(container.querySelector(".tl-step-state.ok")?.textContent).toContain("✓");
   });
 });

@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { toolLabel, type StreamMessage, type StreamToolCall } from "@/hooks/useCopilotChat";
+import { type StreamMessage, type StreamToolCall } from "@/hooks/useCopilotChat";
 import { CopilotFinalMeta, SkillTraceChain } from "@/components/features/CopilotFinalMeta";
+import { ThoughtTimeline } from "@/components/features/ThoughtTimeline";
 
 interface Props {
   streamMessage: StreamMessage;
@@ -25,12 +25,10 @@ const PHASE_COLORS: Record<string, string> = {
 };
 
 export function CopilotStreamingMessage({ streamMessage, onToolClick }: Props) {
-  const [reasoningOpen, setReasoningOpen] = useState(false);
   const hasContent = streamMessage.answerText.length > 0 || streamMessage.phase === "final" || streamMessage.phase === "error";
   const phaseLabel = PHASE_LABELS[streamMessage.phase] || "推理中";
   const phaseColor = PHASE_COLORS[streamMessage.phase] || "var(--blue)";
-  const fullReasoning = streamMessage.reasoningLog.join("\n\n");
-  const canExpandReasoning = fullReasoning.length > 300;
+  const streamingActive = streamMessage.phase !== "final" && streamMessage.phase !== "error";
 
   return (
     <div className={`msg ai${hasContent ? "" : " streaming"}`}>
@@ -67,37 +65,8 @@ export function CopilotStreamingMessage({ streamMessage, onToolClick }: Props) {
           ))}
         </div>
       )}
-      {streamMessage.reasoningText && (
-        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8, fontStyle: "italic" }}>
-          {reasoningOpen ? (
-            <div style={{ whiteSpace: "pre-wrap" }}>{fullReasoning}</div>
-          ) : (
-            (fullReasoning || streamMessage.reasoningText).slice(-300)
-          )}
-          {canExpandReasoning && (
-            <button className="final-meta-toggle" style={{ display: "block", marginTop: 4 }} onClick={() => setReasoningOpen((v) => !v)}>
-              {reasoningOpen ? "▼ 收起完整思维链" : `▶ 展开完整思维链（${streamMessage.reasoningLog.length} 段）`}
-            </button>
-          )}
-        </div>
-      )}
-      {streamMessage.tools.map((tool) => (
-        <div
-          key={tool.callId}
-          className={`tool-card${onToolClick ? " clickable" : ""}`}
-          style={{ marginBottom: 4 }}
-          onClick={onToolClick ? () => onToolClick(tool) : undefined}
-          title={onToolClick ? "查看完整结果" : undefined}
-        >
-          <div className="tool-card-header">
-            <span className={`tool-dot ${tool.status === "done" ? "ok" : tool.status === "failed" ? "fail" : "busy"}`} />
-            <span className="tool-name">{toolLabel(tool.name)}</span>
-            <span className={`tool-status-text ${tool.status === "done" ? "success" : tool.status === "failed" ? "failed" : "running"}`}>
-              {tool.status === "done" ? "✓ 完成" : tool.status === "failed" ? "⚠ 失败" : "⏳ 进行中"}
-            </span>
-          </div>
-        </div>
-      ))}
+      {/* 思维链时间线(deer-flow 借鉴):推理/工具按序交错,早期步骤折叠 */}
+      <ThoughtTimeline steps={streamMessage.steps} active={streamingActive} onToolClick={onToolClick} />
       {streamMessage.clarificationText && (
         <div className="clarification-card">
           <div className="clarification-title">AI 需要你的补充信息</div>
