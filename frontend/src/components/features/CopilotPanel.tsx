@@ -31,6 +31,8 @@ type ToolItem = {
   id: string;
   created_at: string;
   resultText?: string;
+  /** task 委派的子代理类型 */
+  subagentType?: string;
 };
 
 type GroupedItem =
@@ -77,8 +79,16 @@ function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null): Grou
       const matched = !!resultPayload;
       const resultText = extractToolResultText(resultPayload);
       const failed = !matched && !!msg.run_id && completedRuns.has(msg.run_id);
+      let subagentType: string | undefined;
+      if (name === "task") {
+        let args = p?.arguments;
+        if (typeof args === "string") {
+          try { args = JSON.parse(args); } catch { args = {}; }
+        }
+        subagentType = String((args as { subagent_type?: string })?.subagent_type || "") || undefined;
+      }
       const tools = pendingTools.get(rid) || [];
-      tools.push({ t: "tool", name, done: matched, failed, id: msg.message_id, created_at: msg.created_at, resultText });
+      tools.push({ t: "tool", name, done: matched, failed, id: msg.message_id, created_at: msg.created_at, resultText, subagentType });
       pendingTools.set(rid, tools);
     } else if (ev.type === EVENT_TOOL_RESULT) {
       // 已在预扫描中按 call_id 收集，配对到对应 tool_call；此处跳过，不单独渲染。

@@ -1,10 +1,10 @@
-import { useState } from "react";
 import { parseCopilotEvent } from "@/api/copilot";
 import type { CopilotMessage } from "@/api/client";
 import { MarkdownRenderer } from "@/components/features/MarkdownRenderer";
 import { formatLocalTime } from "@/utils/format";
 import { CopilotFinalMeta } from "@/components/features/CopilotFinalMeta";
-import { toolLabel } from "@/hooks/useCopilotChat";
+import { ThoughtTimeline } from "@/components/features/ThoughtTimeline";
+import type { StreamStep, StreamToolCall } from "@/hooks/useCopilotChat";
 
 /** 从 AI 回答文本中移除嵌入的 XML 式工具调用标签 */
 function stripToolCallTags(text: string): string {
@@ -24,6 +24,7 @@ export interface ToolInfo {
   failed?: boolean;
   id: string;
   resultText?: string;
+  subagentType?: string;
 }
 
 interface Props {
@@ -34,61 +35,29 @@ interface Props {
 }
 
 /** final / error 两个分支共用的「调用了 N 个工具」折叠区 */
-function ToolListSection({ tools, open, onToggle, onToolClick }: {
-  tools: ToolInfo[];
-  open: boolean;
-  onToggle: () => void;
-  onToolClick?: (tool: ToolInfo) => void;
-}) {
-  const doneCount = tools.filter((t) => t.done).length;
-  const failCount = tools.filter((t) => t.failed).length;
-  return (
-    <div className="tool-list-wrap">
-      <button className="tool-list-toggle" onClick={onToggle}>
-        <span className="tool-list-arrow">{open ? "▼" : "▶"}</span>
-        <span className="tool-list-summary">
-          调用了 {tools.length} 个工具
-          {doneCount > 0 && <span className="tool-count-ok"> · {doneCount} 完成</span>}
-          {failCount > 0 && <span className="tool-count-fail"> · {failCount} 失败</span>}
-        </span>
-      </button>
-      {open && (
-        <div className="tool-list-body">
-          {tools.map((t) => (
-            <div
-              key={t.id}
-              className={`tool-card${onToolClick ? " clickable" : ""}`}
-              onClick={onToolClick ? () => onToolClick(t) : undefined}
-              title={onToolClick ? "查看完整结果" : undefined}
-            >
-              <div className="tool-card-header">
-                <span className={`tool-dot ${t.failed ? "fail" : t.done ? "ok" : "busy"}`} />
-                <span className="tool-name">{toolLabel(t.name)}</span>
-                <span className="tool-eng">{t.name}</span>
-                <span className={`tool-status-text ${t.failed ? "failed" : t.done ? "success" : "running"}`}>
-                  {t.failed ? "⚠ 失败" : t.done ? "✓ 完成" : "⏳ 进行中"}
-                </span>
-              </div>
-              {t.resultText && (
-                <div className="tool-card-body">
-                  {t.resultText.length > 200 ? t.resultText.slice(0, 200) + "…" : t.resultText}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function CopilotMessageItem({ msg, tools, onToolClick }: Props) {
   const ev = parseCopilotEvent(msg as unknown as Record<string, unknown>);
   const isUser = msg.role === "user";
   const isFinal = msg.kind === "final_answer";
   const isErrorEvent = ev.type === "error";
-  const [openTools, setOpenTools] = useState(false);
   const hasTools = tools && tools.length > 0;
+  // 持久化消息与流式共用思维链时间线形态(官方"过程即结果":收口不坍缩成计数条)。
+  // 推理文本未落库,历史时间线只有工具步。
+  const toolSteps: StreamStep[] = (tools ?? []).map((t) => ({
+    kind: "tool" as const,
+    id: t.id,
+    tool: {
+      callId: t.id, name: t.name,
+      status: t.failed ? "failed" as const : t.done ? "done" as const : "running" as const,
+      resultText: t.resultText, subagentType: t.subagentType,
+    },
+  }));
+  const handleTimelineClick = onToolClick
+    ? (t: StreamToolCall) => onToolClick({
+        id: t.callId, name: t.name, done: t.status === "done",
+        failed: t.status === "failed", resultText: t.resultText, subagentType: t.subagentType,
+      })
+    : undefined;
 
   let body: React.ReactNode;
   let cls = "msg";
@@ -102,9 +71,7 @@ export function CopilotMessageItem({ msg, tools, onToolClick }: Props) {
     const raw = (evPayload.conclusion as string) || msg.text || "";
     body = (
       <>
-        {hasTools && (
-          <ToolListSection tools={tools!} open={openTools} onToggle={() => setOpenTools((v) => !v)} onToolClick={onToolClick} />
-        )}
+        {hasTools && <ThoughtTimeline steps={toolSteps} active={false} onToolClick={handleTimelineClick} />}
         {Boolean(evPayload.clarification) && (
           <div className="clarification-hint" style={{ marginBottom: 4 }}>❓ AI 反问澄清 · 回复即可继续</div>
         )}
@@ -117,9 +84,7 @@ export function CopilotMessageItem({ msg, tools, onToolClick }: Props) {
     const evPayload = ev.payload as Record<string, unknown>;
     body = (
       <>
-        {hasTools && (
-          <ToolListSection tools={tools!} open={openTools} onToggle={() => setOpenTools((v) => !v)} onToolClick={onToolClick} />
-        )}
+        {hasTools && <ThoughtTimeline steps={toolSteps} active={false} onToolClick={handleTimelineClick} />}
         <>⚠️ {(evPayload.error as string) || msg.text || "error"}</>
       </>
     );
