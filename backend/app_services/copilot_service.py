@@ -823,6 +823,13 @@ class CopilotService:
             return
         payload = event.get("payload") or {}
         result = payload.get("result")
+        # direct/embedded 模式下 ToolMessage 内容是 JSON 字符串(stub 才是 dict):
+        # 不解析就会漏捕 draft/report/review,final 富化(draft_id 等)全部失效
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except ValueError:
+                return
         if not isinstance(result, dict):
             return
         tool = payload.get("tool")

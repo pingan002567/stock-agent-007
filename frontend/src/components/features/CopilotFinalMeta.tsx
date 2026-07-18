@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { skillTraceItems, type SkillTraceItem } from "@/api/copilot";
+import { DraftDecisionCard } from "@/components/features/DraftDecisionCard";
 
 /** final payload 的富信息条：信心度 / 反方观点 / 引用来源 / skill 链路 / token 成本。
  *  流式气泡（final 阶段）与持久化消息共用。 */
@@ -66,12 +67,16 @@ export function CopilotFinalMeta({ payload }: { payload: Record<string, unknown>
   const tokensOut = Number(usage.output_tokens || usage.completion_tokens || 0);
   const cost = Number(payload.cost_estimate || 0);
 
+  const draftId = typeof payload.draft_id === "string" ? payload.draft_id : null;
   const hasAny =
-    confidence || counterReasons.length > 0 || evidenceRefs.length > 0 || trace.length > 0 || tokensIn + tokensOut > 0;
+    confidence || counterReasons.length > 0 || evidenceRefs.length > 0 || trace.length > 0 ||
+    tokensIn + tokensOut > 0 || draftId;
   if (!hasAny) return null;
 
   return (
     <div className="final-meta">
+      {/* 人在环决策卡:AI 提案 → 人确认(guardrail 对模型封死 confirm) */}
+      {draftId && <DraftDecisionCard draftId={draftId} />}
       <SkillTraceChain items={trace} />
       <div className="final-meta-badges">
         {confidence && (
