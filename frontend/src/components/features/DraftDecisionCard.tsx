@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiGet, apiPost } from "@/api/client";
 import { StatusDot } from "@/components/ui/StatusDot";
+import { useCopilotChat } from "@/hooks/useCopilotChat";
 
 /** 调仓草案决策卡(人在环审批):AI 只能提案——confirm 工具在 guardrail
  * denied 列表对模型封死,确认/驳回唯一路径是这里的按钮走 REST。
@@ -38,6 +39,7 @@ export function DraftDecisionCard({ draftId }: { draftId: string }) {
   const [draft, setDraft] = useState<DraftDetail | null>(null);
   const [busy, setBusy] = useState<"confirm" | "reject" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { handleSend } = useCopilotChat();
 
   useEffect(() => {
     let alive = true;
@@ -59,6 +61,14 @@ export function DraftDecisionCard({ draftId }: { draftId: string }) {
         `/api/rebalance-drafts/${encodeURIComponent(draftId)}/${action}`, { note: "" },
       );
       setDraft(updated);
+      // 审批结果回到对话(动作归聊天):以用户身份发一条自然语言消息,
+      // AI 据此接话(登记确认/建议预交易审查/驳回后的替代方案)
+      const actionLabel = ACTION_LABEL[updated.action ?? ""] ?? updated.action ?? "调仓";
+      const summary = `${updated.symbol} ${actionLabel}至 ${pct(updated.target_weight_pct)}`;
+      const followup = action === "confirm"
+        ? `我已确认调仓草案(${summary})。请说明确认后的登记情况,并给出下一步建议(比如是否需要预交易审查)。`
+        : `我已驳回调仓草案(${summary})。简单说明驳回后的状态,如有替代思路可以提。`;
+      void handleSend(followup, updated.symbol);
     } catch (e) {
       setError(e instanceof Error ? e.message : "操作失败");
     } finally {
