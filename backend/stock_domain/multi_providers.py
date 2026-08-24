@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from backend.schemas import PriceSnapshot, now_iso
 from backend.stock_domain.catalog import get_stock, normalize_symbol
+from backend.stock_domain.provider_credentials import resolve as provider_credential
 from backend.stock_domain.providers import (
     MarketDataProvider,
     MockMarketDataProvider,
@@ -43,7 +44,7 @@ class TickFlowMarketDataProvider:
 
     @property
     def _api_key(self) -> str | None:
-        return os.getenv("TICKFLOW_API_KEY") or None
+        return provider_credential("tickflow", "api_key")
 
     def is_available(self) -> bool:
         if (
@@ -156,7 +157,7 @@ class TushareMarketDataProvider:
 
     @property
     def _token(self) -> str | None:
-        return os.getenv("TUSHARE_TOKEN") or None
+        return provider_credential("tushare", "token")
 
     def is_available(self) -> bool:
         if (
@@ -904,8 +905,8 @@ class LongbridgeMarketDataProvider:
     @property
     def _config_valid(self) -> bool:
         return (
-            os.getenv("LONGBRIDGE_APP_KEY") is not None
-            and os.getenv("LONGBRIDGE_APP_SECRET") is not None
+            provider_credential("longbridge", "app_key") is not None
+            and provider_credential("longbridge", "app_secret") is not None
         )
 
     def is_available(self) -> bool:
@@ -923,8 +924,8 @@ class LongbridgeMarketDataProvider:
             from longbridge import Config, QuoteContext  # type: ignore[import-not-found]
 
             config = Config(
-                app_key=os.getenv("LONGBRIDGE_APP_KEY"),
-                app_secret=os.getenv("LONGBRIDGE_APP_SECRET"),
+                app_key=provider_credential("longbridge", "app_key"),
+                app_secret=provider_credential("longbridge", "app_secret"),
             )
             self._client = QuoteContext(config)
         return self._client
@@ -1023,11 +1024,32 @@ class LongbridgeMarketDataProvider:
 
 
 # ──────────────────────────────────────────────
+#  AKShare 子源：东方财富 / 同花顺（独立 provider id，底层仍走 AKShare）
+# ──────────────────────────────────────────────
+
+
+def _akshare_delegate_class(provider_id: str) -> type:
+    from backend.stock_domain.providers import AkShareMarketDataProvider
+
+    class _DelegatedAkShareProvider(AkShareMarketDataProvider):
+        name = provider_id
+
+    _DelegatedAkShareProvider.__name__ = f"{provider_id.title()}MarketDataProvider"
+    return _DelegatedAkShareProvider
+
+
+EastMoneyMarketDataProvider = _akshare_delegate_class("eastmoney")
+TonghuashunMarketDataProvider = _akshare_delegate_class("tonghuashun")
+
+
+# ──────────────────────────────────────────────
 #  Provider registry — maps provider_id → class
 # ──────────────────────────────────────────────
 
 PROVIDER_CLASSES: dict[str, type] = {
     "akshare": None,  # defined in providers.py, loaded lazily
+    "eastmoney": EastMoneyMarketDataProvider,
+    "tonghuashun": TonghuashunMarketDataProvider,
     "tickflow": TickFlowMarketDataProvider,
     "tushare": TushareMarketDataProvider,
     "pytdx": PytdxMarketDataProvider,

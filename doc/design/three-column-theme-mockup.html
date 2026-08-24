@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Stock Agent · 三栏配色方案 v2（Cursor/Codex 参考）</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════════
+   设计来源与原则（供人工审核）
+   ─────────────────────────────────────────────────────────────────
+   参考：Cursor IDE、Codex/Copilot 类聊天壳 —— 中性灰阶为主，强调色
+   仅用于「选中 / 主按钮 / 链接焦点」，三栏用「明度差」分区而非「色相差」。
+
+   当前 App 不协调点（本稿试图修复）：
+   1. :root 默认深蓝金融底 (#0a0e17) vs :root.light 暖纸色 —— 两套世界观
+   2. 左/中/右栏混用 bg / bg-secondary / bg-tertiary，语义不清
+   3. 暗色偏蓝、浅色偏黄，切换后像两个产品
+   4. 边框/阴影/选中态在不同栏位对比度不一致
+
+   本稿统一语义（三栏共用）：
+   --canvas     应用画布（中栏聊天区背景）
+   --sidebar    侧栏（左会话 + 右功能坞/图标条）
+   --surface    卡片/输入框/消息纸面
+   --surface-2  悬停/次级块
+   --selected   选中行背景
+   --border     主分割线
+   --border-soft 弱分割
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Dark · Cursor-neutral ── */
+html.dark {
+  color-scheme: dark;
+  --canvas:     #1e1e1e;
+  --sidebar:    #252526;
+  --surface:    #2d2d2d;
+  --surface-2:  #333333;
+  --selected:   rgba(255, 255, 255, 0.06);
+  --selected-strong: rgba(255, 255, 255, 0.10);
+  --border:     rgba(255, 255, 255, 0.08);
+  --border-soft:rgba(255, 255, 255, 0.05);
+  --ink:        #e4e4e4;
+  --ink-2:      #cccccc;
+  --muted:      #9d9d9d;
+  --faint:      #6e6e6e;
+  --accent:     #0078d4;
+  --accent-soft:rgba(0, 120, 212, 0.14);
+  --accent-hover:#1a86d9;
+  --up:         #3fb950;
+  --down:       #f85149;
+  --shadow-panel: 0 8px 32px rgba(0, 0, 0, 0.35);
+  --composer-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  --scrollbar:  rgba(255, 255, 255, 0.12);
+}
+
+/* ── Light · Cursor-neutral ── */
+html.light {
+  color-scheme: light;
+  --canvas:     #ffffff;
+  --sidebar:    #f3f3f3;
+  --surface:    #ffffff;
+  --surface-2:  #f8f8f8;
+  --selected:   rgba(0, 0, 0, 0.04);
+  --selected-strong: rgba(0, 0, 0, 0.07);
+  --border:     rgba(0, 0, 0, 0.10);
+  --border-soft:rgba(0, 0, 0, 0.06);
+  --ink:        #1f1f1f;
+  --ink-2:      #333333;
+  --muted:      #616161;
+  --faint:      #8a8a8a;
+  --accent:     #0066b8;
+  --accent-soft:rgba(0, 102, 184, 0.10);
+  --accent-hover:#005a9e;
+  --up:         #1a7f37;
+  --down:       #cf222e;
+  --shadow-panel: 0 8px 28px rgba(0, 0, 0, 0.08);
+  --composer-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  --scrollbar:  rgba(0, 0, 0, 0.15);
+}
+
+/* ── 共享结构 token ── */
+:root {
+  --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  --sans: -apple-system, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --left-w: 260px;
+  --right-w: 400px;
+  --strip-w: 48px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 14px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  font: 13px/1.55 var(--sans);
+  background: var(--canvas);
+  color: var(--ink);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; background: none; border: none; cursor: default; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 4px; }
+
+/* ── 审核工具栏 ── */
+.review-bar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 14px;
+  background: var(--sidebar);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.review-bar strong { font-size: 13px; color: var(--ink); }
+.review-bar .hint { color: var(--muted); max-width: 520px; line-height: 1.4; }
+.theme-switch { display: flex; gap: 4px; margin-left: auto; }
+.theme-switch button {
+  padding: 4px 10px; border-radius: var(--r-sm);
+  border: 1px solid var(--border); color: var(--muted);
+  font-size: 11px; font-weight: 600;
+}
+.theme-switch button.on {
+  background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
+}
+.spec-toggle {
+  padding: 4px 10px; border-radius: var(--r-sm);
+  border: 1px dashed var(--border); color: var(--muted); font-size: 11px;
+}
+.spec-panel {
+  display: none; position: fixed; top: 44px; right: 12px; z-index: 99;
+  width: min(420px, calc(100vw - 24px)); max-height: calc(100vh - 56px); overflow: auto;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-lg); padding: 14px; box-shadow: var(--shadow-panel);
+  font-size: 11px; line-height: 1.6;
+}
+.spec-panel.open { display: block; }
+.spec-panel h3 { font-size: 12px; margin-bottom: 8px; color: var(--ink); }
+.spec-panel table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+.spec-panel th, .spec-panel td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+.spec-panel th { color: var(--faint); font-weight: 600; }
+.spec-panel code { font-family: var(--mono); font-size: 10px; color: var(--accent); }
+.spec-panel .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; border: 1px solid var(--border); vertical-align: middle; margin-right: 4px; }
+
+/* ── 三栏骨架（顶栏下推） ── */
+.app {
+  display: grid;
+  grid-template-columns: var(--left-w) minmax(0, 1fr) auto;
+  height: calc(100vh - 44px);
+  margin-top: 44px;
+}
+
+/* ═══ 左栏 · sidebar 色 ═══ */
+.left {
+  display: grid; grid-template-rows: auto auto 1fr auto;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border-soft);
+  min-height: 0;
+}
+.brand { display: flex; align-items: center; gap: 10px; padding: 14px 14px 10px; }
+.brand-logo {
+  width: 32px; height: 32px; border-radius: 8px; flex: none;
+  background: linear-gradient(145deg, var(--surface), var(--surface-2));
+  border: 1px solid var(--border);
+  display: grid; place-items: center; font-size: 14px;
+}
+.brand-name { font-weight: 650; font-size: 13px; }
+.brand-sub { font-family: var(--mono); font-size: 10px; color: var(--faint); margin-top: 1px; }
+.left-actions { display: flex; gap: 6px; padding: 0 10px 10px; }
+.btn-primary {
+  flex: 1; height: 32px; border-radius: var(--r-md);
+  background: var(--accent); color: #fff; font-weight: 600; font-size: 12px;
+}
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-ghost {
+  width: 32px; height: 32px; border-radius: var(--r-md);
+  border: 1px solid var(--border); color: var(--muted);
+  display: grid; place-items: center;
+}
+.btn-ghost:hover { background: var(--selected); color: var(--ink-2); }
+.sessions { overflow-y: auto; padding: 2px 8px 8px; min-height: 0; }
+.sess-group {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .1em;
+  color: var(--faint); text-transform: uppercase; padding: 10px 8px 4px;
+}
+.sess {
+  position: relative; width: 100%; text-align: left;
+  padding: 8px 10px 8px 12px; border-radius: var(--r-md);
+}
+.sess:hover { background: var(--selected); }
+.sess.active { background: var(--selected-strong); }
+.sess.active::before {
+  content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px;
+  border-radius: 1px; background: var(--accent);
+}
+.sess-title { font-size: 13px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sess.active .sess-title { color: var(--ink); font-weight: 550; }
+.sess-meta { font-family: var(--mono); font-size: 10px; color: var(--faint); margin-top: 2px; }
+.left-foot { border-top: 1px solid var(--border-soft); padding: 6px; }
+.foot-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 10px; border-radius: var(--r-md); color: var(--ink-2);
+}
+.foot-item:hover { background: var(--selected); }
+.dot-ok { width: 6px; height: 6px; border-radius: 50%; background: var(--up); }
+
+/* ═══ 中栏 · canvas 色 ═══ */
+.center { display: grid; grid-template-rows: auto 1fr auto; min-height: 0; background: var(--canvas); }
+.chat-head {
+  display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 16px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--canvas);
+}
+.chat-title { font-weight: 650; font-size: 13px; }
+.chat-head .sub { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+.head-spacer { flex: 1; }
+.chip-ghost {
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+  border: 1px dashed var(--border); border-radius: 4px; padding: 3px 8px;
+}
+.msgs { overflow-y: auto; padding: 20px 20px 8px; min-height: 0; }
+.msgs-inner { max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.divider {
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--mono); font-size: 10px; color: var(--faint);
+}
+.divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--border-soft); }
+
+/* 用户消息：浅 accent 底，不抢画布 */
+.msg.user { align-self: flex-end; max-width: 78%; }
+.bubble-u {
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl) var(--r-sm) var(--r-xl) var(--r-xl);
+  padding: 10px 13px; color: var(--ink);
+}
+/* AI：surface 纸面，与 canvas 有层次 */
+.msg.ai { align-self: flex-start; width: 100%; max-width: 100%; }
+.ai-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 11px; color: var(--muted); }
+.ai-avatar {
+  width: 22px; height: 22px; border-radius: 5px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  display: grid; place-items: center; font-size: 10px; font-weight: 700; color: var(--accent);
+}
+.bubble-a {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm) var(--r-xl) var(--r-xl) var(--r-xl);
+  padding: 12px 14px; box-shadow: var(--composer-shadow);
+}
+.toolcard {
+  display: flex; align-items: center; gap: 8px; margin: 8px 0;
+  padding: 8px 10px; border-radius: var(--r-md);
+  background: var(--canvas); border: 1px solid var(--border-soft);
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+}
+.toolcard:hover { border-color: var(--border); background: var(--selected); }
+.quote-px { font-family: var(--mono); font-size: 20px; font-weight: 600; }
+.quote-chg { font-family: var(--mono); font-size: 12px; color: var(--up); }
+
+.composer { padding: 8px 20px 16px; background: var(--canvas); }
+.composer-inner {
+  max-width: 780px; margin: 0 auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  padding: 10px 12px 8px;
+  box-shadow: var(--composer-shadow);
+}
+.composer-inner:focus-within { border-color: var(--accent); }
+.composer textarea {
+  width: 100%; background: none; border: none; outline: none; resize: none;
+  color: var(--ink); font: inherit; min-height: 22px;
+}
+.composer textarea::placeholder { color: var(--faint); }
+.composer-bar { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.model-pill {
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+  border: 1px solid var(--border-soft); border-radius: 20px; padding: 3px 9px;
+}
+.send {
+  margin-left: auto; width: 28px; height: 28px; border-radius: var(--r-md);
+  background: var(--accent); color: #fff; display: grid; place-items: center;
+}
+.send:hover { background: var(--accent-hover); }
+
+/* ═══ 右栏 · sidebar 色（与左栏同级） ═══ */
+.right { display: flex; min-height: 0; }
+.func-panel {
+  width: var(--right-w);
+  background: var(--sidebar);
+  border-left: 1px solid var(--border-soft);
+  display: grid; grid-template-rows: auto 1fr;
+}
+.func-head {
+  display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.func-title { font-weight: 650; font-size: 13px; }
+.func-sub { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+.func-body { overflow-y: auto; padding: 12px 14px 16px; min-height: 0; }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-lg);
+  padding: 12px; margin-bottom: 10px;
+}
+.card-title { font-size: 11px; color: var(--muted); margin-bottom: 8px; letter-spacing: .04em; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-variant-numeric: tabular-nums; }
+.kv .k { color: var(--muted); font-size: 12px; }
+.kv .v { font-family: var(--mono); font-size: 12px; text-align: right; color: var(--ink-2); }
+.v.up { color: var(--up); }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th { font-family: var(--mono); font-size: 10px; color: var(--faint); font-weight: 500; text-align: right; padding: 4px 0; }
+th:first-child, td:first-child { text-align: left; }
+td { padding: 6px 0; border-top: 1px solid var(--border-soft); text-align: right; color: var(--ink-2); }
+.strip {
+  width: var(--strip-w); flex: none;
+  background: var(--sidebar);
+  border-left: 1px solid var(--border-soft);
+  display: flex; flex-direction: column; align-items: center; padding: 8px 0; gap: 4px;
+}
+.strip-btn {
+  width: 36px; height: 36px; border-radius: var(--r-md);
+  display: grid; place-items: center; color: var(--muted);
+}
+.strip-btn:hover { background: var(--selected); color: var(--ink-2); }
+.strip-btn.on { background: var(--selected-strong); color: var(--accent); }
+.badge { position: relative; }
+.badge::after {
+  content: "2"; position: absolute; top: 2px; right: 2px;
+  min-width: 14px; height: 14px; padding: 0 3px;
+  background: var(--down); color: #fff; font-size: 9px; font-weight: 700;
+  border-radius: 7px; display: grid; place-items: center;
+}
+
+/* 栏位标注（审核用，落地时可删） */
+.col-label {
+  position: absolute; top: 6px; right: 8px;
+  font-family: var(--mono); font-size: 9px; color: var(--faint);
+  opacity: .7; pointer-events: none;
+}
+.left, .center, .func-panel { position: relative; }
+</style>
+</head>
+<body>
+
+<div class="review-bar">
+  <strong>三栏配色 v2 · 人工审核稿</strong>
+  <span class="hint">中性灰阶分区（Cursor/Codex 思路）· 左/右 = sidebar · 中 = canvas · 卡片 = surface</span>
+  <button type="button" class="spec-toggle" id="specToggle">Token 对照表</button>
+  <div class="theme-switch">
+    <button type="button" data-theme="dark" class="on">夜间</button>
+    <button type="button" data-theme="light">白天</button>
+  </div>
+</div>
+
+<div class="spec-panel" id="specPanel">
+  <h3>语义 Token（建议映射到 index.css）</h3>
+  <table>
+    <tr><th>Token</th><th>用途</th><th>暗色</th><th>白天</th></tr>
+    <tr><td><code>--canvas</code></td><td>中栏聊天画布</td><td>#1e1e1e</td><td>#ffffff</td></tr>
+    <tr><td><code>--sidebar</code></td><td>左栏 + 右栏 + 图标条</td><td>#252526</td><td>#f3f3f3</td></tr>
+    <tr><td><code>--surface</code></td><td>卡片 / AI 纸面 / Composer</td><td>#2d2d2d</td><td>#ffffff</td></tr>
+    <tr><td><code>--surface-2</code></td><td>悬停 / 次级块</td><td>#333333</td><td>#f8f8f8</td></tr>
+    <tr><td><code>--selected</code></td><td>会话选中 / 条目标 hover</td><td>白 6%</td><td>黑 4%</td></tr>
+    <tr><td><code>--accent</code></td><td>左条 / 主按钮 / 焦点（每屏≤3处）</td><td>#0078d4</td><td>#0066b8</td></tr>
+    <tr><td><code>--up / --down</code></td><td>仅涨跌数字</td><td>绿/红</td><td>绿/红</td></tr>
+  </table>
+  <h3>与当前 App 差异</h3>
+  <ul style="padding-left:16px;color:var(--muted)">
+    <li>去掉默认 <code>#0a0e17</code> 金融蓝黑，暗色改中性灰</li>
+    <li>白天去掉 <code>#fbfaf7</code> 暖纸黄，改 Cursor 冷灰白</li>
+    <li><code>bg-secondary</code> → <code>sidebar</code>；<code>bg</code> → <code>canvas</code></li>
+    <li>三栏不再用不同色相，仅明度差 1 级</li>
+  </ul>
+  <h3>审核清单</h3>
+  <ul style="padding-left:16px;color:var(--muted)">
+    <li>☐ 左/右栏与中间对比是否足够但不刺眼</li>
+    <li>☐ 白天模式是否「办公软件感」而非「泛黄旧纸」</li>
+    <li>☐ 夜间是否减少蓝光溢出</li>
+    <li>☐ accent 蓝是否过亮/过暗</li>
+    <li>☐ 会话选中左条 + 功能坞高亮是否一致</li>
+  </ul>
+</div>
+
+<div class="app panel-open">
+  <!-- 左栏 -->
+  <aside class="left">
+    <span class="col-label">sidebar</span>
+    <div class="brand">
+      <div class="brand-logo">📈</div>
+      <div>
+        <div class="brand-name">Stock Agent</div>
+        <div class="brand-sub">local · 8686</div>
+      </div>
+    </div>
+    <div class="left-actions">
+      <button type="button" class="btn-primary">+ 新对话</button>
+      <button type="button" class="btn-ghost" title="搜索">⌕</button>
+    </div>
+    <div class="sessions">
+      <div class="sess-group">今天</div>
+      <button type="button" class="sess active">
+        <div class="sess-title">茅台持仓风险与调仓建议</div>
+        <div class="sess-meta">15:42 · 6 轮</div>
+      </button>
+      <button type="button" class="sess">
+        <div class="sess-title">AAPL 财报解读</div>
+        <div class="sess-meta">11:08 · 3 轮</div>
+      </button>
+      <div class="sess-group">本周</div>
+      <button type="button" class="sess">
+        <div class="sess-title">盯盘规则：突破 5 日高点</div>
+        <div class="sess-meta">周一 · 已归档</div>
+      </button>
+    </div>
+    <div class="left-foot">
+      <button type="button" class="foot-item">
+        <span class="dot-ok"></span>
+        <span>AI 就绪</span>
+        <span style="margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--faint)">设置</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- 中栏 -->
+  <main class="center">
+    <span class="col-label">canvas</span>
+    <header class="chat-head">
+      <div class="chat-title">茅台持仓风险与调仓建议</div>
+      <div class="sub">session · mimo-v2.5</div>
+      <div class="head-spacer"></div>
+      <button type="button" class="chip-ghost">显示推理</button>
+    </header>
+    <div class="msgs">
+      <div class="msgs-inner">
+        <div class="divider">今天 15:38</div>
+        <div class="msg user">
+          <div class="bubble-u">帮我看一下 600519 在当前持仓里的风险敞口，并给一个保守的调仓草案。</div>
+        </div>
+        <div class="msg ai">
+          <div class="ai-head">
+            <span class="ai-avatar">AI</span>
+            <span>Copilot</span>
+            <span style="color:var(--faint)">· 15:39</span>
+          </div>
+          <div class="bubble-a">
+            <p style="margin-bottom:8px;color:var(--ink-2)">已拉取持仓快照与风险策略。茅台占组合 <strong>28.4%</strong>，超过单票上限 25%，属于集中度偏高。</p>
+            <div class="toolcard">
+              <span>●</span>
+              <span>get_portfolio_snapshot</span>
+              <span style="margin-left:auto;color:var(--faint)">ok · 0.3s →</span>
+            </div>
+            <div class="quote-px">¥ 1,678.00 <span class="quote-chg">+0.82%</span></div>
+            <p style="margin-top:10px;font-size:12px;color:var(--muted)">建议：减持 3–5 个百分点至 23–25% 区间，腾出的权重分配给防御型标的。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="composer">
+      <div class="composer-inner">
+        <textarea rows="1" placeholder="输入问题，⌘ Enter 发送…"></textarea>
+        <div class="composer-bar">
+          <span class="model-pill">mimo-v2.5 ▾</span>
+          <button type="button" class="send">↑</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- 右栏 -->
+  <div class="right">
+    <section class="func-panel">
+      <span class="col-label">sidebar + surface 卡片</span>
+      <header class="func-head">
+        <span class="func-title">持仓</span>
+        <span class="func-sub">Holdings</span>
+      </header>
+      <div class="func-body">
+        <div class="card">
+          <div class="card-title">组合摘要</div>
+          <div class="kv">
+            <span class="k">总市值</span><span class="v">¥ 1,234,567</span>
+            <span class="k">今日</span><span class="v up">+1.25%</span>
+            <span class="k">风险档</span><span class="v">中等</span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">持仓明细</div>
+          <table>
+            <thead><tr><th>标的</th><th>权重</th><th>涨跌</th></tr></thead>
+            <tbody>
+              <tr><td>600519</td><td>28.4%</td><td class="up">+0.8%</td></tr>
+              <tr><td>00700</td><td>18.2%</td><td class="down" style="color:var(--down)">-0.5%</td></tr>
+              <tr><td>AAPL</td><td>15.1%</td><td class="up">+1.2%</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+    <nav class="strip">
+      <button type="button" class="strip-btn" title="总览">▦</button>
+      <button type="button" class="strip-btn on badge" title="持仓">📊</button>
+      <button type="button" class="strip-btn" title="盯盘">🔔</button>
+      <button type="button" class="strip-btn" title="报告">📄</button>
+    </nav>
+  </div>
+</div>
+
+<script>
+  const html = document.documentElement;
+  const buttons = document.querySelectorAll('[data-theme]');
+  buttons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const t = btn.dataset.theme;
+      html.classList.remove('dark', 'light');
+      html.classList.add(t);
+      buttons.forEach(b => b.classList.toggle('on', b.dataset.theme === t));
+    });
+  });
+  document.getElementById('specToggle').addEventListener('click', () => {
+    document.getElementById('specPanel').classList.toggle('open');
+  });
+</script>
+</body>
+</html>

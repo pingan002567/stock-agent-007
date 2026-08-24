@@ -4,21 +4,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Single-user, locally-run AI investment workbench. A FastAPI backend exposes an AI Copilot (built on ByteDance's DeerFlow agent runtime) plus stock research, watchlist/holdings, monitoring/alerts, strategy backtesting, risk control, paper trading, and reporting. A React 19 + Vite frontend (a fixed-rail multi-page SPA) consumes the REST API and an SSE stream. Persistence is a single local SQLite file. Most of the docs and product surface are in Chinese.
+Single-user, locally-run AI investment workbench (Tauri desktop client). A FastAPI backend exposes an AI Copilot (built on ByteDance's DeerFlow agent runtime) plus stock research, watchlist/holdings, monitoring/alerts, strategy backtesting, risk control, paper trading, and reporting. The React SPA is built to `frontend/dist` and served by the backend; the Tauri shell loads it via WebView. Persistence is a single local SQLite file. Most of the docs and product surface are in Chinese.
 
 ## Commands
 
 ```bash
-# Single entry point — runs backend on :6666 + frontend on :8888 (loads .env, sets AI defaults).
-# Flags: --dev (backend hot reload), --backend-only, --frontend-only, --port PORT. Safe under `sh start.sh` (re-execs with bash).
+# Desktop client — backend :8686 + Tauri shell (loads .env, sets AI defaults).
+# Flags: --dev (backend hot reload), --backend-only, --port PORT. Safe under `sh start.sh`.
 ./start.sh
-./scripts/dev.sh   # thin shim, equivalent to `./start.sh --dev`
+./start.sh --dev            # backend hot reload + Tauri desktop
 
-# Backend only (manual)
-uv run uvicorn backend.app:app --host 0.0.0.0 --port 6666
+# Backend only (when using a built .app or debugging)
+./start.sh --backend-only
 
-# Frontend only (manual) — Vite proxies /api -> 127.0.0.1:6666
-cd frontend && npm run dev
+# Manual backend
+uv run uvicorn backend.app:app --host 127.0.0.1 --port 8686
+
+# Build SPA assets (required before first desktop run if frontend/dist missing)
+cd frontend && npm run build
+
+# Tauri desktop shell (manual)
+cd desktop/src-tauri && STOCKAGENT_REPO_ROOT=$PWD/../.. cargo tauri dev
 
 # Backend tests (pytest is configured with --assert=plain; testpaths=tests)
 uv run pytest
@@ -39,7 +45,7 @@ python scripts/deerflow_smoke.py
 python scripts/closed_loop_smoke.py
 ```
 
-Frontend is **8888** (matching `vite.config.ts`), backend is **6666** — for both `./start.sh` and the `./scripts/dev.sh` shim. When `frontend/dist` exists the backend serves the built SPA at `/app` and mounts it at `/`.
+Backend is **8686**. The Tauri desktop client loads `http://127.0.0.1:8686/` (backend serves `frontend/dist` when built). There is no Vite dev server entry.
 
 ## Architecture
 

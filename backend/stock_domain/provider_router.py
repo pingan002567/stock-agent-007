@@ -8,6 +8,11 @@ from typing import Any, Callable, TypeVar
 
 from backend.app_services.runtime_observer import runtime_observer
 from backend.config.data_sources import DEFAULT_DATA_SOURCES
+from backend.config.provider_policy import (
+    is_provider_usable,
+    resolve_market_provider,
+    selectable_providers_for_market,
+)
 from backend.schemas import PriceSnapshot, StockDaily, StockQuote, now_iso
 from backend.stock_domain.catalog import get_stock, normalize_symbol
 from backend.stock_domain.multi_providers import create_provider
@@ -111,20 +116,38 @@ class ProviderRouter:
             cb.failures = 0
             cb.state = "closed"
 
-    def _provider_id_for_market(self, market: str | None) -> str:
-        if not self.repo or not market:
-            return "akshare"
+    def _data_sources_config(self) -> dict:
+        if not self.repo:
+            return DEFAULT_DATA_SOURCES
         try:
-            config = self.repo.get_config("data_sources", DEFAULT_DATA_SOURCES)
-            providers = config.get("providers", {})
-            return providers.get(market, {}).get("provider", "akshare")
+            return self.repo.get_config("data_sources", DEFAULT_DATA_SOURCES)
         except Exception:
-            return "akshare"
+            return DEFAULT_DATA_SOURCES
 
-    def _get_provider(self, provider_id: str) -> MarketDataProvider:
-        """Get or create a provider instance by id."""
+    def _provider_id_for_market(self, market: str | None) -> str:
+        if not market:
+            return "eastmoney"
+        try:
+            return resolve_market_provider(self._data_sources_config(), market)
+        except Exception:
+            return "eastmoney" if market != "US" else "yfinance"
+
+    def _resolve_provider_id(self, provider_id: str, market: str | None) -> str:
         if provider_id == "mock":
-            return self.fallback
+            if market == "US":
+                return "yfinance"
+            return "eastmoney"
+        return provider_id
+
+    def _get_provider(self, provider_id: str, market: str | None = None) -> MarketDataProvider:
+        """Get or create a provider instance by id."""
+        provider_id = self._resolve_provider_id(provider_id, market)
+        config = self._data_sources_config()
+        if not is_provider_usable(config, provider_id):
+            if market:
+                fallback_id = resolve_market_provider(config, market)
+                if fallback_id != provider_id and is_provider_usable(config, fallback_id):
+                    provider_id = fallback_id
         if provider_id in self._provider_instances:
             return self._provider_instances[provider_id]
         instance = create_provider(provider_id)
@@ -134,7 +157,7 @@ class ProviderRouter:
     def _provider_for_market(self, market: str | None) -> MarketDataProvider:
         """Resolve the configured provider for a market."""
         provider_id = self._provider_id_for_market(market)
-        return self._get_provider(provider_id)
+        return self._get_provider(provider_id, market)
 
     def _secondary_providers(
         self, market: str | None, primary: MarketDataProvider
@@ -144,28 +167,19 @@ class ProviderRouter:
         Returns an ordered list of providers to attempt after the primary fails.
         These serve as cross-provider fallbacks — e.g. for US: yfinance → akshare → mock.
         """
+        config = self._data_sources_config()
         chain: list[MarketDataProvider] = []
-        if market == "US":
-            # US: YFinance → AkShare (internal: famous_spot→spot_em→Tencent→TwelveData) → Mock
-            for pid in ["yfinance", "akshare"]:
-                p = self._get_provider(pid)
-                if p.name != primary.name and p.is_available():
-                    chain.append(p)
-        elif market == "HK":
-            # HK: AkShare internal fallbacks (hot_rank→Tencent) already robust; add secondary only if primary isn't akshare
-            if primary.name != "akshare":
-                p = self._get_provider("akshare")
+        if not market:
+            return chain
+        for pid in selectable_providers_for_market(config, market):
+            if pid == primary.name:
+                continue
+            try:
+                p = self._get_provider(pid, market)
                 if p.is_available():
                     chain.append(p)
-        elif market == "CN":
-            # CN: try baostock or pytdx as secondary when available
-            for pid in ["baostock", "pytdx"]:
-                try:
-                    p = self._get_provider(pid)
-                    if p.name != primary.name and p.is_available():
-                        chain.append(p)
-                except Exception:
-                    continue
+            except Exception:
+                continue
         return chain
 
     def status(self) -> ProviderStatus:

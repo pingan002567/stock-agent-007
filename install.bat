@@ -210,13 +210,11 @@ echo ╔════════════════════════
 echo ║           安装完成!                           ║
 echo ╠═══════════════════════════════════════════════╣
 echo ║                                               ║
-echo ║  启动命令: start.bat                          ║
+echo ║  启动命令: start.bat （Windows 仅后端）        ║
+echo ║  桌面客户端: macOS 上使用 ./start.sh           ║
 echo ║                                               ║
-echo ║  或手动启动:                                  ║
-echo ║    终端1: .venv\Scripts\activate              ║
-echo ║            uv run uvicorn backend.app:app     ║
-echo ║              --host 0.0.0.0 --port 6666      ║
-echo ║    终端2: cd frontend ^&^& npm run dev          ║
+echo ║  或手动启动后端:                              ║
+echo ║    start.bat --dev                            ║
 echo ║                                               ║
 echo ╚═══════════════════════════════════════════════╝
 echo.

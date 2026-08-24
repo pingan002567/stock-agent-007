@@ -69,7 +69,7 @@
 
 - 前端工程位于 **[frontend/](../frontend/)**（React + TypeScript + Vite）
 - 后端入口：[backend/app.py](../backend/app.py)
-- 运行方式：`bash scripts/dev.sh`（启动 backend:6666 + frontend:8888）
+- 运行方式：`./start.sh`（后端 8686 + Tauri 桌面；开发加 `--dev`）
 
 ## 设计原则
 

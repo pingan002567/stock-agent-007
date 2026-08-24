@@ -1,9 +1,8 @@
 """统一路径解析：桌面化改造的 cwd 陷阱修复（doc/DESKTOP_APP_PLAN.md §2 改造清单 1）。
 
 三类路径，职责分离（§3.1.3）：
-- 数据目录（可选）：SQLite/生成文件。开发态默认仓库内 ``data/``（与历史行为一致），
-  桌面态经 launchd plist 下发 ``WORKBENCH_DATA_DIR`` 指到
-  ``~/Library/Application Support/StockAgent``。
+- 数据目录（可选）：SQLite/生成文件。默认锚定仓库 ``data/``（Web / 桌面 / launchd 同源），
+  可通过 ``WORKBENCH_DATA_DIR`` 覆盖。
 - 服务状态目录（固定不可选）：plist 引用的 service.json（端口/数据目录）与服务日志。
   固定路径是为了壳在后端启动前就能找到它。
 - 前端产物：锚定仓库根，不再依赖进程 cwd。
@@ -17,11 +16,19 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 APP_NAME = "StockAgent"
 
+# 全栈统一后端端口。不用 6666：6665-6669 在 WKWebView/Chromium 受限端口名单，
+# 桌面壳直连会静默失败（见 doc/DESKTOP_APP_PLAN.md §2）。
+DEFAULT_BACKEND_PORT = 8686
+
+
+def default_data_dir() -> Path:
+    """统一数据目录：WORKBENCH_DATA_DIR 优先，否则锚定仓库 data/（Web / 桌面 / launchd 同源）。"""
+    env = os.getenv("WORKBENCH_DATA_DIR", "").strip()
+    return Path(env).expanduser() if env else REPO_ROOT / "data"
+
 
 def data_dir() -> Path:
-    """数据目录：WORKBENCH_DATA_DIR 优先；缺省保持历史行为（cwd 下 data/）。"""
-    env = os.getenv("WORKBENCH_DATA_DIR", "").strip()
-    return Path(env).expanduser() if env else Path("data")
+    return default_data_dir()
 
 
 def default_db_path() -> Path:
@@ -54,6 +61,11 @@ def service_state_dir() -> Path:
     return Path.home() / "Library" / "Application Support" / APP_NAME
 
 
-def default_desktop_data_dir() -> Path:
-    """桌面态数据目录默认值（约定优于配置，可在首启引导中另选）。"""
+def recommended_app_data_dir() -> Path:
+    """桌面首启推荐数据目录：位于服务状态目录下的 ``data/``（与引导页一致）。"""
     return service_state_dir() / "data"
+
+
+def default_desktop_data_dir() -> Path:
+    """桌面首启引导默认数据目录（与 Web 开发态一致，可在引导中另选）。"""
+    return default_data_dir()

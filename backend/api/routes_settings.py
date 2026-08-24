@@ -9,7 +9,8 @@ from backend.config.profiles import DEFAULT_PROFILES
 from backend.config.providers import DEFAULT_PROVIDERS
 from backend.config.runtime import DEFAULT_RUNTIME_CONFIG
 from backend.config.tools import DEFAULT_TOOLS
-from backend.config.data_sources import AVAILABLE_PROVIDERS, DEFAULT_DATA_SOURCES
+from backend.config.data_sources import AVAILABLE_PROVIDERS, DEFAULT_DATA_SOURCES, PROVIDER_CREDENTIAL_SCHEMA
+from backend.config.data_source_sanitize import sanitize_data_sources, sanitize_intel_sources
 from backend.config.intel_sources import (
     AVAILABLE_INTEL_PROVIDERS,
     AVAILABLE_SENTIMENT_PROVIDERS,
@@ -53,10 +54,13 @@ def get_settings(request: Request, services: AppServices = Depends(get_services)
         ).effective_runtime_config(services.repo),
         "agent_runtime": services.copilot_service.deerflow.status().to_dict(),
         "data_provider": provider_router.status().to_dict(),
-        "data_sources": services.repo.get_config("data_sources", DEFAULT_DATA_SOURCES),
+        "data_sources": sanitize_data_sources(
+            services.repo.get_config("data_sources", DEFAULT_DATA_SOURCES)
+        ),
         "available_data_providers": AVAILABLE_PROVIDERS,
-        "intel_sources": services.repo.get_config(
-            "intel_sources", DEFAULT_INTEL_SOURCES
+        "provider_credential_schema": PROVIDER_CREDENTIAL_SCHEMA,
+        "intel_sources": sanitize_intel_sources(
+            services.repo.get_config("intel_sources", DEFAULT_INTEL_SOURCES)
         ),
         "available_intel_providers": AVAILABLE_INTEL_PROVIDERS,
         "available_sentiment_providers": AVAILABLE_SENTIMENT_PROVIDERS,
@@ -125,7 +129,8 @@ def put_data_provider(
     payload: dict, request: Request, services: AppServices = Depends(get_services)
 ):
     services.audit_service.record("settings data provider updated", "data_sources")
-    result = services.repo.set_config("data_sources", payload)
+    cleaned = sanitize_data_sources(payload)
+    result = services.repo.set_config("data_sources", cleaned)
     # Clear provider cache so new config takes effect immediately
     provider_router.clear_cache()
     return result
@@ -136,7 +141,7 @@ def put_intel_sources(
     payload: dict, request: Request, services: AppServices = Depends(get_services)
 ):
     services.audit_service.record("settings intel sources updated", "intel_sources")
-    return services.repo.set_config("intel_sources", payload)
+    return services.repo.set_config("intel_sources", sanitize_intel_sources(payload))
 
 
 @router.put("/tools")
@@ -160,7 +165,9 @@ def data_provider_health(request: Request, services: AppServices = Depends(get_s
     health_status = {}
     
     for market, provider_config in providers.items():
-        provider_id = provider_config.get("provider", "mock")
+        provider_id = provider_config.get("provider", "akshare")
+        if provider_id == "mock":
+            provider_id = "yfinance" if market == "US" else "akshare"
         try:
             from backend.stock_domain.multi_providers import create_provider
             provider = create_provider(provider_id)

@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { toolLabel, type StreamStep, type StreamToolCall } from "@/hooks/useCopilotChat";
 import { skillLabelOf } from "@/components/features/skillLabels";
+import { truncateText } from "@/components/features/taskToolMeta";
 
 /** 思维链时间线(借鉴 deer-flow ChainOfThought/SubtaskCard):
  * 推理与工具步按到达顺序交错,垂直连接线 + 图标;早期步骤折叠为
- * 「更早 N 步」,只展开最近几步;task 委派渲染为子任务卡(运行态 shimmer)。 */
+ * 「更早 N 步」,只展开最近几步;task 委派与其它工具同为紧凑单行。 */
 
 const VISIBLE_TAIL = 4;
 
@@ -27,28 +28,41 @@ function ToolIcon() {
 function SubagentIcon() {
   return (
     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="5" y="7" width="14" height="11" rx="2"/><path d="M12 3v4M8 12h.01M16 12h.01M9 16h6"/>
+      <rect x="5" y="7" width="14" height="11" rx="2" />
+      <path d="M12 3v4M8 12h.01M16 12h.01M9 16h6" />
     </svg>
   );
+}
+
+function taskEngLabel(tool: StreamToolCall): string {
+  if (tool.subagentType) return tool.subagentType;
+  if (tool.taskDescription) return truncateText(tool.taskDescription, 48);
+  if (tool.taskPrompt) return truncateText(tool.taskPrompt, 48);
+  return "task";
 }
 
 function ToolStepRow({ tool, onClick }: { tool: StreamToolCall; onClick?: (t: StreamToolCall) => void }) {
   const running = tool.status === "running";
   const failed = tool.status === "failed";
+
   if (tool.name === "task") {
-    // 子任务卡:委派给子代理(deer-flow SubtaskCard 借鉴)
-    const label = skillLabelOf(tool.subagentType) ?? tool.subagentType ?? "子代理";
+    const skillLabel = skillLabelOf(tool.subagentType) ?? toolLabel(tool.name);
     return (
-      <div className={`tl-step subtask${running ? " running" : ""}`}
-        onClick={onClick ? () => onClick(tool) : undefined} role={onClick ? "button" : undefined}>
+      <div
+        className={`tl-step subtask${running ? " running" : ""}`}
+        onClick={onClick ? () => onClick(tool) : undefined}
+        role={onClick ? "button" : undefined}
+      >
         <span className="tl-step-icon subagent"><SubagentIcon /></span>
-        <span className={`tl-step-label${running ? " shimmer" : ""}`}>委派 · {label}</span>
+        <span className={`tl-step-label${running ? " shimmer" : ""}`}>{skillLabel}</span>
+        <span className="tl-step-eng">{taskEngLabel(tool)}</span>
         <span className={`tl-step-state ${failed ? "bad" : running ? "busy" : "ok"}`}>
-          {failed ? "失败" : running ? "执行中" : "完成"}
+          {failed ? "失败" : running ? "…" : "✓"}
         </span>
       </div>
     );
   }
+
   return (
     <div className="tl-step" onClick={onClick ? () => onClick(tool) : undefined} role={onClick ? "button" : undefined}>
       <span className="tl-step-icon"><ToolIcon /></span>

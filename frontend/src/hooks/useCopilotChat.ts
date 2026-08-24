@@ -11,6 +11,7 @@ import {
 } from "@/api/copilot";
 import type { CopilotSession, CopilotMessage } from "@/api/client";
 import { skillTraceItems, type SkillTraceItem } from "@/api/copilot";
+import { parseTaskToolArgs } from "@/components/features/taskToolMeta";
 
 // ── Streaming message types ──
 
@@ -21,6 +22,10 @@ export interface StreamToolCall {
   resultText?: string;
   /** task 委派时的子代理类型(subagent_type) */
   subagentType?: string;
+  /** task 工具的 description 字段（短标题） */
+  taskDescription?: string;
+  /** task 工具的 prompt 字段（完整指令，展示截断） */
+  taskPrompt?: string;
 }
 
 /** 思维链时间线步骤(deer-flow ChainOfThought 借鉴):推理与工具按到达顺序交错 */
@@ -109,6 +114,8 @@ const TOOL_LABELS: Record<string, string> = {
   write_file: "写文件",
   str_replace: "编辑文件",
   present_files: "交付文件",
+  task: "子代理委派",
+  write_todos: "执行计划",
 };
 
 export function toolLabel(name: string): string {
@@ -394,17 +401,20 @@ function useCopilotChatState() {
             return;
           }
           let subagentType: string | undefined;
+          let taskDescription: string | undefined;
+          let taskPrompt: string | undefined;
           if (name === "task") {
-            let args = p.arguments;
-            if (typeof args === "string") {
-              try { args = JSON.parse(args); } catch { args = {}; }
-            }
-            subagentType = String((args as { subagent_type?: string })?.subagent_type || "") || undefined;
+            const meta = parseTaskToolArgs(p.arguments);
+            subagentType = meta.subagentType;
+            taskDescription = meta.description;
+            taskPrompt = meta.prompt;
           }
           setStreamMessage((prev) => {
             if (!prev) return prev;
             if (prev.tools.some((t) => t.callId === callId)) return prev;
-            const tool: StreamToolCall = { callId, name, status: "running", subagentType };
+            const tool: StreamToolCall = {
+              callId, name, status: "running", subagentType, taskDescription, taskPrompt,
+            };
             return {
               ...prev,
               phase: "tools",

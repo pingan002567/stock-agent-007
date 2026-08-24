@@ -5,15 +5,13 @@ export default defineConfig({
   timeout: 30000,
   retries: 0,
   use: {
-    baseURL: "http://localhost:8888",
+    baseURL: "http://127.0.0.1:8686",
     headless: true,
   },
-  webServer: [
-    {
-      command: "cd .. && bash scripts/dev.sh 2>&1",
-      port: 8888,
-      timeout: 120000,
-      reuseExistingServer: true,
-    },
-  ],
+  webServer: {
+    command: "cd .. && ./start.sh --backend-only --dev",
+    port: 8686,
+    timeout: 120000,
+    reuseExistingServer: true,
+  },
 });

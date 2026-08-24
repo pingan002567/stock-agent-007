@@ -56,11 +56,11 @@ RUN mkdir -p /app/data /app/log
 COPY .env.example .env
 
 # Expose port
-EXPOSE 6666
+EXPOSE 8686
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:6666/health || exit 1
+    CMD curl -f http://localhost:8686/api/health || exit 1
 
 # Run the application
-CMD ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "6666"]
+CMD ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8686"]

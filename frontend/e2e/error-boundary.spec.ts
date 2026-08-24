@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 test.describe("error boundary", () => {
   test("shows error boundary on unknown route", async ({ browser }) => {
     const page = await browser.newPage();
-    await page.goto("http://127.0.0.1:8888/#!/nonexistent-route", {
+    await page.goto("http://127.0.0.1:8686/#!/nonexistent-route", {
       waitUntil: "networkidle",
     });
 
@@ -29,12 +29,12 @@ test.describe("error boundary", () => {
     const page = await browser.newPage();
 
     // Trigger an error route
-    await page.goto("http://127.0.0.1:8888/#!/nonexistent-route", {
+    await page.goto("http://127.0.0.1:8686/#!/nonexistent-route", {
       waitUntil: "networkidle",
     });
 
     // Navigate back to valid route
-    await page.goto("http://127.0.0.1:8888", { waitUntil: "networkidle" });
+    await page.goto("http://127.0.0.1:8686", { waitUntil: "networkidle" });
 
     // App shell should be fully functional
     await expect(page.locator(".app")).toBeVisible({ timeout: 10000 });

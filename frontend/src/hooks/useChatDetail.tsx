@@ -7,6 +7,9 @@ export interface ToolDetail {
   name: string;
   status: "done" | "failed" | "running";
   resultText?: string;
+  subagentType?: string;
+  taskDescription?: string;
+  taskPrompt?: string;
 }
 
 interface ChatDetailValue {

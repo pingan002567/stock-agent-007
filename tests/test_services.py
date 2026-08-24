@@ -1101,6 +1101,26 @@ def test_delegation_observation_and_required_skill_compliance(services):
     assert compliance["missing_required"] == ["risk-officer"]
 
 
+def test_serialize_tool_call_persists_task_meta(services):
+    """task 委派元数据应写入 message.payload，供历史会话还原子代理卡片。"""
+    _, kind, _, data = services.copilot_service._serialize_event(
+        "tool_call",
+        {
+            "tool": "task",
+            "call_id": "call_x",
+            "arguments": {
+                "subagent_type": "risk-officer",
+                "description": "评估组合风险",
+                "prompt": "分析当前持仓集中度与最大回撤",
+            },
+        },
+    )
+    assert kind == "tool_call"
+    assert data["task_meta"]["subagent_type"] == "risk-officer"
+    assert data["task_meta"]["description"] == "评估组合风险"
+    assert "集中度" in data["task_meta"]["prompt"]
+
+
 def test_build_prompt_envelope_trims_runtime_context():
     envelope = build_prompt_envelope(
         user_message="分析 AAPL 风险",

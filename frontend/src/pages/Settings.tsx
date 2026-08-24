@@ -23,6 +23,14 @@ interface DataSourceProviderConfig {
 }
 interface DataSourcesConfig {
   providers: Record<string, DataSourceProviderConfig>;
+  provider_credentials?: Record<string, Record<string, string | null>>;
+  provider_states?: Record<string, { enabled: boolean }>;
+}
+interface ProviderCredentialField {
+  key: string;
+  label: string;
+  env: string;
+  secret?: boolean;
 }
 interface AvailableDataProvider {
   id: string;
@@ -30,10 +38,13 @@ interface AvailableDataProvider {
   markets: string[];
   description: string;
   requirements?: string;
+  free?: boolean;
+  enabled_by_default?: boolean;
 }
 
 interface IntelProviderConfig {
   provider: string;
+  enabled?: boolean;
   api_key?: string | null;
   label?: string;
   description?: string;
@@ -47,8 +58,33 @@ interface AvailableIntelProvider {
   category: string;
   markets: string[];
   api_key_required: boolean;
+  free?: boolean;
   description: string;
   requirements?: string;
+}
+
+function providerCredentialsComplete(
+  providerId: string,
+  credentialSchema: Record<string, ProviderCredentialField[]>,
+  credentials: Record<string, Record<string, string | null>> | undefined,
+): boolean {
+  const fields = credentialSchema[providerId] ?? [];
+  if (fields.length === 0) return true;
+  return fields.every((field) => {
+    const value = credentials?.[providerId]?.[field.key];
+    return typeof value === "string" && value.trim().length > 0;
+  });
+}
+
+function isMarketProviderUsable(
+  provider: AvailableDataProvider,
+  config: DataSourcesConfig,
+  credentialSchema: Record<string, ProviderCredentialField[]>,
+): boolean {
+  const enabled = config.provider_states?.[provider.id]?.enabled ?? provider.enabled_by_default ?? provider.free ?? false;
+  if (!enabled) return false;
+  if (provider.free) return true;
+  return providerCredentialsComplete(provider.id, credentialSchema, config.provider_credentials);
 }
 
 interface SettingsData {
@@ -59,6 +95,7 @@ interface SettingsData {
   data_provider?: Record<string, unknown>;
   data_sources?: DataSourcesConfig;
   available_data_providers?: AvailableDataProvider[];
+  provider_credential_schema?: Record<string, ProviderCredentialField[]>;
   intel_sources?: IntelSourcesConfig;
   available_intel_providers?: AvailableIntelProvider[];
   available_sentiment_providers?: AvailableIntelProvider[];
@@ -74,7 +111,19 @@ interface SkillInfo {
   authority: string; enabled: boolean; locked: boolean;
 }
 
-type SettingTab = "general" | "channels" | "ai" | "skills" | "mcp" | "data" | "risk" | "diag";
+type SettingTab = "general" | "channels" | "ai" | "agent" | "market" | "intel" | "trade" | "diag";
+
+/** 右栏顶部说明（每个分区一句，降低「不知道改哪」的困惑） */
+const TAB_META: Record<SettingTab, { title: string; desc: string }> = {
+  general: { title: "外观与工作区", desc: "主题、当前档案与本地数据目录。" },
+  channels: { title: "通知通道", desc: "盯盘告警、邮件/Webhook 等外发渠道。" },
+  ai: { title: "模型接入", desc: "大模型 API、Base URL、推理模式与连接测试。" },
+  agent: { title: "Agent 能力", desc: "子代理技能开关、长期记忆、MCP 外部工具扩展。" },
+  market: { title: "行情数据源", desc: "A 股 / 港股 / 美股的行情 provider 与实时分发状态。" },
+  intel: { title: "情报与舆情", desc: "新闻搜索、舆情分析 provider 与 API Key。" },
+  trade: { title: "交易与风控", desc: "V1 交易护栏（只读）与可编辑的风控策略规则。" },
+  diag: { title: "运行诊断", desc: "运行时状态、对话记录与排障信息（只读）。" },
+};
 
 /* ---------- Helpers ---------- */
 
@@ -183,15 +232,18 @@ function GeneralTab({ settings }: { settings: SettingsData }) {
   const [ws, setWs] = useState<{ name?: string; data_dir?: string } | null>(null);
   useEffect(() => {
     let alive = true;
-    apiGet<{ name?: string; data_dir?: string }>("/api/workspace")
-      .then((w) => { if (alive) setWs(w); })
-      .catch(() => { /* 旧后端无此接口 */ });
-    return () => { alive = false; };
+    const refresh = () => {
+      apiGet<{ name?: string; data_dir?: string }>("/api/workspace")
+        .then((w) => { if (alive) setWs(w); })
+        .catch(() => { /* 旧后端无此接口 */ });
+    };
+    refresh();
+    window.addEventListener("workspace-changed", refresh);
+    return () => { alive = false; window.removeEventListener("workspace-changed", refresh); };
   }, []);
-  const tc = settings.trading_controls;
   return (
     <div className="settings-stack">
-      <SectionCard title="外观" description="明暗主题跟随">
+      <SectionCard title="外观" description="界面明暗与系统跟随">
         <SettingRow label="主题模式" sub="跟随系统时随 macOS 自动切换">
           <div className="seg-ctl">
             {([["light", "白天"], ["dark", "夜晚"], ["system", "跟随系统"]] as const).map(([mode, label]) => (
@@ -202,18 +254,7 @@ function GeneralTab({ settings }: { settings: SettingsData }) {
         </SettingRow>
       </SectionCard>
 
-      {tc && (
-        <SectionCard title="交易控制" subtitle="V1 锁定" description="research-only 安全护栏">
-          <SettingRow label="纸上交易" sub="模拟撮合,不触真钱">
-            <span className="tag" style={{ color: "var(--green)" }}>{String(tc.paper_trading ?? "-")}</span>
-          </SettingRow>
-          <SettingRow label="真实下单" sub="执行代理锁定 A5,本版本不可开启">
-            <span className="tag" style={{ color: "var(--red)" }}>{String(tc.real_order ?? "blocked")}</span>
-          </SettingRow>
-        </SectionCard>
-      )}
-
-      <SectionCard title="工作区" description="当前档案与数据目录;切换入口在左栏底部">
+      <SectionCard title="工作区" description="档案名称与 SQLite 数据目录；切换入口在左栏底部">
         <SettingRow label="当前工作区">
           <span className="num" style={{ fontSize: 12 }}>{ws?.name ?? "-"}</span>
         </SettingRow>
@@ -659,14 +700,27 @@ function AiTab({
   };
 
   return (
-    <div className="page-stack">
-
-      <SectionCard title="AI Runtime 配置" subtitle="API Key / 模型 / 连接">
-        <div className="page-stack" style={{ gap: 12 }}>
-          <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
-            配置 AI 模型接入。API Key 可通过环境变量 <code>OPENAI_API_KEY</code> 设置，
-            也可在此页输入并保存到本地数据库。环境变量优先级高于页面配置。
+    <div className="settings-stack">
+      {settings.agent_runtime && (
+        <SectionCard title="运行时概览" description="当前 Copilot 连接状态（只读）">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
+            {[
+              ["模式", settings.agent_runtime.mode],
+              ["客户端", settings.agent_runtime.active_client],
+              ["模型", settings.agent_runtime.model_name],
+              ["子代理", settings.agent_runtime.subagent_enabled ? "已启用" : "未启用"],
+              ["计划模式", settings.agent_runtime.plan_mode ? "开" : "关"],
+              ["降级", settings.agent_runtime.degraded ? (settings.agent_runtime.degraded_reason ?? "是") : "否"],
+            ].map(([k, v]) => (
+              <div key={k} className="card" style={{ padding: "10px 12px" }}>
+                <div className="muted" style={{ fontSize: 11 }}>{k}</div>
+                <div className="num" style={{ fontSize: 12, marginTop: 4, wordBreak: "break-all" }}>{String(v ?? "-")}</div>
+              </div>
+            ))}
           </div>
+        </SectionCard>
+      )}
+      <SectionCard title="模型与连接" description="API Key 可存本地；环境变量 OPENAI_API_KEY 优先于页面配置">
           <label className="page-stack" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 12 }}>
               API Key
@@ -763,36 +817,33 @@ function AiTab({
               </span>
             )}
           </div>
-        </div>
       </SectionCard>
 
     </div>
   );
 }
 
-/* ---------- 股票配置 ---------- */
+/* ---------- 行情 / 情报数据源 ---------- */
 
-function StockTab({
-  settings, dataSources, availableProviders, onSaveDataSources, savingDataSources,
-  intelSources, availableIntelProviders, availableSentimentProviders, onSaveIntelSources, savingIntelSources,
+function MarketDataTab({
+  settings, dataSources, availableProviders, credentialSchema, onSaveDataSources, savingDataSources,
 }: {
   settings: SettingsData;
   dataSources: DataSourcesConfig;
   availableProviders: AvailableDataProvider[];
+  credentialSchema: Record<string, ProviderCredentialField[]>;
   onSaveDataSources: (config: DataSourcesConfig) => Promise<void>;
   savingDataSources: boolean;
-  intelSources: IntelSourcesConfig;
-  availableIntelProviders: AvailableIntelProvider[];
-  availableSentimentProviders: AvailableIntelProvider[];
-  onSaveIntelSources: (config: IntelSourcesConfig) => Promise<void>;
-  savingIntelSources: boolean;
 }) {
   const [localConfig, setLocalConfig] = useState<DataSourcesConfig>(dataSources);
   const [dirty, setDirty] = useState(false);
 
-  // Sync when settings load
   useEffect(() => {
-    setLocalConfig(dataSources);
+    setLocalConfig({
+      ...dataSources,
+      provider_credentials: dataSources.provider_credentials ?? {},
+      provider_states: dataSources.provider_states ?? {},
+    });
     setDirty(false);
   }, [dataSources]);
 
@@ -807,6 +858,223 @@ function StockTab({
     setDirty(true);
   };
 
+  const handleProviderToggle = (providerId: string, enabled: boolean) => {
+    setLocalConfig((prev) => ({
+      ...prev,
+      provider_states: {
+        ...(prev.provider_states ?? {}),
+        [providerId]: { enabled },
+      },
+    }));
+    setDirty(true);
+  };
+
+  const handleCredentialChange = (providerId: string, field: string, value: string) => {
+    setLocalConfig((prev) => ({
+      ...prev,
+      provider_credentials: {
+        ...(prev.provider_credentials ?? {}),
+        [providerId]: {
+          ...(prev.provider_credentials?.[providerId] ?? {}),
+          [field]: value || null,
+        },
+      },
+    }));
+    setDirty(true);
+  };
+
+  const marketDefaults: Record<string, string> = { CN: "eastmoney", HK: "eastmoney", US: "yfinance" };
+  const marketLabels: Record<string, string> = { CN: "A 股", HK: "港股", US: "美股" };
+  const marketIcons: Record<string, string> = { CN: "🇨🇳", HK: "🇭🇰", US: "🇺🇸" };
+
+  const usableForMarket = (market: string) =>
+    availableProviders.filter((p) => p.markets.includes(market) && isMarketProviderUsable(p, localConfig, credentialSchema));
+
+  return (
+    <div className="settings-stack">
+      <SectionCard title="数据源目录" description="仅已激活且配置完整的数据源可用于行情；免费源只需开关，付费源需填写 API 凭证">
+        <div className="page-stack" style={{ gap: 10 }}>
+          {availableProviders.map((provider) => {
+            const enabled = localConfig.provider_states?.[provider.id]?.enabled
+              ?? provider.enabled_by_default
+              ?? provider.free
+              ?? false;
+            const fields = credentialSchema[provider.id] ?? [];
+            const credsReady = provider.free || providerCredentialsComplete(provider.id, credentialSchema, localConfig.provider_credentials);
+            const usable = enabled && credsReady;
+            return (
+              <div key={provider.id} className="card" style={{ padding: 12, opacity: enabled ? 1 : 0.72 }}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <strong style={{ fontSize: 13 }}>{provider.name}</strong>
+                      {provider.free ? (
+                        <span className="tag green" style={{ fontSize: 10 }}>免费</span>
+                      ) : (
+                        <span className="tag amber" style={{ fontSize: 10 }}>需 API</span>
+                      )}
+                      {enabled && !credsReady ? (
+                        <span className="tag amber" style={{ fontSize: 10 }}>待配置凭证</span>
+                      ) : null}
+                      {usable ? (
+                        <span className="tag green" style={{ fontSize: 10 }}>可用</span>
+                      ) : null}
+                    </div>
+                    <div className="muted" style={{ fontSize: 11, marginTop: 4, lineHeight: 1.45 }}>
+                      {provider.description}
+                    </div>
+                    <div className="muted" style={{ fontSize: 10, marginTop: 4 }}>
+                      市场：{provider.markets.join(" / ")}
+                      {provider.requirements ? ` · ${provider.requirements}` : ""}
+                    </div>
+                  </div>
+                  <ToggleSwitch
+                    checked={enabled}
+                    onChange={(checked) => handleProviderToggle(provider.id, checked)}
+                    title={`${provider.name} 激活开关`}
+                  />
+                </div>
+                {enabled && fields.length > 0 ? (
+                  <div style={{ borderTop: "1px solid var(--line)", paddingTop: 10, marginTop: 4 }}>
+                    {fields.map((field) => (
+                      <label key={field.key} className="page-stack" style={{ gap: 4, marginBottom: 8 }}>
+                        <span className="muted" style={{ fontSize: 11 }}>
+                          {field.label}
+                          {field.env ? ` · 环境变量 ${field.env}` : ""}
+                        </span>
+                        <input
+                          type={field.secret ? "password" : "text"}
+                          placeholder={field.secret ? "留空则沿用环境变量" : ""}
+                          value={localConfig.provider_credentials?.[provider.id]?.[field.key] ?? ""}
+                          onChange={(e) => handleCredentialChange(provider.id, field.key, e.target.value)}
+                          style={{
+                            width: "100%", height: 32, border: "1px solid var(--line)", borderRadius: 7,
+                            background: "var(--panel)", color: "var(--ink)", padding: "0 10px", fontSize: 12,
+                          }}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </SectionCard>
+
+      <SectionCard title="按市场分配" description="下拉列表仅显示已激活且可用的数据源">
+        <div className="page-stack" style={{ gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
+            {["CN", "HK", "US"].map((market) => {
+              const cfg = localConfig.providers?.[market] ?? { provider: marketDefaults[market] ?? "eastmoney" };
+              const current = cfg.provider;
+              const availForMarket = usableForMarket(market);
+              const selectedUsable = availForMarket.some((p) => p.id === current);
+              const displayValue = selectedUsable ? current : (availForMarket[0]?.id ?? current);
+              return (
+                <div key={market} className="card" style={{ padding: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                    <span style={{ fontSize: 18 }}>{marketIcons[market]}</span>
+                    <strong style={{ fontSize: 14 }}>{marketLabels[market] ?? market}</strong>
+                    <span style={{ fontSize: 11, color: "var(--muted)" }}>{market}</span>
+                  </div>
+                  {availForMarket.length === 0 ? (
+                    <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
+                      暂无可用数据源，请先在上方激活并配置至少一个支持 {marketLabels[market]} 的数据源。
+                    </div>
+                  ) : (
+                    <>
+                      <select
+                        value={displayValue}
+                        onChange={(e) => handleProviderChange(market, e.target.value)}
+                        style={{ width: "100%", height: 34, border: "1px solid var(--line)", borderRadius: 7, background: "var(--panel)", color: "var(--ink)", padding: "0 6px", fontSize: 13 }}
+                      >
+                        {availForMarket.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}{p.free ? " · 免费" : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="muted" style={{ fontSize: 11, marginTop: 6, lineHeight: 1.4 }}>
+                        {availForMarket.find((p) => p.id === displayValue)?.description ?? ""}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {dirty && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button className="primary" disabled={savingDataSources}
+                onClick={() => void onSaveDataSources(localConfig)} type="button">
+                {savingDataSources ? "保存中…" : "保存行情配置"}
+              </button>
+            </div>
+          )}
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Provider 运行状态" description="当前生效 provider 与各能力分发（只读）">
+        {settings.data_provider ? (() => {
+          const dp = settings.data_provider!;
+          const caps = (dp.capabilities as Record<string, { capability?: string; active_provider?: string; degraded?: boolean; degraded_reason?: string | null; coverage?: string }> | undefined) ?? {};
+          return (
+            <div className="page-stack" style={{ gap: 10 }}>
+              <div className="barline" style={{ padding: "6px 0" }}>
+                <span className="muted" style={{ fontSize: 12 }}>主 Provider</span><span /><span className="num">{String(dp.active_provider ?? "-")}</span>
+              </div>
+              <div className="barline" style={{ padding: "6px 0" }}>
+                <span className="muted" style={{ fontSize: 12 }}>Fallback</span><span /><span className="num">{String(dp.fallback_provider ?? "-")}</span>
+              </div>
+              {dp.degraded_reason ? (
+                <div className="muted" style={{ fontSize: 11, lineHeight: 1.5, padding: "4px 0" }}>
+                  ⚠️ {String(dp.degraded_reason)}
+                </div>
+              ) : null}
+              <div style={{ fontSize: 12, fontWeight: 600, marginTop: 4 }}>能力分发</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
+                {Object.entries(caps).map(([key, cap]) => {
+                  const provider = cap?.active_provider ?? "-";
+                  const degraded = cap?.degraded ?? false;
+                  const coverage = cap?.coverage ?? "";
+                  return (
+                    <div key={key} className="card" style={{ padding: 11 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                        <span style={{
+                          width: 8, height: 8, borderRadius: "50%", display: "inline-block", flexShrink: 0,
+                          background: degraded ? "var(--amber)" : "var(--green)",
+                        }} />
+                        <span className="num" style={{ fontSize: 12 }}>{key}</span>
+                        <span className={`tag ${degraded ? "amber" : "green"}`} style={{ marginLeft: "auto", fontSize: 11 }}>{provider}</span>
+                      </div>
+                      <div className="muted" style={{ fontSize: 11, lineHeight: 1.5 }}>
+                        {coverage ? `覆盖: ${coverage}` : ""}
+                        {degraded && cap?.degraded_reason ? <><br />{cap.degraded_reason}</> : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })() : (
+          <div className="muted" style={{ padding: 8 }}>暂无 Provider 状态</div>
+        )}
+      </SectionCard>
+    </div>
+  );
+}
+
+function IntelTab({
+  intelSources, availableIntelProviders, availableSentimentProviders, onSaveIntelSources, savingIntelSources,
+}: {
+  intelSources: IntelSourcesConfig;
+  availableIntelProviders: AvailableIntelProvider[];
+  availableSentimentProviders: AvailableIntelProvider[];
+  onSaveIntelSources: (config: IntelSourcesConfig) => Promise<void>;
+  savingIntelSources: boolean;
+}) {
   const [localIntel, setLocalIntel] = useState<IntelSourcesConfig>(intelSources);
   const [intelDirty, setIntelDirty] = useState(false);
 
@@ -826,6 +1094,17 @@ function StockTab({
     setIntelDirty(true);
   };
 
+  const handleIntelEnabledChange = (key: string, enabled: boolean) => {
+    setLocalIntel((prev) => ({
+      ...prev,
+      providers: {
+        ...prev.providers,
+        [key]: { ...prev.providers[key], enabled },
+      },
+    }));
+    setIntelDirty(true);
+  };
+
   const handleIntelApiKeyChange = (key: string, apiKey: string) => {
     setLocalIntel((prev) => ({
       ...prev,
@@ -837,214 +1116,101 @@ function StockTab({
     setIntelDirty(true);
   };
 
-  const marketLabels: Record<string, string> = { CN: "A 股", HK: "港股", US: "美股" };
-  const marketIcons: Record<string, string> = { CN: "🇨🇳", HK: "🇭🇰", US: "🇺🇸" };
+  const newsCfg = localIntel.providers?.news_search ?? { provider: "eastmoney", enabled: true, api_key: null };
+  const sentimentCfg = localIntel.providers?.social_sentiment ?? { provider: "none", enabled: false, api_key: null };
+  const newsEnabled = newsCfg.enabled !== false;
 
   return (
-    <div className="page-stack">
-
-      {/* 多市场数据源配置 */}
-      <SectionCard title="多市场数据源配置" subtitle="per-market provider selection">
-        <div className="page-stack" style={{ gap: 12 }}>
-          <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
-            为每个市场选择数据提供源。AKShare 提供 A 股/港股/美股实时行情（需安装 akshare），
-            模拟数据用于开发和演示环境。
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
-            {["CN", "HK", "US"].map((market) => {
-              const cfg = localConfig.providers?.[market] ?? { provider: "mock" };
-              const current = cfg.provider;
-              const availForMarket = availableProviders.filter((p) => p.markets.includes(market));
-              return (
-                <div key={market} className="card" style={{ padding: 12 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                    <span style={{ fontSize: 18 }}>{marketIcons[market]}</span>
-                    <strong style={{ fontSize: 14 }}>{marketLabels[market] ?? market}</strong>
-                    <span style={{ fontSize: 11, color: "var(--muted)" }}>{market}</span>
-                  </div>
+    <div className="settings-stack">
+      <SectionCard title="新闻搜索" description="仅已激活的数据源可用；免费源标注「免费」，无需 API Key">
+        {availableIntelProviders.length === 0 ? (
+          <div className="muted" style={{ padding: 8 }}>暂无可用数据源</div>
+        ) : (
+          <div className="page-stack" style={{ gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+              <span className="muted" style={{ fontSize: 12 }}>启用新闻搜索</span>
+              <ToggleSwitch
+                checked={newsEnabled}
+                onChange={(checked) => handleIntelEnabledChange("news_search", checked)}
+                title="启用新闻搜索"
+              />
+            </div>
+            {newsEnabled ? (
+              <>
+                <label className="page-stack" style={{ gap: 4 }}>
+                  <span className="muted" style={{ fontSize: 12 }}>Provider</span>
                   <select
-                    value={current}
-                    onChange={(e) => handleProviderChange(market, e.target.value)}
+                    value={newsCfg.provider === "mock" ? "eastmoney" : newsCfg.provider}
+                    onChange={(e) => handleIntelProviderChange("news_search", e.target.value)}
                     style={{ width: "100%", height: 34, border: "1px solid var(--line)", borderRadius: 7, background: "var(--panel)", color: "var(--ink)", padding: "0 6px", fontSize: 13 }}
                   >
-                    {availForMarket.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
+                    {availableIntelProviders.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}{p.free ? " · 免费" : ""}
+                      </option>
                     ))}
                   </select>
-                  <div className="muted" style={{ fontSize: 11, marginTop: 6, lineHeight: 1.4 }}>
-                    {availForMarket.find((p) => p.id === current)?.description ?? ""}
+                </label>
+                {availableIntelProviders.find((p) => p.id === newsCfg.provider)?.description && (
+                  <div className="muted" style={{ fontSize: 11, lineHeight: 1.5 }}>
+                    {availableIntelProviders.find((p) => p.id === newsCfg.provider)?.description}
+                    {availableIntelProviders.find((p) => p.id === newsCfg.provider)?.free ? (
+                      <span className="tag green" style={{ marginLeft: 8, fontSize: 10 }}>免费</span>
+                    ) : null}
                   </div>
-                </div>
-              );
-            })}
+                )}
+                {availableIntelProviders.find((p) => p.id === newsCfg.provider)?.api_key_required && (
+                  <label className="page-stack" style={{ gap: 4 }}>
+                    <span className="muted" style={{ fontSize: 12 }}>API Key</span>
+                    <input
+                      type="password"
+                      placeholder="输入 API Key..."
+                      value={newsCfg.api_key ?? ""}
+                      onChange={(e) => handleIntelApiKeyChange("news_search", e.target.value)}
+                      style={{ width: "100%", height: 32, border: "1px solid var(--line)", borderRadius: 7, background: "var(--panel)", color: "var(--ink)", padding: "0 10px", fontSize: 12 }}
+                    />
+                  </label>
+                )}
+              </>
+            ) : (
+              <div className="muted" style={{ fontSize: 11 }}>新闻搜索已关闭，Agent 将不会拉取个股新闻。</div>
+            )}
           </div>
-          {dirty && (
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button className="primary" disabled={savingDataSources}
-                onClick={() => void onSaveDataSources(localConfig)} type="button">
-                {savingDataSources ? "保存中…" : "保存数据源配置"}
-              </button>
-              {savingDataSources && <span className="muted" style={{ fontSize: 12 }}>保存中…</span>}
-            </div>
-          )}
-        </div>
-      </SectionCard>
-
-      {/* 数据源实时状态 */}
-      <SectionCard title="数据源实时状态" subtitle="stock data provider status">
-        {settings.data_provider ? (() => {
-          const dp = settings.data_provider!;
-          const caps = (dp.capabilities as Record<string, { capability?: string; active_provider?: string; degraded?: boolean; degraded_reason?: string | null; coverage?: string }> | undefined) ?? {};
-          return (
-            <div className="page-stack" style={{ gap: 10 }}>
-              <div className="barline" style={{ padding: "6px 0" }}>
-                <span className="muted" style={{ fontSize: 12 }}>active_provider</span><span /><span className="num">{String(dp.active_provider ?? "-")}</span>
-              </div>
-              <div className="barline" style={{ padding: "6px 0" }}>
-                <span className="muted" style={{ fontSize: 12 }}>fallback_provider</span><span /><span className="num">{String(dp.fallback_provider ?? "-")}</span>
-              </div>
-              {dp.degraded_reason ? (
-                <div className="muted" style={{ fontSize: 11, lineHeight: 1.5, padding: "4px 0" }}>
-                  ⚠️ {String(dp.degraded_reason)}
-                </div>
-              ) : null}
-              <div style={{ fontSize: 12, fontWeight: 600, marginTop: 4 }}>各能力分发</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
-                {Object.entries(caps).map(([key, cap]) => {
-                  const provider = cap?.active_provider ?? "-";
-                  const degraded = cap?.degraded ?? false;
-                  const coverage = cap?.coverage ?? "";
-                  return (
-                    <div key={key} className="card" style={{ padding: 11 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                        <span style={{
-                          width: 8, height: 8, borderRadius: "50%", display: "inline-block", flexShrink: 0,
-                          background: degraded ? "var(--amber)" : "var(--green)",
-                        }} />
-                        <span className="num" style={{ fontSize: 12 }}>{key}</span>
-                        <span className={`tag ${degraded ? "amber" : "green"}`} style={{ marginLeft: "auto", fontSize: 11 }}>{provider}</span>
-                      </div>
-                      <div className="muted" style={{ fontSize: 11, lineHeight: 1.5 }}>
-                        {coverage ? `coverage: ${coverage}` : ""}
-                        {degraded && cap?.degraded_reason ? <><br />{cap.degraded_reason}</> : null}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })() : (
-          <div className="muted" style={{ padding: 8 }}>暂无数据源配置</div>
         )}
       </SectionCard>
 
-      {/* 新闻与情报源配置 */}
-      <SectionCard title="新闻与情报源配置" subtitle="news / intel search providers">
-        <div className="page-stack" style={{ gap: 12 }}>
-          <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
-            配置股票新闻搜索和舆情数据源。各 provider 独立配置，按列表顺序 fallback。
-            如需设置 API Key，请填入相应字段（仅当前会话有效）。
+      {availableSentimentProviders.length > 0 && (
+        <SectionCard title="舆情分析" description="可选启用第三方舆情 API">
+          <div className="page-stack" style={{ gap: 10 }}>
+            <label className="page-stack" style={{ gap: 4 }}>
+              <span className="muted" style={{ fontSize: 12 }}>Provider</span>
+              <select
+                value={sentimentCfg.provider}
+                onChange={(e) => handleIntelProviderChange("social_sentiment", e.target.value)}
+                style={{ width: "100%", height: 34, border: "1px solid var(--line)", borderRadius: 7, background: "var(--panel)", color: "var(--ink)", padding: "0 6px", fontSize: 13 }}
+              >
+                {availableSentimentProviders.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </label>
+            {availableSentimentProviders.find((p) => p.id === sentimentCfg.provider)?.description && (
+              <div className="muted" style={{ fontSize: 11, lineHeight: 1.5 }}>
+                {availableSentimentProviders.find((p) => p.id === sentimentCfg.provider)?.description}
+              </div>
+            )}
           </div>
-          {availableIntelProviders.length === 0 ? (
-            <div className="muted" style={{ padding: 8 }}>暂无可用数据源</div>
-          ) : (
-            <div className="page-stack" style={{ gap: 10 }}>
-              {/* 新闻搜索 providers */}
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>新闻搜索</div>
-              {availableIntelProviders.map((prov) => {
-                const cfg = localIntel.providers[prov.id] ?? { provider: "", api_key: null };
-                const isSelected = cfg.provider === prov.id || cfg.provider === "" && prov.id === "mock";
-                return (
-                  <div key={prov.id} className="card" style={{ padding: 12 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                      <ToggleSwitch
-                        checked={isSelected}
-                        onChange={() => handleIntelProviderChange(prov.id, isSelected ? "" : prov.id)}
-                      />
-                      <strong style={{ fontSize: 14 }}>{prov.name}</strong>
-                      <span className="tag" style={{ fontSize: 10 }}>{prov.category}</span>
-                    </div>
-                    <div className="muted" style={{ fontSize: 11, lineHeight: 1.4, marginLeft: 24 }}>
-                      {prov.description}
-                    </div>
-                    {prov.api_key_required && (
-                      <div style={{ marginLeft: 24, marginTop: 6 }}>
-                        <label style={{ fontSize: 11, color: "var(--muted)" }}>
-                          API Key {prov.requirements ? `(${prov.requirements})` : ""}
-                        </label>
-                        <input
-                          type="password"
-                          placeholder="输入 API Key..."
-                          value={cfg.api_key ?? ""}
-                          onChange={(e) => handleIntelApiKeyChange(prov.id, e.target.value)}
-                          style={{
-                            width: "100%", height: 30, border: "1px solid var(--line)", borderRadius: 6,
-                            background: "var(--panel)", color: "var(--ink)", padding: "0 8px", fontSize: 12, marginTop: 2,
-                          }}
-                        />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+        </SectionCard>
+      )}
 
-              {/* 舆情 providers */}
-              {availableSentimentProviders.length > 0 && (
-                <>
-                  <div style={{ fontWeight: 600, fontSize: 13, marginTop: 8, marginBottom: 4 }}>舆情分析</div>
-                  {availableSentimentProviders.map((prov) => {
-                    const cfg = localIntel.providers[prov.id] ?? { provider: "", api_key: null };
-                    const isSelected = cfg.provider === prov.id;
-                    return (
-                      <div key={prov.id} className="card" style={{ padding: 12 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                          <ToggleSwitch
-                            checked={isSelected}
-                            onChange={() => handleIntelProviderChange(prov.id, isSelected ? "" : prov.id)}
-                          />
-                          <strong style={{ fontSize: 14 }}>{prov.name}</strong>
-                          <span className="tag" style={{ fontSize: 10 }}>{prov.category}</span>
-                        </div>
-                        <div className="muted" style={{ fontSize: 11, lineHeight: 1.4, marginLeft: 24 }}>
-                          {prov.description}
-                        </div>
-                        {prov.api_key_required && (
-                          <div style={{ marginLeft: 24, marginTop: 6 }}>
-                            <label style={{ fontSize: 11, color: "var(--muted)" }}>
-                              API Key {prov.requirements ? `(${prov.requirements})` : ""}
-                            </label>
-                            <input
-                              type="password"
-                              placeholder="输入 API Key..."
-                              value={cfg.api_key ?? ""}
-                              onChange={(e) => handleIntelApiKeyChange(prov.id, e.target.value)}
-                              style={{
-                                width: "100%", height: 30, border: "1px solid var(--line)", borderRadius: 6,
-                                background: "var(--panel)", color: "var(--ink)", padding: "0 8px", fontSize: 12, marginTop: 2,
-                              }}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </>
-              )}
-            </div>
-          )}
-          {intelDirty && (
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button className="primary" disabled={savingIntelSources}
-                onClick={() => void onSaveIntelSources(localIntel)} type="button">
-                {savingIntelSources ? "保存中…" : "保存情报源配置"}
-              </button>
-              {savingIntelSources && <span className="muted" style={{ fontSize: 12 }}>保存中…</span>}
-            </div>
-          )}
+      {intelDirty && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "0 0 8px" }}>
+          <button className="primary" disabled={savingIntelSources}
+            onClick={() => void onSaveIntelSources(localIntel)} type="button">
+            {savingIntelSources ? "保存中…" : "保存情报源配置"}
+          </button>
         </div>
-      </SectionCard>
-
+      )}
     </div>
   );
 }
@@ -1064,7 +1230,7 @@ function RiskTab({
   deletePolicy: (p: RiskPolicy) => Promise<void>;
 }) {
   return (
-    <SectionCard title="风控策略" subtitle="risk policy CRUD · 单票、行业、冷却规则">
+    <SectionCard title="风控策略" description="单票上限、行业集中度、冷却期等规则；同时仅一条策略生效">
       {showCreateForm ? (
         <div style={{ marginBottom: 10 }}>
           <PolicyForm title="新建" submitLabel="创建" initial={{ name: "", description: "", rules: { ...DEFAULT_RULES } }}
@@ -1121,19 +1287,78 @@ function RiskTab({
 
 /* ---------- RAW JSON ---------- */
 
-/* ---------- 技能与记忆 / MCP / 诊断 ---------- */
+/* ---------- Agent 能力 / 交易 / 诊断 ---------- */
 
-function SkillsMemoryTab({ settings }: { settings: SettingsData }) {
+function AgentTab({ settings }: { settings: SettingsData }) {
   return (
     <div className="settings-stack">
       <SkillsSection initial={settings.skills ?? []} />
       <MemorySection />
+      <McpSection />
     </div>
   );
 }
 
-function McpTab() {
-  return <div className="settings-stack"><McpSection /></div>;
+function TradeTab({
+  settings,
+  riskPolicies, showCreateForm, setShowCreateForm, editPolicyId, setEditPolicyId,
+  savingPolicy, submitCreatePolicy, submitEditPolicy, activatePolicy, deletePolicy,
+}: {
+  settings: SettingsData;
+  riskPolicies: RiskPolicy[];
+  showCreateForm: boolean;
+  setShowCreateForm: React.Dispatch<React.SetStateAction<boolean>>;
+  editPolicyId: string | null;
+  setEditPolicyId: React.Dispatch<React.SetStateAction<string | null>>;
+  savingPolicy: boolean;
+  submitCreatePolicy: (form: RiskPolicyFormState) => Promise<void>;
+  submitEditPolicy: (id: string, form: RiskPolicyFormState) => Promise<void>;
+  activatePolicy: (id: string) => Promise<void>;
+  deletePolicy: (p: RiskPolicy) => Promise<void>;
+}) {
+  const tc = settings.trading_controls;
+  return (
+    <div className="settings-stack">
+      {tc && (
+        <SectionCard title="交易护栏" description="V1 研究模式安全锁定，本页只读">
+          <SettingRow label="纸上交易" sub="模拟撮合，不触真钱">
+            <span className="tag" style={{ color: "var(--green)" }}>{String(tc.paper_trading ?? "-")}</span>
+          </SettingRow>
+          <SettingRow label="真实下单" sub="执行代理锁定，本版本不可开启">
+            <span className="tag" style={{ color: "var(--red)" }}>{String(tc.real_order ?? "blocked")}</span>
+          </SettingRow>
+        </SectionCard>
+      )}
+      <RiskTab
+        riskPolicies={riskPolicies}
+        showCreateForm={showCreateForm}
+        setShowCreateForm={setShowCreateForm}
+        editPolicyId={editPolicyId}
+        setEditPolicyId={setEditPolicyId}
+        savingPolicy={savingPolicy}
+        submitCreatePolicy={submitCreatePolicy}
+        submitEditPolicy={submitEditPolicy}
+        activatePolicy={activatePolicy}
+        deletePolicy={deletePolicy}
+      />
+    </div>
+  );
+}
+
+function CollapsibleBlock({ label, defaultOpen = false, children }: {
+  label: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div>
+      <button className="ghost" style={{ height: 26, fontSize: 12, marginBottom: open ? 8 : 0 }} type="button" onClick={() => setOpen((v) => !v)}>
+        {open ? "收起" : "展开"} · {label}
+      </button>
+      {open ? children : null}
+    </div>
+  );
 }
 
 /* 诊断:只读观测区——Runtime 状态 / 运行记录 / 评测 / 回归 / Provider 事件 / 工具注册表 / 原始配置 */
@@ -1146,15 +1371,18 @@ function DiagTab({ settings, copilotRuns, runtimeMetrics, regressionCases, provi
 }) {
   const ar = settings.agent_runtime;
   const [rawOpen, setRawOpen] = useState(false);
+  const runtimeLabels: Record<string, string> = {
+    mode: "运行模式", active_client: "客户端", model_name: "模型", available: "可用",
+    degraded: "降级", degraded_reason: "降级原因", subagent_enabled: "子代理", plan_mode: "计划模式",
+  };
   return (
     <div className="settings-stack">
-      {/* Runtime 状态 */}
       {ar && (
-        <SectionCard title="Runtime 状态" subtitle="current connection">
+        <SectionCard title="Agent Runtime" description="完整运行时字段（排障用）">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 8 }}>
             {Object.entries(ar).map(([k, v]) => (
               <div key={k} className="card" style={{ padding: 10 }}>
-                <h3>{k.replace(/_/g, " ")}</h3>
+                <h3 style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>{runtimeLabels[k] ?? k.replace(/_/g, " ")}</h3>
                 <p>
                   <span className={`num ${k === "available" || k === "degraded" ? (v ? "down" : "up") : ""}`}>
                     {typeof v === "boolean" ? (v ? "是" : "否") : String(v ?? "-")}
@@ -1167,7 +1395,7 @@ function DiagTab({ settings, copilotRuns, runtimeMetrics, regressionCases, provi
       )}
       {/* Copilot Runs */}
       {copilotRuns.length > 0 && (
-        <SectionCard title="Copilot 运行记录" subtitle={`最新 ${Math.min(copilotRuns.length, 10)} 条`}>
+        <SectionCard title="Copilot 运行记录" description={`最近 ${Math.min(copilotRuns.length, 10)} 条对话运行`}>
           {copilotRuns.slice(0, 10).map((item) => (
             <div key={item.run_id} className="check" style={{ marginBottom: 3 }}>
               <div style={{ flex: 1 }}>
@@ -1186,7 +1414,7 @@ function DiagTab({ settings, copilotRuns, runtimeMetrics, regressionCases, provi
       )}
       {/* AI 评测摘要 */}
       {runtimeMetrics?.payload.copilot && (
-        <SectionCard title="AI 评测摘要" subtitle="质量指标">
+        <SectionCard title="AI 质量指标" description="累计运行、成本与延迟统计">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 8 }}>
             <div className="card" style={{ padding: 10 }}>
               <h3>总运行</h3>
@@ -1234,7 +1462,8 @@ function DiagTab({ settings, copilotRuns, runtimeMetrics, regressionCases, provi
       )}
       {/* 回归评测用例 */}
       {regressionCases.length > 0 && (
-        <SectionCard title="回归评测用例" subtitle={`共 ${regressionCases.length} 个`}>
+        <SectionCard title="回归评测用例" description={`共 ${regressionCases.length} 个自动化用例`}>
+          <CollapsibleBlock label="用例列表" defaultOpen={regressionCases.length <= 5}>
           {regressionCases.map((c) => (
             <div key={c.case_id} className="check" style={{ marginBottom: 3 }}>
               <div style={{ flex: 1 }}>
@@ -1252,11 +1481,13 @@ function DiagTab({ settings, copilotRuns, runtimeMetrics, regressionCases, provi
               </div>
             </div>
           ))}
+          </CollapsibleBlock>
         </SectionCard>
       )}
       {/* Tools */}
       {settings.tools && (
-        <SectionCard title="工具注册表" subtitle="workbench tools">
+        <SectionCard title="工具注册表" description="Workbench 已注册 Agent 工具">
+          <CollapsibleBlock label="工具列表">
           {(() => {
             const items = Array.isArray(settings.tools)
               ? settings.tools
@@ -1287,11 +1518,12 @@ function DiagTab({ settings, copilotRuns, runtimeMetrics, regressionCases, provi
               </div>
             );
           })()}
+          </CollapsibleBlock>
         </SectionCard>
       )}
       {/* Provider Events */}
       {providerEvents.length > 0 && (
-        <SectionCard title="Provider 事件" subtitle={`最新 ${Math.min(providerEvents.length, 8)} 条`}>
+        <SectionCard title="Provider 调用事件" description={`最近 ${Math.min(providerEvents.length, 8)} 条市场数据请求`}>
           {providerEvents.slice(0, 8).map((item) => (
             <div key={item.call_id} className="check" style={{ marginBottom: 3 }}>
               <div>
@@ -1307,7 +1539,7 @@ function DiagTab({ settings, copilotRuns, runtimeMetrics, regressionCases, provi
           ))}
         </SectionCard>
       )}
-      <SectionCard title="原始配置" subtitle={rawOpen ? "收起 ▾" : "展开 ▸"} description="settings 全量 JSON(排障用)">
+      <SectionCard title="原始配置 JSON" description="settings 全量快照，仅供排障">
         <button className="ghost" style={{ height: 26, fontSize: 12 }} type="button" onClick={() => setRawOpen((v) => !v)}>
           {rawOpen ? "收起" : "展开"}
         </button>
@@ -1322,26 +1554,25 @@ function DiagTab({ settings, copilotRuns, runtimeMetrics, regressionCases, provi
 
 /** 左导航分区（TeamClaw 式设置页：左侧分区列表 + 右侧内容 + 底部版本） */
 const NAV_GROUPS: { group: string; items: { key: SettingTab; label: string }[] }[] = [
-  { group: "应用", items: [
-    { key: "general", label: "通用" },
-    { key: "channels", label: "通知与通道" },
+  { group: "工作台", items: [
+    { key: "general", label: "外观与工作区" },
+    { key: "channels", label: "通知通道" },
   ]},
-  { group: "智能", items: [
-    { key: "ai", label: "AI 接入" },
-    { key: "skills", label: "技能与记忆" },
-    { key: "mcp", label: "MCP 扩展" },
+  { group: "AI Copilot", items: [
+    { key: "ai", label: "模型接入" },
+    { key: "agent", label: "Agent 能力" },
   ]},
-  { group: "数据与风控", items: [
-    { key: "data", label: "数据源" },
-    { key: "risk", label: "风控策略" },
+  { group: "数据服务", items: [
+    { key: "market", label: "行情数据源" },
+    { key: "intel", label: "情报与舆情" },
+  ]},
+  { group: "交易合规", items: [
+    { key: "trade", label: "交易与风控" },
   ]},
   { group: "系统", items: [
-    { key: "diag", label: "诊断" },
+    { key: "diag", label: "运行诊断" },
   ]},
 ];
-const NAV_LABELS: Record<SettingTab, string> = Object.fromEntries(
-  NAV_GROUPS.flatMap((g) => g.items.map((i) => [i.key, i.label]))
-) as Record<SettingTab, string>;
 
 const APP_VERSION = "0.1.0";
 
@@ -1449,15 +1680,19 @@ export default function Settings() {
       case "general": return <GeneralTab settings={settings} />;
       case "channels": return <ChannelsTab />;
       case "ai": return <AiTab settings={settings} onSaveRuntimeConfig={submitRuntimeConfig} />;
-      case "skills": return <SkillsMemoryTab settings={settings} />;
-      case "mcp": return <McpTab />;
-      case "data": return (
-        <StockTab
+      case "agent": return <AgentTab settings={settings} />;
+      case "market": return (
+        <MarketDataTab
           settings={settings}
-          dataSources={settings.data_sources ?? { providers: { CN: { provider: "akshare" }, HK: { provider: "akshare" }, US: { provider: "mock" } } }}
+          dataSources={settings.data_sources ?? { providers: { CN: { provider: "eastmoney" }, HK: { provider: "eastmoney" }, US: { provider: "yfinance" } }, provider_credentials: {}, provider_states: {} }}
           availableProviders={settings.available_data_providers ?? []}
+          credentialSchema={settings.provider_credential_schema ?? {}}
           onSaveDataSources={submitDataSources}
           savingDataSources={savingDataSources}
+        />
+      );
+      case "intel": return (
+        <IntelTab
           intelSources={settings.intel_sources ?? { providers: {} }}
           availableIntelProviders={settings.available_intel_providers ?? []}
           availableSentimentProviders={settings.available_sentiment_providers ?? []}
@@ -1465,7 +1700,21 @@ export default function Settings() {
           savingIntelSources={savingIntelSources}
         />
       );
-      case "risk": return <RiskTab riskPolicies={riskPolicies} showCreateForm={showCreateForm} setShowCreateForm={setShowCreateForm} editPolicyId={editPolicyId} setEditPolicyId={setEditPolicyId} savingPolicy={savingPolicy} submitCreatePolicy={submitCreatePolicy} submitEditPolicy={submitEditPolicy} activatePolicy={activatePolicy} deletePolicy={deletePolicy} />;
+      case "trade": return (
+        <TradeTab
+          settings={settings}
+          riskPolicies={riskPolicies}
+          showCreateForm={showCreateForm}
+          setShowCreateForm={setShowCreateForm}
+          editPolicyId={editPolicyId}
+          setEditPolicyId={setEditPolicyId}
+          savingPolicy={savingPolicy}
+          submitCreatePolicy={submitCreatePolicy}
+          submitEditPolicy={submitEditPolicy}
+          activatePolicy={activatePolicy}
+          deletePolicy={deletePolicy}
+        />
+      );
       case "diag": return <DiagTab settings={settings} copilotRuns={copilotRuns} runtimeMetrics={runtimeMetrics} regressionCases={regressionCases} providerEvents={providerEvents} />;
     }
   };
@@ -1509,7 +1758,10 @@ export default function Settings() {
       {/* 右内容区：分区标题 + 内容（模态每次打开都重新挂载并全量加载，无需刷新按钮） */}
       <div className="settings-content">
         <div className="settings-content-head">
-          <span className="settings-content-title">{NAV_LABELS[activeTab]}</span>
+          <div className="settings-content-head-text">
+            <span className="settings-content-title">{TAB_META[activeTab].title}</span>
+            <p className="settings-content-desc">{TAB_META[activeTab].desc}</p>
+          </div>
         </div>
         <div className="settings-content-body">
           {loading && <div className="page-stack"><PanelSkeleton /><KpiSkeleton count={3} /></div>}

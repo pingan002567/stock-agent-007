@@ -962,6 +962,13 @@ class CopilotService:
             return "system", "skill_trace", payload.get("note") or "skill trace", data
         if event_type == "tool_call":
             args = payload.get("arguments") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except ValueError:
+                    args = {}
+            if not isinstance(args, dict):
+                args = {}
             preview = {
                 key: value
                 for key, value in args.items()
@@ -977,6 +984,19 @@ class CopilotService:
                     "status",
                 }
             }
+            tool_name = str(payload.get("tool") or "")
+            task_meta: dict[str, Any] | None = None
+            if tool_name == "task":
+                prompt = str(args.get("prompt") or "")
+                task_meta = {
+                    "subagent_type": str(args.get("subagent_type") or ""),
+                    "description": str(args.get("description") or ""),
+                    "prompt": prompt[:800] if len(prompt) > 800 else prompt,
+                }
+                for key in ("subagent_type", "description"):
+                    val = task_meta.get(key)
+                    if val:
+                        preview[key] = val
             data = {
                 "tool": payload.get("tool"),
                 "call_id": payload.get("call_id"),
@@ -984,6 +1004,8 @@ class CopilotService:
                 "argument_keys": sorted(args.keys()),
                 "arguments_preview": preview,
             }
+            if task_meta:
+                data["task_meta"] = task_meta
             return (
                 "assistant",
                 "tool_call",

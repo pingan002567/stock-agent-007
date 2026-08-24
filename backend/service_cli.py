@@ -3,7 +3,7 @@
 用法::
 
     python -m backend.service_cli doctor
-    python -m backend.service_cli install [--port 6666] [--data-dir PATH]
+    python -m backend.service_cli install [--port 8686] [--data-dir PATH]
     python -m backend.service_cli status
     python -m backend.service_cli restart
     python -m backend.service_cli uninstall
@@ -37,15 +37,13 @@ from typing import Any
 from backend import paths
 
 LABEL = "com.stockagent.backend"
-# 桌面服务默认端口。不能用 6666：6665-6669 在 WebKit/Chromium 的受限端口名单
-# （IRC 保留），WKWebView 对其 fetch/导航一律静默失败——实测踩坑，见
-# doc/DESKTOP_APP_PLAN.md §2。浏览器开发流（8888 代理 6666）不受影响。
-DEFAULT_PORT = 8686
+DEFAULT_PORT = paths.DEFAULT_BACKEND_PORT
 # WebKit/Chromium 共同封锁的常见回环端口（节选自 fetch spec bad ports）
 BLOCKED_PORTS = {6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697, 10080}
 PORT_SCAN_RANGE = 50
 HEALTH_TIMEOUT_SEC = 2.0
 STARTUP_WAIT_ROUNDS = 24  # × 0.5s = 12s，对齐计划文档「轮询 12×500ms」
+INSTALL_STARTUP_WAIT_ROUNDS = 60  # 切换/install 时允许更长（含 SQLite 迁移等）
 
 
 def _state_dir() -> Path:
@@ -93,6 +91,31 @@ def _port_listening(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+def _kill_listeners_on_port(port: int, *, exclude_pid: int | None = None) -> None:
+    """释放 127.0.0.1 上的监听端口（开发态 start.sh 直连 uvicorn 占用切换端口时用）。"""
+    try:
+        result = subprocess.run(
+            ["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return
+    for token in result.stdout.split():
+        try:
+            pid = int(token.strip())
+        except ValueError:
+            continue
+        if exclude_pid is not None and pid == exclude_pid:
+            continue
+        try:
+            os.kill(pid, 15)
+        except OSError:
+            pass
+    time.sleep(0.5)
+
+
 def pick_port(requested: int) -> int:
     """请求端口可用则用之，否则向后顺延（§2 改造清单 2：端口被占不该让应用打不开）。
     跳过浏览器引擎封锁端口——webview 连不上等于服务白装。"""
@@ -120,6 +143,11 @@ def _launchctl(*args: str) -> subprocess.CompletedProcess:
 
 def _service_loaded() -> bool:
     return _launchctl("print", f"{_launchd_domain()}/{LABEL}").returncode == 0
+
+
+def service_loaded() -> bool:
+    """Public wrapper: launchd 服务是否已加载。"""
+    return _service_loaded()
 
 
 def _pid_alive(pid: int) -> bool:
@@ -157,17 +185,21 @@ def _read_env_file() -> dict[str, str]:
     return env
 
 
-def _service_environment(data_dir: Path) -> dict[str, str]:
+def _service_environment(data_dir: Path, *, switching: bool = False) -> dict[str, str]:
     """plist 只携带非机密项。AI 密钥/模型走用户级 credentials.json 与档案 DB
     的分层（backend/config/credentials.py），不再从 .env 拷进 plist 明文。"""
     dotenv = _read_env_file()
-    return {
+    env = {
         "WORKBENCH_DATA_DIR": str(data_dir),
         "WORKBENCH_AI_MODE": dotenv.get("WORKBENCH_AI_MODE", "direct"),
         "NO_PROXY": dotenv.get(
             "NO_PROXY", "eastmoney.com,push2.eastmoney.com,finance.sina.com.cn"
         ),
     }
+    # 切换档案时跳过重网络 seeding/warmup，health 探活更快通过
+    if switching:
+        env["WORKBENCH_SKIP_SEED"] = "1"
+    return env
 
 
 def validate_data_dir(raw: str | Path) -> Path:
@@ -176,9 +208,12 @@ def validate_data_dir(raw: str | Path) -> Path:
     if candidate == Path("/") or candidate == Path.home():
         raise ValueError(f"refusing dangerous data dir: {candidate}")
     state = _state_dir().resolve()
+    allowed_inside_state = {
+        paths.recommended_app_data_dir().resolve(),
+        paths.default_desktop_data_dir().resolve(),
+    }
     if candidate == state or state in candidate.parents:
-        # 允许固定推荐位 state/data，拒绝其余内部路径（防软链循环/误删服务状态）
-        if candidate != paths.default_desktop_data_dir().resolve():
+        if candidate not in allowed_inside_state:
             raise ValueError(f"data dir must not live inside service state dir: {candidate}")
     return candidate
 
@@ -215,7 +250,7 @@ def _update_workspace_registry(data_dir: Path, port: int) -> None:
     )
 
 
-def _write_plist(port: int, data_dir: Path) -> Path:
+def _write_plist(port: int, data_dir: Path, *, switching: bool = False) -> Path:
     logs = _state_dir() / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     plist = {
@@ -235,7 +270,7 @@ def _write_plist(port: int, data_dir: Path) -> Path:
             "5",
         ],
         "WorkingDirectory": str(paths.REPO_ROOT),
-        "EnvironmentVariables": _service_environment(data_dir),
+        "EnvironmentVariables": _service_environment(data_dir, switching=switching),
         "RunAtLoad": True,
         "KeepAlive": True,
         "StandardOutPath": str(logs / "backend.out.log"),
@@ -253,8 +288,13 @@ def _write_plist(port: int, data_dir: Path) -> Path:
 
 def cmd_doctor(_args: argparse.Namespace) -> dict[str, Any]:
     config = read_service_config()
+    service_installed = _plist_path().is_file()
+    service_loaded = _service_loaded()
     port = int(config["port"]) if config and config.get("port") else DEFAULT_PORT
-    data_dir = Path(config["data_dir"]) if config and config.get("data_dir") else paths.default_desktop_data_dir()
+    if service_installed and config and config.get("data_dir"):
+        data_dir = Path(config["data_dir"])
+    else:
+        data_dir = paths.default_data_dir()
     data_dir_writable = False
     try:
         data_dir.mkdir(parents=True, exist_ok=True)
@@ -271,8 +311,8 @@ def cmd_doctor(_args: argparse.Namespace) -> dict[str, Any]:
         "venv_python": str(_venv_python()),
         "venv_python_exists": _venv_python().is_file(),
         "frontend_dist_exists": paths.frontend_dist().is_dir(),
-        "service_installed": _plist_path().is_file(),
-        "service_loaded": _service_loaded(),
+        "service_installed": service_installed,
+        "service_loaded": service_loaded,
         "service_pid": _service_pid(),
         "port": port,
         "port_listening": _port_listening(port),
@@ -289,7 +329,7 @@ def cmd_install(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError("launchd install is macOS-only")
     if not _venv_python().is_file():
         raise RuntimeError(f"venv python not found: {_venv_python()} (run ./install.sh first)")
-    data_dir = validate_data_dir(args.data_dir or paths.default_desktop_data_dir())
+    data_dir = validate_data_dir(args.data_dir or paths.default_data_dir())
     data_dir.mkdir(parents=True, exist_ok=True)
 
     # 切换场景：旧档案也写入注册表，否则无法从切换器一键切回
@@ -321,9 +361,20 @@ def cmd_install(args: argparse.Namespace) -> dict[str, Any]:
                 except OSError:
                     pass
                 time.sleep(1.0)
+            _kill_listeners_on_port(requested, exclude_pid=old_pid)
+    else:
+        # 无 launchd 服务时（./start.sh 开发态）：清掉占端口的直连 uvicorn，避免
+        # pick_port 顺延到其它端口而 WebView 仍连旧进程，导致工作区路径不更新
+        requested = args.port or DEFAULT_PORT
+        _kill_listeners_on_port(requested)
 
     port = pick_port(args.port or DEFAULT_PORT)
-    plist_path = _write_plist(port, data_dir)
+    is_switch = bool(
+        previous
+        and previous.get("data_dir")
+        and str(previous.get("data_dir")) != str(data_dir)
+    )
+    plist_path = _write_plist(port, data_dir, switching=is_switch)
 
     # 先写配置、后 bootstrap（§3.1.2：不装出没配置好的空服务）
     _state_dir().mkdir(parents=True, exist_ok=True)
@@ -349,7 +400,8 @@ def cmd_install(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError(f"launchctl bootstrap failed after retries: {last_err}")
 
     healthy = False
-    for _ in range(STARTUP_WAIT_ROUNDS):
+    wait_rounds = INSTALL_STARTUP_WAIT_ROUNDS if is_switch else STARTUP_WAIT_ROUNDS
+    for _ in range(wait_rounds):
         if probe_health(port):
             healthy = True
             break

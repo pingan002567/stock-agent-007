@@ -210,14 +210,39 @@ def create_services(
 
     stock_catalog.set_repo(repo)
     stock_provider_router.repo = repo
-    # Ensure data_sources config is seeded
-    repo.get_config("data_sources", DEFAULT_DATA_SOURCES)
+    from backend.stock_domain import provider_credentials
+
+    def _resolve_provider_credential(provider_id: str, field: str) -> str | None:
+        config = repo.get_config("data_sources", DEFAULT_DATA_SOURCES)
+        creds = config.get("provider_credentials") or {}
+        block = creds.get(provider_id) if isinstance(creds, dict) else None
+        if isinstance(block, dict):
+            value = block.get(field)
+            if value:
+                return str(value)
+        return None
+
+    provider_credentials.set_credential_resolver(_resolve_provider_credential)
+    # Ensure data_sources config is seeded (mock 会被清洗为真实默认 provider)
+    from backend.config.data_source_sanitize import sanitize_data_sources
+
+    seeded = sanitize_data_sources(repo.get_config("data_sources", DEFAULT_DATA_SOURCES))
+    if seeded != repo.get_config("data_sources", DEFAULT_DATA_SOURCES):
+        repo.set_config("data_sources", seeded)
+    else:
+        repo.get_config("data_sources", DEFAULT_DATA_SOURCES)
     # Wire up intel router
     from backend.config.intel_sources import DEFAULT_INTEL_SOURCES
     from backend.stock_domain.intel_providers import intel_router as stock_intel_router
 
     stock_intel_router.repo = repo
-    repo.get_config("intel_sources", DEFAULT_INTEL_SOURCES)
+    from backend.config.data_source_sanitize import sanitize_intel_sources
+
+    intel_seeded = sanitize_intel_sources(repo.get_config("intel_sources", DEFAULT_INTEL_SOURCES))
+    if intel_seeded != repo.get_config("intel_sources", DEFAULT_INTEL_SOURCES):
+        repo.set_config("intel_sources", intel_seeded)
+    else:
+        repo.get_config("intel_sources", DEFAULT_INTEL_SOURCES)
     # Network-dependent seeding + cache warmup. Kept out of the construction path so
     # `create_services()` stays cheap and offline-safe; gate with WORKBENCH_SKIP_SEED=1
     # (set in tests) to avoid touching the network during boot.

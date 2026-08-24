@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useAppState } from "@/hooks/useAppState";
 import { useChatDetail } from "@/hooks/useChatDetail";
 import { useCopilotChat, toolLabel } from "@/hooks/useCopilotChat";
+import { skillLabelOf } from "@/components/features/skillLabels";
 import { icons, navItems } from "@/components/layout/nav";
 import { ScreenRenderer } from "@/pages/ScreenRenderer";
 import { DetailBody } from "@/components/features/ChatDetailPanel";
@@ -34,6 +35,16 @@ export function FunctionDock() {
   const stripItems = navItems.filter((n) => n.screen !== "chat");
   const panelOpen = detailOpen || currentScreen !== "chat";
   const screenLabel = stripItems.find((n) => n.screen === currentScreen)?.label ?? "";
+  const detailTitle = detailOpen && detail
+    ? (detail.name === "task"
+      ? (skillLabelOf(detail.subagentType) ?? detail.subagentType ?? "子代理委派")
+      : toolLabel(detail.name))
+    : "";
+  const detailSub = detailOpen && detail
+    ? (detail.name === "task"
+      ? (detail.taskDescription || detail.taskPrompt?.slice(0, 80) || detail.subagentType || "task")
+      : detail.name)
+    : "";
 
   const handleStrip = (screen: (typeof stripItems)[number]["screen"]) => {
     if (detailOpen) closeDetail();
@@ -58,9 +69,11 @@ export function FunctionDock() {
         <div className="func-inner">
           <div className="func-head" data-tauri-drag-region="">
             <span className="func-title">
-              {detailOpen && detail ? toolLabel(detail.name) : screenLabel}
+              {detailOpen && detail ? detailTitle : screenLabel}
             </span>
-            {detailOpen && detail && <span className="func-sub">{detail.name}</span>}
+            {detailOpen && detail && (
+              <span className="func-sub">{detailSub}</span>
+            )}
             {/* 数据新鲜度替代手动刷新按钮(设计规范 3.5) */}
             {!detailOpen && lastRefreshTime && (
               <span className="func-fresh">{formatTimeAgo(lastRefreshTime)}</span>
@@ -71,7 +84,21 @@ export function FunctionDock() {
           </div>
           <div className="func-body">
             {detailOpen && detail
-              ? <div className="detail-host"><DetailBody key={detail.id} resultText={detail.resultText} /></div>
+              ? (
+                <div className="detail-host">
+                  {detail.name === "task" && (detail.taskDescription || detail.taskPrompt) && (
+                    <div className="subagent-detail-brief">
+                      {detail.taskDescription && (
+                        <div className="subagent-detail-desc">{detail.taskDescription}</div>
+                      )}
+                      {detail.taskPrompt && (
+                        <div className="subagent-detail-prompt">{detail.taskPrompt}</div>
+                      )}
+                    </div>
+                  )}
+                  <DetailBody key={detail.id} resultText={detail.resultText} />
+                </div>
+              )
               // 启动预加载只遮面板不遮全屏（聊天不受业务数据加载连坐）
               : globalLoading
                 ? <div className="page-loading">数据加载中…</div>

@@ -25,6 +25,8 @@ export interface ToolInfo {
   id: string;
   resultText?: string;
   subagentType?: string;
+  taskDescription?: string;
+  taskPrompt?: string;
 }
 
 interface Props {
@@ -50,12 +52,14 @@ export function CopilotMessageItem({ msg, tools, onToolClick }: Props) {
       callId: t.id, name: t.name,
       status: t.failed ? "failed" as const : t.done ? "done" as const : "running" as const,
       resultText: t.resultText, subagentType: t.subagentType,
+      taskDescription: t.taskDescription, taskPrompt: t.taskPrompt,
     },
   }));
   const handleTimelineClick = onToolClick
     ? (t: StreamToolCall) => onToolClick({
         id: t.callId, name: t.name, done: t.status === "done",
         failed: t.status === "failed", resultText: t.resultText, subagentType: t.subagentType,
+        taskDescription: t.taskDescription, taskPrompt: t.taskPrompt,
       })
     : undefined;
 

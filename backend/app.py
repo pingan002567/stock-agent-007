@@ -9,6 +9,9 @@ try:
     from fastapi import FastAPI
     from fastapi.responses import FileResponse
     from fastapi.staticfiles import StaticFiles
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.requests import Request
+    from starlette.responses import Response
 except ImportError as exc:  # pragma: no cover
     raise RuntimeError(
         "FastAPI is required. Install project dependencies from pyproject.toml."
@@ -43,6 +46,22 @@ from backend.api import (
 from backend import paths
 from backend.bootstrap import create_services
 from backend.stock_domain.provider_router import provider_router
+
+
+class _SpaCacheControlMiddleware(BaseHTTPMiddleware):
+    """WKWebView / 浏览器会强缓存 index.html 与 /assets/*，导致改 CSS 后重启仍见旧皮。"""
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        path = request.url.path
+        if path.startswith("/api/"):
+            return response
+        if path == "/" or path.endswith(".html"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+        elif path.startswith("/assets/"):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
 
 
 def _warmup_cache() -> None:
@@ -97,10 +116,13 @@ def create_app(
 
     app = FastAPI(title="AI Stock Workbench", version="0.1.0", lifespan=lifespan)
     app.state.services = services
+    app.add_middleware(_SpaCacheControlMiddleware)
 
     @app.get("/api/health", tags=["health"])
     def health():
         agent_runtime = app.state.services.copilot_service.deerflow.status().to_dict()
+        from backend import service_cli
+
         return {
             "status": "ok",
             "mode": "single-user-local",
@@ -108,6 +130,8 @@ def create_app(
             "agent_runtime": agent_runtime,
             "stock_domain": "provider-router",
             "data_provider": provider_router.status().to_dict(),
+            "data_dir": str(paths.data_dir().resolve()),
+            "service_mode": "launchd" if service_cli.service_loaded() else "dev",
         }
 
     @app.get("/app", include_in_schema=False)

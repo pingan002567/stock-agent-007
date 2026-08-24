@@ -3,6 +3,7 @@ import { AppStateProvider, useAppState } from "@/hooks/useAppState";
 import { CopilotChatProvider } from "@/hooks/useCopilotChat";
 import { ChatDetailProvider, useChatDetail } from "@/hooks/useChatDetail";
 import { TopBar } from "@/components/layout/TopBar";
+import { BottomBar } from "@/components/layout/BottomBar";
 import { LeftSidebar } from "@/components/layout/LeftSidebar";
 import { FunctionDock } from "@/components/layout/FunctionDock";
 import { CopilotPanel } from "@/components/features/CopilotPanel";
@@ -38,9 +39,16 @@ function AppShell() {
   const toggleDock = () => setDockCollapsed((v) => {
     const next = !v;
     try { localStorage.setItem("func-dock-collapsed", next ? "1" : "0"); } catch { /* ignore */ }
-    if (next) { closeDetail(); setCurrentScreen("chat"); } // 收起时联动关闭业务面板
+    if (next) { closeDetail(); setCurrentScreen("chat"); }
     return next;
   });
+
+  const panelOpen = !dockCollapsed && (detailOpen || currentScreen !== "chat");
+
+  // 窄窗 + 右栏展开时临时收起左栏（不写 localStorage）
+  useEffect(() => {
+    if (panelOpen && window.innerWidth < 1280) setLeftCollapsed(true);
+  }, [panelOpen]);
 
   // 桌面壳（Tauri 远程 IPC 已授权）：desktop 态——红绿灯住进顶栏、顶栏可拖拽
   useEffect(() => {
@@ -48,18 +56,10 @@ function AppShell() {
   }, []);
 
   // 顶栏右段列宽与功能坞同步（列头对齐）：面板开 = 52+面板宽,坞收 = 仅按钮位
-  const panelOpen = !dockCollapsed && (detailOpen || currentScreen !== "chat");
-
-  // 断点降级:窄窗下右栏展开会把中栏聊天挤到不可用,自动临时收起左栏
-  // (不写 localStorage——这是布局联动,不是用户偏好)
-  useEffect(() => {
-    if (panelOpen && window.innerWidth < 1280) setLeftCollapsed(true);
-  }, [panelOpen]);
   const appCls = [
     "app",
     leftCollapsed ? "left-collapsed" : "",
     dockCollapsed ? "dock-collapsed" : "",
-    panelOpen ? "panel-open" : "",
   ].filter(Boolean).join(" ");
 
   return (
@@ -84,6 +84,11 @@ function AppShell() {
       <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
         {!dockCollapsed && <FunctionDock />}
       </ErrorBoundary>
+      <BottomBar
+        leftCollapsed={leftCollapsed}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenWorkspace={() => setWorkspaceOpen(true)}
+      />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <WorkspaceModal open={workspaceOpen} onClose={() => setWorkspaceOpen(false)} />
     </div>

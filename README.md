@@ -144,8 +144,11 @@ chmod +x install.sh
 # 3. 配置 API Key（安装脚本会提示）
 vi .env
 
-# 4. 启动服务
+# 4. 启动桌面客户端（后端 + Tauri 壳）
 ./start.sh
+
+# 开发模式（后端热重载）
+./start.sh --dev
 ```
 
 ### Windows
@@ -243,20 +246,19 @@ cp .env.example .env
 vi .env                      # 或用记事本打开
 
 # 6. 启动后端
-uv run uvicorn backend.app:app --host 0.0.0.0 --port 6666
+./start.sh --backend-only
 
-# 7. 启动前端（新终端）
-cd frontend && npm run dev
+# 7. 启动 Tauri 桌面壳（需 Rust + tauri-cli，见 install.sh 提示）
+cd desktop/src-tauri && cargo tauri dev
 ```
 
 ### 访问地址
 
 | 服务 | 地址 |
 |------|------|
-| **应用入口** | http://localhost:6666/app |
-| **后端 API** | http://localhost:6666 |
-| **API 文档** | http://localhost:6666/docs |
-| **开发模式前端** | http://localhost:5173 (仅手动安装) |
+| **桌面客户端** | Tauri 应用（`./start.sh` 自动启动） |
+| **后端 API** | http://127.0.0.1:8686 |
+| **API 文档** | http://127.0.0.1:8686/docs |
 
 ---
 

@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import { apiGet, apiPost } from "@/api/client";
+import { api, apiPost } from "@/api/client";
 
 interface WorkspaceInfo {
   name: string;
   data_dir: string;
   port?: number | null;
   switchable: boolean;
+  service_mode?: "launchd" | "dev";
+  service_loaded?: boolean;
+  configured_data_dir?: string | null;
   recents: { dir: string; name: string; last_used?: string }[];
 }
 
@@ -18,69 +21,162 @@ declare global {
   }
 }
 
-/** 工作区切换器（vault 式,方案 A）：当前档案 + 最近列表 + 选择新目录。
- * 切换 = 后端分离子进程重装 launchd 服务指向新目录,本端轮询健康后整页重载。 */
+function normalizeDir(dir: string): string {
+  return dir.replace(/\/$/, "");
+}
+
+async function resolveTargetDir(dir: string): Promise<string> {
+  try {
+    const r = await apiPost<{ data_dir: string }>("/api/workspace/resolve", { data_dir: dir });
+    return normalizeDir(r.data_dir);
+  } catch {
+    return normalizeDir(dir);
+  }
+}
+
+async function readDoctorPort(fallback: number): Promise<number> {
+  const invoke = window.__TAURI__?.core?.invoke;
+  if (!invoke) return fallback;
+  try {
+    const d = await invoke("service_cli", { args: ["doctor"] }) as { port?: number; ok?: boolean };
+    if (d?.port) return d.port;
+  } catch { /* ignore */ }
+  return fallback;
+}
+
+/** 轮询直到新后端报告目标 data_dir（/api/workspace 与 /api/health 双通道） */
+async function waitForWorkspaceSwitch(
+  targetDir: string,
+  preferredPort: number,
+  deadlineMs = 60000,
+): Promise<{ ok: boolean; port: number }> {
+  const target = normalizeDir(targetDir);
+  const deadline = Date.now() + deadlineMs;
+  let port = preferredPort;
+  await new Promise((r) => setTimeout(r, 1200));
+
+  while (Date.now() < deadline) {
+    port = await readDoctorPort(port);
+    try {
+      const [wsRes, healthRes] = await Promise.all([
+        fetch(`http://127.0.0.1:${port}/api/workspace`, { cache: "no-store" }),
+        fetch(`http://127.0.0.1:${port}/api/health`, { cache: "no-store" }),
+      ]);
+      if (wsRes.ok) {
+        const w = await wsRes.json() as { data_dir?: string };
+        if (normalizeDir(w.data_dir ?? "") === target) return { ok: true, port };
+      }
+      if (healthRes.ok) {
+        const h = await healthRes.json() as { data_dir?: string };
+        if (normalizeDir(h.data_dir ?? "") === target) return { ok: true, port };
+      }
+    } catch { /* 服务重启中 */ }
+    await new Promise((r) => setTimeout(r, 700));
+  }
+  return { ok: false, port };
+}
+
+function notifyWorkspaceChanged() {
+  window.dispatchEvent(new CustomEvent("workspace-changed"));
+}
+
+/** 工作区切换器：Tauri 走 service_cli install；浏览器走 /api/workspace/switch。 */
 export function WorkspaceModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [info, setInfo] = useState<WorkspaceInfo | null>(null);
   const [error, setError] = useState("");
   const [switching, setSwitching] = useState(false);
   const [manualDir, setManualDir] = useState("");
 
+  const hasTauri = !!window.__TAURI__?.core?.invoke;
+  const canSwitch = hasTauri || !!info?.switchable;
+
+  const refreshInfo = useCallback(async () => {
+    const w = await api<WorkspaceInfo>("/api/workspace", { cache: "no-store" });
+    setInfo(w);
+    return w;
+  }, []);
+
   useEffect(() => {
     if (!open) return;
-    apiGet<WorkspaceInfo>("/api/workspace")
-      .then((w) => { setInfo(w); setError(""); })
+    setInfo(null);
+    refreshInfo()
+      .then(() => setError(""))
       .catch((e) => setError(String(e)));
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !switching) onClose(); };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose, switching]);
+  }, [open, onClose, switching, refreshInfo]);
+
+  const finishSwitch = useCallback(async (port: number, dir: string) => {
+    const target = await resolveTargetDir(dir);
+    const result = await waitForWorkspaceSwitch(target, port);
+    if (!result.ok) {
+      setError(
+        "切换超时：服务未在 60 秒内切换到目标目录。"
+        + " 请查看 ~/Library/Application Support/StockAgent/logs/switch.log",
+      );
+      setSwitching(false);
+      try {
+        await refreshInfo();
+      } catch { /* ignore */ }
+      return;
+    }
+    try { localStorage.setItem("sa.lastGoodPort", String(result.port)); } catch { /* ignore */ }
+    notifyWorkspaceChanged();
+    const invoke = window.__TAURI__?.core?.invoke;
+    const url = `http://127.0.0.1:${result.port}/?_=${Date.now()}`;
+    if (invoke) {
+      try {
+        await invoke("navigate", { url });
+      } catch {
+        window.location.replace(url);
+      }
+      return;
+    }
+    window.location.replace(url);
+  }, [refreshInfo]);
 
   const doSwitch = useCallback(async (dir: string) => {
     setError("");
     setSwitching(true);
+    const preferredPort = info?.port ?? 8686;
     try {
       const invoke = window.__TAURI__?.core?.invoke;
       if (invoke) {
-        // 桌面：切换在壳进程里执行（service_cli install），天然不受后端
-        // bootout 影响；完成后按返回的最终端口原生导航（端口漂移也能跟上）
-        const r = await invoke("service_cli", {
-          args: ["install", "--port", String(info?.port ?? 8686), "--data-dir", dir],
-        }) as { ok?: boolean; port?: number; backend_healthy?: boolean; error?: string };
-        if (!r?.ok) throw new Error(r?.error || "切换失败");
-        await invoke("navigate", { url: `http://127.0.0.1:${r.port}/` });
+        let r = await invoke("service_cli", {
+          args: ["install", "--port", String(preferredPort), "--data-dir", dir],
+        }) as { ok?: boolean; port?: number; data_dir?: string; backend_healthy?: boolean; error?: string };
+        if (r?.ok === false) throw new Error(r?.error || "切换失败");
+        if (!r?.port && !r?.data_dir) throw new Error(r?.error || "切换失败：service_cli 无有效响应");
+        const port = r.port ?? preferredPort;
+        const installedDir = r.data_dir ? await resolveTargetDir(r.data_dir) : await resolveTargetDir(dir);
+        if (!r.backend_healthy) {
+          const waited = await waitForWorkspaceSwitch(installedDir, port, 20000);
+          if (!waited.ok) throw new Error("服务已注册但未通过健康检查，请稍后重试或查看 switch.log");
+          await finishSwitch(waited.port, installedDir);
+          return;
+        }
+        await finishSwitch(port, installedDir);
         return;
       }
 
-      // 浏览器：后端分离子进程重装（install 内已等待端口释放,端口保持不变），
-      // 同源轮询健康后整页重载
-      const r = await apiPost<{ ok: boolean; switching: boolean; detail?: string }>(
+      const r = await apiPost<{ ok: boolean; switching: boolean; detail?: string; port?: number; target?: string }>(
         "/api/workspace/switch", { data_dir: dir });
-      if (!r.switching) { setSwitching(false); onClose(); return; }
-      // 必须确认 data_dir 已经变成目标目录才 reload——旧进程优雅退出期间
-      // /api/health 仍会应答,单看健康会提前重载回旧档案（实测踩坑）
-      const deadline = Date.now() + 40000;
-      await new Promise((r) => setTimeout(r, 1500));
-      while (Date.now() < deadline) {
-        try {
-          const res = await fetch("/api/workspace", { cache: "no-store" });
-          if (res.ok) {
-            const w = await res.json() as { data_dir?: string };
-            if (w.data_dir === dir || w.data_dir === dir.replace(/\/$/, "")) {
-              window.location.reload();
-              return;
-            }
-          }
-        } catch { /* 服务重启中 */ }
-        await new Promise((r) => setTimeout(r, 600));
+      if (!r.switching) {
+        setSwitching(false);
+        notifyWorkspaceChanged();
+        await refreshInfo();
+        onClose();
+        return;
       }
-      setError("切换超时:服务未在 40 秒内恢复,请查看日志");
-      setSwitching(false);
+      const port = r.port ?? preferredPort;
+      const target = r.target ? await resolveTargetDir(r.target) : await resolveTargetDir(dir);
+      await finishSwitch(port, target);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setSwitching(false);
     }
-  }, [onClose, info]);
+  }, [finishSwitch, info, onClose, refreshInfo]);
 
   const browse = useCallback(async () => {
     const dialogOpen = window.__TAURI__?.dialog?.open;
@@ -101,7 +197,7 @@ export function WorkspaceModal({ open, onClose }: { open: boolean; onClose: () =
           <div className="ws-switching">
             <div className="spinner-ring" />
             <div>正在切换工作区…</div>
-            <div className="ws-hint">后台服务重启中,完成后自动进入</div>
+            <div className="ws-hint">后台服务重启中，完成后自动刷新</div>
           </div>
         ) : (
           <>
@@ -118,12 +214,20 @@ export function WorkspaceModal({ open, onClose }: { open: boolean; onClose: () =
                   <span className="ws-badge">当前</span>
                 </div>
                 <div className="ws-row-dir">{info?.data_dir ?? ""}</div>
+                {info?.service_mode === "dev" && info.configured_data_dir
+                  && normalizeDir(info.configured_data_dir) !== normalizeDir(info.data_dir ?? "") ? (
+                  <div className="ws-hint" style={{ marginTop: 8 }}>
+                    已注册工作区为 {info.configured_data_dir}，但当前 dev 后端仍指向 {info.data_dir}。
+                    请通过下方切换，或使用 ./start.sh（非 --dev）复用 launchd 后端。
+                  </div>
+                ) : null}
               </div>
 
-              {info && !info.switchable && (
+              {info && !canSwitch && (
                 <div className="ws-hint" style={{ marginBottom: 10 }}>
-                  当前为开发模式（无 launchd 服务）,切换请使用
-                  <code> service_cli install --data-dir</code>
+                  当前环境无法切换。请先运行
+                  <code> python -m backend.service_cli install --data-dir &lt;目录&gt;</code>
+                  注册服务，或使用 Tauri 桌面客户端。
                 </div>
               )}
 
@@ -131,7 +235,7 @@ export function WorkspaceModal({ open, onClose }: { open: boolean; onClose: () =
                 <>
                   <div className="ws-group">最近</div>
                   {info.recents.map((w) => (
-                    <button key={w.dir} className="ws-item" disabled={!info.switchable}
+                    <button key={w.dir} className="ws-item" disabled={!canSwitch}
                       onClick={() => void doSwitch(w.dir)}>
                       <span className="ws-item-name">{w.name}</span>
                       <span className="ws-item-dir">{w.dir}</span>
@@ -142,9 +246,9 @@ export function WorkspaceModal({ open, onClose }: { open: boolean; onClose: () =
 
               <div className="ws-group">切换到其他目录</div>
               {hasNativePicker ? (
-                <button className="ws-item" disabled={!info?.switchable} onClick={() => void browse()}>
+                <button className="ws-item" disabled={!canSwitch} onClick={() => void browse()}>
                   <span className="ws-item-name">浏览选择目录…</span>
-                  <span className="ws-item-dir">新目录会初始化为空档案;含既有档案的目录直接接管</span>
+                  <span className="ws-item-dir">新目录会初始化为空档案；含既有档案的目录直接接管</span>
                 </button>
               ) : (
                 <div className="ws-manual">
@@ -154,7 +258,7 @@ export function WorkspaceModal({ open, onClose }: { open: boolean; onClose: () =
                     onChange={(e) => setManualDir(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter" && manualDir.trim()) void doSwitch(manualDir.trim()); }}
                   />
-                  <button disabled={!info?.switchable || !manualDir.trim()} onClick={() => void doSwitch(manualDir.trim())}>切换</button>
+                  <button disabled={!canSwitch || !manualDir.trim()} onClick={() => void doSwitch(manualDir.trim())}>切换</button>
                 </div>
               )}
               {error && <div className="ws-error">{error}</div>}

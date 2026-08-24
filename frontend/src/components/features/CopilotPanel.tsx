@@ -1,7 +1,8 @@
-import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import React, { useRef, useCallback, useEffect, useMemo } from "react";
 import { useAppState } from "@/hooks/useAppState";
 import type { Screen } from "@/types";
-import { parseCopilotEvent, uploadSessionFiles, EVENT_FINAL, EVENT_ERROR, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, EVENT_PARTIAL_ANSWER, type UploadedFileInfo } from "@/api/copilot";
+import { parseCopilotEvent, EVENT_FINAL, EVENT_ERROR, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, EVENT_PARTIAL_ANSWER } from "@/api/copilot";
+import { parseTaskToolPayload } from "@/components/features/taskToolMeta";
 import type { CopilotMessage } from "@/api/client";
 import { useCopilotChat, extractToolResultText, type StreamToolCall } from "@/hooks/useCopilotChat";
 import { useChatDetail } from "@/hooks/useChatDetail";
@@ -33,6 +34,8 @@ type ToolItem = {
   resultText?: string;
   /** task 委派的子代理类型 */
   subagentType?: string;
+  taskDescription?: string;
+  taskPrompt?: string;
 };
 
 type GroupedItem =
@@ -80,15 +83,19 @@ function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null): Grou
       const resultText = extractToolResultText(resultPayload);
       const failed = !matched && !!msg.run_id && completedRuns.has(msg.run_id);
       let subagentType: string | undefined;
+      let taskDescription: string | undefined;
+      let taskPrompt: string | undefined;
       if (name === "task") {
-        let args = p?.arguments;
-        if (typeof args === "string") {
-          try { args = JSON.parse(args); } catch { args = {}; }
-        }
-        subagentType = String((args as { subagent_type?: string })?.subagent_type || "") || undefined;
+        const meta = parseTaskToolPayload(p);
+        subagentType = meta.subagentType;
+        taskDescription = meta.description;
+        taskPrompt = meta.prompt;
       }
       const tools = pendingTools.get(rid) || [];
-      tools.push({ t: "tool", name, done: matched, failed, id: msg.message_id, created_at: msg.created_at, resultText, subagentType });
+      tools.push({
+        t: "tool", name, done: matched, failed, id: msg.message_id, created_at: msg.created_at,
+        resultText, subagentType, taskDescription, taskPrompt,
+      });
       pendingTools.set(rid, tools);
     } else if (ev.type === EVENT_TOOL_RESULT) {
       // 已在预扫描中按 call_id 收集，配对到对应 tool_call；此处跳过，不单独渲染。
@@ -115,25 +122,17 @@ function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null): Grou
   return out;
 }
 
-/** 三栏布局的中栏常驻聊天(会话管理在 LeftSidebar;历史 panel 折叠变体已随布局定型移除) */
+/** 三栏布局的中栏常驻聊天(会话管理在 LeftSidebar; Composer 在 BottomBar) */
 export function CopilotPanel() {
   const {
     copilotContextVersion,
-    setCurrentScreen, setStock, appDataCache, globalLoading,
+    setCurrentScreen, setStock,
   } = useAppState();
-  // globalLoading 变化触发重读:否则首屏渲染时 settings 缓存未就绪,pill 永远停在兜底文案
-  const modelName = useMemo(() => {
-    void globalLoading;
-    return (appDataCache.current.settings as { agent_runtime?: { model_name?: string } } | undefined)
-      ?.agent_runtime?.model_name || "AI 模型";
-  }, [appDataCache, globalLoading]);
 
   const {
-    currentSession,
     messages,
     sending, streamMessage, copiedId,
-    handleSend: sendMessage, handleStop,
-    handleCopy, ensureSession,
+    handleCopy,
   } = useCopilotChat();
 
   const { openDetail } = useChatDetail();
@@ -144,6 +143,9 @@ export function CopilotPanel() {
       name: t.name,
       status: t.failed ? "failed" : t.done ? "done" : "running",
       resultText: t.resultText,
+      subagentType: t.subagentType,
+      taskDescription: t.taskDescription,
+      taskPrompt: t.taskPrompt,
     });
   }, [openDetail]);
   const handleStreamToolClick = useMemo(() => {
@@ -152,67 +154,19 @@ export function CopilotPanel() {
       name: t.name,
       status: t.status,
       resultText: t.resultText,
+      subagentType: t.subagentType,
+      taskDescription: t.taskDescription,
+      taskPrompt: t.taskPrompt,
     });
   }, [openDetail]);
 
-  const [input, setInput] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [sessionFiles, setSessionFiles] = useState<UploadedFileInfo[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
-  const autoResize = useCallback(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 120) + "px";
-  }, []);
-
   useEffect(() => { scrollToBottom(); }, [messages, streamMessage, scrollToBottom]);
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
-  const handleSend = () => {
-    const text = input;
-    if (!text.trim()) return;
-    setInput("");
-    if (inputRef.current) { inputRef.current.style.height = "auto"; }
-    sendMessage(text);
-  };
-
-  // 附件属于会话线程；切换会话后清空展示（文件本身仍保存在原会话，可回去继续问）。
-  // 用 render 期派生状态调整替代 effect，避免级联渲染。
-  const [chipSessionId, setChipSessionId] = useState<string | null>(currentSession?.session_id ?? null);
-  if ((currentSession?.session_id ?? null) !== chipSessionId) {
-    setChipSessionId(currentSession?.session_id ?? null);
-    setSessionFiles([]);
-  }
-
-  const handleUpload = async (picked: FileList | null) => {
-    if (!picked || picked.length === 0) return;
-    const files = Array.from(picked);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-    setUploading(true);
-    try {
-      const sid = await ensureSession();
-      const result = await uploadSessionFiles(sid, files);
-      setSessionFiles((prev) => [...prev, ...(result.files || [])]);
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : "上传失败");
-    } finally {
-      setUploading(false);
-    }
-  };
 
   const handleNavigate = useCallback((screen: string, stockParam?: string) => {
     if (stockParam) setStock(stockParam);
@@ -308,67 +262,6 @@ export function CopilotPanel() {
           {streamMessage && <CopilotStreamingMessage streamMessage={streamMessage} onToolClick={handleStreamToolClick} />}
 
           <div ref={messagesEndRef} />
-        </div>
-      </div>
-
-      {/* Composer 纸面卡：上区输入、下区工具行（附件/模型 pill/↵ 提示/图标发送） */}
-      <div className="copilot-input">
-        <div className="composer-card">
-          {(sessionFiles.length > 0 || uploading) && (
-            <div className="upload-chips">
-              {sessionFiles.map((f, i) => (
-                <span key={`${f.filename}-${i}`} className="upload-chip" title={f.markdown_file ? `已转 Markdown：${f.markdown_file}` : f.filename}>
-                  📄 {f.filename}
-                  {f.markdown_file && <span className="upload-chip-ok"> ✓</span>}
-                </span>
-              ))}
-              {uploading && <span className="upload-chip">⏳ 上传中…</span>}
-            </div>
-          )}
-          <textarea
-            ref={inputRef}
-            placeholder="输入问题，或让 AI 帮你盯盘、回测、生成报告…"
-            value={input}
-            onChange={(e) => { setInput(e.target.value); autoResize(); }}
-            onKeyDown={handleKeyDown}
-            rows={1}
-          />
-          <div className="composer-bar">
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              style={{ display: "none" }}
-              onChange={(e) => handleUpload(e.target.files)}
-            />
-            <button
-              className="composer-icon-btn"
-              title="上传资料给 AI 在本会话读取：PDF/Word/Excel/PPT 自动转 Markdown，图片可看图，任意文本文件直接可读"
-              disabled={uploading || sending}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-              </svg>
-            </button>
-            <span className="model-pill" title="当前 AI 模型（在 系统设置 → AI 模型 中修改）">
-              <span className="dot-ok" style={{ width: 5, height: 5 }} />
-              {modelName}
-            </span>
-            <span className="composer-hint">↵ 发送</span>
-            {sending ? (
-              <button className="composer-send stop" onClick={handleStop} title="停止生成">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
-              </button>
-            ) : (
-              <button className="composer-send" onClick={handleSend} disabled={sending || !input.trim()} title="发送">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="22" y1="2" x2="11" y2="13"/>
-                  <polygon points="22,2 15,22 11,13 2,9"/>
-                </svg>
-              </button>
-            )}
-          </div>
         </div>
       </div>
     </aside>

@@ -2,8 +2,11 @@
 
 切换 = 分离子进程跑 ``service_cli install --data-dir <新目录>``（会 bootout 当前
 服务→重写 plist→bootstrap 新目录），本进程随之被 launchd 终止；前端收到响应后
-轮询 /api/health 等新档案上线再整页刷新。仅在 launchd 服务形态下可用——dev
-（start.sh 手动跑）没有服务可重装，返回 409。
+轮询 /api/health 等新档案上线再整页刷新。
+
+开发态（``start.sh`` 直连 uvicorn）优先走 Tauri ``service_cli install`` 桥；
+HTTP ``/switch`` 在无 launchd 时也会 spawn install，但 ``start.sh`` 重启会覆盖——
+见 ``start.sh`` 对 launchd 后端的复用逻辑。
 """
 from __future__ import annotations
 
@@ -18,6 +21,10 @@ from backend import paths
 from backend import service_cli
 
 router = APIRouter(prefix="/api/workspace", tags=["workspace"])
+
+
+def _resolved_dir(raw: str | Path) -> Path:
+    return service_cli.validate_data_dir(raw)
 
 
 def _workspace_name(data_dir: Path) -> str:
@@ -35,9 +42,23 @@ def _registry() -> list[dict]:
         items = json.loads(
             (paths.service_state_dir() / "workspaces.json").read_text(encoding="utf-8")
         )
-        return items if isinstance(items, list) else []
+        if not isinstance(items, list):
+            items = []
     except (OSError, ValueError):
-        return []
+        items = []
+    valid: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        raw_dir = str(item.get("dir") or "").strip()
+        if not raw_dir:
+            continue
+        try:
+            service_cli.validate_data_dir(raw_dir)
+        except ValueError:
+            continue
+        valid.append(item)
+    return valid
 
 
 @router.get("")
@@ -45,14 +66,31 @@ def workspace_info():
     data_dir = paths.data_dir().resolve()
     current = str(data_dir)
     config = service_cli.read_service_config()
+    loaded = service_cli.service_loaded()
     recents = [w for w in _registry() if w.get("dir") and w["dir"] != current]
+    configured_dir = str(Path(config["data_dir"]).resolve()) if config and config.get("data_dir") else None
     return {
         "name": _workspace_name(data_dir),
         "data_dir": current,
         "port": (config or {}).get("port"),
-        "switchable": config is not None,
+        "switchable": loaded or config is not None,
+        "service_mode": "launchd" if loaded else "dev",
+        "service_loaded": loaded,
+        "configured_data_dir": configured_dir,
         "recents": recents,
     }
+
+
+@router.post("/resolve")
+def workspace_resolve(payload: dict):
+    raw = str(payload.get("data_dir") or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="data_dir is required")
+    try:
+        target = _resolved_dir(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"data_dir": str(target)}
 
 
 @router.post("/switch")
@@ -65,19 +103,16 @@ def workspace_switch(payload: dict):
     if config is None:
         raise HTTPException(
             status_code=409,
-            detail="当前以开发模式运行（无 launchd 服务），请用 service_cli install 切换",
+            detail="尚未注册 launchd 服务；请用 Tauri 桌面切换，或先运行 service_cli install",
         )
     try:
-        target = service_cli.validate_data_dir(raw)
+        target = _resolved_dir(raw)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
     if str(target) == str(paths.data_dir().resolve()):
-        return {"ok": True, "switching": False, "detail": "已在该工作区"}
+        return {"ok": True, "switching": False, "detail": "已在该工作区", "target": str(target)}
 
-    # 分离子进程执行重装：install 会 bootout 当前服务（本进程随之退出），
-    # start_new_session 让子进程脱离本服务的进程组、在 bootout 后存活完成
-    # bootstrap。输出落状态目录 switch.log 供事后排障。
     log_dir = paths.service_state_dir() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     switch_log = open(log_dir / "switch.log", "ab")
@@ -92,4 +127,9 @@ def workspace_switch(payload: dict):
         stdout=switch_log,
         stderr=switch_log,
     )
-    return {"ok": True, "switching": True, "target": str(target)}
+    return {
+        "ok": True,
+        "switching": True,
+        "target": str(target),
+        "port": int(config.get("port") or service_cli.DEFAULT_PORT),
+    }

@@ -7,6 +7,20 @@ from backend.schemas import now_iso
 from backend.stock_domain.catalog import get_stock, normalize_symbol
 
 
+def _empty_intel_result(symbol: str, query: str, reason: str, *, source: str = "none") -> dict:
+    normalized = normalize_symbol(symbol)
+    return {
+        "symbol": normalized,
+        "query": query,
+        "source": source,
+        "updated_at": now_iso(),
+        "items": [],
+        "degraded": True,
+        "degraded_reason": reason,
+        "coverage": {"mode": "unavailable"},
+    }
+
+
 class IntelProvider(Protocol):
     name: str
 
@@ -34,6 +48,13 @@ class MockIntelProvider:
             "items": items,
             "coverage": {"mode": "mock"},
         }
+
+
+class _EmptyIntelProvider:
+    name = "none"
+
+    def search_news(self, symbol: str, query: str = "") -> dict:
+        return _empty_intel_result(symbol, query, "provider disabled")
 
 
 class YFinanceIntelProvider:
@@ -96,10 +117,7 @@ class YFinanceIntelProvider:
         }
 
     def _degraded(self, symbol: str, query: str, reason: str) -> dict:
-        result = MockIntelProvider().search_news(symbol, query)
-        result["degraded"] = True
-        result["degraded_reason"] = reason
-        return result
+        return _empty_intel_result(symbol, query, reason, source=self.name)
 
 
 class AkShareIntelProvider:
@@ -124,7 +142,7 @@ class AkShareIntelProvider:
         normalized = normalize_symbol(symbol)
         stock = get_stock(normalized)
         if not stock:
-            return MockIntelProvider().search_news(symbol, query)
+            return _empty_intel_result(symbol, query, "unknown symbol")
         market = str(stock["market"])
 
         # For CN/HK, use AKShare's existing search_intel logic
@@ -137,12 +155,18 @@ class AkShareIntelProvider:
             # Real US-equity news via Yahoo Finance (falls back to mock internally).
             return YFinanceIntelProvider().search_news(normalized, query)
 
-        # Fallback for unknown markets or on CN/HK error
-        mock = MockIntelProvider()
-        result = mock.search_news(normalized, query)
-        result["degraded"] = True
-        result["degraded_reason"] = f"{self.name} does not support {market} intel"
-        return result
+        # 未知市场或 CN/HK 调用失败：返回空结果，不再注入模拟新闻
+        return _empty_intel_result(
+            normalized, query, f"{self.name} does not support {market} intel", source=self.name
+        )
+
+
+def _akshare_intel_delegate(name: str) -> IntelProvider:
+    class _Delegated(AkShareIntelProvider):
+        pass
+
+    _Delegated.name = name  # type: ignore[attr-defined]
+    return _Delegated()
 
 
 class IntelProviderRouter:
@@ -156,37 +180,46 @@ class IntelProviderRouter:
         self.repo: Any = None
         self._providers: dict[str, IntelProvider] = {
             "akshare": AkShareIntelProvider(),
+            "eastmoney": _akshare_intel_delegate("eastmoney"),
+            "tonghuashun": _akshare_intel_delegate("tonghuashun"),
             "yfinance": YFinanceIntelProvider(),
-            "mock": MockIntelProvider(),
         }
+
+    def _category_config(self, category: str) -> dict:
+        from backend.config.intel_sources import DEFAULT_INTEL_SOURCES
+
+        defaults = DEFAULT_INTEL_SOURCES.get("providers", {}).get(category, {})
+        if self.repo is None:
+            return dict(defaults)
+        try:
+            config = self.repo.get_config("intel_sources", DEFAULT_INTEL_SOURCES)
+            cfg = config.get("providers", {}).get(category, {})
+            if isinstance(cfg, dict):
+                return {**defaults, **cfg}
+        except Exception:
+            pass
+        return dict(defaults)
 
     def _provider_for_category(self, category: str) -> tuple[str, IntelProvider]:
         """Return (provider_id, provider) for the given intel category."""
-        provider_id = "akshare"
-        if self.repo is not None:
-            try:
-                from backend.config.intel_sources import DEFAULT_INTEL_SOURCES
-                config = self.repo.get_config("intel_sources", DEFAULT_INTEL_SOURCES)
-                providers = config.get("providers", {})
-                provider_id = providers.get(category, {}).get("provider", "akshare")
-                if provider_id == "none":
-                    provider_id = "mock"
-            except Exception:
-                provider_id = "akshare"
-        provider = self._providers.get(provider_id, self._providers["mock"])
+        cfg = self._category_config(category)
+        if not cfg.get("enabled", True):
+            return "none", _EmptyIntelProvider()
+        provider_id = str(cfg.get("provider") or "eastmoney")
+        if provider_id in ("none", "mock"):
+            return "none", _EmptyIntelProvider()
+        provider = self._providers.get(provider_id) or self._providers["akshare"]
         return provider_id, provider
 
     def search_news(self, symbol: str, query: str = "") -> dict:
-        _, provider = self._provider_for_category("news_search")
+        provider_id, provider = self._provider_for_category("news_search")
+        if provider_id == "none":
+            return _empty_intel_result(symbol, query, "新闻搜索未启用")
         started = time.perf_counter()
         try:
             return provider.search_news(symbol, query)
         except Exception as exc:
-            fallback = self._providers["mock"]
-            result = fallback.search_news(symbol, query)
-            result["degraded"] = True
-            result["degraded_reason"] = str(exc)
-            return result
+            return _empty_intel_result(symbol, query, str(exc), source=provider_id)
 
     def social_sentiment_summary(self, symbol: str) -> dict:
         """Return social sentiment data if configured, else empty."""

@@ -1,34 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { actorColor } from "@/lib/actorColor";
 import { useCopilotChat } from "@/hooks/useCopilotChat";
 import type { CopilotSession } from "@/api/client";
 
-const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
-
-/** 品牌区状态簇：时钟 + AI 状态 + 头像（原页面 topbar 右侧集群上移至此） */
-function BrandStatus() {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} 周${WEEKDAYS[now.getDay()]}`;
-  const time = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-  return (
-    <div className="brand-status">
-      <div className="brand-status-col" title={date}>
-        <span className="brand-clock">{time}</span>
-        <span className="brand-ai"><span className="dot-ok"/>AI 就绪</span>
-      </div>
-      <div className="brand-avatar" style={{ background: actorColor("local-user"), color: "#fff" }}>Z</div>
-    </div>
-  );
-}
-
-/** 三栏布局左栏（doc/design/three-column-mockup.html）：
- * 品牌区 + 新建/搜索 + 按时间分组的会话列表 + 系统设置沉底。
- * 会话即一级导航；业务页面入口在右侧 FunctionDock。 */
+/** 三栏布局左栏：品牌 + 会话列表 + 底部工作区/设置（Cursor 式沉底）。 */
 
 /** 会话活跃时间:与后端排序键一致(last_message_at ?? created_at),
  * 分组与显示若用 created_at 会和排序两把尺子,产出重复组头 */
@@ -61,16 +35,19 @@ export function LeftSidebar({ onOpenSettings, onOpenWorkspace }: {
     switchSession, handleNewSession, handleRenameSession, handleDeleteSession,
   } = useCopilotChat();
 
-  // 当前工作区名（vault 切换器按钮文本）
   const [workspaceName, setWorkspaceName] = useState("工作区");
   useEffect(() => {
     let alive = true;
-    import("@/api/client").then(({ apiGet }) =>
-      apiGet<{ name: string }>("/api/workspace")
-        .then((w) => { if (alive && w.name) setWorkspaceName(w.name); })
-        .catch(() => { /* 旧后端无此接口时保持默认 */ })
-    );
-    return () => { alive = false; };
+    const refresh = () => {
+      import("@/api/client").then(({ apiGet }) =>
+        apiGet<{ name: string }>("/api/workspace")
+          .then((w) => { if (alive && w.name) setWorkspaceName(w.name); })
+          .catch(() => { /* ignore */ }),
+      );
+    };
+    refresh();
+    window.addEventListener("workspace-changed", refresh);
+    return () => { alive = false; window.removeEventListener("workspace-changed", refresh); };
   }, []);
 
   const [searchOpen, setSearchOpen] = useState(false);
@@ -94,9 +71,16 @@ export function LeftSidebar({ onOpenSettings, onOpenWorkspace }: {
 
   return (
     <aside className="left-sidebar">
-      {/* 顶行只留状态簇（时钟/AI 状态/头像）;品牌标识随统一顶栏化简去除 */}
       <div className="brand" data-tauri-drag-region="">
-        <BrandStatus />
+        <div className="brand-logo" aria-hidden>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <path d="M4 19V5M9 19v-6M14 19V9M19 19v-9" />
+          </svg>
+        </div>
+        <div>
+          <div className="brand-name">Stock Agent</div>
+          <div className="brand-sub">local · 8686</div>
+        </div>
       </div>
 
       <div className="left-actions">
@@ -197,15 +181,16 @@ export function LeftSidebar({ onOpenSettings, onOpenWorkspace }: {
         ))}
       </nav>
 
-      {/* 底部并排：系统设置 │ 工作区切换（按钮文本 = 当前工作区名） */}
       <div className="left-foot">
-        <button className="foot-item" onClick={onOpenSettings}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          系统设置
+        <button className="left-foot-user" onClick={onOpenWorkspace} title={`工作区：${workspaceName}`} type="button">
+          <span className="left-foot-avatar" aria-hidden>{workspaceName.charAt(0).toUpperCase()}</span>
+          <span className="left-foot-name">{workspaceName}</span>
         </button>
-        <button className="foot-item" onClick={onOpenWorkspace} title={`工作区：${workspaceName}`}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-          <span className="foot-item-text">{workspaceName}</span>
+        <button className="left-foot-icon" onClick={onOpenSettings} title="系统设置" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l-.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
         </button>
       </div>
     </aside>
