@@ -49,6 +49,7 @@ export async function createSession(
   title: string,
   page: string = "overview",
   symbol: string | null = null,
+  defaultModel: string | null = null,
 ): Promise<CopilotSession> {
   return api<CopilotSession>("/api/copilot/sessions", {
     method: "POST",
@@ -57,17 +58,18 @@ export async function createSession(
       current_page: page,
       anchor_symbol: symbol,
       authority_level: DEFAULT_AUTHORITY_LEVEL,
+      default_model: defaultModel,
     }),
   });
 }
 
 export async function updateSession(
   sessionId: string,
-  title: string,
+  patch: { title?: string; default_model?: string | null },
 ): Promise<CopilotSession> {
   return api<CopilotSession>(`/api/copilot/sessions/${encodeURIComponent(sessionId)}`, {
     method: "PUT",
-    body: JSON.stringify({ title }),
+    body: JSON.stringify(patch),
   });
 }
 

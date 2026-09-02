@@ -2,17 +2,19 @@ import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost, apiPut, apiDelete } from "@/api/client";
 import {
   fetchCopilotRuns, fetchProviderEvents, fetchRuntimeMetrics, fetchRegressionCases,
-  testConnection,
   fetchMemoryStatus, clearMemory, deleteMemoryFact, updateMemoryFact, createMemoryFact,
   fetchMcpConfig, updateMcpConfig,
   type CopilotRunLog, type ProviderEvent, type RuntimeMetricSnapshot,
-  type RegressionCase, type ConnectionTestResult, type MemoryStatus,
+  type RegressionCase, type MemoryStatus,
   type McpServerConfig,
 } from "@/api/runtime";
 import { ErrorMessage, PanelSkeleton, KpiSkeleton } from "@/components/ui/Loading";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { useAppState } from "@/hooks/useAppState";
 import ChannelsTab from "./Channels";
+import { ModelProvidersTab } from "@/components/settings/ai/ModelProvidersTab";
+import { ModelCatalogTab } from "@/components/settings/ai/ModelCatalogTab";
+import type { LlmProvidersSnapshot } from "@/api/llmProviders";
 
 /* ---------- Types ---------- */
 
@@ -104,6 +106,7 @@ interface SettingsData {
   profiles?: Array<{ name?: string; description?: string }>;
   trading_controls?: { paper_trading?: string; real_order?: string };
   skills?: SkillInfo[];
+  llm_providers?: LlmProvidersSnapshot;
 }
 
 interface SkillInfo {
@@ -111,17 +114,35 @@ interface SkillInfo {
   authority: string; enabled: boolean; locked: boolean;
 }
 
-type SettingTab = "general" | "channels" | "ai" | "agent" | "market" | "intel" | "trade" | "diag";
+type SettingTab =
+  | "appearance"
+  | "workspace"
+  | "channels"
+  | "ai"
+  | "ai-models"
+  | "agent-skills"
+  | "agent-memory"
+  | "agent-mcp"
+  | "data"
+  | "intel"
+  | "trade"
+  | "risk"
+  | "diag";
 
 /** 右栏顶部说明（每个分区一句，降低「不知道改哪」的困惑） */
 const TAB_META: Record<SettingTab, { title: string; desc: string }> = {
-  general: { title: "外观与工作区", desc: "主题、当前档案与本地数据目录。" },
+  appearance: { title: "外观", desc: "界面明暗与系统跟随。" },
+  workspace: { title: "工作区", desc: "当前档案名称与本地数据目录。" },
   channels: { title: "通知通道", desc: "盯盘告警、邮件/Webhook 等外发渠道。" },
-  ai: { title: "模型接入", desc: "大模型 API、Base URL、推理模式与连接测试。" },
-  agent: { title: "Agent 能力", desc: "子代理技能开关、长期记忆、MCP 外部工具扩展。" },
-  market: { title: "行情数据源", desc: "A 股 / 港股 / 美股的行情 provider 与实时分发状态。" },
-  intel: { title: "情报与舆情", desc: "新闻搜索、舆情分析 provider 与 API Key。" },
-  trade: { title: "交易与风控", desc: "V1 交易护栏（只读）与可编辑的风控策略规则。" },
+  ai: { title: "提供商", desc: "连接多家 OpenAI 兼容提供商。" },
+  "ai-models": { title: "默认模型", desc: "从已连接提供商中选择 Copilot 默认模型与 Thinking 偏好。" },
+  "agent-skills": { title: "技能", desc: "控制 AI 可委派的子代理技能开关。" },
+  "agent-memory": { title: "记忆", desc: "AI 长期记住的用户事实，可纠偏或清空。" },
+  "agent-mcp": { title: "MCP", desc: "无代码接入外部数据源与工具（保存后下一轮对话生效）。" },
+  data: { title: "数据源", desc: "A 股 / 港股 / 美股的行情 provider 与实时分发状态。" },
+  intel: { title: "情报", desc: "新闻搜索、舆情分析 provider 与 API Key。" },
+  trade: { title: "交易", desc: "V1 交易护栏（只读）与纸上交易模式。" },
+  risk: { title: "风控", desc: "单票上限、行业集中度、冷却期等可编辑策略规则。" },
   diag: { title: "运行诊断", desc: "运行时状态、对话记录与排障信息（只读）。" },
 };
 
@@ -227,8 +248,25 @@ function SettingRow({ label, sub, children }: { label: React.ReactNode; sub?: Re
   );
 }
 
-function GeneralTab({ settings }: { settings: SettingsData }) {
+function AppearanceTab() {
   const { themeMode, setThemeMode } = useAppState();
+  return (
+    <div className="settings-stack">
+      <SectionCard title="外观" description="界面明暗与系统跟随">
+        <SettingRow label="主题模式" sub="跟随系统时随 macOS 自动切换">
+          <div className="seg-ctl">
+            {([["light", "白天"], ["dark", "夜晚"], ["system", "跟随系统"]] as const).map(([mode, label]) => (
+              <button key={mode} type="button" className={themeMode === mode ? "on" : ""}
+                onClick={() => setThemeMode(mode)}>{label}</button>
+            ))}
+          </div>
+        </SettingRow>
+      </SectionCard>
+    </div>
+  );
+}
+
+function WorkspaceTab() {
   const [ws, setWs] = useState<{ name?: string; data_dir?: string } | null>(null);
   useEffect(() => {
     let alive = true;
@@ -243,17 +281,6 @@ function GeneralTab({ settings }: { settings: SettingsData }) {
   }, []);
   return (
     <div className="settings-stack">
-      <SectionCard title="外观" description="界面明暗与系统跟随">
-        <SettingRow label="主题模式" sub="跟随系统时随 macOS 自动切换">
-          <div className="seg-ctl">
-            {([["light", "白天"], ["dark", "夜晚"], ["system", "跟随系统"]] as const).map(([mode, label]) => (
-              <button key={mode} type="button" className={themeMode === mode ? "on" : ""}
-                onClick={() => setThemeMode(mode)}>{label}</button>
-            ))}
-          </div>
-        </SettingRow>
-      </SectionCard>
-
       <SectionCard title="工作区" description="档案名称与 SQLite 数据目录；切换入口在左栏底部">
         <SettingRow label="当前工作区">
           <span className="num" style={{ fontSize: 12 }}>{ws?.name ?? "-"}</span>
@@ -268,18 +295,28 @@ function GeneralTab({ settings }: { settings: SettingsData }) {
 
 /* ---------- AI 配置 ---------- */
 
-interface ModelOption {
-  name: string;
-  provider?: string;
-  role?: string;
-}
+function DefaultModelTab({
+  settings, onRefresh,
+}: {
+  settings: SettingsData;
+  onRefresh: () => Promise<void>;
+}) {
+  const snapshot = settings.llm_providers;
+  const thinking = Boolean((settings.runtime_config as { thinking_enabled?: boolean } | undefined)?.thinking_enabled ?? true);
 
-const MODEL_PROVIDER_BASE_URLS: Record<string, string> = {
-  openai: "https://api.openai.com/v1",
-  deepseek: "https://api.deepseek.com",
-  anthropic: "native SDK",
-  gemini: "native or OpenAI-compatible",
-};
+  if (!snapshot) {
+    return <div className="llm-empty">无法加载提供商目录。</div>;
+  }
+
+  return (
+    <ModelCatalogTab
+      snapshot={snapshot}
+      thinkingEnabled={thinking}
+      runtimeConfig={settings.runtime_config ?? {}}
+      onRefresh={onRefresh}
+    />
+  );
+}
 
 /* ---------- AI 记忆管理 ---------- */
 
@@ -615,211 +652,6 @@ function SkillsSection({ initial }: { initial: SkillInfo[] }) {
         ))}
       </div>
     </SectionCard>
-  );
-}
-
-function AiTab({
-  settings, onSaveRuntimeConfig,
-}: {
-  settings: SettingsData;
-  onSaveRuntimeConfig: (config: Record<string, unknown>) => Promise<void>;
-}) {
-  const rc = settings.runtime_config ?? {};
-  const [apiKey, setApiKey] = useState("");
-  const [baseUrl, setBaseUrl] = useState<string>((rc.base_url as string) ?? "");
-  const [modelName, setModelName] = useState<string>((rc.model_name as string) ?? "");
-  const [customModel, setCustomModel] = useState(false);
-  const [thinking, setThinking] = useState<boolean>((rc.thinking_enabled as boolean) ?? true);
-  const [dirty, setDirty] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [testConnecting, setTestConnecting] = useState(false);
-  const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
-  const [reconnecting] = useState(false);
-
-  const knownModels: ModelOption[] = (settings.models as ModelOption[]) ?? [];
-
-  useEffect(() => {
-    const r = settings.runtime_config ?? {};
-    const storedModel = (r.model_name as string) ?? "";
-    setBaseUrl((r.base_url as string) ?? "");
-    setModelName(storedModel);
-    setThinking((r.thinking_enabled as boolean) ?? true);
-    setCustomModel(storedModel !== "" && !knownModels.some((m) => m.name === storedModel));
-    setDirty(false);
-  }, [settings.runtime_config]);
-
-  const handleModelSelect = (name: string) => {
-    if (name === "__custom__") {
-      setCustomModel(true);
-      return;
-    }
-    setCustomModel(false);
-    setModelName(name);
-    const model = knownModels.find((m) => m.name === name);
-    if (model?.provider && MODEL_PROVIDER_BASE_URLS[model.provider]) {
-      setBaseUrl(MODEL_PROVIDER_BASE_URLS[model.provider]);
-    }
-    markDirty();
-  };
-
-  const markDirty = () => { if (!dirty) setDirty(true); };
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const payload: Record<string, unknown> = {
-        ...rc,
-        base_url: baseUrl || null,
-        model_name: modelName || null,
-        thinking_enabled: thinking,
-      };
-      if (apiKey) payload.api_key = apiKey;
-      await onSaveRuntimeConfig(payload);
-      setApiKey("");
-      setDirty(false);
-      // 后端会自动重连，显示成功状态
-      setTestResult({ ok: true, model: modelName || undefined });
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : "保存 AI 配置失败");
-    } finally { setSaving(false); }
-  };
-
-  const handleTestConnection = async () => {
-    setTestConnecting(true);
-    setTestResult(null);
-    try {
-      const result = await testConnection({
-        api_key: apiKey || undefined,
-        base_url: baseUrl || undefined,
-        model_name: modelName || undefined,
-      });
-      setTestResult(result);
-    } catch (err) {
-      setTestResult({ ok: false, error: err instanceof Error ? err.message : "连接测试失败" });
-    } finally { setTestConnecting(false); }
-  };
-
-  return (
-    <div className="settings-stack">
-      {settings.agent_runtime && (
-        <SectionCard title="运行时概览" description="当前 Copilot 连接状态（只读）">
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
-            {[
-              ["模式", settings.agent_runtime.mode],
-              ["客户端", settings.agent_runtime.active_client],
-              ["模型", settings.agent_runtime.model_name],
-              ["子代理", settings.agent_runtime.subagent_enabled ? "已启用" : "未启用"],
-              ["计划模式", settings.agent_runtime.plan_mode ? "开" : "关"],
-              ["降级", settings.agent_runtime.degraded ? (settings.agent_runtime.degraded_reason ?? "是") : "否"],
-            ].map(([k, v]) => (
-              <div key={k} className="card" style={{ padding: "10px 12px" }}>
-                <div className="muted" style={{ fontSize: 11 }}>{k}</div>
-                <div className="num" style={{ fontSize: 12, marginTop: 4, wordBreak: "break-all" }}>{String(v ?? "-")}</div>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-      )}
-      <SectionCard title="模型与连接" description="API Key 可存本地；环境变量 OPENAI_API_KEY 优先于页面配置">
-          <label className="page-stack" style={{ gap: 4 }}>
-            <span className="muted" style={{ fontSize: 12 }}>
-              API Key
-              {Boolean((rc as { api_key?: string }).api_key) && (
-                <span style={{ marginLeft: 8, color: "var(--green, #3fb950)", fontSize: 11 }}>
-                  ✓ 已配置（出于安全不回显，留空则沿用已保存的 Key）
-                </span>
-              )}
-            </span>
-            <input
-              type="password"
-              placeholder={(rc as { api_key?: string }).api_key ? "已保存，留空则不修改" : "sk-..."}
-              value={apiKey}
-              onChange={(e) => { setApiKey(e.target.value); markDirty(); }}
-              style={{ width: "100%", height: 34, border: "1px solid var(--line)", borderRadius: 7, background: "var(--panel)", color: "var(--ink)", padding: "0 10px", fontSize: 13 }}
-            />
-          </label>
-          <label className="page-stack" style={{ gap: 4 }}>
-            <span className="muted" style={{ fontSize: 12 }}>Base URL</span>
-            <input
-              type="text" placeholder="https://api.deepseek.com/v1" value={baseUrl}
-              onChange={(e) => { setBaseUrl(e.target.value); markDirty(); }}
-              style={{ width: "100%", height: 34, border: "1px solid var(--line)", borderRadius: 7, background: "var(--panel)", color: "var(--ink)", padding: "0 10px", fontSize: 13 }}
-            />
-          </label>
-          <label className="page-stack" style={{ gap: 4 }}>
-            <span className="muted" style={{ fontSize: 12 }}>模型</span>
-            <select
-              value={customModel ? "__custom__" : modelName}
-              onChange={(e) => handleModelSelect(e.target.value)}
-              style={{ width: "100%", height: 34, border: "1px solid var(--line)", borderRadius: 7, background: "var(--panel)", color: "var(--ink)", padding: "0 6px", fontSize: 13 }}
-            >
-              {modelName && !knownModels.some((m) => m.name === modelName) && (
-                <option value={modelName}>{modelName} (当前)</option>
-              )}
-              {knownModels.map((m) => (
-                <option key={m.name} value={m.name}>
-                  {m.name}{m.provider ? ` · ${m.provider}` : ""}{m.role ? ` (${m.role})` : ""}
-                </option>
-              ))}
-              <option value="__custom__">自定义…</option>
-            </select>
-          </label>
-          {customModel && (
-            <label className="page-stack" style={{ gap: 4 }}>
-              <span className="muted" style={{ fontSize: 12 }}>自定义模型名</span>
-              <input
-                type="text" placeholder="deepseek-chat" value={modelName}
-                onChange={(e) => { setModelName(e.target.value); markDirty(); }}
-                style={{ width: "100%", height: 34, border: "1px solid var(--line)", borderRadius: 7, background: "var(--panel)", color: "var(--ink)", padding: "0 10px", fontSize: 13 }}
-              />
-            </label>
-          )}
-          {modelName && !customModel && (() => {
-            const model = knownModels.find((m) => m.name === modelName);
-            if (!model?.provider) return null;
-            const provName = model.provider;
-            const base = MODEL_PROVIDER_BASE_URLS[provName];
-            if (!base) return null;
-            return (
-              <div className="muted" style={{ fontSize: 11, lineHeight: 1.4, padding: "2px 4px" }}>
-                Provider: {provName} · Base URL: <code>{base}</code>
-              </div>
-            );
-          })()}
-          <div className="card" style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px" }}
-            onClick={() => { setThinking(!thinking); markDirty(); }}>
-            <span style={{ fontWeight: 600, fontSize: 13 }}>Thinking (推理)</span>
-            <div style={{ marginLeft: "auto", width: 40, height: 22, borderRadius: 999, padding: 2,
-              background: thinking ? "var(--blue)" : "var(--line)", transition: "background .15s ease" }}>
-              <div style={{ width: 18, height: 18, borderRadius: "50%", background: "#fff",
-                transform: thinking ? "translateX(18px)" : "translateX(0)", transition: "transform .15s ease",
-                boxShadow: "0 1px 3px rgba(0,0,0,.15)" }} />
-            </div>
-          </div>
-          {dirty && (
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button className="primary" disabled={saving} onClick={handleSave} type="button">
-                {saving ? "保存中…" : "保存 AI 配置"}
-              </button>
-              {saving && <span className="muted" style={{ fontSize: 12 }}>保存中…</span>}
-            </div>
-          )}
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <button className="ghost" disabled={testConnecting} onClick={handleTestConnection} type="button" style={{ height: 32, fontSize: 12 }}>
-              {testConnecting ? "测试中…" : "测试连接"}
-            </button>
-            {reconnecting && <span className="muted" style={{ fontSize: 12 }}>正在重连运行时…</span>}
-            {testResult && (
-              <span style={{ fontSize: 12, color: testResult.ok ? "var(--green)" : "var(--red)" }}>
-                {testResult.ok
-                  ? `连接成功 · ${testResult.model ?? ""} · ${testResult.latency_ms ?? ""}ms`
-                  : `连接失败: ${testResult.error}`}
-              </span>
-            )}
-          </div>
-      </SectionCard>
-
-    </div>
   );
 }
 
@@ -1287,48 +1119,63 @@ function RiskTab({
 
 /* ---------- RAW JSON ---------- */
 
-/* ---------- Agent 能力 / 交易 / 诊断 ---------- */
+/* ---------- Agent：技能 / 记忆 / MCP ---------- */
 
-function AgentTab({ settings }: { settings: SettingsData }) {
+function SkillsTab({ settings }: { settings: SettingsData }) {
   return (
     <div className="settings-stack">
       <SkillsSection initial={settings.skills ?? []} />
+    </div>
+  );
+}
+
+function MemoryTab() {
+  return (
+    <div className="settings-stack">
       <MemorySection />
+    </div>
+  );
+}
+
+function McpTab() {
+  return (
+    <div className="settings-stack">
       <McpSection />
     </div>
   );
 }
 
-function TradeTab({
-  settings,
+function TradeOnlyTab({ settings }: { settings: SettingsData }) {
+  const tc = settings.trading_controls;
+  if (!tc) return <div className="llm-empty">暂无交易护栏配置。</div>;
+  return (
+    <div className="settings-stack">
+      <SectionCard title="交易护栏" description="V1 研究模式安全锁定，本页只读">
+        <SettingRow label="纸上交易" sub="模拟撮合，不触真钱">
+          <span className="tag" style={{ color: "var(--green)" }}>{String(tc.paper_trading ?? "-")}</span>
+        </SettingRow>
+        <SettingRow label="真实下单" sub="执行代理锁定，本版本不可开启">
+          <span className="tag" style={{ color: "var(--red)" }}>{String(tc.real_order ?? "blocked")}</span>
+        </SettingRow>
+      </SectionCard>
+    </div>
+  );
+}
+
+function RiskOnlyTab({
   riskPolicies, showCreateForm, setShowCreateForm, editPolicyId, setEditPolicyId,
   savingPolicy, submitCreatePolicy, submitEditPolicy, activatePolicy, deletePolicy,
 }: {
-  settings: SettingsData;
-  riskPolicies: RiskPolicy[];
-  showCreateForm: boolean;
-  setShowCreateForm: React.Dispatch<React.SetStateAction<boolean>>;
-  editPolicyId: string | null;
-  setEditPolicyId: React.Dispatch<React.SetStateAction<string | null>>;
+  riskPolicies: RiskPolicy[]; showCreateForm: boolean; setShowCreateForm: React.Dispatch<React.SetStateAction<boolean>>;
+  editPolicyId: string | null; setEditPolicyId: React.Dispatch<React.SetStateAction<string | null>>;
   savingPolicy: boolean;
   submitCreatePolicy: (form: RiskPolicyFormState) => Promise<void>;
   submitEditPolicy: (id: string, form: RiskPolicyFormState) => Promise<void>;
   activatePolicy: (id: string) => Promise<void>;
   deletePolicy: (p: RiskPolicy) => Promise<void>;
 }) {
-  const tc = settings.trading_controls;
   return (
     <div className="settings-stack">
-      {tc && (
-        <SectionCard title="交易护栏" description="V1 研究模式安全锁定，本页只读">
-          <SettingRow label="纸上交易" sub="模拟撮合，不触真钱">
-            <span className="tag" style={{ color: "var(--green)" }}>{String(tc.paper_trading ?? "-")}</span>
-          </SettingRow>
-          <SettingRow label="真实下单" sub="执行代理锁定，本版本不可开启">
-            <span className="tag" style={{ color: "var(--red)" }}>{String(tc.real_order ?? "blocked")}</span>
-          </SettingRow>
-        </SectionCard>
-      )}
       <RiskTab
         riskPolicies={riskPolicies}
         showCreateForm={showCreateForm}
@@ -1552,22 +1399,30 @@ function DiagTab({ settings, copilotRuns, runtimeMetrics, regressionCases, provi
 
 /* ==================== MAIN ==================== */
 
+type NavItem = { key: SettingTab; label: string };
+type NavGroupDef = { group: string; items: NavItem[] };
+
 /** 左导航分区（TeamClaw 式设置页：左侧分区列表 + 右侧内容 + 底部版本） */
-const NAV_GROUPS: { group: string; items: { key: SettingTab; label: string }[] }[] = [
+const NAV_GROUPS: NavGroupDef[] = [
   { group: "工作台", items: [
-    { key: "general", label: "外观与工作区" },
+    { key: "appearance", label: "外观" },
+    { key: "workspace", label: "工作区" },
     { key: "channels", label: "通知通道" },
   ]},
   { group: "AI Copilot", items: [
-    { key: "ai", label: "模型接入" },
-    { key: "agent", label: "Agent 能力" },
+    { key: "ai", label: "提供商" },
+    { key: "ai-models", label: "默认模型" },
+    { key: "agent-skills", label: "技能" },
+    { key: "agent-memory", label: "记忆" },
+    { key: "agent-mcp", label: "MCP" },
   ]},
   { group: "数据服务", items: [
-    { key: "market", label: "行情数据源" },
-    { key: "intel", label: "情报与舆情" },
+    { key: "data", label: "数据源" },
+    { key: "intel", label: "情报" },
   ]},
   { group: "交易合规", items: [
-    { key: "trade", label: "交易与风控" },
+    { key: "trade", label: "交易" },
+    { key: "risk", label: "风控" },
   ]},
   { group: "系统", items: [
     { key: "diag", label: "运行诊断" },
@@ -1582,7 +1437,7 @@ export default function Settings() {
   const [providerEvents, setProviderEvents] = useState<ProviderEvent[]>([]);
   const [copilotRuns, setCopilotRuns] = useState<CopilotRunLog[]>([]);
   const [regressionCases, setRegressionCases] = useState<RegressionCase[]>([]);
-  const [activeTab, setActiveTab] = useState<SettingTab>("general");
+  const [activeTab, setActiveTab] = useState<SettingTab>("appearance");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [riskPolicies, setRiskPolicies] = useState<RiskPolicy[]>([]);
@@ -1638,11 +1493,6 @@ export default function Settings() {
     } finally { setSavingIntelSources(false); }
   };
 
-  const submitRuntimeConfig = async (config: Record<string, unknown>) => {
-    await apiPut("/api/settings/runtime", config);
-    await loadAll();
-  };
-
   const deletePolicy = async (p: RiskPolicy) => {
     if (!window.confirm(`确认删除策略「${p.name}」？`)) return;
     setSavingPolicy(true);
@@ -1677,11 +1527,23 @@ export default function Settings() {
   const renderTab = () => {
     if (!settings) return null;
     switch (activeTab) {
-      case "general": return <GeneralTab settings={settings} />;
+      case "appearance": return <AppearanceTab />;
+      case "workspace": return <WorkspaceTab />;
       case "channels": return <ChannelsTab />;
-      case "ai": return <AiTab settings={settings} onSaveRuntimeConfig={submitRuntimeConfig} />;
-      case "agent": return <AgentTab settings={settings} />;
-      case "market": return (
+      case "ai": return settings.llm_providers ? (
+        <ModelProvidersTab
+          snapshot={settings.llm_providers}
+          onRefresh={loadAll}
+          onAfterConnect={() => setActiveTab("ai-models")}
+        />
+      ) : (
+        <div className="llm-empty">无法加载提供商目录。</div>
+      );
+      case "ai-models": return <DefaultModelTab settings={settings} onRefresh={loadAll} />;
+      case "agent-skills": return <SkillsTab settings={settings} />;
+      case "agent-memory": return <MemoryTab />;
+      case "agent-mcp": return <McpTab />;
+      case "data": return (
         <MarketDataTab
           settings={settings}
           dataSources={settings.data_sources ?? { providers: { CN: { provider: "eastmoney" }, HK: { provider: "eastmoney" }, US: { provider: "yfinance" } }, provider_credentials: {}, provider_states: {} }}
@@ -1700,9 +1562,9 @@ export default function Settings() {
           savingIntelSources={savingIntelSources}
         />
       );
-      case "trade": return (
-        <TradeTab
-          settings={settings}
+      case "trade": return <TradeOnlyTab settings={settings} />;
+      case "risk": return (
+        <RiskOnlyTab
           riskPolicies={riskPolicies}
           showCreateForm={showCreateForm}
           setShowCreateForm={setShowCreateForm}

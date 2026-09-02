@@ -437,6 +437,7 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_report_quality_check_columns(conn)
     _ensure_review_inbox_state_columns(conn)
     _ensure_copilot_run_log_columns(conn)
+    _ensure_copilot_session_columns(conn)
     _ensure_stock_quote_columns(conn)
     conn.commit()
 
@@ -805,6 +806,15 @@ def _ensure_copilot_run_log_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE copilot_run_log ADD COLUMN latency_ms REAL")
     if "started_at" not in columns:
         conn.execute("ALTER TABLE copilot_run_log ADD COLUMN started_at TEXT")
+
+
+def _ensure_copilot_session_columns(conn: sqlite3.Connection) -> None:
+    columns = {
+        row["name"] if isinstance(row, sqlite3.Row) else row[1]
+        for row in conn.execute("PRAGMA table_info(copilot_session)").fetchall()
+    }
+    if "default_model" not in columns:
+        conn.execute("ALTER TABLE copilot_session ADD COLUMN default_model TEXT")
 
 
 def _ensure_stock_quote_columns(conn: sqlite3.Connection) -> None:

@@ -1,23 +1,19 @@
-import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useRef, useState, type KeyboardEvent } from "react";
 import { uploadSessionFiles, type UploadedFileInfo } from "@/api/copilot";
-import { useAppState } from "@/hooks/useAppState";
+import { SessionModelPicker } from "@/components/features/SessionModelPicker";
 import { useCopilotChat } from "@/hooks/useCopilotChat";
 
 /** 中栏底部 Composer（Cursor 式浮动输入卡）。 */
 export function CopilotComposer() {
-  const { appDataCache, globalLoading } = useAppState();
-  const modelName = useMemo(() => {
-    void globalLoading;
-    return (appDataCache.current.settings as { agent_runtime?: { model_name?: string } } | undefined)
-      ?.agent_runtime?.model_name || "AI 模型";
-  }, [appDataCache, globalLoading]);
-
   const {
     currentSession,
     sending,
     handleSend: sendMessage,
     handleStop,
     ensureSession,
+    sessionModelRef,
+    modelOptions,
+    setSessionModel,
   } = useCopilotChat();
 
   const [input, setInput] = useState("");
@@ -113,7 +109,12 @@ export function CopilotComposer() {
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
           </button>
-          <span className="model-pill" title="当前模型（系统设置 → AI 模型）">{modelName}</span>
+          <SessionModelPicker
+            value={sessionModelRef}
+            options={modelOptions}
+            disabled={sending}
+            onChange={setSessionModel}
+          />
           <span className="composer-bar-spacer" />
           {sending ? (
             <button className="composer-send stop" onClick={handleStop} title="停止" type="button">

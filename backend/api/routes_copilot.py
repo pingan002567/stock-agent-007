@@ -46,6 +46,8 @@ def update_session(session_id: str, payload: CopilotSessionUpdateRequest, reques
         session = services.copilot_service.update_session(session_id, payload)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return model_to_dict(session)
 
 

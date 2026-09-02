@@ -2586,6 +2586,8 @@ def test_settings_runtime_exposes_embedded_runtime_fields(tmp_path, monkeypatch)
     monkeypatch.delenv("WORKBENCH_AI_MODE", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("WORKBENCH_AI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("WORKBENCH_AI_MODEL", raising=False)
 
     class FakeClient:
         def __init__(self, **kwargs):
@@ -2643,7 +2645,9 @@ def test_settings_runtime_config_roundtrip_and_runtime_metrics_routes(
             "enable_copilot_logging": True,
         }
     }
-    assert client.put("/api/settings/runtime", json=updated).json() == updated
+    stored = client.put("/api/settings/runtime", json=updated).json()
+    assert stored["config"] == updated["config"]
+    assert "agent_runtime" in stored
 
     refreshed = client.get("/api/settings").json()
     assert refreshed["runtime_config"]["model_name"] == "demo-embedded-model"

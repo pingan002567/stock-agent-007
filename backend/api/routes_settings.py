@@ -18,8 +18,20 @@ from backend.config.intel_sources import (
 )
 from backend.agent_runtime import extensions_store
 from backend.stock_domain.provider_router import provider_router
+from backend.app_services.llm_provider_service import LlmProviderError
+from backend.config.credentials import effective_runtime_config
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+
+def _public_runtime_config(repo) -> dict:
+    """GET 回显用：合成 runtime，但去掉明文 api_key。"""
+    cfg = dict(effective_runtime_config(repo) or {})
+    has_key = bool(cfg.get("api_key"))
+    cfg["api_key"] = None
+    cfg["has_api_key"] = has_key
+    return cfg
+
 
 
 @router.get("")
@@ -48,10 +60,8 @@ def get_settings(request: Request, services: AppServices = Depends(get_services)
             "real_order": "blocked",
         },
         # 兼容两种配置格式：直接在顶层或在 config 子键下
-        # 展示分层合成后的有效配置（用户级凭证 + 档案覆盖），表单回显一致
-        "runtime_config": __import__(
-            "backend.config.credentials", fromlist=["effective_runtime_config"]
-        ).effective_runtime_config(services.repo),
+        # 展示分层合成后的有效配置（用户级凭证 + 档案覆盖），密钥不回显
+        "runtime_config": _public_runtime_config(services.repo),
         "agent_runtime": services.copilot_service.deerflow.status().to_dict(),
         "data_provider": provider_router.status().to_dict(),
         "data_sources": sanitize_data_sources(
@@ -64,6 +74,7 @@ def get_settings(request: Request, services: AppServices = Depends(get_services)
         ),
         "available_intel_providers": AVAILABLE_INTEL_PROVIDERS,
         "available_sentiment_providers": AVAILABLE_SENTIMENT_PROVIDERS,
+        "llm_providers": services.llm_provider_service.snapshot(),
     }
 
 
@@ -122,6 +133,62 @@ def put_runtime(
     # Auto-reconnect so the new config takes effect immediately
     status = services.copilot_service.reconnect_runtime()
     return {**result, "agent_runtime": status}
+
+
+@router.get("/llm/providers")
+def llm_providers(services: AppServices = Depends(get_services)):
+    return services.llm_provider_service.snapshot()
+
+
+@router.post("/llm/connect")
+def llm_connect(payload: dict, services: AppServices = Depends(get_services)):
+    try:
+        return services.llm_provider_service.connect(
+            str(payload.get("provider_id") or ""),
+            api_key=payload.get("api_key"),
+        )
+    except LlmProviderError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.delete("/llm/providers/{provider_id}")
+def llm_disconnect(provider_id: str, services: AppServices = Depends(get_services)):
+    try:
+        return services.llm_provider_service.disconnect(provider_id)
+    except LlmProviderError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/llm/custom")
+def llm_upsert_custom(payload: dict, services: AppServices = Depends(get_services)):
+    try:
+        return services.llm_provider_service.upsert_custom(payload)
+    except LlmProviderError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.put("/llm/default-model")
+def llm_set_default_model(payload: dict, services: AppServices = Depends(get_services)):
+    try:
+        return services.llm_provider_service.set_default_model(str(payload.get("default_model") or ""))
+    except LlmProviderError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/llm/test")
+def llm_test_connection(payload: dict, services: AppServices = Depends(get_services)):
+    extra = services.llm_provider_service.test_payload(payload)
+    spec = None
+    provider_id = extra.get("provider_id")
+    if provider_id:
+        from backend.config.llm_catalog import get_provider_spec
+        spec = get_provider_spec(str(provider_id))
+    if spec is not None and not spec.requires_key:
+        extra["allow_empty_key"] = True
+    result = services.copilot_service.test_connection(extra)
+    if not result.get("ok"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result)
+    return result
 
 
 @router.put("/data-provider")

@@ -679,7 +679,9 @@ class DeerFlowClientAdapter:
         subagent_enabled: bool = False,
         plan_mode: bool = False,
         budget: Dict[str, Any] | None = None,
+        model_name: str | None = None,
     ) -> AsyncIterator[Dict[str, Any]]:
+        effective_model = model_name or self.model_name
         # Both direct and embedded modes use DeerFlowClient.stream()
         if self.client is not None:
             # On a resumed session thread, DeerFlow re-streams prior-run messages from
@@ -708,7 +710,7 @@ class DeerFlowClientAdapter:
                     # tool_results (their msg ids aren't in this call's streamed_ids).
                     # Filtering that replay is handled at the mapper boundary.
                     thread_id=session_id or run_id,
-                    model_name=self.model_name,
+                    model_name=effective_model,
                     thinking_enabled=self.thinking_enabled,
                     subagent_enabled=subagent_enabled,
                     # plan_mode（TodoMiddleware）：write_todos 计划清单进流 +
@@ -825,7 +827,7 @@ class DeerFlowClientAdapter:
             yield {
                 "type": "final",
                 "payload": {
-                    "conclusion": f"AI 服务不可用：{reason}。请在设置页面配置 API Key 和模型，或设置环境变量 OPENAI_API_KEY。",
+                    "conclusion": f"AI 服务不可用：{reason}。请在设置页「模型接入」连接提供商并选择默认模型。",
                     "confidence": "low",
                     "counter_reasons": [reason, f"无法处理请求：{message}"],
                     "runtime_error": reason,

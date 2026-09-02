@@ -28,11 +28,11 @@ def _force_stub_ai_mode(request, monkeypatch, tmp_path):
         return
     monkeypatch.delenv("WORKBENCH_AI_MODE", raising=False)
     # Clear ambient credentials so the embedded branch never auto-upgrades to direct
-    # mode (which would hit a real model). This globalises the per-test
-    # _force_stub_runtime intent; tests opting into embedded set their own
-    # WORKBENCH_DEERFLOW_MODE and still get a clean (non-direct) runtime.
+    # mode (which would hit a real model).
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("WORKBENCH_AI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("WORKBENCH_AI_MODEL", raising=False)
     monkeypatch.setenv("WORKBENCH_DEERFLOW_MODE", "stub")
     monkeypatch.setenv("WORKBENCH_SKIP_SEED", "1")
     # 用户级凭证隔离：指向测试临时路径，避免开发机上的真实

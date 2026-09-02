@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, createContext, useContext, createElement, type ReactNode } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, createContext, useContext, createElement, type ReactNode } from "react";
 import { useAppState } from "@/hooks/useAppState";
 import {
   createSession,
@@ -146,6 +146,8 @@ function useCopilotChatState() {
     setCopilotStreaming,
     setStreamingReasoningText,
     refreshCopilotContext,
+    appDataCache,
+    globalLoading,
   } = useAppState();
 
   const [sessions, setSessions] = useState<CopilotSession[]>([]);
@@ -161,10 +163,42 @@ function useCopilotChatState() {
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const sendingRef = useRef(false);
+  const [draftSessionModel, setDraftSessionModel] = useState<string | null>(null);
   // 「新建对话」不立即建库(否则积累空会话):置起意向标记,首条消息时才真正创建
   const pendingNewRef = useRef(false);
 
   const currentSession = sessions.find((s) => s.session_id === currentSessionId);
+
+  const globalDefaultModel = useMemo(() => {
+    void globalLoading;
+    const settings = appDataCache.current.settings as {
+      llm_providers?: { default_model?: string | null };
+    } | undefined;
+    return settings?.llm_providers?.default_model ?? null;
+  }, [appDataCache, globalLoading]);
+
+  const sessionModelRef = currentSession?.default_model
+    ?? draftSessionModel
+    ?? globalDefaultModel;
+
+  const modelOptions = useMemo(() => {
+    void globalLoading;
+    const settings = appDataCache.current.settings as {
+      llm_providers?: {
+        connected?: Array<{ id: string; name: string; models: Array<{ id: string; name: string }> }>;
+      };
+    } | undefined;
+    const rows: { value: string; label: string }[] = [];
+    for (const provider of settings?.llm_providers?.connected ?? []) {
+      for (const model of provider.models ?? []) {
+        rows.push({
+          value: `${provider.id}/${model.id}`,
+          label: `${provider.name} · ${model.name}`,
+        });
+      }
+    }
+    return rows;
+  }, [appDataCache, globalLoading]);
 
   // memo 化：否则每次渲染重建，会让依赖它们的 handleSend 等 useCallback 全部失效
   const loadMessages = useCallback(async (sessionId: string, runId?: string) => {
@@ -199,6 +233,7 @@ function useCopilotChatState() {
     eventSourceRef.current = null;
     sendingRef.current = false;
     pendingNewRef.current = false;
+    setDraftSessionModel(null);
     setCurrentSessionId(id);
     setMessages([]);
     setStreamingReasoningText("");
@@ -217,6 +252,7 @@ function useCopilotChatState() {
     sendingRef.current = false;
     // 懒建:只清空视图并置新建意向,首条消息时 ensureSession 才创建会话
     pendingNewRef.current = true;
+    setDraftSessionModel(null);
     currentSessionIdRef.current = null;
     setCurrentSessionId(null);
     setMessages([]);
@@ -230,7 +266,7 @@ function useCopilotChatState() {
     const trimmed = val.trim();
     if (!trimmed || trimmed === sessions.find((s) => s.session_id === sid)?.title) return;
     try {
-      await updateSession(sid, trimmed);
+      await updateSession(sid, { title: trimmed });
       setSessions((prev) => prev.map((s) => s.session_id === sid ? { ...s, title: trimmed } : s));
     } catch { /* empty */ }
   }, [sessions]);
@@ -257,14 +293,31 @@ function useCopilotChatState() {
       session = existing[0];
     }
     if (!session) {
-      session = await createSession("新会话", currentScreen, stock || null);
+      session = await createSession("新会话", currentScreen, stock || null, draftSessionModel);
       setSessions((prev) => [session!, ...prev]);
     }
     pendingNewRef.current = false;
+    setDraftSessionModel(null);
     currentSessionIdRef.current = session.session_id;
     setCurrentSessionId(session.session_id);
     return session.session_id;
-  }, [currentScreen, stock]);
+  }, [currentScreen, stock, draftSessionModel]);
+
+  const setSessionModel = useCallback(async (defaultModel: string) => {
+    const sid = currentSessionIdRef.current;
+    if (!sid) {
+      setDraftSessionModel(defaultModel);
+      return;
+    }
+    try {
+      const updated = await updateSession(sid, { default_model: defaultModel });
+      setSessions((prev) => prev.map((s) => (
+        s.session_id === sid ? { ...s, default_model: updated.default_model ?? defaultModel } : s
+      )));
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "更新会话模型失败");
+    }
+  }, []);
 
   // symbolOverride:「问 AI」快捷入口按卡片上下文指定锚点,不依赖全局 stock 的当前值
   const handleSend = useCallback(async (input: string, symbolOverride?: string) => {
@@ -599,6 +652,9 @@ function useCopilotChatState() {
     handleStop,
     handleCopy,
     toggleToolOpen,
+    sessionModelRef,
+    modelOptions,
+    setSessionModel,
   };
 }
 

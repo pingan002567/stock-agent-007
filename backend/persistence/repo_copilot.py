@@ -300,15 +300,16 @@ class CopilotRepoMixin:
                 """
                 INSERT INTO copilot_session(
                   session_id, title, status, current_page, anchor_symbol, authority_level,
-                  created_at, updated_at, last_message_at
+                  default_model, created_at, updated_at, last_message_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
                   title=excluded.title,
                   status=excluded.status,
                   current_page=excluded.current_page,
                   anchor_symbol=excluded.anchor_symbol,
                   authority_level=excluded.authority_level,
+                  default_model=excluded.default_model,
                   created_at=excluded.created_at,
                   updated_at=excluded.updated_at,
                   last_message_at=excluded.last_message_at
@@ -320,6 +321,7 @@ class CopilotRepoMixin:
                     session.current_page,
                     session.anchor_symbol,
                     session.authority_level.value,
+                    session.default_model,
                     session.created_at,
                     session.updated_at,
                     session.last_message_at,
@@ -475,6 +477,7 @@ class CopilotRepoMixin:
             current_page=row["current_page"],
             anchor_symbol=row["anchor_symbol"],
             authority_level=AuthorityLevel(row["authority_level"]),
+            default_model=row["default_model"] if "default_model" in row.keys() else None,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             last_message_at=row["last_message_at"],

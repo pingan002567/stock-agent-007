@@ -38,6 +38,7 @@ from backend.app_services.runtime_observer import runtime_observer, RuntimeObser
 from backend.app_services.strategy_service import StrategyService
 from backend.app_services.task_service import TaskService
 from backend.app_services.tool_execution_service import ToolExecutionService
+from backend.app_services.llm_provider_service import LlmProviderService
 from backend.config.data_sources import DEFAULT_DATA_SOURCES
 from backend.config.runtime import DEFAULT_RUNTIME_CONFIG
 from backend.stock_domain.multi_providers import create_provider
@@ -71,6 +72,7 @@ class AppServices:
     runtime_observer: RuntimeObserver
     channel_service: "ChannelService"
     channel_binding_store: "BindingStore"
+    llm_provider_service: "LlmProviderService"
 
 
 _log = logging.getLogger("bootstrap")
@@ -368,6 +370,11 @@ def create_services(
         repo=repo, copilot_service=copilot_service, audit_service=audit_service
     )
 
+    llm_provider_service = LlmProviderService(
+        repo=repo, copilot_service=copilot_service
+    )
+    copilot_service.llm_provider_service = llm_provider_service
+
     # Cleanup old logs on startup
     try:
         deleted = repo.cleanup_provider_call_logs(keep_days=7)
@@ -387,6 +394,7 @@ def create_services(
         risk_policy_service=risk_policy_service,
         copilot_service=copilot_service,
         scheduler_service=scheduler_service,
+        llm_provider_service=llm_provider_service,
         monitor_service=monitor_service,
         strategy_service=strategy_service,
         rebalance_draft_service=rebalance_draft_service,

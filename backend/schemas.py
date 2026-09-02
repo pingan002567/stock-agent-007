@@ -733,6 +733,7 @@ class CopilotSession(BaseModel):
     current_page: str = "overview"
     anchor_symbol: Optional[str] = None
     authority_level: AuthorityLevel = AuthorityLevel.A4
+    default_model: Optional[str] = None
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
     last_message_at: Optional[str] = None
@@ -745,6 +746,7 @@ class CopilotSessionCreateRequest(BaseModel):
     current_page: str = "overview"
     anchor_symbol: Optional[str] = None
     authority_level: AuthorityLevel = AuthorityLevel.A4
+    default_model: Optional[str] = None
 
 
 class CopilotMessage(BaseModel):
@@ -772,11 +774,14 @@ class CopilotRequest(BaseModel):
 
 
 class CopilotSessionUpdateRequest(BaseModel):
-    title: str
+    title: Optional[str] = None
+    default_model: Optional[str] = None
 
     @model_validator(mode="after")
-    def validate_title(self) -> "CopilotSessionUpdateRequest":
-        if not self.title or not self.title.strip():
+    def validate_payload(self) -> "CopilotSessionUpdateRequest":
+        if self.title is None and self.default_model is None:
+            raise ValueError("至少提供一个更新字段")
+        if self.title is not None and not self.title.strip():
             raise ValueError("title must not be empty")
         return self
 

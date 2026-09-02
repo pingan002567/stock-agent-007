@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, Optional
 from uuid import uuid4
@@ -91,6 +92,7 @@ class CopilotService:
         self.runtime_observer = runtime_observer
         self._runs: Dict[str, CopilotRunState] = {}
         self._session_states: dict[str, SessionStateData] = {}
+        self.llm_provider_service = None
 
     def reconnect_runtime(self) -> dict[str, Any]:
         """Re-initialize DeerFlowClientAdapter from persisted runtime_config.
@@ -113,22 +115,80 @@ class CopilotService:
         )
         return status
 
+    def _session_model_ref(self, session_id: str) -> str | None:
+        session = self.repo.get_copilot_session(session_id)
+        if session and session.default_model:
+            ref = str(session.default_model).strip()
+            if ref:
+                return ref
+        from backend.config.credentials import effective_runtime_config, load_llm_credentials
+
+        merged = effective_runtime_config(self.repo)
+        ws = merged.get("default_model")
+        if ws:
+            return str(ws)
+        data = load_llm_credentials()
+        raw = data.get("default_model")
+        return str(raw).strip() if raw else None
+
+    def _resolve_session_slot(self, session_id: str) -> dict[str, Any]:
+        from backend.config.credentials import load_llm_credentials, resolve_slot
+
+        ref = self._session_model_ref(session_id)
+        return resolve_slot(load_llm_credentials(), ref)
+
+    @asynccontextmanager
+    async def _temporary_llm_slot(self, slot: dict[str, Any]):
+        """单用户桌面场景：按会话模型临时切换 DeerFlow 连接槽。"""
+        env_keys = (
+            "OPENAI_API_KEY",
+            "OPENAI_BASE_URL",
+            "WORKBENCH_AI_MODEL",
+            "WORKBENCH_AI_API_KEY",
+            "WORKBENCH_AI_BASE_URL",
+        )
+        saved = {k: os.environ.get(k) for k in env_keys}
+        saved_model = getattr(self.deerflow, "model_name", None)
+        use_full_reconnect = bool(slot.get("api_key") and slot.get("base_url"))
+        try:
+            if use_full_reconnect:
+                if slot.get("api_key"):
+                    os.environ["OPENAI_API_KEY"] = str(slot["api_key"])
+                    os.environ["WORKBENCH_AI_API_KEY"] = str(slot["api_key"])
+                if slot.get("base_url"):
+                    os.environ["OPENAI_BASE_URL"] = str(slot["base_url"])
+                    os.environ["WORKBENCH_AI_BASE_URL"] = str(slot["base_url"])
+                if slot.get("model_name"):
+                    os.environ["WORKBENCH_AI_MODEL"] = str(slot["model_name"])
+                self.reconnect_runtime()
+            elif slot.get("model_name"):
+                self.deerflow.model_name = str(slot["model_name"])
+            yield slot
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            if use_full_reconnect:
+                self.reconnect_runtime()
+            elif slot.get("model_name") and saved_model is not None:
+                self.deerflow.model_name = saved_model
+
     def test_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Quick model connectivity test against configured endpoint."""
         import logging
 
         logger = logging.getLogger("copilot_service")
-        api_key = (
-            payload.get("api_key")
-            or os.environ.get("OPENAI_API_KEY")
-            or os.environ.get("WORKBENCH_AI_API_KEY")
-        )
-        base_url = payload.get("base_url") or os.environ.get("OPENAI_BASE_URL") or ""
+        api_key = payload.get("api_key")
+        base_url = payload.get("base_url") or ""
         model_name = payload.get("model_name") or self.deerflow.model_name or "gpt-4o"
-        if not api_key:
+        extra_headers = payload.get("headers") if isinstance(payload.get("headers"), dict) else {}
+        allow_empty_key = bool(payload.get("allow_empty_key"))
+        if not api_key and not allow_empty_key:
             return {
                 "ok": False,
-                "error": "API Key 未配置。请在设置页输入或设置 OPENAI_API_KEY 环境变量。",
+                "error": "API Key 未配置。请在设置页连接提供商。",
                 "model": model_name,
                 "base_url": base_url or "default",
             }
@@ -141,13 +201,16 @@ class CopilotService:
                 else "https://api.openai.com/v1/chat/completions"
             )
             transport = httpx.HTTPTransport(proxy=None)
+            headers = {
+                "Content-Type": "application/json",
+                **{str(k): str(v) for k, v in extra_headers.items() if k and v is not None},
+            }
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
             with httpx.Client(transport=transport, timeout=30) as client:
                 resp = client.post(
                     url,
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
+                    headers=headers,
                     json={
                         "model": model_name,
                         "messages": [{"role": "user", "content": "ping"}],
@@ -259,10 +322,13 @@ class CopilotService:
             current_page=payload.current_page,
             anchor_symbol=payload.anchor_symbol,
             authority_level=payload.authority_level,
+            default_model=(payload.default_model or "").strip() or None,
             created_at=created_at,
             updated_at=created_at,
             last_message_at=None,
         )
+        if session.default_model:
+            self._validate_session_model_ref(session.default_model)
         return self.repo.save_copilot_session(session)
 
     def get_session(self, session_id: str) -> CopilotSession:
@@ -275,9 +341,26 @@ class CopilotService:
         self, session_id: str, payload: CopilotSessionUpdateRequest
     ) -> CopilotSession:
         session = self.get_session(session_id)
-        session.title = payload.title.strip()
+        if payload.title is not None:
+            session.title = payload.title.strip()
+        if payload.default_model is not None:
+            ref = payload.default_model.strip()
+            if ref:
+                self._validate_session_model_ref(ref)
+                session.default_model = ref
+            else:
+                session.default_model = None
         session.updated_at = now_iso()
         return self.repo.save_copilot_session(session)
+
+    def _validate_session_model_ref(self, default_model: str) -> None:
+        from backend.app_services.llm_provider_service import LlmProviderError, LlmProviderService
+
+        svc = self.llm_provider_service or LlmProviderService(repo=self.repo)
+        try:
+            svc.assert_connected_model(default_model)
+        except LlmProviderError as exc:
+            raise ValueError(str(exc)) from exc
 
     def delete_session(self, session_id: str) -> None:
         self.get_session(session_id)
@@ -374,6 +457,7 @@ class CopilotService:
             required,
         )
         runtime_status = self.deerflow.status().to_dict()
+        run_slot = self._resolve_session_slot(session.session_id)
         self.runtime_observer.save_copilot_run_log(
             CopilotRunLog(
                 run_id=run_id,
@@ -381,7 +465,7 @@ class CopilotService:
                 task_id=task.task_id,
                 mode=runtime_status["mode"],
                 active_client=runtime_status["active_client"],
-                model_name=runtime_status["model_name"],
+                model_name=run_slot.get("model_name") or runtime_status["model_name"],
                 status="running",
                 tool_call_count=0,
                 started_at=now_iso(),
@@ -529,236 +613,239 @@ class CopilotService:
         self._update_task_step(resolved_task_id, "skill_trace_declared", 20)
 
         try:
-            async for event in self.deerflow.stream(
-                run_id=run_id,
-                task_id=resolved_task_id,
-                skill=state.skill,
-                message=request.message,
-                context=runtime_context,
-                skill_trace=state.skill_trace,
-                history=[],
-                session_id=state.session_id,
-                subagent_enabled=skill_specs.subagent_intent_enabled(state.intent),
-                plan_mode=skill_specs.plan_mode_intent_enabled(state.intent),
-                budget=state.budget,
-            ):
-                payload = event["payload"]
-                self._capture_tool_result(event, captured)
-                # 实际委派观测：task 工具调用/回执 → skill_trace 行状态推进 + 增量 SSE
-                observed_sse = self._observe_delegation(
-                    state, event, run_id, resolved_task_id, delegated_calls
-                )
-                if observed_sse:
-                    yield observed_sse
-                if (
-                    event["type"] == "tool_result"
-                    and str(payload.get("tool") or "") == "ask_clarification"
-                ):
-                    clarification_payload = {
-                        "question": str(payload.get("result") or ""),
-                        "call_id": payload.get("call_id"),
-                    }
-                    clarification_sse = SSEEvent(
-                        run_id=run_id,
-                        task_id=resolved_task_id,
-                        type="clarification",
-                        payload=clarification_payload,
-                    )
-                    self._persist_stream_event(state, clarification_sse)
-                    yield clarification_sse
-                if event["type"] == "final":
-                    last_report_result = captured["report"]
-                    last_draft_result = captured["draft"]
-                    last_review_result = captured["review"]
-                    try:
-                        payload = self.result_normalizer.normalize_final(payload)
-                        payload["skill_trace"] = state.skill_trace
-                        compliance = self._budget_compliance(state, delegated_calls)
-                        if compliance:
-                            payload["budget_compliance"] = compliance
-                        payload.setdefault(
-                            "evidence_refs",
-                            self._evidence_refs(state.skill_trace, context),
-                        )
-                        if clarification_payload:
-                            payload["clarification"] = clarification_payload
-                            _conclusion_now = str(payload.get("conclusion") or "")
-                            # 反问中断的 final 往往没有正文，用问题文本兜底，
-                            # 避免持久化一条空壳回答。
-                            if (
-                                not _conclusion_now
-                                or _conclusion_now
-                                == "DeerFlow embedded stream completed."
-                            ):
-                                payload["conclusion"] = clarification_payload["question"]
-                        if last_report_result:
-                            self.copilot_context_builder._cache.invalidate(
-                                "reports_summary"
-                            )
-                            payload.setdefault(
-                                "report_id", last_report_result.get("report_id")
-                            )
-                            payload.setdefault(
-                                "quality_status",
-                                last_report_result.get("quality_status"),
-                            )
-                            payload.setdefault(
-                                "evidence_refs",
-                                last_report_result.get("evidence_refs")
-                                or payload.get("evidence_refs"),
-                            )
-                            payload.setdefault(
-                                "valid_until", last_report_result.get("valid_until")
-                            )
-                            payload["disclaimer"] = (
-                                last_report_result.get("disclaimer")
-                                or payload["disclaimer"]
-                            )
-                            if last_report_result.get("candidate_actions"):
-                                payload["execution_guard"] = {
-                                    **(last_report_result.get("execution_guard") or {}),
-                                    "auto_trade": False,
-                                }
-                        if any(
-                            item["skill"] in {"rebalance-planner", "strategy-analyst"}
-                            for item in state.skill_trace
-                        ):
-                            payload["execution_guard"] = {
-                                "research_only": True,
-                                "auto_trade": False,
-                                "status": "real_order_disabled",
-                                "reason": "V1 只提供研究结论与拟单草案，真实交易保持关闭。",
-                            }
-                        if last_draft_result:
-                            self.copilot_context_builder._cache.invalidate(
-                                "holdings_summary"
-                            )
-                            self.copilot_context_builder._cache.invalidate(
-                                "inbox_summary"
-                            )
-                            payload["draft_id"] = last_draft_result.get("draft_id")
-                            payload["draft_status"] = last_draft_result.get(
-                                "draft_status"
-                            ) or last_draft_result.get("status")
-                            if last_draft_result.get("status") == "needs_confirmation":
-                                payload.setdefault("next_actions", []).append(
-                                    "在调仓页显式创建或确认草案。"
-                                )
-                        if last_review_result:
-                            self.copilot_context_builder._cache.invalidate(
-                                "holdings_summary"
-                            )
-                            self.copilot_context_builder._cache.invalidate(
-                                "inbox_summary"
-                            )
-                            payload["review_id"] = last_review_result.get("review_id")
-                            payload["review_status"] = last_review_result.get("status")
-                            payload["status"] = last_review_result.get("status")
-                            payload["blockers"] = list(
-                                last_review_result.get("blocker_codes") or []
-                            )
-                            payload["blocker_codes"] = list(
-                                last_review_result.get("blocker_codes") or []
-                            )
-                            payload["execution_guard"] = last_review_result.get(
-                                "execution_guard"
-                            ) or payload.get("execution_guard")
-                            if last_review_result.get("status") == "needs_confirmation":
-                                payload.setdefault("next_actions", []).append(
-                                    "在审查页显式发起 pre-trade review。"
-                                )
-                        payload["suggested_actions"] = self._suggest_actions(
-                            page=request.page,
-                            symbol=request.symbol,
-                            context=context,
-                            skill_trace=state.skill_trace,
-                            last_report_result=last_report_result,
-                            last_draft_result=last_draft_result,
-                            last_review_result=last_review_result,
-                        )
-                        self._update_task_step(
-                            resolved_task_id, "final", 100, status="done"
-                        )
-                        usage = payload.get("usage") or {}
-                        _usage_in = usage.get("input_tokens") or usage.get("prompt_tokens") or 0
-                        _usage_out = (
-                            usage.get("output_tokens") or usage.get("completion_tokens") or 0
-                        )
-                        if _usage_in or _usage_out:
-                            payload.setdefault("model_name", self.deerflow.model_name)
-                            payload.setdefault(
-                                "cost_estimate",
-                                _estimate_cost(
-                                    _usage_in, _usage_out, self.deerflow.model_name
-                                ),
-                            )
-                        self._upsert_run_log(
-                            run_id,
-                            status="completed",
-                            tool_call_count=len(
-                                [
-                                    item
-                                    for item in self.repo.list_copilot_run_messages(
-                                        run_id
-                                    )
-                                    if item.kind == "tool_call"
-                                ]
-                            ),
-                            usage_input_tokens=usage.get("input_tokens"),
-                            usage_output_tokens=usage.get("output_tokens")
-                            or usage.get("completion_tokens"),
-                            latency_ms=(time.monotonic() - _start_time) * 1000,
-                        )
-                    except Exception as exc:
-                        payload = self.result_normalizer.normalize_final(
-                            payload
-                            if isinstance(payload, dict)
-                            else {"conclusion": "AI 最终收口已降级。"}
-                        )
-                        payload.setdefault("counter_reasons", []).append(
-                            f"final enrichment degraded: {type(exc).__name__}"
-                        )
-                        payload.setdefault("skill_trace", state.skill_trace)
-                        payload.setdefault(
-                            "evidence_refs",
-                            self._evidence_refs(state.skill_trace, context),
-                        )
-                sse_event = SSEEvent(
+            run_slot = self._resolve_session_slot(state.session_id)
+            async with self._temporary_llm_slot(run_slot):
+                async for event in self.deerflow.stream(
                     run_id=run_id,
                     task_id=resolved_task_id,
-                    type=event["type"],
-                    payload=payload,
-                )
-                if event["type"] == "tool_call":
-                    tool_call_events.append(payload)
-                elif event["type"] == "tool_result":
-                    tool_result_events.append(payload)
-                # Handle final events - skip empty ones, keep the one with content
-                if event["type"] == "final":
-                    conclusion = str(payload.get("conclusion") or "")
-                    if not conclusion:
-                        # Skip empty final events
-                        continue
-                    if final_seen:
-                        # Already have a final with content, skip
-                        continue
-                    final_seen = True
-                # title 是瞬态事件（会话标题已由前端 title listener 更新），落库会
-                # 走 _serialize_event 的兜底分支变成一条空 final_answer——既污染
-                # 历史，又会让断流恢复的「已收口」判定（any final_answer）误判。
-                if event["type"] not in ("reasoning", "partial_answer", "skill_trace", "title"):
-                    self._persist_stream_event(state, sse_event)
-                yield sse_event
-                if event["type"] in ("final", "error"):
-                    turn = self._build_turn_summary(
-                        intent=state.intent,
-                        user_message=request.message,
-                        tool_call_events=tool_call_events,
-                        tool_result_events=tool_result_events,
-                        final_payload=payload if event["type"] == "final" else None,
-                        error_payload=payload if event["type"] == "error" else None,
+                    skill=state.skill,
+                    message=request.message,
+                    context=runtime_context,
+                    skill_trace=state.skill_trace,
+                    history=[],
+                    session_id=state.session_id,
+                    subagent_enabled=skill_specs.subagent_intent_enabled(state.intent),
+                    plan_mode=skill_specs.plan_mode_intent_enabled(state.intent),
+                    budget=state.budget,
+                    model_name=run_slot.get("model_name"),
+                    ):
+                    payload = event["payload"]
+                    self._capture_tool_result(event, captured)
+                    # 实际委派观测：task 工具调用/回执 → skill_trace 行状态推进 + 增量 SSE
+                    observed_sse = self._observe_delegation(
+                        state, event, run_id, resolved_task_id, delegated_calls
                     )
-                    self._update_session_state(state.session_id, turn)
+                    if observed_sse:
+                        yield observed_sse
+                    if (
+                        event["type"] == "tool_result"
+                        and str(payload.get("tool") or "") == "ask_clarification"
+                    ):
+                        clarification_payload = {
+                            "question": str(payload.get("result") or ""),
+                            "call_id": payload.get("call_id"),
+                        }
+                        clarification_sse = SSEEvent(
+                            run_id=run_id,
+                            task_id=resolved_task_id,
+                            type="clarification",
+                            payload=clarification_payload,
+                        )
+                        self._persist_stream_event(state, clarification_sse)
+                        yield clarification_sse
+                    if event["type"] == "final":
+                        last_report_result = captured["report"]
+                        last_draft_result = captured["draft"]
+                        last_review_result = captured["review"]
+                        try:
+                            payload = self.result_normalizer.normalize_final(payload)
+                            payload["skill_trace"] = state.skill_trace
+                            compliance = self._budget_compliance(state, delegated_calls)
+                            if compliance:
+                                payload["budget_compliance"] = compliance
+                            payload.setdefault(
+                                "evidence_refs",
+                                self._evidence_refs(state.skill_trace, context),
+                            )
+                            if clarification_payload:
+                                payload["clarification"] = clarification_payload
+                                _conclusion_now = str(payload.get("conclusion") or "")
+                                # 反问中断的 final 往往没有正文，用问题文本兜底，
+                                # 避免持久化一条空壳回答。
+                                if (
+                                    not _conclusion_now
+                                    or _conclusion_now
+                                    == "DeerFlow embedded stream completed."
+                                ):
+                                    payload["conclusion"] = clarification_payload["question"]
+                            if last_report_result:
+                                self.copilot_context_builder._cache.invalidate(
+                                    "reports_summary"
+                                )
+                                payload.setdefault(
+                                    "report_id", last_report_result.get("report_id")
+                                )
+                                payload.setdefault(
+                                    "quality_status",
+                                    last_report_result.get("quality_status"),
+                                )
+                                payload.setdefault(
+                                    "evidence_refs",
+                                    last_report_result.get("evidence_refs")
+                                    or payload.get("evidence_refs"),
+                                )
+                                payload.setdefault(
+                                    "valid_until", last_report_result.get("valid_until")
+                                )
+                                payload["disclaimer"] = (
+                                    last_report_result.get("disclaimer")
+                                    or payload["disclaimer"]
+                                )
+                                if last_report_result.get("candidate_actions"):
+                                    payload["execution_guard"] = {
+                                        **(last_report_result.get("execution_guard") or {}),
+                                        "auto_trade": False,
+                                    }
+                            if any(
+                                item["skill"] in {"rebalance-planner", "strategy-analyst"}
+                                for item in state.skill_trace
+                            ):
+                                payload["execution_guard"] = {
+                                    "research_only": True,
+                                    "auto_trade": False,
+                                    "status": "real_order_disabled",
+                                    "reason": "V1 只提供研究结论与拟单草案，真实交易保持关闭。",
+                                }
+                            if last_draft_result:
+                                self.copilot_context_builder._cache.invalidate(
+                                    "holdings_summary"
+                                )
+                                self.copilot_context_builder._cache.invalidate(
+                                    "inbox_summary"
+                                )
+                                payload["draft_id"] = last_draft_result.get("draft_id")
+                                payload["draft_status"] = last_draft_result.get(
+                                    "draft_status"
+                                ) or last_draft_result.get("status")
+                                if last_draft_result.get("status") == "needs_confirmation":
+                                    payload.setdefault("next_actions", []).append(
+                                        "在调仓页显式创建或确认草案。"
+                                    )
+                            if last_review_result:
+                                self.copilot_context_builder._cache.invalidate(
+                                    "holdings_summary"
+                                )
+                                self.copilot_context_builder._cache.invalidate(
+                                    "inbox_summary"
+                                )
+                                payload["review_id"] = last_review_result.get("review_id")
+                                payload["review_status"] = last_review_result.get("status")
+                                payload["status"] = last_review_result.get("status")
+                                payload["blockers"] = list(
+                                    last_review_result.get("blocker_codes") or []
+                                )
+                                payload["blocker_codes"] = list(
+                                    last_review_result.get("blocker_codes") or []
+                                )
+                                payload["execution_guard"] = last_review_result.get(
+                                    "execution_guard"
+                                ) or payload.get("execution_guard")
+                                if last_review_result.get("status") == "needs_confirmation":
+                                    payload.setdefault("next_actions", []).append(
+                                        "在审查页显式发起 pre-trade review。"
+                                    )
+                            payload["suggested_actions"] = self._suggest_actions(
+                                page=request.page,
+                                symbol=request.symbol,
+                                context=context,
+                                skill_trace=state.skill_trace,
+                                last_report_result=last_report_result,
+                                last_draft_result=last_draft_result,
+                                last_review_result=last_review_result,
+                            )
+                            self._update_task_step(
+                                resolved_task_id, "final", 100, status="done"
+                            )
+                            usage = payload.get("usage") or {}
+                            _usage_in = usage.get("input_tokens") or usage.get("prompt_tokens") or 0
+                            _usage_out = (
+                                usage.get("output_tokens") or usage.get("completion_tokens") or 0
+                            )
+                            if _usage_in or _usage_out:
+                                payload.setdefault("model_name", self.deerflow.model_name)
+                                payload.setdefault(
+                                    "cost_estimate",
+                                    _estimate_cost(
+                                        _usage_in, _usage_out, self.deerflow.model_name
+                                    ),
+                                )
+                            self._upsert_run_log(
+                                run_id,
+                                status="completed",
+                                tool_call_count=len(
+                                    [
+                                        item
+                                        for item in self.repo.list_copilot_run_messages(
+                                            run_id
+                                        )
+                                        if item.kind == "tool_call"
+                                    ]
+                                ),
+                                usage_input_tokens=usage.get("input_tokens"),
+                                usage_output_tokens=usage.get("output_tokens")
+                                or usage.get("completion_tokens"),
+                                latency_ms=(time.monotonic() - _start_time) * 1000,
+                            )
+                        except Exception as exc:
+                            payload = self.result_normalizer.normalize_final(
+                                payload
+                                if isinstance(payload, dict)
+                                else {"conclusion": "AI 最终收口已降级。"}
+                            )
+                            payload.setdefault("counter_reasons", []).append(
+                                f"final enrichment degraded: {type(exc).__name__}"
+                            )
+                            payload.setdefault("skill_trace", state.skill_trace)
+                            payload.setdefault(
+                                "evidence_refs",
+                                self._evidence_refs(state.skill_trace, context),
+                            )
+                    sse_event = SSEEvent(
+                        run_id=run_id,
+                        task_id=resolved_task_id,
+                        type=event["type"],
+                        payload=payload,
+                    )
+                    if event["type"] == "tool_call":
+                        tool_call_events.append(payload)
+                    elif event["type"] == "tool_result":
+                        tool_result_events.append(payload)
+                    # Handle final events - skip empty ones, keep the one with content
+                    if event["type"] == "final":
+                        conclusion = str(payload.get("conclusion") or "")
+                        if not conclusion:
+                            # Skip empty final events
+                            continue
+                        if final_seen:
+                            # Already have a final with content, skip
+                            continue
+                        final_seen = True
+                    # title 是瞬态事件（会话标题已由前端 title listener 更新），落库会
+                    # 走 _serialize_event 的兜底分支变成一条空 final_answer——既污染
+                    # 历史，又会让断流恢复的「已收口」判定（any final_answer）误判。
+                    if event["type"] not in ("reasoning", "partial_answer", "skill_trace", "title"):
+                        self._persist_stream_event(state, sse_event)
+                    yield sse_event
+                    if event["type"] in ("final", "error"):
+                        turn = self._build_turn_summary(
+                            intent=state.intent,
+                            user_message=request.message,
+                            tool_call_events=tool_call_events,
+                            tool_result_events=tool_result_events,
+                            final_payload=payload if event["type"] == "final" else None,
+                            error_payload=payload if event["type"] == "error" else None,
+                        )
+                        self._update_session_state(state.session_id, turn)
         except Exception as exc:
             error_sse = SSEEvent(
                 run_id=run_id,
