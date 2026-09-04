@@ -72,21 +72,21 @@ class WorkbenchRepository(
                     symbol="600519",
                     name="贵州茅台",
                     group="核心持仓",
-                    tags=["白酒", "持仓"],
+                    tags=["白酒", "持仓", "示例"],
                     monitored=True,
                 ),
                 WatchlistItem(
                     symbol="HK00700",
                     name="腾讯控股",
                     group="事件池",
-                    tags=["互联网", "港股"],
+                    tags=["互联网", "港股", "示例"],
                     monitored=True,
                 ),
                 WatchlistItem(
                     symbol="AAPL",
                     name="Apple",
                     group="核心持仓",
-                    tags=["大型科技", "美股"],
+                    tags=["大型科技", "美股", "示例"],
                     monitored=True,
                 ),
             ]:
@@ -116,6 +116,7 @@ class WorkbenchRepository(
                 ),
             ]:
                 self.upsert_holding(position)
+            self.set_config("demo_portfolio", {"active": True, "symbols": ["600519", "HK00700", "AAPL"]})
         if not self.list_risk_policies():
             policy = self.save_risk_policy(
                 RiskPolicy(
@@ -286,6 +287,31 @@ class WorkbenchRepository(
         if not self.get_monitor_status():
             self.save_monitor_status(MonitorStatus(status="paused", auto_start=False))
         self._normalize_seed_concentration_strategy()
+
+    def is_demo_portfolio(self) -> bool:
+        flag = self.get_config("demo_portfolio", {}) or {}
+        if flag.get("cleared") or flag.get("replaced"):
+            return False
+        if flag.get("active"):
+            return True
+        if "active" in flag:
+            return False
+        symbols = {item.symbol.upper() for item in self.list_holdings()}
+        return symbols == {"600519", "HK00700", "AAPL"}
+
+    def mark_demo_portfolio_real(self) -> None:
+        flag = dict(self.get_config("demo_portfolio", {}) or {})
+        flag["active"] = False
+        flag["replaced"] = True
+        self.set_config("demo_portfolio", flag)
+
+    def clear_demo_portfolio(self) -> dict[str, Any]:
+        removed: list[str] = []
+        for symbol in ("600519", "HK00700", "AAPL"):
+            if self.delete_holding(symbol):
+                removed.append(symbol)
+        self.set_config("demo_portfolio", {"active": False, "cleared": True, "symbols": ["600519", "HK00700", "AAPL"]})
+        return {"removed": removed, "demo": False}
 
     def seed_report_templates(self, templates: Iterable[ReportTemplate]) -> None:
         for template in templates:

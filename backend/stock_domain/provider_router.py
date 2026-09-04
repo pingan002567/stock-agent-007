@@ -28,6 +28,8 @@ from backend.stock_domain.providers import (
 
 T = TypeVar("T")
 
+_NO_MOCK_CAPABILITIES = frozenset({"quote", "history", "intel", "financial", "chip", "fund_flow", "snapshot"})
+
 # Layer 1 memory cache TTL per capability (seconds)
 _CACHE_TTL: dict[str, float] = {
     "quote": 60.0,      # 60s during trading hours
@@ -222,7 +224,7 @@ class ProviderRouter:
         if self.repo is not None:
             try:
                 cached = self.repo.get_stock_quote(normalized)
-                if cached is not None and cached.updated_at:
+                if cached is not None and cached.updated_at and (cached.last or 0) > 0:
                     cache_time = datetime.fromisoformat(cached.updated_at)
                     age = (datetime.now(timezone.utc) - cache_time).total_seconds()
                     if age < sqlite_age_limit:
@@ -236,14 +238,7 @@ class ProviderRouter:
                         return result
             except Exception:
                 pass
-        if not trading:
-            return PriceSnapshot(
-                last=0, change_pct=0, updated_at=datetime.now(timezone.utc).isoformat(),
-                source="cache", degraded=True,
-                degraded_reason="market closed",
-                coverage={"mode": "market_closed"},
-            )
-        # trading hours, cache miss: fetch live (with provider fallback chain)
+        # cache miss: fetch live (with provider fallback chain)
         provider = self._provider_for_market(market)
         result = self._call_with_provider(
             "quote",
@@ -277,13 +272,41 @@ class ProviderRouter:
                         if cached_count >= days and trading_day_diff <= 3:
                             items = []
                             for r in self.repo.list_stock_daily(normalized, limit=days):
-                                items.append({"day": 0, "date": r.trade_date, "open": r.open, "high": r.high, "low": r.low, "close": r.close, "volume": r.volume, "amount": r.amount})
+                                volume = float(r.volume or 0)
+                                amount = float(r.amount or 0)
+                                close = float(r.close or 0)
+                                if volume <= 0 and amount > 0 and close > 0:
+                                    volume = round(amount / close, 0)
+                                items.append({
+                                    "day": 0,
+                                    "date": r.trade_date,
+                                    "open": r.open,
+                                    "high": r.high,
+                                    "low": r.low,
+                                    "close": close,
+                                    "volume": volume,
+                                    "amount": amount,
+                                })
                             items.reverse()
                             for idx, item in enumerate(items):
                                 item["day"] = idx + 1
-                            result = {"symbol": normalized, "source": "cache", "updated_at": now_iso(), "degraded": False, "degraded_reason": None, "coverage": {"source": "sqlite_cache", "mode": "persisted"}, "items": items}
-                            self._mem_cache.set(ck, result, ttl=_CACHE_TTL["history"])
-                            return result
+                            stale_volumes = (
+                                bool(items)
+                                and all(float(i.get("volume") or 0) <= 0 for i in items)
+                                and any(float(i.get("amount") or 0) > 0 for i in items)
+                            )
+                            if not stale_volumes:
+                                result = {
+                                    "symbol": normalized,
+                                    "source": "cache",
+                                    "updated_at": now_iso(),
+                                    "degraded": False,
+                                    "degraded_reason": None,
+                                    "coverage": {"source": "sqlite_cache", "mode": "persisted"},
+                                    "items": items,
+                                }
+                                self._mem_cache.set(ck, result, ttl=_CACHE_TTL["history"])
+                                return result
                     except ValueError:
                         pass
         provider = self._provider_for_market(market)
@@ -469,14 +492,18 @@ class ProviderRouter:
                 f"circuit breaker open for {capability} "
                 f"after {self._circuit_breakers[capability].failures} consecutive failures"
             )
-            fallback_result = call_fn(self.fallback)
-            payload = self._degraded(fallback_result, reason)
+            fallback_result = self._fallback_payload(
+                capability, symbol, reason, call_fn
+            )
+            payload = fallback_result
             self._last_capability_reasons[capability] = reason
             self._refresh_last_degraded_reason()
             self._record_call(
                 capability=capability,
                 market=market,
-                provider=self.fallback.name,
+                provider="unavailable"
+                if capability in _NO_MOCK_CAPABILITIES
+                else self.fallback.name,
                 status="circuit_open",
                 degraded_reason=reason,
                 duration_ms=(time.perf_counter() - started) * 1000,
@@ -556,17 +583,52 @@ class ProviderRouter:
             reason = f"{provider.name}: {last_exc}"
             self._last_capability_reasons[capability] = reason
             self._refresh_last_degraded_reason()
-            fallback_result = call_fn(self.fallback)
-            payload = self._degraded(fallback_result, reason)
+            payload = self._fallback_payload(capability, symbol, reason, call_fn)
             self._record_call(
                 capability=capability,
                 market=market,
-                provider=self.fallback.name,
+                provider="unavailable"
+                if capability in _NO_MOCK_CAPABILITIES
+                else self.fallback.name,
                 status="fallback",
                 degraded_reason=reason,
                 duration_ms=(time.perf_counter() - started) * 1000,
             )
             return payload
+
+    def _unavailable_payload(
+        self, capability: str, symbol: str, reason: str
+    ) -> Any:
+        if capability == "quote":
+            return PriceSnapshot(
+                last=0.0,
+                change_pct=0.0,
+                updated_at=now_iso(),
+                source="unavailable",
+                degraded=True,
+                degraded_reason=reason,
+                coverage={"mode": "unavailable"},
+            )
+        payload: dict[str, Any] = {
+            "symbol": symbol.upper() if symbol else "",
+            "source": "unavailable",
+            "updated_at": now_iso(),
+            "degraded": True,
+            "degraded_reason": reason,
+            "coverage": {"mode": "unavailable"},
+            "items": [],
+        }
+        if capability == "intel":
+            payload["query"] = ""
+        return payload
+
+    def _fallback_payload(
+        self, capability: str, symbol: str, reason: str, call_fn: Callable[[MarketDataProvider], T]
+    ) -> T:
+        if capability in _NO_MOCK_CAPABILITIES:
+            return self._unavailable_payload(capability, symbol, reason)
+        fallback_result = call_fn(self.fallback)
+        return self._degraded(fallback_result, reason)
 
     def _degraded(self, payload: T, reason: str) -> T:
         if isinstance(payload, PriceSnapshot):

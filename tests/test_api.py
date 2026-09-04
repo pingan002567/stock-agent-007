@@ -406,7 +406,7 @@ def test_research_creates_task_report_and_audit(tmp_path):
     assert overview["monitor_summary"]["event_count"] >= 3
 
 
-def test_report_templates_endpoint_returns_four_seed_templates(tmp_path):
+def test_report_templates_endpoint_returns_seed_templates(tmp_path):
     client = make_client(tmp_path)
     response = client.get("/api/report-templates")
     assert response.status_code == 200
@@ -416,6 +416,7 @@ def test_report_templates_endpoint_returns_four_seed_templates(tmp_path):
         "monitor_review",
         "strategy_backtest",
         "paper_portfolio_review",
+        "ops_briefing",
     }
 
 
@@ -733,6 +734,7 @@ def test_v04_stock_provider_endpoints_return_200_with_offline_mock_router(
         )(),
         fallback=MockMarketDataProvider(),
     )
+    router._provider_for_market = lambda market: router.primary
     router.repo = None
     monkeypatch.setattr("backend.stock_domain.provider_router.provider_router", router)
     monkeypatch.setattr("backend.stock_domain.history_tools.provider_router", router)
@@ -746,16 +748,18 @@ def test_v04_stock_provider_endpoints_return_200_with_offline_mock_router(
     hk_history = client.get("/api/stocks/HK00700/history", params={"days": 5})
     assert hk_history.status_code == 200
     hk_payload = hk_history.json()
-    assert hk_payload["source"] == "mock_adapter"
+    assert hk_payload["source"] == "unavailable"
     assert hk_payload["degraded"] is True
     assert hk_payload["degraded_reason"] is not None
+    assert hk_payload["items"] == []
 
     cn_history = client.get("/api/stocks/600519/history", params={"days": 5})
     assert cn_history.status_code == 200
     cn_payload = cn_history.json()
-    assert cn_payload["source"] == "mock_adapter"
+    assert cn_payload["source"] == "unavailable"
     assert cn_payload["degraded"] is True
     assert cn_payload["degraded_reason"] is not None
+    assert cn_payload["items"] == []
 
 
 class RaisingApiPrimaryProvider:
@@ -869,6 +873,33 @@ def test_parallel_demo_bootstrap_requests_share_sqlite_safely(tmp_path):
         statuses = list(pool.map(lambda path: client.get(path).status_code, paths * 4))
 
     assert statuses == [200] * len(statuses)
+
+
+def test_demo_holdings_flag_and_clear(tmp_path):
+    client = make_client(tmp_path)
+    data = client.get("/api/holdings").json()
+    assert data["demo"] is True
+    assert {item["symbol"] for item in data["items"]} == {"600519", "HK00700", "AAPL"}
+
+    cleared = client.post("/api/holdings/clear-demo").json()
+    assert cleared["ok"] is True
+    assert set(cleared["removed"]) == {"600519", "HK00700", "AAPL"}
+    after = client.get("/api/holdings").json()
+    assert after["demo"] is False
+    assert after["items"] == []
+
+
+def test_holdings_import_confirm_clears_demo_flag(tmp_path):
+    client = make_client(tmp_path)
+    assert client.get("/api/holdings").json()["demo"] is True
+    imported = client.post(
+        "/api/holdings/import-confirm",
+        json=[{"symbol": "MSFT", "name": "Microsoft", "quantity": 10, "market_value": 4000, "weight_pct": 100}],
+    )
+    assert imported.status_code == 200
+    data = client.get("/api/holdings").json()
+    assert data["demo"] is False
+    assert any(item["symbol"] == "MSFT" for item in data["items"])
 
 
 def test_holdings_risk_and_copilot_chat(tmp_path):
@@ -2692,6 +2723,7 @@ def test_settings_expose_tool_bridge_registry_without_enabling_real_orders(tmp_p
         "get_backtest_result",
         "get_daily_history",
         "get_industry_context",
+        "get_market_structure",
         "get_decision_journal_entry",
         "get_monitor_events",
         "get_monitor_rules",

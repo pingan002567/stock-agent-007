@@ -32,6 +32,10 @@ class _Rule:
 # specialized reviews before the generic report/research rules).
 _RULES: list[_Rule] = [
     _Rule(
+        "ops_briefing", "stock-researcher", "A2",
+        lambda m, t, p: m.startswith("[定时任务·") or "你是值班研究员" in m,
+    ),
+    _Rule(
         "review_inbox", "risk-officer", "A3",
         lambda m, t, p: (
             "今天我需要处理什么" in m
@@ -79,7 +83,7 @@ _RULES: list[_Rule] = [
     ),
     _Rule(
         "report_write", "report-writer", "A2",
-        lambda m, t, p: _any(m, ["报告", "复盘", "总结"]) or "report" in t,
+        lambda m, t, p: _any(m, ["报告", "复盘", "总结", "简报", "盘前"]) or "report" in t,
     ),
     _Rule(
         "strategy_backtest", "strategy-analyst", "A3",

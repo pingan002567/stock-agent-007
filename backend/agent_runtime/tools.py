@@ -217,8 +217,8 @@ class BacktestGetInput(BaseModel):
 
 
 class ReportGenerateInput(BaseModel):
-    report_type: str = Field(description="报告类型（stock_research/monitor_review/strategy_backtest）")
-    source_type: str = Field(description="来源类型（stock/monitor_event/backtest_run）")
+    report_type: str = Field(description="报告类型（stock_research/monitor_review/strategy_backtest/paper_portfolio_review/ops_briefing）")
+    source_type: str = Field(description="来源类型（stock/monitor_event/backtest_run/paper_portfolio_snapshot/scheduled_task）")
     source_id: str = Field(description="来源ID 或 symbol")
     template_id: str | None = Field(default=None, description="报告模板ID")
     title: str | None = Field(default=None, description="报告标题")
@@ -393,6 +393,11 @@ get_industry_context = _tool(
     "获取行业竞争格局：行业行情快照、个股在行业内的市值排名与 PE/PB/涨幅分位、Top10 成分股对比。仅覆盖 A 股。",
     IndustryContextInput, AuthorityLevel.A2,
 )
+get_market_structure = _tool(
+    "get_market_structure",
+    "获取个股市场结构：本地技术量价（均线/RSI/MACD/ATR/支撑阻力）、估值与流动性快照；A 股另含东财筹码（获利/套牢）与资金流向。港美股无筹码数字。",
+    StockInput, AuthorityLevel.A2,
+)
 get_monitor_events = _tool(
     "get_monitor_events",
     "获取盯盘监控事件列表，可按股票、严重级别筛选。",
@@ -435,7 +440,7 @@ list_report_templates = _tool(
 )
 generate_report = _tool(
     "generate_report",
-    "生成指定类型和来源的分析报告。支持 stock_research（个股研究）、monitor_review（盯盘回顾）、strategy_backtest（策略回测）。",
+    "生成指定类型和来源的分析报告。支持 stock_research、monitor_review、strategy_backtest、paper_portfolio_review、ops_briefing（值班简报，通常由定时任务自动落盘）。",
     ReportGenerateInput, AuthorityLevel.A2,
 )
 get_report_quality = _tool(

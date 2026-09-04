@@ -20,6 +20,7 @@ from backend.stock_domain.providers import (
     _first,
     _history_item,
     _number,
+    _safe_float,
     _safe_iso,
 )
 
@@ -819,53 +820,63 @@ class YFinanceMarketDataProvider:
         ticker = self._get_ticker(normalized)
 
         def _load_fin():
-            return ticker.financials or {}
+            frame = ticker.financials
+            if frame is None or getattr(frame, "empty", False):
+                return None
+            return frame
 
         def _load_bs():
-            return ticker.balance_sheet or {}
+            frame = ticker.balance_sheet
+            if frame is None or getattr(frame, "empty", False):
+                return None
+            return frame
 
         fin = self._cached(f"yf_fin_{normalized}", 86400, _load_fin)
         bs = self._cached(f"yf_bs_{normalized}", 86400, _load_bs)
         items = []
-        if hasattr(fin, "columns"):
+
+        def _row_value(frame, *labels: str) -> float:
+            if frame is None or not hasattr(frame, "index"):
+                return 0.0
+            for label in labels:
+                if label in frame.index:
+                    for col in frame.columns[:1]:
+                        val = _coerce_float(frame.at[label, col], default=0.0)
+                        if val:
+                            return val
+            return 0.0
+
+        if fin is not None and hasattr(fin, "columns"):
             for col in fin.columns[:4]:
+                report_date = str(col.date()) if hasattr(col, "date") else str(col)[:10]
                 items.append(
                     {
-                        "report_date": str(col)[:10],
+                        "report_date": report_date,
                         "report_type": "annual",
-                        "revenue": _coerce_float(
-                            fin.loc.get("Total Revenue", fin.loc.get("totalRevenue", 0))
-                            if hasattr(fin, "loc")
-                            else 0
-                        ),
-                        "profit": _coerce_float(
-                            fin.loc.get("Net Income", fin.loc.get("netIncome", 0))
-                            if hasattr(fin, "loc")
-                            else 0
-                        ),
-                        "total_assets": _coerce_float(
-                            bs.loc.get("Total Assets", bs.loc.get("totalAssets", 0))
-                            if hasattr(bs, "loc")
-                            else 0
-                        ),
-                        "total_liabilities": _coerce_float(
-                            bs.loc.get("Total Liabilities Net Minority Interest", 0)
-                            if hasattr(bs, "loc")
-                            else 0
+                        "revenue": _row_value(fin, "Total Revenue", "TotalRevenue"),
+                        "profit": _row_value(fin, "Net Income", "Net Income Common Stockholders"),
+                        "total_assets": _row_value(bs, "Total Assets"),
+                        "total_liabilities": _row_value(
+                            bs,
+                            "Total Liabilities Net Minority Interest",
+                            "Total Liab",
                         ),
                     }
                 )
         if not items:
-            # fallback to info
             info = self._get_ticker(normalized).info or {}
+            revenue = _coerce_float(info.get("totalRevenue", 0))
+            profit = _coerce_float(info.get("netIncomeToCommon", info.get("netIncome", 0)))
+            if revenue <= 0 and profit <= 0:
+                raise ProviderError(f"empty yfinance financials for {normalized}")
             items.append(
                 {
                     "report_date": now_iso()[:10],
                     "report_type": "annual",
-                    "revenue": _coerce_float(info.get("totalRevenue", 0)),
-                    "profit": _coerce_float(info.get("netIncomeToCommon", 0)),
-                    "total_assets": 0,
-                    "total_liabilities": 0,
+                    "revenue": revenue,
+                    "profit": profit,
+                    "total_assets": 0.0,
+                    "total_liabilities": 0.0,
                 }
             )
         return {
@@ -879,6 +890,49 @@ class YFinanceMarketDataProvider:
                 "source_interface": "yfinance.Ticker.financials",
             },
             "items": items,
+        }
+
+    def fetch_spot_snapshot(self, symbol: str) -> dict[str, Any]:
+        ticker = self._get_ticker(normalize_symbol(symbol))
+
+        def _load_info():
+            return ticker.info or {}
+
+        info = self._cached(f"yf_info_{normalize_symbol(symbol)}", 60, _load_info)
+        if not info:
+            return {}
+        volume = _safe_float(info.get("volume"))
+        avg_volume = _safe_float(info.get("averageVolume"))
+        volume_ratio = (
+            round(volume / avg_volume, 3)
+            if volume is not None and avg_volume
+            else None
+        )
+        return {
+            "last": _safe_float(info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose")),
+            "pe": _safe_float(info.get("trailingPE") or info.get("forwardPE")),
+            "pb": _safe_float(info.get("priceToBook")),
+            "turnover_pct": None,
+            "amplitude_pct": None,
+            "volume_ratio": volume_ratio,
+            "total_market_cap": _safe_float(info.get("marketCap")),
+            "float_market_cap": None,
+            "industry": str(info.get("industry") or info.get("sector") or "").strip() or None,
+        }
+
+    def fetch_us_positioning(self, symbol: str) -> dict[str, Any]:
+        ticker = self._get_ticker(normalize_symbol(symbol))
+
+        def _load_info():
+            return ticker.info or {}
+
+        info = self._cached(f"yf_info_{normalize_symbol(symbol)}", 60, _load_info)
+        return {
+            "short_percent_of_float": _safe_float(info.get("shortPercentOfFloat")),
+            "held_percent_insiders": _safe_float(info.get("heldPercentInsiders")),
+            "held_percent_institutions": _safe_float(info.get("heldPercentInstitutions")),
+            "float_shares": _safe_float(info.get("floatShares")),
+            "note": "美股持仓/空头占比，不是 A 股筹码获利/套牢盘",
         }
 
 

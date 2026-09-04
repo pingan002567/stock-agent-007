@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { CopilotMessageItem } from "@/components/features/CopilotMessageItem";
 import { CopilotToolCard } from "@/components/features/CopilotToolCard";
 import { CopilotStreamingMessage } from "@/components/features/CopilotStreamingMessage";
+import { pairMessages } from "@/components/features/CopilotPanel";
 import { toolLabel, type StreamMessage } from "@/hooks/useCopilotChat";
 import type { CopilotMessage } from "@/api/client";
 
@@ -175,5 +176,50 @@ describe("CopilotStreamingMessage", () => {
     const { container } = render(<CopilotStreamingMessage streamMessage={sm} />);
     // 时间线里完成态显示 ✓(紧凑步行,非文字标签)
     expect(container.querySelector(".tl-step-state.ok")?.textContent).toContain("✓");
+  });
+});
+
+describe("pairMessages", () => {
+  it("marks zero-output runs as aborted", () => {
+    const msgs = [
+      makeMsg({ message_id: "u1", role: "user", kind: "user_message", text: "你好", run_id: "run_a" }),
+    ];
+    const paired = pairMessages(msgs);
+    expect(paired).toHaveLength(1);
+    expect(paired[0].t).toBe("msg");
+    if (paired[0].t === "msg") expect(paired[0].aborted).toBe(true);
+  });
+
+  it("does not abort runs that already have tool output", () => {
+    const msgs = [
+      makeMsg({ message_id: "u1", role: "user", kind: "user_message", text: "简报", run_id: "run_b" }),
+      makeMsg({
+        message_id: "t1", role: "assistant", kind: "tool_call", text: "",
+        run_id: "run_b", payload: { tool: "get_stock_context", call_id: "c1" },
+      }),
+    ];
+    const paired = pairMessages(msgs);
+    expect(paired.some((item) => item.t === "msg" && item.aborted)).toBe(false);
+    expect(paired.some((item) => item.t === "ai" && item.incomplete)).toBe(true);
+  });
+
+  it("places incomplete runs before the next user turn", () => {
+    const msgs = [
+      makeMsg({ message_id: "u1", role: "user", kind: "user_message", text: "第一次", run_id: "run_1" }),
+      makeMsg({
+        message_id: "t1", role: "assistant", kind: "tool_call", text: "",
+        run_id: "run_1", payload: { tool: "get_stock_context", call_id: "c1" },
+      }),
+      makeMsg({ message_id: "u2", role: "user", kind: "user_message", text: "第二次", run_id: "run_2" }),
+      makeMsg({
+        message_id: "f2", role: "assistant", kind: "final_answer", text: "好的",
+        run_id: "run_2", payload: { conclusion: "好的" },
+      }),
+    ];
+    const paired = pairMessages(msgs);
+    const u2Index = paired.findIndex((item) => item.t === "msg" && item.msg.message_id === "u2");
+    const incompleteIndex = paired.findIndex((item) => item.t === "ai" && item.incomplete);
+    expect(incompleteIndex).toBeGreaterThan(-1);
+    expect(incompleteIndex).toBeLessThan(u2Index);
   });
 });

@@ -142,10 +142,68 @@ def migrate_provider_aliases(data: dict[str, Any]) -> tuple[dict[str, Any], bool
     return current, changed
 
 
+def _provider_model_ids(data: dict[str, Any], provider_id: str) -> list[str]:
+    spec = get_provider_spec(provider_id)
+    if spec:
+        return [m.id for m in spec.models]
+    custom = custom_provider(data, provider_id)
+    if not custom:
+        return []
+    return [
+        str(m.get("id"))
+        for m in (custom.get("models") or [])
+        if isinstance(m, dict) and m.get("id")
+    ]
+
+
+def migrate_invalid_default_model(data: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """修正 default_model 指向错误提供商或不存在模型的情况（如 deepseek/mimo-v2.5）。"""
+    current = dict(data)
+    default = str(current.get("default_model") or "").strip()
+    if not default:
+        return current, False
+    provider_id, model_id = parse_model_ref(default)
+    if not provider_id or not model_id:
+        return current, False
+
+    connected = list_connected_ids(current)
+    if provider_id not in connected:
+        if not connected:
+            return current, False
+        pid = connected[0]
+        ids = _provider_model_ids(current, pid)
+        if not ids:
+            return current, False
+        current["default_model"] = format_model_ref(pid, ids[0])
+        return current, True
+
+    model_ids = _provider_model_ids(current, provider_id)
+    if model_id in model_ids:
+        return current, False
+
+    for pid in connected:
+        ids = _provider_model_ids(current, pid)
+        if model_id in ids:
+            current["default_model"] = format_model_ref(pid, model_id)
+            return current, True
+
+    if model_ids:
+        current["default_model"] = format_model_ref(provider_id, model_ids[0])
+        return current, True
+    if connected:
+        pid = connected[0]
+        ids = _provider_model_ids(current, pid)
+        if ids:
+            current["default_model"] = format_model_ref(pid, ids[0])
+            return current, True
+    return current, False
+
+
 def load_llm_credentials() -> dict[str, Any]:
     data, changed = migrate_legacy_credentials(load_credentials())
     data, alias_changed = migrate_provider_aliases(data)
-    changed = changed or alias_changed
+    data, model_changed = migrate_invalid_default_model(data)
+    changed = changed or alias_changed or model_changed
     if changed and credentials_path().exists():
         persist_credentials(data)
     return data
@@ -322,6 +380,9 @@ def resolve_slot(data: dict[str, Any], default_model: str | None) -> dict[str, A
             model_id = str(models[0].get("id") or provider_id)
     elif spec and not model_id:
         model_id = first_model_id(spec)
+    model_ids = _provider_model_ids(data, provider_id)
+    if model_id and model_ids and model_id not in model_ids:
+        model_id = model_ids[0]
     requires_key = spec.requires_key if spec else True
     source = provider_connection_source(data, provider_id, requires_key=requires_key)
     api_key = resolve_provider_secret(data, provider_id)

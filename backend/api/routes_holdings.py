@@ -22,7 +22,7 @@ def list_holdings(request: Request, services: AppServices = Depends(get_services
         stock = get_stock(item.symbol)
         d["market"] = str(stock["market"]) if stock else ""
         items.append(d)
-    return {"summary": summarize_portfolio(holdings), "items": items}
+    return {"summary": summarize_portfolio(holdings), "items": items, "demo": services.repo.is_demo_portfolio()}
 
 
 @router.post("/import-preview")
@@ -33,8 +33,18 @@ def import_preview(items: List[HoldingPosition]):
 @router.post("/import-confirm")
 def import_confirm(items: List[HoldingPosition], request: Request, services: AppServices = Depends(get_services)):
     saved = [services.repo.upsert_holding(item) for item in items]
+    services.repo.mark_demo_portfolio_real()
     services.audit_service.record("holdings import confirmed", f"count={len(saved)}")
     return {"imported": len(saved), "items": [model_to_dict(item) for item in saved]}
+
+
+@router.post("/clear-demo")
+def clear_demo_holdings(request: Request, services: AppServices = Depends(get_services)):
+    if not services.repo.is_demo_portfolio():
+        return {"ok": True, "demo": False, "removed": []}
+    result = services.repo.clear_demo_portfolio()
+    services.audit_service.record("demo holdings cleared", f"removed={len(result['removed'])}")
+    return {"ok": True, **result}
 
 
 @router.get("/risk")

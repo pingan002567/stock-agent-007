@@ -8,7 +8,7 @@ set BACKEND_PORT=8686
 
 echo.
 echo Stock Agent 后端启动中... (Windows)
-echo [HINT] Tauri 桌面客户端目前请在 macOS 上使用 ./start.sh
+echo [HINT] Tauri 桌面客户端目前请在 macOS 上使用 make run
 echo.
 
 cd /d "%~dp0"

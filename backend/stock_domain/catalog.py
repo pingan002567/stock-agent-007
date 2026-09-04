@@ -138,13 +138,19 @@ def normalize_symbol(symbol: str) -> str:
 
 
 def _overlay_stock_dict(master: Any, stock_dict: Dict[str, object] | None = None) -> Dict[str, object]:
+    try:
+        from backend.stock_domain.catalog_tools import KNOWN_STOCK_ALIASES
+        alias_seed = KNOWN_STOCK_ALIASES.get(str(master.symbol), [])
+    except Exception:
+        alias_seed = []
+    aliases = list(dict.fromkeys([*(master.aliases or []), *alias_seed]))
     result: Dict[str, object] = {
         "symbol": master.symbol,
         "name": master.name,
         "market": master.market,
         "industry": master.industry or "",
         "sector": master.sector or "",
-        "aliases": master.aliases,
+        "aliases": aliases,
         "price": 0.0,
         "change_pct": 0.0,
         "score": 0,
@@ -207,6 +213,18 @@ def search_stocks(query: str) -> List[Dict[str, object]]:
     q = query.strip().lower()
     if _repo is not None:
         masters = _repo.search_stock_master(q)
+        if not masters and q:
+            try:
+                from backend.stock_domain.catalog_tools import KNOWN_STOCK_ALIASES
+
+                for symbol, aliases in KNOWN_STOCK_ALIASES.items():
+                    if any(q in alias.lower() for alias in aliases):
+                        master = _repo.get_stock_master(symbol)
+                        if master is not None:
+                            masters = [master]
+                            break
+            except Exception:
+                pass
         if masters:
             return [_overlay_stock_dict(m, STOCKS.get(m.symbol)) for m in masters]
     if not q:

@@ -1044,12 +1044,23 @@ class AkShareMarketDataProvider:
                 f"phase1 real data only covers CN/HK markets: {normalized}"
             )
 
-        profile = self._profile_cninfo(normalized)
-        top_holders = self._main_holders(normalized)
-        fund_holders = self._fund_holders(normalized)
-        shareholder_changes = self._shareholder_changes(normalized)
-        financial = self._financial_abstract(normalized)
-        fund_flow = self._fund_flow(normalized)
+        missing: list[str] = []
+        profile = self._safe_intel_call("profile_cninfo", lambda: self._profile_cninfo(normalized), missing)
+        top_holders = self._safe_intel_call(
+            "main_holders", lambda: self._main_holders(normalized), missing, default=[]
+        )
+        fund_holders = self._safe_intel_call(
+            "fund_holders", lambda: self._fund_holders(normalized), missing, default=[]
+        )
+        shareholder_changes = self._safe_intel_call(
+            "shareholder_changes", lambda: self._shareholder_changes(normalized), missing, default=[]
+        )
+        financial = self._safe_intel_call(
+            "financial_abstract", lambda: self._financial_abstract(normalized), missing, default=[]
+        )
+        fund_flow = self._safe_intel_call(
+            "fund_flow", lambda: self._fund_flow(normalized), missing, default=[]
+        )
         news = self._stock_news(normalized)
         sources = [
             "stock_profile_cninfo",
@@ -1120,7 +1131,9 @@ class AkShareMarketDataProvider:
         if news:
             items = news + items
             sources.insert(0, "stock_news_em")
-        coverage = {"market": "CN", "sources": sources, "missing": []}
+        else:
+            missing.append("stock_news_em")
+        coverage = {"market": "CN", "sources": sources, "missing": missing}
         return {
             "symbol": normalized,
             "query": query,
@@ -1244,67 +1257,43 @@ class AkShareMarketDataProvider:
         stock = get_stock(normalized)
         if not stock:
             raise ProviderError(f"unknown stock: {symbol}")
-        if str(stock["market"]) != "CN":
-            base_revenue = hash(normalized) % 100_000_000_00 + 5_000_000_00
+        market = str(stock["market"])
+        if market == "HK":
+            fin_ind = self._hk_financial_indicator(normalized)
+            if not fin_ind:
+                raise ProviderError(f"empty HK financial indicators for {normalized}")
+            revenue = _safe_float(fin_ind.get("营业总收入")) or _safe_float(fin_ind.get("营业收入")) or 0.0
+            profit = _safe_float(fin_ind.get("净利润")) or _safe_float(fin_ind.get("归属于母公司股东的净利润")) or 0.0
+            total_assets = _safe_float(fin_ind.get("总资产")) or _safe_float(fin_ind.get("资产总计")) or 0.0
+            total_liabilities = _safe_float(fin_ind.get("总负债")) or _safe_float(fin_ind.get("负债合计")) or 0.0
             return {
                 "symbol": normalized,
                 "source": self.name,
                 "updated_at": now_iso(),
-                "degraded": True,
-                "degraded_reason": "akshare: phase1 real data only covers CN market",
-                "coverage": {"market": str(stock["market"]), "mode": "mock"},
-                "items": [
-                    {
-                        "report_date": "2024-12-31",
-                        "report_type": "annual",
-                        "revenue": base_revenue,
-                        "profit": round(base_revenue * 0.12, 2),
-                        "total_assets": round(base_revenue * 2.5, 2),
-                        "total_liabilities": round(base_revenue * 1.2, 2),
-                    },
-                    {
-                        "report_date": "2024-09-30",
-                        "report_type": "quarterly",
-                        "revenue": round(base_revenue * 0.7, 2),
-                        "profit": round(base_revenue * 0.08, 2),
-                        "total_assets": round(base_revenue * 2.3, 2),
-                        "total_liabilities": round(base_revenue * 1.1, 2),
-                    },
-                ],
+                "degraded": False,
+                "degraded_reason": None,
+                "coverage": {
+                    "market": "HK",
+                    "mode": "real",
+                    "source_interface": "stock_hk_financial_indicator_em",
+                },
+                "items": [{
+                    "report_date": str(fin_ind.get("报告期") or now_iso()[:10])[:10],
+                    "report_type": "annual",
+                    "revenue": revenue or 0.0,
+                    "profit": profit or 0.0,
+                    "total_assets": total_assets or 0.0,
+                    "total_liabilities": total_liabilities or 0.0,
+                }],
             }
+        if market != "CN":
+            raise ProviderError(
+                f"akshare financial data only covers CN/HK markets: {normalized}"
+            )
         rows = self._financial_abstract(normalized)
-        # akShare returns rows keyed by '指标' column (e.g. '营业总收入', '净利润'),
-        # not by report period.  Build a dict keyed by report date.
-        reports: dict[str, dict] = {}
-        date_cols = []
-        if rows:
-            for k in rows[0]:
-                if isinstance(k, str) and k.isdigit() and len(k) == 8:
-                    date_cols.append(k)
-        for row in rows:
-            indicator = str(row.get("指标", ""))
-            for dc in date_cols:
-                if dc not in reports:
-                    report_date = dc[:4] + "-" + dc[4:6] + "-" + dc[6:8]
-                    reports[dc] = {
-                        "report_date": report_date,
-                        "report_type": "annual" if dc.endswith("1231") else "quarterly",
-                        "revenue": 0,
-                        "profit": 0,
-                        "total_assets": 0,
-                        "total_liabilities": 0,
-                    }
-                val = _coerce_float(row.get(dc, 0))
-                if indicator in ("营业总收入", "营业收入"):
-                    reports[dc]["revenue"] = val
-                elif indicator in ("净利润", "归母净利润"):
-                    if val > reports[dc]["profit"]:
-                        reports[dc]["profit"] = val
-                elif indicator in ("总资产", "资产总计"):
-                    reports[dc]["total_assets"] = val
-                elif indicator in ("总负债", "负债合计"):
-                    reports[dc]["total_liabilities"] = val
-        items = sorted(reports.values(), key=lambda x: x["report_date"], reverse=True)[:5]
+        items = _build_financial_items(rows)
+        if not items:
+            raise ProviderError(f"empty financial data for {normalized}")
         return {
             "symbol": normalized,
             "source": self.name,
@@ -1468,6 +1457,54 @@ class AkShareMarketDataProvider:
         rows.sort(key=lambda row: abs(_coerce_float(row.get("涨跌幅"))), reverse=True)
         return rows
 
+    def _safe_intel_call(
+        self,
+        label: str,
+        loader,
+        missing: list[str],
+        *,
+        default: dict | list | None = None,
+    ) -> dict | list:
+        try:
+            return loader()
+        except Exception:
+            missing.append(label)
+            if default is not None:
+                return default
+            return {} if label == "profile_cninfo" else []
+
+    def fetch_profile_metadata(self, symbol: str) -> dict[str, Any]:
+        """从巨潮 profile 提取行业/板块/别名，供 stock_master enrichment。"""
+        normalized = normalize_symbol(symbol)
+        try:
+            profile = self._profile_cninfo(normalized)
+        except Exception:
+            return {}
+        if not profile:
+            return {}
+        industry = str(profile.get("所属行业") or "").strip()
+        main_biz = str(profile.get("主营业务") or "").strip()
+        sector = main_biz.split("。")[0].split("；")[0][:64] if main_biz else industry
+        aliases: list[str] = []
+        for key in ("英文名称", "曾用简称", "A股简称"):
+            raw = str(profile.get(key) or "").strip()
+            if raw and raw not in aliases:
+                aliases.append(raw)
+        website = str(profile.get("官方网站") or "").strip()
+        if website:
+            host = website.replace("https://", "").replace("http://", "").split("/")[0]
+            if host.startswith("www."):
+                host = host[4:]
+            token = host.split(".")[0]
+            if token and token not in aliases:
+                aliases.append(token)
+        return {
+            "industry": industry,
+            "sector": sector or industry,
+            "aliases": aliases,
+            "company_name": str(profile.get("公司名称") or "").strip(),
+        }
+
     def _profile_cninfo(self, symbol: str) -> dict[str, Any]:
         frame = self._cached(
             ("profile_cninfo", symbol),
@@ -1510,15 +1547,69 @@ class AkShareMarketDataProvider:
         return _frame_tail(frame, 80)  # Need most rows for complete financial data
 
     def _fund_flow(self, symbol: str) -> list[dict[str, Any]]:
+        return self.fetch_fund_flow_rows(symbol, limit=5)
+
+    def fetch_fund_flow_rows(self, symbol: str, limit: int = 12) -> list[dict[str, Any]]:
         market = "sh" if symbol.startswith("6") else "sz"
         frame = self._cached(
             ("fund_flow", symbol),
-            ttl_seconds=3600,
+            ttl_seconds=600,
             loader=lambda: self._ak().stock_individual_fund_flow(
                 stock=symbol, market=market
             ),
         )
-        return _frame_tail(frame, 5)
+        rows = _frame_records(frame)
+        return rows
+
+    def fetch_chip_cyq(self, symbol: str) -> list[dict[str, Any]]:
+        frame = self._cached(
+            ("chip_cyq", symbol),
+            ttl_seconds=86400,
+            loader=lambda: self._ak().stock_cyq_em(symbol=symbol),
+        )
+        return _frame_records(frame)
+
+    def fetch_spot_snapshot(self, symbol: str) -> dict[str, Any]:
+        frame = self._cached(
+            ("spot_info_em", symbol),
+            ttl_seconds=60,
+            loader=lambda: self._ak().stock_individual_info_em(symbol=symbol),
+        )
+        mapping: dict[str, Any] = {}
+        for row in _frame_tail(frame, 80):
+            key = str(row.get("item") or row.get("指标") or row.get("item_name") or "").strip()
+            if not key:
+                continue
+            mapping[key] = row.get("value") if "value" in row else row.get("值")
+        if not mapping:
+            return {}
+        return {
+            "last": _safe_float(mapping.get("最新") or mapping.get("最新价")),
+            "turnover_pct": _safe_float(mapping.get("换手率")),
+            "amplitude_pct": _safe_float(mapping.get("振幅")),
+            "volume_ratio": _safe_float(mapping.get("量比")),
+            "pe": _safe_float(mapping.get("市盈率") or mapping.get("市盈率-动态") or mapping.get("市盈率(动)")),
+            "pb": _safe_float(mapping.get("市净率")),
+            "total_market_cap": _safe_float(mapping.get("总市值")),
+            "float_market_cap": _safe_float(mapping.get("流通市值")),
+            "industry": str(mapping.get("行业") or "").strip() or None,
+        }
+
+    def fetch_hk_spot_snapshot(self, symbol: str) -> dict[str, Any]:
+        fin = self._hk_financial_indicator(symbol)
+        if not fin:
+            return {}
+        return {
+            "last": _safe_float(fin.get("最新价") or fin.get("收盘价")),
+            "pe": _safe_float(fin.get("市盈率")),
+            "pb": _safe_float(fin.get("市净率")),
+            "turnover_pct": _safe_float(fin.get("换手率")),
+            "total_market_cap": _safe_float(fin.get("总市值") or fin.get("市值")),
+            "float_market_cap": None,
+            "amplitude_pct": None,
+            "volume_ratio": None,
+            "industry": str(fin.get("所属行业") or "").strip() or None,
+        }
 
     def _stock_news(self, symbol: str) -> list[dict[str, Any]]:
         try:
@@ -2192,6 +2283,19 @@ class AkShareMarketDataProvider:
                 )
 
 
+def _frame_records(frame: Any) -> list[dict[str, Any]]:
+    if frame is None:
+        return []
+    if hasattr(frame, "to_dict"):
+        try:
+            return frame.to_dict("records")
+        except Exception:
+            return []
+    if isinstance(frame, list):
+        return [dict(item) for item in frame]
+    return []
+
+
 def _frame_tail(frame: Any, size: int) -> list[dict[str, Any]]:
     if frame is None:
         return []
@@ -2237,16 +2341,81 @@ def _history_item(
     volume_keys: tuple[str, ...] = ("成交量", "volume"),
     amount_keys: tuple[str, ...] = ("成交额", "amount"),
 ) -> dict[str, Any]:
+    close = _number(row, *close_keys)
+    volume = _number(row, *volume_keys, default=0.0)
+    amount = _number(row, *amount_keys, default=0.0)
+    if volume == 0.0 and amount > 0 and close > 0:
+        volume = round(amount / close, 0)
     return {
         "day": day,
         "date": _first(row, *date_keys),
         "open": _number(row, *open_keys),
         "high": _number(row, *high_keys),
         "low": _number(row, *low_keys),
-        "close": _number(row, *close_keys),
-        "volume": _number(row, *volume_keys, default=0.0),
-        "amount": _number(row, *amount_keys, default=0.0),
+        "close": close,
+        "volume": volume,
+        "amount": amount,
     }
+
+
+def _build_financial_items(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """把 akshare financial_abstract 行转为 JSON 安全的报告列表。"""
+    reports: dict[str, dict[str, Any]] = {}
+    date_cols: list[str] = []
+    if rows:
+        for key in rows[0]:
+            if isinstance(key, str) and key.isdigit() and len(key) == 8:
+                date_cols.append(key)
+    for row in rows:
+        indicator = str(row.get("指标", ""))
+        for dc in date_cols:
+            if dc not in reports:
+                report_date = f"{dc[:4]}-{dc[4:6]}-{dc[6:8]}"
+                reports[dc] = {
+                    "report_date": report_date,
+                    "report_type": "annual" if dc.endswith("1231") else "quarterly",
+                    "revenue": None,
+                    "profit": None,
+                    "total_assets": None,
+                    "total_liabilities": None,
+                    "_equity": None,
+                    "_debt_ratio_pct": None,
+                }
+            val = _safe_float(row.get(dc))
+            if val is None:
+                continue
+            if indicator in ("营业总收入", "营业收入"):
+                reports[dc]["revenue"] = val
+            elif indicator == "归母净利润":
+                reports[dc]["profit"] = val
+            elif indicator == "净利润" and reports[dc]["profit"] is None:
+                reports[dc]["profit"] = val
+            elif indicator in ("总资产", "资产总计"):
+                reports[dc]["total_assets"] = val
+            elif indicator in ("总负债", "负债合计"):
+                reports[dc]["total_liabilities"] = val
+            elif indicator in ("股东权益合计(净资产)", "净资产", "股东权益"):
+                reports[dc]["_equity"] = val
+            elif indicator == "资产负债率":
+                reports[dc]["_debt_ratio_pct"] = val
+
+    items: list[dict[str, Any]] = []
+    for report in sorted(reports.values(), key=lambda x: x["report_date"], reverse=True):
+        equity = report.pop("_equity", None)
+        debt_ratio = report.pop("_debt_ratio_pct", None)
+        if report["total_assets"] is None and equity is not None and debt_ratio is not None:
+            ratio = debt_ratio / 100.0
+            if 0 <= ratio < 1:
+                assets = equity / (1.0 - ratio)
+                report["total_assets"] = round(assets, 2)
+                report["total_liabilities"] = round(assets - equity, 2)
+        for key in ("revenue", "profit", "total_assets", "total_liabilities"):
+            if report[key] is None:
+                report[key] = 0.0
+        if report["revenue"] <= 0 and report["profit"] <= 0:
+            continue
+        items.append(report)
+    return items[:5]
 
 
 def _first(row: dict[str, Any], *keys: str) -> Any:
@@ -2257,9 +2426,8 @@ def _first(row: dict[str, Any], *keys: str) -> Any:
 
 
 def _coerce_float(value: Any, default: float = 0.0) -> float:
-    if value in (None, ""):
-        return default
-    return float(value)
+    parsed = _safe_float(value)
+    return parsed if parsed is not None else default
 
 
 def _safe_float(value: Any) -> float | None:

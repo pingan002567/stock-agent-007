@@ -190,6 +190,27 @@ def test_moonshot_credentials_migrate_to_kimi(tmp_path, monkeypatch):
     assert data["default_model"] == "kimi/kimi-k2.5"
 
 
+def test_invalid_default_model_migrates_to_valid_ref(tmp_path, monkeypatch):
+    cred = tmp_path / "credentials.json"
+    monkeypatch.setenv("WORKBENCH_CREDENTIALS_PATH", str(cred))
+    cred.write_text(json.dumps({
+        "providers": {
+            "deepseek": {"api_key": "sk-deepseek", "source": "api"},
+            "legacy": {"api_key": "sk-legacy", "source": "api"},
+        },
+        "custom_providers": {
+            "legacy": {
+                "name": "已保存连接",
+                "base_url": "https://api.xiaomimimo.com/v1",
+                "models": [{"id": "mimo-v2.5-pro", "name": "MiMo V2.5 Pro"}],
+            },
+        },
+        "default_model": "deepseek/mimo-v2.5",
+    }), encoding="utf-8")
+    data = load_llm_credentials()
+    assert data["default_model"] == "deepseek/deepseek-v4-flash"
+
+
 def test_llm_snapshot_does_not_echo_secrets(tmp_path):
     client = make_client(tmp_path)
     created = client.post("/api/settings/llm/connect", json={

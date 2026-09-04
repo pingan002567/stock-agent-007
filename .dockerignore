@@ -56,7 +56,8 @@ docs/
 scripts/
 install.sh
 install.bat
-start.sh
+Makefile
+scripts/
 start.bat
 
 # Tests

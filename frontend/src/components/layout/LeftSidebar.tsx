@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useCopilotChat } from "@/hooks/useCopilotChat";
 import type { CopilotSession } from "@/api/client";
+import { ResizeHandle } from "@/components/ui/ResizeHandle";
 
 /** 三栏布局左栏：品牌 + 会话列表 + 底部工作区/设置（Cursor 式沉底）。 */
 
@@ -71,6 +72,7 @@ export function LeftSidebar({ onOpenSettings, onOpenWorkspace }: {
 
   return (
     <aside className="left-sidebar">
+      <ResizeHandle cssVar="--left-sidebar-w" storageKey="left-sidebar-w" min={200} max={480} edge="right" />
       <div className="brand" data-tauri-drag-region="">
         <div className="brand-logo" aria-hidden>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">

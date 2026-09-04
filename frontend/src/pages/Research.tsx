@@ -6,6 +6,13 @@ import { useAppState } from "@/hooks/useAppState";
 import { AskAiButton } from "@/components/ui/AskAiButton";
 import { useToast } from "@/hooks/useToast";
 import { MarkdownRenderer as Markdown } from "@/components/features/MarkdownRenderer";
+import { StockHistoryChart } from "@/components/features/StockHistoryChart";
+import {
+  sortFinancialNewestFirst,
+  sortHistoryNewestFirst,
+  sortIntelNewestFirst,
+} from "@/lib/sortStockSeries";
+import { FUNNEL_EXAMPLE_STOCKS, RESEARCH_FUNNEL } from "@/lib/researchFunnel";
 
 // --- types ---
 
@@ -56,12 +63,80 @@ interface IntelItem { title?: string; summary?: string; source?: string; publish
 interface FinancialItem { report_date?: string; report_type?: string; revenue?: number; profit?: number; total_assets?: number; total_liabilities?: number }
 interface FollowupItem { label?: string; prompt?: string; action?: string }
 
+interface MarketStructureTechnical {
+  degraded?: boolean;
+  reason?: string | null;
+  missing?: string[];
+  bar_count?: number;
+  as_of?: string;
+  last?: number;
+  ma5?: number | null;
+  ma10?: number | null;
+  ma20?: number | null;
+  ma60?: number | null;
+  ma_stack?: string | null;
+  rsi14?: number | null;
+  volume_ratio?: number | null;
+  support_20?: number | null;
+  resistance_20?: number | null;
+  volume_note?: string | null;
+}
+interface MarketStructureChip {
+  degraded?: boolean;
+  reason?: string;
+  quality?: string;
+  profit_ratio?: number | null;
+  trapped_ratio?: number | null;
+  market_avg_cost?: number | null;
+  price_vs_avg_cost_pct?: number | null;
+  cost_90_low?: number | null;
+  cost_90_high?: number | null;
+  concentration_90?: number | null;
+  as_of?: string;
+  notes?: string[];
+  proxy?: { vwap_20d?: number | null; volume_vs_20d?: number | null };
+}
+interface MarketStructureFlow {
+  degraded?: boolean;
+  reason?: string;
+  main_net_1d?: number | null;
+  main_net_5d?: number | null;
+  as_of?: string;
+}
+interface MarketStructureSnapshot {
+  degraded?: boolean;
+  reason?: string;
+  pe?: number | null;
+  pb?: number | null;
+  turnover_pct?: number | null;
+  volume_ratio?: number | null;
+  us_positioning?: {
+    short_percent_of_float?: number | null;
+    held_percent_institutions?: number | null;
+    held_percent_insiders?: number | null;
+    note?: string;
+  };
+}
+interface MarketStructure {
+  symbol?: string;
+  market?: string;
+  degraded?: boolean;
+  technical?: MarketStructureTechnical;
+  chip?: MarketStructureChip;
+  flow?: MarketStructureFlow;
+  snapshot?: MarketStructureSnapshot;
+}
+
 const money = (v?: number, market?: string) => {
   const prefix = market === "HK" ? "HK$" : market === "US" ? "$" : "¥";
   return `${prefix}${(v ?? 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}`;
 };
 const pct = (v?: number) => `${(v ?? 0) >= 0 ? "+" : ""}${(v ?? 0).toFixed(2)}%`;
 const changeCls = (cp?: number) => (cp ?? 0) >= 0 ? "up" : "down";
+const ratioPct = (v?: number | null) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
+const numOrDash = (v?: number | null, digits = 2) => (v == null ? "—" : v.toFixed(digits));
+const maStackLabel = (stack?: string | null) =>
+  stack === "bullish" ? "多头排列" : stack === "bearish" ? "空头排列" : stack === "mixed" ? "交叉纠缠" : "—";
 
 export default function Research() {
   const { stock, setStock, appDataCache, globalLoading } = useAppState();
@@ -71,11 +146,13 @@ export default function Research() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [intel, setIntel] = useState<IntelItem[]>([]);
   const [financial, setFinancial] = useState<FinancialItem[]>([]);
+  const [marketStructure, setMarketStructure] = useState<MarketStructure | null>(null);
   const [followups, setFollowups] = useState<FollowupItem[]>([]);
   const [researchResult, setResearchResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [researchBusy, setResearchBusy] = useState(false);
+  const [historyRangeDays, setHistoryRangeDays] = useState<7 | 30 | 90>(30);
   const [stockCacheSymbol, setStockCacheSymbol] = useState<string | null>(null);
   const [wlGroup, setWlGroup] = useState("默认");
   const [wlGroups, setWlGroups] = useState<{name:string;color:string}[]>([]);
@@ -106,6 +183,9 @@ export default function Research() {
       setFollowups((cache.stockFollowups as { items: FollowupItem[] })?.items ?? []);  
       setStockCacheSymbol(stock);
       setLoading(false);
+      void apiGet<MarketStructure>(`/api/stocks/${encodeURIComponent(stock)}/market-structure`)
+        .then(setMarketStructure)
+        .catch(() => setMarketStructure(null));
     }
   }, [globalLoading, appDataCache, stock, stockCacheSymbol]);
 
@@ -187,16 +267,22 @@ export default function Research() {
   };
 
   const loadAll = useCallback(async () => {
-    setLoading(true); setError(null); setContext(null);
+    setLoading(true); setError(null); setContext(null); setMarketStructure(null);
     try {
-      const [ctx, hist, int, fin, fu] = await Promise.all([
+      const [ctx, hist, int, fin, ms, fu] = await Promise.all([
         apiGet<StockContext>(`/api/stocks/${encodeURIComponent(stock)}/context`),
-        apiGet<{ items: HistoryItem[] }>(`/api/stocks/${encodeURIComponent(stock)}/history`).then((r) => r.items).catch(() => []),
+        apiGet<{ items: HistoryItem[] }>(`/api/stocks/${encodeURIComponent(stock)}/history?days=90`).then((r) => r.items).catch(() => []),
         apiGet<{ items: IntelItem[] }>(`/api/stocks/${encodeURIComponent(stock)}/intel`).then((r) => r.items).catch(() => []),
         apiGet<{ items: FinancialItem[] }>(`/api/stocks/${encodeURIComponent(stock)}/financial`).then((r) => r.items).catch(() => []),
+        apiGet<MarketStructure>(`/api/stocks/${encodeURIComponent(stock)}/market-structure`).catch(() => null),
         apiGet<{ items: FollowupItem[] }>("/api/portfolio/copilot/followups").then((r) => r.items ?? []).catch(() => []),
       ]);
-      setContext(ctx); setHistory(hist); setIntel(int); setFinancial(fin); setFollowups(fu);
+      setContext(ctx);
+      setHistory(sortHistoryNewestFirst(hist));
+      setIntel(sortIntelNewestFirst(int));
+      setFinancial(sortFinancialNewestFirst(fin));
+      setMarketStructure(ms);
+      setFollowups(fu);
       setStockCacheSymbol(stock);
     } catch (err) { setError(err instanceof Error ? err.message : "加载个股研究失败"); } finally { setLoading(false); }
   }, [stock]);
@@ -314,8 +400,25 @@ export default function Research() {
             <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ opacity: 0.6, marginBottom: 8 }}>
               <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
             </svg>
-            <div style={{ fontSize: 13 }}>搜索一只股票开始研究</div>
-            <div style={{ fontSize: 11, color: "var(--faint, var(--muted))", marginTop: 4 }}>也可以在聊天里直接问,会话锚点会自动带到这里</div>
+            <div style={{ fontSize: 13, color: "var(--ink)", fontWeight: 600 }}>按漏斗做研究</div>
+            <div style={{ fontSize: 12, marginTop: 6, lineHeight: 1.7 }}>
+              {RESEARCH_FUNNEL.map((item) => (
+                <div key={item.step}>{item.step} · {item.hint}</div>
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--faint, var(--muted))", marginTop: 10 }}>搜一只股票，或点示例开始</div>
+            <div className="funnel-chips" style={{ marginTop: 10, justifyContent: "center" }}>
+              {FUNNEL_EXAMPLE_STOCKS.map((item) => (
+                <button
+                  key={item.symbol}
+                  type="button"
+                  className="followup-chip"
+                  onClick={() => selectStock(item.symbol)}
+                >
+                  {item.name}
+                </button>
+              ))}
+            </div>
           </div></div>
         ) : loading && !context ? (
           <section className="detail-grid">
@@ -425,12 +528,7 @@ export default function Research() {
                         <polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/>
                       </svg>
                       历史走势
-                      <span className="panel-badge">30日</span>
-                    </div>
-                    <div className="time-range-btns">
-                      <button className="time-range-btn">1周</button>
-                      <button className="time-range-btn active">1月</button>
-                      <button className="time-range-btn">3月</button>
+                      <span className="panel-badge">{historyRangeDays}日</span>
                     </div>
                   </div>
                   <div className="panel-body">
@@ -438,23 +536,20 @@ export default function Research() {
                       <div className="muted">暂无历史数据</div>
                     ) : (
                       <>
-                        <svg viewBox="0 0 600 100" style={{ width: "100%", height: 100, marginBottom: 16 }}>
-                          {(() => {
-                            const data = history.slice(-30);
-                            const closes = data.map(x => x.close ?? 0);
-                            const mx = Math.max(...closes); const mn = Math.min(...closes); const rng = mx - mn || 1;
-                            const points = data.map((h, i) => `${(i / (data.length - 1)) * 580 + 10},${100 - ((h.close ?? 0) - mn) / rng * 80 - 10}`).join(" ");
-                            return <polyline points={points} fill="none" stroke="var(--blue)" strokeWidth="2" />;
-                          })()}
-                        </svg>
-                        <table>
+                        <StockHistoryChart
+                          items={history}
+                          market={context.market}
+                          rangeDays={historyRangeDays}
+                          onRangeChange={setHistoryRangeDays}
+                        />
+                        <table style={{ marginTop: 16 }}>
                           <thead>
                             <tr><th>日期</th><th>开盘</th><th>最高</th><th>最低</th><th>收盘</th><th>涨跌</th></tr>
                           </thead>
                           <tbody>
-                            {history.slice(0, 5).map((h, idx) => {
-                              // 计算涨跌：当前收盘价 vs 前一天收盘价
-                              const prevItem = idx < history.length - 1 ? history[idx + 1] : null;
+                            {history.slice(0, 5).map((h, idx, rows) => {
+                              // 列表按日期从新到旧；涨跌 = 相对上一交易日（更旧的一条）
+                              const prevItem = idx < rows.length - 1 ? rows[idx + 1] : null;
                               const prevClose = prevItem?.close ?? h.open;
                               const change = prevClose ? ((h.close ?? 0) - prevClose) / prevClose * 100 : 0;
                               return (
@@ -474,6 +569,8 @@ export default function Research() {
                     )}
                   </div>
                 </div>
+
+                <MarketStructurePanel data={marketStructure} market={context.market} />
 
                 <div className="panel">
                   <div className="panel-header">
@@ -617,5 +714,120 @@ export default function Research() {
         ) : null}
       </div>
     </PageContainer>
+  );
+}
+
+function MarketStructurePanel({ data, market }: { data: MarketStructure | null; market?: string }) {
+  if (!data) {
+    return (
+      <div className="panel">
+        <div className="panel-header">
+          <div className="panel-title">市场结构</div>
+        </div>
+        <div className="panel-body"><div className="muted">暂无市场结构数据</div></div>
+      </div>
+    );
+  }
+  const chip = data.chip;
+  const tech = data.technical;
+  const flow = data.flow;
+  const snap = data.snapshot;
+  const hasChip = Boolean(chip && !chip.degraded && (chip.profit_ratio != null || chip.market_avg_cost != null));
+  const title = market === "CN" ? "市场结构" : "市场结构（非筹码）";
+  const profit = chip?.profit_ratio;
+  const trapped = chip?.trapped_ratio;
+  const profitPct = profit != null ? Math.max(0, Math.min(100, profit * 100)) : 0;
+  const trappedPct = trapped != null ? Math.max(0, Math.min(100, trapped * 100)) : Math.max(0, 100 - profitPct);
+
+  return (
+    <div className="panel">
+      <div className="panel-header">
+        <div className="panel-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M3 3v18h18"/>
+            <path d="M7 14l4-4 4 4 5-6"/>
+          </svg>
+          {title}
+          {tech?.as_of && <span className="panel-badge">{tech.as_of}</span>}
+        </div>
+      </div>
+      <div className="panel-body">
+        {hasChip ? (
+          <div className="ms-chip">
+            <div className="ms-chip-meta">
+              <span>现价 {numOrDash(tech?.last)} vs 平均成本 {numOrDash(chip?.market_avg_cost)}</span>
+              {chip?.price_vs_avg_cost_pct != null && (
+                <span className={chip.price_vs_avg_cost_pct >= 0 ? "up" : "down"}>
+                  {pct(chip.price_vs_avg_cost_pct)}
+                </span>
+              )}
+            </div>
+            <div className="ms-chip-bar" title="获利 / 套牢">
+              <div className="ms-chip-profit" style={{ width: `${profitPct}%` }} />
+              <div className="ms-chip-trapped" style={{ width: `${trappedPct}%` }} />
+            </div>
+            <div className="ms-chip-legend">
+              <span className="up">获利 {ratioPct(profit)}</span>
+              <span className="down">套牢 {ratioPct(trapped)}</span>
+              {chip?.cost_90_low != null && chip?.cost_90_high != null && (
+                <span className="muted">90% 成本 {numOrDash(chip.cost_90_low)}–{numOrDash(chip.cost_90_high)}</span>
+              )}
+            </div>
+            {chip?.quality === "low" && (
+              <div className="ms-quality-warn">筹码质量偏低（次新/无量/涨停），勿据此标高置信度</div>
+            )}
+          </div>
+        ) : (
+          <div className="ms-degraded">
+            {chip?.reason || "本市场无筹码数据"}
+            {chip?.proxy?.vwap_20d != null && (
+              <span className="muted"> · 近20日均价 {numOrDash(chip.proxy.vwap_20d)}（非获利盘）</span>
+            )}
+          </div>
+        )}
+
+        <div className="ms-grid">
+          <div>
+            <div className="muted" style={{ fontSize: 11 }}>均线</div>
+            <div>{maStackLabel(tech?.ma_stack)}</div>
+            <div className="muted" style={{ fontSize: 11 }}>MA5 {numOrDash(tech?.ma5)} / MA20 {numOrDash(tech?.ma20)}</div>
+          </div>
+          <div>
+            <div className="muted" style={{ fontSize: 11 }}>RSI14</div>
+            <div className="num">{numOrDash(tech?.rsi14)}</div>
+          </div>
+          <div>
+            <div className="muted" style={{ fontSize: 11 }}>量比</div>
+            <div className="num">{numOrDash(tech?.volume_ratio, 3)}</div>
+          </div>
+          <div>
+            <div className="muted" style={{ fontSize: 11 }}>支撑 / 阻力（近20日）</div>
+            <div className="num">{numOrDash(tech?.support_20)} / {numOrDash(tech?.resistance_20)}</div>
+          </div>
+        </div>
+        {tech?.degraded && <div className="ms-degraded">{tech.reason}</div>}
+        {tech?.volume_note && <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>{tech.volume_note}</div>}
+
+        {market === "CN" && (
+          flow?.degraded ? (
+            <div className="ms-degraded" style={{ marginTop: 10 }}>{flow.reason}</div>
+          ) : (
+            <div className="ms-flow">
+              主力净流入 1日 {numOrDash(flow?.main_net_1d)} · 5日 {numOrDash(flow?.main_net_5d)}
+              {flow?.as_of && <span className="muted"> · {flow.as_of}</span>}
+            </div>
+          )
+        )}
+
+        {snap?.us_positioning && !snap.degraded && (
+          <div className="ms-flow">
+            空头占流通 {ratioPct(snap.us_positioning.short_percent_of_float)}
+            {" · "}机构持股 {ratioPct(snap.us_positioning.held_percent_institutions)}
+            <div className="muted" style={{ fontSize: 11 }}>{snap.us_positioning.note}</div>
+          </div>
+        )}
+        {snap?.degraded && <div className="ms-degraded">{snap.reason}</div>}
+      </div>
+    </div>
   );
 }

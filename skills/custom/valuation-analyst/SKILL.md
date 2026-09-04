@@ -6,6 +6,7 @@ allowed-tools:
   - get_stock_context
   - get_daily_history
   - get_industry_context
+  - get_market_structure
 ---
 
 # Valuation Analyst
@@ -17,7 +18,8 @@ allowed-tools:
 1. `get_stock_financial`：财务报表（营收/净利/总资产/总负债，及 `payload` 中更多科目与多期数据）
 2. `get_stock_context`：当前价 / PE / 市值（用于倍数）
 3. `get_industry_context`：行业 PE/PB 中位数与该股分位（A 股；degraded 时退回历史对比口径并说明）
-4. 综合为下方「输出框架」
+4. `get_market_structure`：换手、量比、流动性快照辅助估值判断；**不得把筹码获利/套牢当作估值倍数**
+5. 综合为下方「输出框架」
 
 ## 输出框架
 1. **盈利能力**：净利率(净利/营收)、ROA(净利/总资产) + 同比趋势

@@ -1057,6 +1057,8 @@ class DeerFlowClientAdapter:
     def _stub_tool_for_skill(
         self, skill: str, message: str, context: Dict[str, Any]
     ) -> tuple[str, dict[str, Any], AuthorityLevel]:
+        if message.startswith("[定时任务·") or "你是值班研究员" in message:
+            return "get_portfolio_snapshot", {}, AuthorityLevel.A3
         symbol = self._message_symbol(message, context)
         lower = message.lower()
         if skill == "strategy-analyst":

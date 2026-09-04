@@ -178,6 +178,30 @@ export function WorkspaceModal({ open, onClose }: { open: boolean; onClose: () =
     }
   }, [finishSwitch, info, onClose, refreshInfo]);
 
+  const doRemove = useCallback(async (dir: string, name: string) => {
+    const target = await resolveTargetDir(dir);
+    const current = info?.data_dir ? normalizeDir(info.data_dir) : "";
+    if (target === current) {
+      setError("不能删除当前正在使用的工作区");
+      return;
+    }
+    const ok = window.confirm(
+      `确定删除工作区「${name}」？\n\n将同时删除本地数据目录及其中所有会话、持仓等数据，此操作不可恢复。`,
+    );
+    if (!ok) return;
+    setError("");
+    try {
+      await apiPost<{ ok: boolean }>("/api/workspace/remove", {
+        data_dir: target,
+        delete_files: true,
+      });
+      notifyWorkspaceChanged();
+      await refreshInfo();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [info?.data_dir, refreshInfo]);
+
   const browse = useCallback(async () => {
     const dialogOpen = window.__TAURI__?.dialog?.open;
     if (!dialogOpen) return;
@@ -218,7 +242,7 @@ export function WorkspaceModal({ open, onClose }: { open: boolean; onClose: () =
                   && normalizeDir(info.configured_data_dir) !== normalizeDir(info.data_dir ?? "") ? (
                   <div className="ws-hint" style={{ marginTop: 8 }}>
                     已注册工作区为 {info.configured_data_dir}，但当前 dev 后端仍指向 {info.data_dir}。
-                    请通过下方切换，或使用 ./start.sh（非 --dev）复用 launchd 后端。
+                    请通过下方切换，或使用 make run 打开客户端（后端由 launchd 承载）。
                   </div>
                 ) : null}
               </div>
@@ -235,11 +259,22 @@ export function WorkspaceModal({ open, onClose }: { open: boolean; onClose: () =
                 <>
                   <div className="ws-group">最近</div>
                   {info.recents.map((w) => (
-                    <button key={w.dir} className="ws-item" disabled={!canSwitch}
-                      onClick={() => void doSwitch(w.dir)}>
-                      <span className="ws-item-name">{w.name}</span>
-                      <span className="ws-item-dir">{w.dir}</span>
-                    </button>
+                    <div key={w.dir} className="ws-item-row">
+                      <button className="ws-item" disabled={!canSwitch}
+                        onClick={() => void doSwitch(w.dir)}>
+                        <span className="ws-item-name">{w.name}</span>
+                        <span className="ws-item-dir">{w.dir}</span>
+                      </button>
+                      <button
+                        className="ws-delete"
+                        type="button"
+                        title="删除工作区"
+                        disabled={switching}
+                        onClick={(e) => { e.stopPropagation(); void doRemove(w.dir, w.name); }}
+                      >
+                        ✕
+                      </button>
+                    </div>
                   ))}
                 </>
               )}

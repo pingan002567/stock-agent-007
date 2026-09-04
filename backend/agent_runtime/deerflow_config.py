@@ -78,7 +78,7 @@ def _build_model_config() -> dict[str, Any]:
 
 A2_TOOLS = [
     "get_stock_context", "get_daily_history", "search_stock_intel",
-    "get_industry_context",
+    "get_industry_context", "get_market_structure",
     "add_watchlist_item", "remove_watchlist_item",
     "get_monitor_events", "get_monitor_rules", "evaluate_monitor_rules",
     "list_strategies", "get_backtest_result",

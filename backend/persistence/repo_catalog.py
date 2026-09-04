@@ -202,6 +202,14 @@ class CatalogRepoMixin:
             self.conn.commit()
         return position
 
+    def delete_holding(self, symbol: str) -> bool:
+        with self._lock:
+            cur = self.conn.execute(
+                "DELETE FROM holding_position WHERE symbol = ?", (symbol.upper(),)
+            )
+            self.conn.commit()
+        return cur.rowcount > 0
+
     def list_stock_master(self, *, active_only: bool = True) -> List[StockMaster]:
         with self._lock:
             if active_only:

@@ -115,6 +115,20 @@ class CopilotService:
         )
         return status
 
+    def _reconnect_with_slot(self, slot: dict[str, Any]) -> dict[str, Any]:
+        """按显式连接槽重建 DeerFlow（会话级模型切换；勿走 effective_runtime_config 覆盖 env）。"""
+        runtime_config = {
+            k: slot[k]
+            for k in ("api_key", "base_url", "model_name", "provider_id")
+            if slot.get(k)
+        }
+        new_adapter = DeerFlowClientAdapter.from_env(
+            tool_bridge=self.deerflow.tool_bridge,
+            runtime_config=runtime_config,
+        )
+        self.deerflow = new_adapter
+        return new_adapter.status().to_dict()
+
     def _session_model_ref(self, session_id: str) -> str | None:
         session = self.repo.get_copilot_session(session_id)
         if session and session.default_model:
@@ -160,9 +174,12 @@ class CopilotService:
                     os.environ["WORKBENCH_AI_BASE_URL"] = str(slot["base_url"])
                 if slot.get("model_name"):
                     os.environ["WORKBENCH_AI_MODEL"] = str(slot["model_name"])
-                self.reconnect_runtime()
+                self._reconnect_with_slot(slot)
             elif slot.get("model_name"):
-                self.deerflow.model_name = str(slot["model_name"])
+                if slot.get("api_key") and slot.get("base_url"):
+                    self._reconnect_with_slot(slot)
+                else:
+                    self.deerflow.model_name = str(slot["model_name"])
             yield slot
         finally:
             for key, value in saved.items():
@@ -170,7 +187,7 @@ class CopilotService:
                     os.environ.pop(key, None)
                 else:
                     os.environ[key] = value
-            if use_full_reconnect:
+            if use_full_reconnect or (slot.get("model_name") and slot.get("api_key") and slot.get("base_url")):
                 self.reconnect_runtime()
             elif slot.get("model_name") and saved_model is not None:
                 self.deerflow.model_name = saved_model
@@ -400,11 +417,11 @@ class CopilotService:
         return self.create_run(request)
 
     def create_run(self, request: CopilotRequest) -> CopilotRun:
-        session = self._ensure_session(request)
         intent = self.intent_router.route(request.message, request.page, request.symbol)
         required = AuthorityLevel(intent.required_authority)
         self.permission_guard.require(request.authority_level, required, intent.name)
         self.skill_registry.get(intent.skill)
+        session = self._ensure_session(request)
         run_id = f"run_{uuid4().hex[:10]}"
         skill_trace = self._build_skill_trace(intent.name, request)
         task = self.task_service.create(

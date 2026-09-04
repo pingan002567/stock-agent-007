@@ -135,6 +135,7 @@ class WorkbenchToolBridge:
             "evaluate_policy_risk": self._evaluate_policy_risk,
             "analyze_portfolio_risk": self._analyze_portfolio_risk,
             "get_industry_context": self._get_industry_context,
+            "get_market_structure": self._get_market_structure,
             "get_monitor_events": self._get_monitor_events,
             "get_monitor_rules": self._get_monitor_rules,
             "evaluate_monitor_rules": self._evaluate_monitor_rules,
@@ -454,6 +455,15 @@ class WorkbenchToolBridge:
                 {"symbol": "str?", "industry": "str?"},
                 ["industry_board", "industry_constituents"],
             ),
+            "get_market_structure": ToolSpec(
+                "get_market_structure",
+                "market-data",
+                AuthorityLevel.A2,
+                "low",
+                True,
+                {"symbol": "str"},
+                ["market_structure", "history", "chip"],
+            ),
             "get_monitor_events": ToolSpec(
                 "get_monitor_events",
                 "monitor",
@@ -764,6 +774,11 @@ class WorkbenchToolBridge:
             symbol=arguments.get("symbol"),
             industry=arguments.get("industry"),
         )
+
+    def _get_market_structure(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from backend.stock_domain.market_structure import get_market_structure
+
+        return get_market_structure(str(arguments.get("symbol") or ""))
 
     def _get_monitor_events(self, arguments: dict[str, Any]) -> dict[str, Any]:
         symbol = str(arguments.get("symbol") or "").upper() or None

@@ -23,6 +23,7 @@ class ExecutionPolicy:
         "get_stock_financial",
         "get_daily_history",
         "search_stock_intel",
+        "get_market_structure",
         "get_portfolio_snapshot",
         "get_active_risk_policy",
         "list_risk_policies",

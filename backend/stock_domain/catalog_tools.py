@@ -6,6 +6,62 @@ from backend.schemas import StockMaster
 from backend.stock_domain.provider_router import provider_router
 from backend.stock_domain.providers import AkShareMarketDataProvider
 
+# 知名别名补全（profile 英文/网站无法覆盖的中文俗称）
+KNOWN_STOCK_ALIASES: dict[str, list[str]] = {
+    "688825": ["长鑫存储", "cxmt", "CXMT", "ChangXin"],
+    "600519": ["茅台", "贵州茅台", "maotai"],
+    "000858": ["五粮液", "wuliangye"],
+    "AAPL": ["苹果", "Apple"],
+    "HK00700": ["腾讯", "Tencent", "00700"],
+}
+
+
+def enrich_stock_master(symbol: str, *, force: bool = False) -> dict:
+    """用巨潮 profile + 已知别名回填 industry/sector/aliases。"""
+    repo = provider_router.repo
+    if repo is None:
+        return {"ok": False, "error": "repository not initialized"}
+
+    normalized = symbol.strip().upper()
+    master = repo.get_stock_master(normalized)
+    if master is None:
+        return {"ok": False, "error": f"unknown symbol: {normalized}"}
+
+    needs_enrichment = force or not master.industry or not master.aliases
+    if not needs_enrichment:
+        return {"ok": True, "skipped": True, "symbol": normalized}
+
+    meta: dict = {}
+    primary = provider_router.primary
+    if isinstance(primary, AkShareMarketDataProvider) and master.market == "CN":
+        meta = primary.fetch_profile_metadata(normalized)
+
+    aliases = list(dict.fromkeys(
+        [*master.aliases, *KNOWN_STOCK_ALIASES.get(normalized, []), *meta.get("aliases", [])]
+    ))
+    industry = meta.get("industry") or master.industry
+    sector = meta.get("sector") or master.sector or industry
+
+    updated = StockMaster(
+        symbol=normalized,
+        name=meta.get("company_name") or master.name,
+        market=master.market,
+        industry=industry,
+        sector=sector,
+        aliases=aliases,
+        is_active=master.is_active,
+        created_at=master.created_at,
+        updated_at=master.updated_at,
+    )
+    repo.upsert_stock_master(updated)
+    return {
+        "ok": True,
+        "symbol": normalized,
+        "industry": industry,
+        "sector": sector,
+        "aliases": aliases,
+    }
+
 
 def import_a_share_master() -> dict:
     """Import all A-share stocks from AKShare into stock_master table.

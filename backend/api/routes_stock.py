@@ -11,6 +11,7 @@ from backend.schemas import StockQuote, now_iso
 from backend.stock_domain.financial_tools import get_stock_financial
 from backend.stock_domain.history_tools import get_daily_history
 from backend.stock_domain.intel_tools import search_stock_intel, social_sentiment
+from backend.stock_domain.market_structure import get_market_structure
 from backend.stock_domain.report_tools import generate_stock_dashboard
 
 router = APIRouter(prefix="/api/stocks", tags=["stocks"])
@@ -83,6 +84,11 @@ def stock_dashboard(symbol: str, request: Request, services: AppServices = Depen
 @router.get("/{symbol}/financial")
 def stock_financial(symbol: str):
     return get_stock_financial(symbol)
+
+
+@router.get("/{symbol}/market-structure")
+def stock_market_structure(symbol: str):
+    return get_market_structure(symbol)
 
 
 @router.post("/{symbol}/research")

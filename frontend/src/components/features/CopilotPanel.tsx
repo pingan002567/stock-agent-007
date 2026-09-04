@@ -10,6 +10,7 @@ import { CopilotMessageItem, type ToolInfo } from "@/components/features/Copilot
 import { CopilotStreamingMessage } from "@/components/features/CopilotStreamingMessage";
 import { ContextCard } from "@/components/features/ContextCard";
 import { NextActions } from "@/components/features/NextActions";
+import { RESEARCH_FUNNEL } from "@/lib/researchFunnel";
 
 function dateHeader(dateStr: string): string {
   const d = new Date(dateStr);
@@ -40,18 +41,47 @@ type ToolItem = {
 
 type GroupedItem =
   | { t: "msg"; msg: CopilotMessage; aborted?: boolean }
-  | { t: "ai"; msg: CopilotMessage; tools: ToolItem[] };
+  | { t: "ai"; msg: CopilotMessage; tools: ToolItem[]; incomplete?: boolean };
 
-function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null): GroupedItem[] {
+function pushIncompleteRun(
+  out: GroupedItem[],
+  rid: string,
+  tools: ToolItem[],
+  msgs: CopilotMessage[],
+) {
+  const anchor = msgs.find((m) => m.run_id === rid && m.role === "user");
+  if (!anchor || !tools.length) return;
+  out.push({
+    t: "ai",
+    incomplete: true,
+    tools,
+    msg: {
+      message_id: `incomplete-${rid}`,
+      session_id: anchor.session_id,
+      role: "assistant",
+      kind: "partial_answer",
+      text: "",
+      payload: { incomplete: true },
+      created_at: anchor.created_at,
+      run_id: rid,
+    },
+  });
+}
+
+export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null): GroupedItem[] {
   // 识别已完成的 run（有 final_answer 或 error），并按 call_id 预收集 tool_result。
   // 不能按相邻位置配对：模型常一次批量发多个 tool_call，顺序是 call×N 再 result×N，
   // 相邻配对会全部落空、把成功的工具误判为失败。改为按 call_id 匹配。
   const completedRuns = new Set<string>();
+  const runsWithOutput = new Set<string>();
   const lastFinalIndex = new Map<string, number>();
   const resultByCallId = new Map<string, Record<string, unknown>>();
   for (let idx = 0; idx < msgs.length; idx++) {
     const msg = msgs[idx];
     const ev = parseCopilotEvent(msg as unknown as Record<string, unknown>);
+    if (msg.run_id && msg.role !== "user") {
+      runsWithOutput.add(msg.run_id);
+    }
     if (msg.run_id) {
       if (msg.kind === "final_answer") {
         completedRuns.add(msg.run_id);
@@ -113,10 +143,25 @@ function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null): Grou
       pendingTools.delete(rid);
       out.push({ t: "ai", msg, tools });
     } else if (msg.role === "user") {
-      // 无终局(final/error)且非进行中的 run:流被中断,给占位说明,别让消息悬空
-      const aborted = !!msg.run_id && !completedRuns.has(msg.run_id) && msg.run_id !== activeRunId;
+      if (msg.run_id) {
+        for (const [pendingRid, tools] of [...pendingTools.entries()]) {
+          if (pendingRid === msg.run_id || completedRuns.has(pendingRid)) continue;
+          pushIncompleteRun(out, pendingRid, tools, msgs);
+          pendingTools.delete(pendingRid);
+        }
+      }
+      // 仅当 run 完全没有任何助手/工具输出时才视为「中断」；已有工具链路的 run 由 incomplete 展示。
+      const aborted = !!msg.run_id
+        && !completedRuns.has(msg.run_id)
+        && msg.run_id !== activeRunId
+        && !runsWithOutput.has(msg.run_id);
       out.push({ t: "msg", msg, aborted });
     }
+  }
+
+  for (const [rid, tools] of pendingTools) {
+    if (!tools.length || completedRuns.has(rid)) continue;
+    pushIncompleteRun(out, rid, tools, msgs);
   }
 
   return out;
@@ -132,7 +177,7 @@ export function CopilotPanel() {
   const {
     messages,
     sending, streamMessage, copiedId,
-    handleCopy,
+    handleCopy, handleSend,
   } = useCopilotChat();
 
   const { openDetail } = useChatDetail();
@@ -220,6 +265,9 @@ export function CopilotPanel() {
                 {copiedId === item.msg.message_id ? "已复制" : "复制"}
               </button>
             </div>
+            {item.incomplete && (
+              <div className="msg-aborted">— 本轮未完成，未生成最终回答 —</div>
+            )}
             {suggestedActions && suggestedActions.length > 0 && (
               <NextActions actions={suggestedActions} onNavigate={handleNavigate} onApi={handleApi} />
             )}
@@ -252,8 +300,22 @@ export function CopilotPanel() {
 
           {messages.length === 0 && !sending && (
             <div className="empty-state">
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>开始一段对话</div>
-              <div style={{ fontSize: 12, color: "var(--muted)" }}>研究个股、检查持仓风险、跑回测,或随便聊聊</div>
+              <div className="empty-title">按漏斗做研究</div>
+              <div className="empty-desc">圈候选 → 体检 → 深研 → 进自选。只做研究，不下单。</div>
+              <div className="funnel-chips">
+                {RESEARCH_FUNNEL.map((item) => (
+                  <button
+                    key={item.step}
+                    type="button"
+                    className="followup-chip"
+                    title={item.hint}
+                    disabled={sending}
+                    onClick={() => void handleSend(item.prompt)}
+                  >
+                    {item.step}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 

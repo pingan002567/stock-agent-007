@@ -211,7 +211,7 @@
     (async function tick() {
       if (await probe(DEFAULT_PORT)) return enter(DEFAULT_PORT);
       if (Date.now() - started > 8000)
-        $("splash-hint").innerHTML = "后端未启动？请在项目目录运行 <code>./start.sh</code>";
+        $("splash-hint").innerHTML = "请用 Tauri 打开本应用（<code>make run</code>），在引导页完成服务注册";
       setTimeout(tick, 800);
     })();
   }

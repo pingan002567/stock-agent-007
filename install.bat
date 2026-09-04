@@ -211,7 +211,7 @@ echo ║           安装完成!                           ║
 echo ╠═══════════════════════════════════════════════╣
 echo ║                                               ║
 echo ║  启动命令: start.bat （Windows 仅后端）        ║
-echo ║  桌面客户端: macOS 上使用 ./start.sh           ║
+echo ║  桌面客户端: macOS 上使用 make run              ║
 echo ║                                               ║
 echo ║  或手动启动后端:                              ║
 echo ║    start.bat --dev                            ║

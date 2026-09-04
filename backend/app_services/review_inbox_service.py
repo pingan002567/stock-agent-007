@@ -143,6 +143,7 @@ class ReviewInboxService:
         items.extend(self._monitor_items())
         items.extend(self._report_items())
         items.extend(self._snapshot_items())
+        items.extend(self._ops_items())
         return items
 
     def _draft_items(self) -> list[ReviewInboxItem]:
@@ -330,6 +331,56 @@ class ReviewInboxService:
                     updated_at=snapshot.created_at,
                     evidence_refs=["paper_portfolio_snapshot", "paper_portfolio_projection", "provider_router"],
                     snapshot_id=snapshot.snapshot_id,
+                )
+            )
+        return items
+
+    def _ops_items(self) -> list[ReviewInboxItem]:
+        items: list[ReviewInboxItem] = []
+        data = self.repo.get_config("scheduled_tasks", {"items": []})
+        for task in data.get("items") or []:
+            if not isinstance(task, dict):
+                continue
+            if str(task.get("last_status") or "") != "failed":
+                continue
+            task_id = str(task.get("task_id") or "")
+            run_id = str(task.get("last_run_id") or task.get("last_run_at") or "unknown")
+            occurred = str(task.get("last_run_at") or now_iso())
+            items.append(
+                ReviewInboxItem(
+                    item_key=f"scheduled_task:{task_id}:{run_id}:failed",
+                    item_type="scheduled_task_failed",
+                    source_type="scheduled_task",
+                    source_id=task_id,
+                    title=f"{task.get('name') or task_id} 值班任务失败",
+                    summary=str(task.get("last_error") or "定时任务未收口，需人工复核。"),
+                    priority="high",
+                    severity="failed",
+                    occurred_at=occurred,
+                    updated_at=occurred,
+                    evidence_refs=["scheduled_task"],
+                    report_id=task.get("last_report_id"),
+                )
+            )
+        for report in self.repo.list_reports(report_type="ops_briefing", limit=5):
+            exceptions = list((report.payload or {}).get("exceptions") or [])
+            if not exceptions:
+                continue
+            high = any(item.get("code") == "run_failed" for item in exceptions if isinstance(item, dict))
+            items.append(
+                ReviewInboxItem(
+                    item_key=f"ops_briefing:{report.report_id}:exceptions",
+                    item_type="ops_briefing_exceptions",
+                    source_type="report",
+                    source_id=report.report_id,
+                    title=f"{report.title} 有例外待复核",
+                    summary=report.conclusion or f"{len(exceptions)} 项例外。",
+                    priority="high" if high or report.degraded else "medium",
+                    severity="failed" if high else "warning",
+                    occurred_at=report.created_at,
+                    updated_at=report.created_at,
+                    evidence_refs=list(report.evidence_refs) or ["ops_briefing"],
+                    report_id=report.report_id,
                 )
             )
         return items

@@ -95,6 +95,7 @@ def test_report_service_templates_generate_and_rerun_quality(services):
         "monitor_review",
         "strategy_backtest",
         "paper_portfolio_review",
+        "ops_briefing",
     }
 
     report = services.report_service.generate(
@@ -106,6 +107,76 @@ def test_report_service_templates_generate_and_rerun_quality(services):
     rerun = services.report_service.rerun_quality(report.report_id)
     assert rerun["quality_status"] == report.quality_status
     assert len(services.repo.list_report_quality_checks(report.report_id)) == 2
+
+
+def test_ops_briefing_report_composes_snapshot_without_trade_actions(services):
+    services.repo.upsert_holding(
+        HoldingPosition(symbol="AAPL", name="Apple", quantity=10, market_value=1937, weight_pct=9.5)
+    )
+    report = services.report_service.generate(
+        ReportGenerateRequest(
+            report_type="ops_briefing",
+            source_type="scheduled_task",
+            source_id="sched_premarket",
+            options={
+                "session": "premarket",
+                "run_status": "completed",
+                "narrative": "今日关注集中度与隔夜情报。",
+                "task_name": "盘前简报",
+            },
+        )
+    )
+    assert report.report_type == "ops_briefing"
+    assert report.source_type == "scheduled_task"
+    assert report.execution_guard["auto_trade"] is False
+    assert report.content.startswith("# ")
+    assert "仅供研究" in report.content
+    assert "## 例外" in report.content
+    assert "## 持仓与自选" in report.content
+    assert report.payload["session"] == "premarket"
+    assert report.payload["auto_trade"] is False
+    assert "今日关注集中度" in report.conclusion
+    assert services.report_service.latest_ops_briefing().report_id == report.report_id
+
+
+def test_ops_briefing_failed_run_marks_degraded_and_surfaces_in_inbox(services):
+    report = services.report_service.generate(
+        ReportGenerateRequest(
+            report_type="ops_briefing",
+            source_type="scheduled_task",
+            source_id="sched_premarket",
+            options={
+                "session": "premarket",
+                "run_status": "failed",
+                "run_error": "timeout after 900s",
+                "task_name": "盘前简报",
+            },
+        )
+    )
+    assert report.degraded is True
+    assert any(item.get("code") == "run_failed" for item in report.payload["exceptions"])
+    items = {item.item_key: item for item in services.review_inbox_service.list_items()}
+    key = f"ops_briefing:{report.report_id}:exceptions"
+    assert key in items
+    assert items[key].priority == "high"
+
+
+def test_ops_briefing_focuses_top_k_when_universe_exceeds_15(services):
+    for i in range(16):
+        services.repo.upsert_watchlist_item(
+            WatchlistItem(symbol=f"T{i:03d}", name=f"标的{i}", group="观察")
+        )
+    report = services.report_service.generate(
+        ReportGenerateRequest(
+            report_type="ops_briefing",
+            source_type="scheduled_task",
+            source_id="sched_close",
+            options={"session": "close", "run_status": "completed", "task_name": "收盘体检"},
+        )
+    )
+    assert "仅深拉 Top 8" in report.content
+    assert len(report.payload["focus_symbols"]) <= 8
+    assert report.payload["watchlist_count"] >= 16
 
 
 def test_import_holding_updates_context(services):
@@ -888,6 +959,21 @@ def test_permission_allows_draft_but_blocks_execution(services):
     assert "real order execution is disabled" in str(exc.value)
 
 
+def test_copilot_create_run_permission_denied_does_not_create_session(services):
+    before = len(services.repo.list_copilot_sessions(limit=200))
+    with pytest.raises(PermissionDenied):
+        services.copilot_service.create_run(
+            CopilotRequest(
+                message="分析 AAPL 风险",
+                page="stock",
+                symbol="AAPL",
+                authority_level=AuthorityLevel.A2,
+            )
+        )
+    after = len(services.repo.list_copilot_sessions(limit=200))
+    assert after == before
+
+
 def test_copilot_routes_and_streams_events(services):
     run = services.copilot_service.create_run(
         CopilotRequest(message="分析 AAPL 风险", page="stock", symbol="AAPL", authority_level=AuthorityLevel.A4)
@@ -1360,60 +1446,60 @@ class RaisingPrimaryProvider:
         raise ProviderError("sectors failed")
 
 
-def test_provider_router_falls_back_to_mock_when_primary_is_unavailable():
+def test_provider_router_falls_back_to_unavailable_when_primary_is_unavailable():
     router = ProviderRouter(primary=UnavailablePrimaryProvider(), fallback=MockMarketDataProvider())
+    router._provider_for_market = lambda market: router.primary
 
     quote = router.get_quote("600519")
-    assert quote.source == "mock_adapter"
+    assert quote.source == "unavailable"
     assert quote.degraded is True
-    assert quote.degraded_reason == "primary_stub optional dependency is not installed"
+    assert quote.degraded_reason is not None
+    assert "primary_stub" in quote.degraded_reason
     status = router.status().to_dict()
     assert status["akshare_available"] is False
-    assert status["active_provider"] == "mock_adapter"
     assert status["fallback_provider"] == "mock_adapter"
     assert status["degraded"] is True
-    assert status["degraded_reason"] == "primary_stub optional dependency is not installed"
-    assert status["capabilities"]["quote"]["degraded_reason"] == "primary_stub optional dependency is not installed"
+    assert status["degraded_reason"] is not None
 
     history = router.get_history("HK00700", days=3)
-    assert history["source"] == "mock_adapter"
+    assert history["source"] == "unavailable"
     assert history["degraded"] is True
-    assert history["degraded_reason"] == "primary_stub optional dependency is not installed"
-    assert len(history["items"]) == 3
+    assert history["degraded_reason"] is not None
+    assert history["items"] == []
 
     intel = router.search_intel("600519")
-    assert intel["source"] == "mock_adapter"
+    assert intel["source"] == "unavailable"
     assert intel["degraded"] is True
-    assert intel["degraded_reason"] == "primary_stub optional dependency is not installed"
-    assert intel["items"]
+    assert intel["degraded_reason"] is not None
+    assert intel["items"] == []
 
 
-def test_provider_router_falls_back_to_mock_when_primary_raises():
+def test_provider_router_falls_back_to_unavailable_when_primary_raises():
     router = ProviderRouter(primary=RaisingPrimaryProvider(), fallback=MockMarketDataProvider())
+    router._provider_for_market = lambda market: router.primary
 
     quote = router.get_quote("600519")
-    assert quote.source == "mock_adapter"
+    assert quote.source == "unavailable"
     assert quote.degraded is True
     assert quote.degraded_reason == "primary_stub: quote failed for 600519"
     status = router.status().to_dict()
     assert status["akshare_available"] is True
-    assert status["active_provider"] == "mock_adapter"
     assert status["fallback_provider"] == "mock_adapter"
     assert status["degraded"] is True
     assert status["degraded_reason"] == "primary_stub: quote failed for 600519"
     assert status["capabilities"]["quote"]["degraded_reason"] == "primary_stub: quote failed for 600519"
 
     history = router.get_history("HK00700", days=4)
-    assert history["source"] == "mock_adapter"
+    assert history["source"] == "unavailable"
     assert history["degraded"] is True
     assert history["degraded_reason"] == "primary_stub: history failed for HK00700"
-    assert len(history["items"]) == 4
+    assert history["items"] == []
 
     intel = router.search_intel("600519")
-    assert intel["source"] == "mock_adapter"
+    assert intel["source"] == "unavailable"
     assert intel["degraded"] is True
     assert intel["degraded_reason"] == "primary_stub: intel failed for 600519"
-    assert intel["items"]
+    assert intel["items"] == []
 
 
 class HealthyCnOnlyPrimaryProvider:
@@ -1663,6 +1749,7 @@ def test_stock_research_report_includes_industry_section_with_degradation_warnin
     report = result["report"] if isinstance(result, dict) and "report" in result else result
     content = report.content if hasattr(report, "content") else report["content"]
     assert "## 行业与竞争格局" in content
+    assert "## 市场结构" in content
     assert "行业数据不可用" in content  # 离线明确降级，不编数据
 
     report_id = report.report_id if hasattr(report, "report_id") else report["report_id"]

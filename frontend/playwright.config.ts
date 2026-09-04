@@ -9,7 +9,7 @@ export default defineConfig({
     headless: true,
   },
   webServer: {
-    command: "cd .. && ./start.sh --backend-only --dev",
+    command: "cd .. && make backend-dev",
     port: 8686,
     timeout: 120000,
     reuseExistingServer: true,

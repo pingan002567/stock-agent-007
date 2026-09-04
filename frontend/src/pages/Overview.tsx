@@ -19,12 +19,24 @@ interface OverviewData {
   watchlist?: WatchItem[]; holdings?: HoldingSummary[];
   tasks?: TaskItem[]; monitor_summary?: { event_count?: number; high_count?: number };
   market?: string;
+  latest_ops_briefing?: OpsBriefingCard | null;
+  inbox_summary?: { open_count?: number; high_count?: number; overdue_count?: number };
+}
+interface OpsBriefingCard {
+  report_id: string;
+  title?: string;
+  conclusion?: string;
+  created_at?: string;
+  quality_status?: string;
+  session?: string;
+  exception_count?: number;
+  degraded?: boolean;
 }
 interface IndexInfo { code?: string; name?: string; last?: number; change_pct?: number }
 interface ReportItem { report_id: string; title?: string; status?: string; created_at?: string }
 
 export default function Overview() {
-  const { appDataCache, globalLoading } = useAppState();
+  const { appDataCache, globalLoading, setCurrentScreen } = useAppState();
   const [data, setData] = useState<OverviewData | null>(null);
   const [events, setEvents] = useState<MonitorEvent[]>([]);
   const [indices, setIndices] = useState<IndexInfo[]>([]);
@@ -80,12 +92,55 @@ export default function Overview() {
                 tone: (data.portfolio_summary?.max_weight_pct ?? 0) >= 15 ? "down" : undefined,
                 prompt: "我的持仓集中度是否过高?哪只需要减仓?" },
               { label: "现金", value: pct(data.portfolio_summary?.cash_pct) },
+              { label: "待办", value: data.inbox_summary?.open_count ?? 0,
+                tone: (data.inbox_summary?.high_count ?? 0) > 0 ? "down" : undefined,
+                prompt: "总结当前待办：高优有哪些、哪些来自值班失败或报告例外？" },
               { label: "高优告警", value: events.filter((e) => e.severity === "high").length,
                 tone: events.some((e) => e.severity === "high") ? "down" : undefined,
                 prompt: "分析当前高优告警的根因,并给出处理建议" },
             ]}
             actions={<AskAiButton prompt="今天我的组合表现如何?有什么需要关注的风险或机会?" />}
           />
+
+          <div className="panel">
+            <div className="panel-header">
+              <div className="panel-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14,2 14,8 20,8"/>
+                </svg>
+                今日简报
+                {data.latest_ops_briefing?.exception_count ? (
+                  <span className="panel-badge">{data.latest_ops_briefing.exception_count} 例外</span>
+                ) : null}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" className="small" onClick={() => setCurrentScreen("monitor")}>待办</button>
+                <button type="button" className="small" onClick={() => setCurrentScreen("reports")}>报告</button>
+              </div>
+            </div>
+            <div className="panel-body">
+              {data.latest_ops_briefing ? (
+                <div
+                  className="event-item"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setCurrentScreen("reports")}
+                  onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") setCurrentScreen("reports"); }}
+                  style={{ cursor: "pointer" }}
+                >
+                  <div className={`event-dot ${data.latest_ops_briefing.degraded || (data.latest_ops_briefing.exception_count ?? 0) > 0 ? "warning" : "info"}`} />
+                  <div className="event-content">
+                    <div className="event-title">{data.latest_ops_briefing.title}</div>
+                    <div className="event-desc">{data.latest_ops_briefing.conclusion}</div>
+                  </div>
+                  <div className="event-time">{data.latest_ops_briefing.created_at?.slice(5, 16).replace("T", " ") ?? ""}</div>
+                </div>
+              ) : (
+                <div className="muted">今日尚无值班简报。默认每天 08:30 盘前任务会自动生成；也可在「任务」页立即运行。</div>
+              )}
+            </div>
+          </div>
 
           {/* 指数条（原市场页并入：每股一列 mono 点位+涨跌） */}
           {indices.length > 0 && (

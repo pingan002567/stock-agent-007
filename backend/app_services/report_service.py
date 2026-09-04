@@ -67,6 +67,15 @@ REPORT_TEMPLATE_REGISTRY: tuple[ReportTemplate, ...] = (
         sections=["组合概览", "持仓变化", "风险策略引用", "Warnings", "执行约束"],
         version="v0.16",
     ),
+    ReportTemplate(
+        template_id="ops_briefing_default",
+        report_type="ops_briefing",
+        name="值班简报模板",
+        summary="定时任务结束后落盘的值班简报：结论、持仓/自选、盯盘例外与数据源状态。不自动交易。",
+        source_types=["scheduled_task"],
+        sections=["值班结论", "指数与数据源", "持仓与自选", "例外", "观察", "执行约束"],
+        version="v0.20",
+    ),
 )
 
 
@@ -135,6 +144,10 @@ class ReportService:
 
     def list_reports(self) -> list[Report]:
         return self.repo.list_reports()
+
+    def latest_ops_briefing(self) -> Report | None:
+        items = self.repo.list_reports(report_type="ops_briefing", limit=1)
+        return items[0] if items else None
 
     def get_report(self, report_id: str) -> Report:
         report = self.repo.get_report(report_id)
@@ -528,6 +541,8 @@ class ReportService:
                 "payload": snapshot,
                 "evidence_refs": ["paper_portfolio_snapshot", "paper_portfolio_projection"],
             }
+        if request.source_type == "scheduled_task":
+            return self._resolve_scheduled_task_source(request)
         raise KeyError(f"unsupported source_type: {request.source_type}")
 
     def _resolve_monitor_event(self, source_id: str) -> EventContext:
@@ -563,6 +578,8 @@ class ReportService:
             return self._compose_strategy_backtest(request, template, source, payload)
         if request.report_type == "paper_portfolio_review":
             return self._compose_paper_portfolio_review(request, template, source, payload)
+        if request.report_type == "ops_briefing":
+            return self._compose_ops_briefing(request, template, source, payload)
         raise KeyError(f"unsupported report_type: {request.report_type}")
 
     def _compose_stock_research(
@@ -627,10 +644,16 @@ class ReportService:
                     [
                         ["趋势", tech["trend"]],
                         ["动能", tech["momentum"]],
-                        ["支撑位", rc.fmt(tech["support"])],
-                        ["压力位", rc.fmt(tech["resistance"])],
+                        ["MA5 / MA20", f"{rc.fmt(tech.get('ma5'))} / {rc.fmt(tech.get('ma20'))}"],
+                        ["RSI14", rc.fmt(tech.get("rsi14"))],
+                        ["量比", rc.fmt(tech.get("volume_ratio"), 3)],
+                        ["支撑位（近20日低）", rc.fmt(tech["support"])],
+                        ["压力位（近20日高）", rc.fmt(tech["resistance"])],
                     ],
                 ),
+                "",
+                "## 市场结构",
+                *self._market_structure_section(context, dashboard.get("market_structure") or {}),
                 "",
                 "## 行业与竞争格局",
                 *self._industry_section(context),
@@ -642,6 +665,7 @@ class ReportService:
                         ["当前仓位", rc.gauge(holding.weight_pct, 100, suffix="%")],
                         ["建议仓位", rc.gauge(advice["suggested_weight"], 100, suffix="%")],
                         ["操作", advice["action"]],
+                        ["持仓成本", rc.fmt(holding.cost) if holding.cost is not None else "—"],
                         ["持仓盈亏", rc.pct_marker(holding.pnl_pct) if holding.pnl_pct is not None else "—"],
                     ],
                 ),
@@ -964,6 +988,192 @@ class ReportService:
             },
         )
 
+    def _resolve_scheduled_task_source(self, request: ReportGenerateRequest) -> dict[str, Any]:
+        options = request.options or {}
+        holdings = self.repo.list_holdings()
+        watchlist = self.repo.list_watchlist()
+        events = self.monitor_service.list_events(limit=20)
+        market_review: dict[str, Any] = {}
+        try:
+            from backend.stock_domain.provider_router import provider_router
+
+            raw = provider_router.get_market_review()
+            market_review = raw if isinstance(raw, dict) else {}
+        except Exception as exc:  # 简报必须能落盘，指数源失败只记例外
+            market_review = {"degraded": True, "degraded_reason": str(exc)[:200]}
+        task_name = str(options.get("task_name") or request.source_id)
+        session = str(options.get("session") or "premarket")
+        if session not in {"premarket", "close", "weekly"}:
+            session = "premarket"
+        return {
+            "source_id": request.source_id,
+            "source_label": task_name,
+            "symbol": "",
+            "payload": {
+                "task_id": request.source_id,
+                "task_name": task_name,
+                "session": session,
+                "run_id": options.get("run_id"),
+                "run_status": options.get("run_status"),
+                "run_error": options.get("run_error"),
+                "narrative": str(options.get("narrative") or "")[:4000],
+                "holdings": [model_to_dict(item) for item in holdings],
+                "watchlist": [model_to_dict(item) for item in watchlist],
+                "monitor_events": [model_to_dict(item) for item in events],
+                "market_review": market_review,
+            },
+            "evidence_refs": [
+                "scheduled_task",
+                "holdings",
+                "watchlist",
+                "monitor_event",
+                "provider_router",
+            ],
+        }
+
+    def _compose_ops_briefing(
+        self,
+        request: ReportGenerateRequest,
+        template: ReportTemplate,
+        source: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> Report:
+        session = str(payload.get("session") or "premarket")
+        session_title = {
+            "premarket": "盘前值班简报",
+            "close": "收盘值班简报",
+            "weekly": "周度值班复盘",
+        }.get(session, "值班简报")
+        title = request.title or f"{session_title} · {source['source_label']}"
+        market = payload.get("market_review") if isinstance(payload.get("market_review"), dict) else {}
+        market_degraded = bool(market.get("degraded"))
+        run_failed = str(payload.get("run_status") or "") == "failed" or bool(payload.get("run_error"))
+        holdings = [item for item in (payload.get("holdings") or []) if isinstance(item, dict)]
+        watchlist = [item for item in (payload.get("watchlist") or []) if isinstance(item, dict)]
+        focus_holdings, focus_watchlist, focus_notes = _ops_focus_tables(holdings, watchlist)
+        exceptions = _ops_briefing_exceptions(payload)
+        observations = _ops_briefing_observations(payload) + focus_notes
+        conclusion = _ops_briefing_conclusion(payload, exceptions, observations)
+        holding_rows = [
+            [
+                f"{item.get('symbol') or '—'} {item.get('name') or ''}".strip(),
+                rc.fmt(item.get("market_value")),
+                rc.fmt(item.get("weight_pct")),
+            ]
+            for item in focus_holdings
+        ] or [["—", "—", "无持仓"]]
+        watch_rows = [
+            [item.get("symbol") or "—", item.get("name") or "—", item.get("group") or "—"]
+            for item in focus_watchlist
+        ] or [["—", "—", "无自选"]]
+        exception_lines = [
+            f"- `{item.get('code')}`"
+            + (f" `{item['symbol']}`" if item.get("symbol") else "")
+            + f"：{item.get('message') or '需复核'}"
+            for item in exceptions
+        ] or ["- 无自动标记的例外"]
+        observation_lines = [f"- {item}" for item in observations] or ["- 无额外观察"]
+        index_rows: list[list[str]] = []
+        if market_degraded:
+            index_rows.append(
+                ["指数", "不可用", str(market.get("degraded_reason") or "上游降级，未编造点位")]
+            )
+        else:
+            for idx in (market.get("indices") or [])[:6]:
+                if not isinstance(idx, dict):
+                    continue
+                index_rows.append(
+                    [
+                        str(idx.get("name") or idx.get("code") or "—"),
+                        rc.fmt(idx.get("last")),
+                        rc.fmt(idx.get("change_pct")),
+                    ]
+                )
+        if not index_rows:
+            index_rows = [["指数", "—", "无指数快照"]]
+        narrative = str(payload.get("narrative") or "").strip()
+        narrative_block = [narrative[:2000]] if narrative else ["（本轮 Copilot 无值班叙事，以上为系统快照。）"]
+        execution_guard = {
+            "research_only": True,
+            "auto_trade": False,
+            "place_real_order_enabled": False,
+        }
+        content = "\n".join(
+            [
+                f"# {title}",
+                "",
+                f"> **值班结论**：{conclusion}",
+                "",
+                "## 指数与数据源",
+                *rc.table(["标的", "点位", "涨跌/说明"], index_rows),
+                f"- 行情源：`{market.get('source') or 'provider_router'}`"
+                + (" · 已降级" if market_degraded else ""),
+                "",
+                "## 持仓与自选",
+                f"持仓 {len(holdings)} 只 · 自选 {len(watchlist)} 只。",
+                "",
+                *rc.table(["持仓", "市值", "权重%"], holding_rows),
+                "",
+                *rc.table(["自选", "名称", "分组"], watch_rows),
+                "",
+                "## 例外",
+                *exception_lines,
+                "",
+                "## 观察",
+                *observation_lines,
+                "",
+                "## 值班叙事",
+                *narrative_block,
+                "",
+                "## 执行约束",
+                "- `execution_guard.auto_trade = false`（研究态，禁止自动下单）",
+                "",
+                "---",
+                "_仅供研究，不构成投资建议。_",
+            ]
+        )
+        report_payload = {
+            "session": session,
+            "task_id": payload.get("task_id") or source["source_id"],
+            "run_id": payload.get("run_id"),
+            "run_status": payload.get("run_status"),
+            "exceptions": exceptions,
+            "observations": observations,
+            "holdings_count": len(holdings),
+            "watchlist_count": len(watchlist),
+            "focus_symbols": [
+                str(item.get("symbol") or "").upper()
+                for item in [*focus_holdings, *focus_watchlist]
+                if item.get("symbol")
+            ],
+            "auto_trade": False,
+        }
+        return Report(
+            report_id=f"report_ops_{session}_{uuid4().hex[:8]}",
+            title=title,
+            symbol="",
+            report_type=request.report_type,
+            conclusion=conclusion,
+            evidence_count=len(holdings) + len(watchlist) + len(exceptions),
+            content=content,
+            template_id=template.template_id,
+            template_name=template.name,
+            source_type=request.source_type,
+            source_id=source["source_id"],
+            source_label=source["source_label"],
+            evidence_refs=list(source["evidence_refs"]),
+            valid_until=(_utc_now() + timedelta(hours=18)).isoformat(),
+            disclaimer="仅供研究，不构成投资建议。",
+            degraded=run_failed or market_degraded,
+            degraded_reason=(
+                str(payload.get("run_error") or market.get("degraded_reason") or "值班源数据降级")
+                if (run_failed or market_degraded)
+                else None
+            ),
+            execution_guard=execution_guard,
+            payload=report_payload,
+        )
+
     def _industry_section(self, context: StockContext) -> list[str]:
         """行业与竞争格局章节：非降级给硬数据表格，降级给明确说明（不编数据）。"""
         from backend.stock_domain.industry_tools import get_industry_context
@@ -1007,6 +1217,62 @@ class ReportService:
             ),
             "",
             "行业市值 Top5：",
+            *self._industry_top_lines(ctx),
+        ]
+        return lines
+
+    def _market_structure_section(self, context: StockContext, ms: dict[str, Any]) -> list[str]:
+        """市场结构：筹码与持仓成本分行；无筹码则明确降级，不编获利盘。"""
+        if not ms:
+            return ["> 市场结构数据不可用（本节降级）"]
+        chip = ms.get("chip") if isinstance(ms.get("chip"), dict) else {}
+        flow = ms.get("flow") if isinstance(ms.get("flow"), dict) else {}
+        tech = ms.get("technical") if isinstance(ms.get("technical"), dict) else {}
+        snap = ms.get("snapshot") if isinstance(ms.get("snapshot"), dict) else {}
+        rows: list[list[str]] = [
+            ["K 线根数", str(tech.get("bar_count") or "—")],
+            ["换手率", rc.fmt(snap.get("turnover_pct"), suffix="%") if snap.get("turnover_pct") is not None else "—"],
+        ]
+        if chip.get("degraded"):
+            rows.append(["筹码", f"不可用：{chip.get('reason') or '本市场无筹码数据'}"])
+            proxy = chip.get("proxy") if isinstance(chip.get("proxy"), dict) else {}
+            if proxy.get("vwap_20d") is not None:
+                rows.append(["近20日均价（非获利盘）", rc.fmt(proxy.get("vwap_20d"))])
+        else:
+            rows.extend(
+                [
+                    ["市场平均成本（非持仓成本）", rc.fmt(chip.get("market_avg_cost"))],
+                    ["现价 vs 平均成本", rc.pct_marker(chip.get("price_vs_avg_cost_pct")) if chip.get("price_vs_avg_cost_pct") is not None else "—"],
+                    ["获利比例", f"{round(chip['profit_ratio'] * 100, 1)}%" if chip.get("profit_ratio") is not None else "—"],
+                    ["套牢比例", f"{round(chip['trapped_ratio'] * 100, 1)}%" if chip.get("trapped_ratio") is not None else "—"],
+                    ["90% 成本区间", f"{rc.fmt(chip.get('cost_90_low'))} – {rc.fmt(chip.get('cost_90_high'))}"],
+                    ["筹码质量", chip.get("quality") or "—"],
+                    ["筹码日期", chip.get("as_of") or "—"],
+                ]
+            )
+        if flow.get("degraded"):
+            rows.append(["资金流向", f"不可用：{flow.get('reason') or '—'}"])
+        else:
+            rows.extend(
+                [
+                    ["主力净流入 1日", rc.fmt(flow.get("main_net_1d"))],
+                    ["主力净流入 5日", rc.fmt(flow.get("main_net_5d"))],
+                ]
+            )
+        holding_cost = context.holding.cost
+        rows.append(["用户持仓成本", rc.fmt(holding_cost) if holding_cost is not None else "（无持仓或未记录）"])
+        notes = []
+        if tech.get("volume_note"):
+            notes.append(str(tech["volume_note"]))
+        if chip.get("quality") == "low":
+            notes.append("筹码质量偏低，深研勿据此标高置信度")
+        lines = [*rc.table(["项", "数值"], rows)]
+        if notes:
+            lines.extend(["", *[f"- {item}" for item in notes]])
+        return lines
+
+    def _industry_top_lines(self, ctx: dict[str, Any]) -> list[str]:
+        return [
             *[
                 f"- {item['name']}（{item['symbol']}）PE {rc.fmt(item.get('pe'))} / 涨跌 {rc.pct_marker(item.get('change_pct')) if item.get('change_pct') is not None else '—'}"
                 for item in (ctx.get("top_constituents") or [])[:5]
@@ -1015,7 +1281,6 @@ class ReportService:
             "> 市值为推算口径（成交额/换手率），仅用于行业内相对排序 `[来源: industry]`；"
             "壁垒/上下游属定性判断，需结合研报与公开信息，本模板不自动生成。",
         ]
-        return lines
 
     def _build_quality_check(self, report: Report) -> ReportQualityCheck:
         issues: list[dict[str, Any]] = []
@@ -1119,3 +1384,105 @@ class ReportService:
         if delta is not None:
             bits.append(f"delta={delta}")
         return " | ".join(bits)
+
+
+def _ops_focus_tables(
+    holdings: list[dict[str, Any]],
+    watchlist: list[dict[str, Any]],
+    *,
+    threshold: int = 15,
+    top_k: int = 8,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    ranked_holdings = sorted(
+        holdings, key=lambda item: float(item.get("weight_pct") or 0), reverse=True
+    )
+    universe: list[str] = []
+    seen: set[str] = set()
+    for item in [*ranked_holdings, *watchlist]:
+        symbol = str(item.get("symbol") or "").upper()
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        universe.append(symbol)
+    if len(universe) <= threshold:
+        return ranked_holdings, watchlist, []
+    focus = set(universe[:top_k])
+    focus_holdings = [item for item in ranked_holdings if str(item.get("symbol") or "").upper() in focus]
+    focus_watchlist = [
+        item
+        for item in watchlist
+        if str(item.get("symbol") or "").upper() in focus
+        and str(item.get("symbol") or "").upper() not in {str(h.get("symbol") or "").upper() for h in focus_holdings}
+    ]
+    note = f"持仓+自选共 {len(universe)} 只，仅深拉 Top {top_k}，其余不逐只展开。"
+    return focus_holdings, focus_watchlist, [note]
+
+
+def _ops_briefing_one_liner(text: str) -> str:
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    first = raw.splitlines()[0].strip().lstrip("#").strip().lstrip("*- ").strip()
+    if first.startswith("{") or first.startswith("```"):
+        return ""
+    return first[:120]
+
+
+def _ops_briefing_exceptions(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    exceptions: list[dict[str, Any]] = []
+    if str(payload.get("run_status") or "") == "failed" or payload.get("run_error"):
+        exceptions.append(
+            {
+                "code": "run_failed",
+                "message": str(payload.get("run_error") or "定时任务 Copilot 运行失败"),
+            }
+        )
+    market = payload.get("market_review") if isinstance(payload.get("market_review"), dict) else {}
+    if market.get("degraded"):
+        exceptions.append(
+            {
+                "code": "market_degraded",
+                "message": str(market.get("degraded_reason") or "指数/行情源降级，未编造点位"),
+            }
+        )
+    for event in payload.get("monitor_events") or []:
+        if not isinstance(event, dict):
+            continue
+        if event.get("severity") not in {"high", "medium"}:
+            continue
+        exceptions.append(
+            {
+                "code": "monitor_event",
+                "symbol": event.get("symbol"),
+                "message": f"{event.get('title') or event.get('event_id')} · {event.get('severity')}",
+            }
+        )
+    return exceptions[:20]
+
+
+def _ops_briefing_observations(payload: dict[str, Any]) -> list[str]:
+    holdings = [item for item in (payload.get("holdings") or []) if isinstance(item, dict)]
+    watchlist = [item for item in (payload.get("watchlist") or []) if isinstance(item, dict)]
+    observations: list[str] = []
+    if not holdings and not watchlist:
+        observations.append("持仓与自选均为空，简报仅覆盖盯盘与数据源状态。")
+    elif not holdings:
+        observations.append("当前无持仓，关注点来自自选与盯盘。")
+    return observations
+
+
+def _ops_briefing_conclusion(
+    payload: dict[str, Any],
+    exceptions: list[dict[str, Any]],
+    observations: list[str],
+) -> str:
+    narrative = _ops_briefing_one_liner(str(payload.get("narrative") or ""))
+    if narrative:
+        return narrative
+    if any(item.get("code") == "run_failed" for item in exceptions):
+        return "值班 Copilot 未收口，已落快照供复核，未编造市场结论。"
+    if exceptions:
+        return f"发现 {len(exceptions)} 项例外，需人工复核；未给出交易指令。"
+    if observations:
+        return observations[0]
+    return "持仓、自选与盯盘已汇总，未见自动标记的例外。"

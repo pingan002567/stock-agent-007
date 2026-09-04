@@ -92,7 +92,7 @@ def _port_listening(port: int) -> bool:
 
 
 def _kill_listeners_on_port(port: int, *, exclude_pid: int | None = None) -> None:
-    """释放 127.0.0.1 上的监听端口（开发态 start.sh 直连 uvicorn 占用切换端口时用）。"""
+    """释放 127.0.0.1 上的监听端口（开发态 make backend-dev 直连 uvicorn 占用切换端口时用）。"""
     try:
         result = subprocess.run(
             ["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
@@ -250,6 +250,35 @@ def _update_workspace_registry(data_dir: Path, port: int) -> None:
     )
 
 
+def remove_from_workspace_registry(data_dir: Path) -> None:
+    """从 workspaces.json 移除一条注册记录（不存在则静默成功）。"""
+    registry_path = _state_dir() / "workspaces.json"
+    try:
+        items = json.loads(registry_path.read_text(encoding="utf-8"))
+        if not isinstance(items, list):
+            items = []
+    except (OSError, ValueError):
+        items = []
+    target = str(data_dir.resolve())
+    filtered = [w for w in items if isinstance(w, dict) and w.get("dir") != target]
+    if len(filtered) == len(items):
+        return
+    registry_path.write_text(
+        json.dumps(filtered, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def delete_workspace_directory(data_dir: Path) -> None:
+    """删除工作区数据目录（须由调用方保证非当前/非 launchd 注册目录）。"""
+    import shutil
+
+    if not data_dir.exists():
+        return
+    if not data_dir.is_dir():
+        raise ValueError(f"not a directory: {data_dir}")
+    shutil.rmtree(data_dir)
+
+
 def _write_plist(port: int, data_dir: Path, *, switching: bool = False) -> Path:
     logs = _state_dir() / "logs"
     logs.mkdir(parents=True, exist_ok=True)
@@ -363,7 +392,7 @@ def cmd_install(args: argparse.Namespace) -> dict[str, Any]:
                 time.sleep(1.0)
             _kill_listeners_on_port(requested, exclude_pid=old_pid)
     else:
-        # 无 launchd 服务时（./start.sh 开发态）：清掉占端口的直连 uvicorn，避免
+        # 无 launchd 服务时（make dev-stack 开发态）：清掉占端口的直连 uvicorn，避免
         # pick_port 顺延到其它端口而 WebView 仍连旧进程，导致工作区路径不更新
         requested = args.port or DEFAULT_PORT
         _kill_listeners_on_port(requested)

@@ -90,6 +90,17 @@ def test_report_write_intent():
     assert intent.skill == "report-writer"
 
 
+def test_ops_briefing_intent_for_scheduled_duty():
+    router = IntentRouter()
+    msg = (
+        "[定时任务·盘前简报 09-04 08:30]\n你是值班研究员。只做研究，不出买卖指令，禁止自动交易。\n"
+        "用户任务：汇总自选与持仓相关的隔夜要闻。"
+    )
+    intent = router.route(msg, page="chat")
+    assert intent.name == "ops_briefing"
+    assert intent.skill == "stock-researcher"
+
+
 def test_review_inbox_intent():
     router = IntentRouter()
     for msg in [
@@ -217,6 +228,20 @@ def test_report_with_risk_keywords():
     router = IntentRouter()
     intent = router.route("出一个风控报告", page="holdings")
     assert intent.name == "report_write"
+
+
+def test_scheduled_premarket_briefing_intent():
+    """盘前简报定时任务含「风险点」,须走 ops_briefing(A2) 而非 risk_review(A3)。"""
+    router = IntentRouter()
+    msg = (
+        "[定时任务·盘前简报 09-04 08:30] "
+        "生成今日盘前简报:汇总自选与持仓相关的隔夜要闻与情报,"
+        "列出今天需要重点关注的标的和风险点。"
+    )
+    intent = router.route(msg, page="chat")
+    assert intent.name == "ops_briefing"
+    assert intent.skill == "stock-researcher"
+    assert intent.required_authority == "A2"
 
 
 def test_keyword_priority_order():

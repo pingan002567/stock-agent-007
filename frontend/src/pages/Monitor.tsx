@@ -44,6 +44,10 @@ function ruleTypeLabel(t: string | undefined) {
   return RULE_TYPE_OPTIONS.find((o) => o.value === t)?.label ?? t ?? "unknown";
 }
 
+function ruleDisplayTitle(rule: MonitorRule) {
+  return rule.title?.trim() || ruleTypeLabel(rule.rule_type);
+}
+
 export default function Monitor() {
   const [events, setEvents] = useState<MonitorEvent[]>([]);
   const [rules, setRules] = useState<MonitorRule[]>([]);
@@ -315,16 +319,20 @@ export default function Monitor() {
                 {rules.length === 0 && !showAddRule ? (
                   <div className="muted">暂无规则</div>
                 ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div className="monitor-rule-list">
                     {rules.map((rule) => (
-                      <div key={rule.rule_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 12, background: "var(--bg-tertiary)", borderRadius: 8 }}>
-                        <div>
-                          <div style={{ fontSize: 13, fontWeight: 600 }}>{ruleTypeLabel(rule.rule_type)}</div>
-                          <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                            {rule.symbol ?? "全市场"} · {rule.threshold != null ? `阈值 ${rule.threshold}` : ""} {rule.keyword ? `关键词 ${rule.keyword}` : ""} {rule.cooldown_seconds ? `· ${rule.cooldown_seconds}s冷却` : ""}
+                      <div key={rule.rule_id} className="monitor-rule-row">
+                        <div className="monitor-rule-main">
+                          <div className="monitor-rule-title">{ruleDisplayTitle(rule)}</div>
+                          <div className="monitor-rule-meta">
+                            {rule.title?.trim() ? `${ruleTypeLabel(rule.rule_type)} · ` : ""}
+                            {rule.symbol ?? "全市场"}
+                            {rule.threshold != null ? ` · 阈值 ${rule.threshold}` : ""}
+                            {rule.keyword ? ` · 关键词 ${rule.keyword}` : ""}
+                            {rule.cooldown_seconds ? ` · ${rule.cooldown_seconds}s冷却` : ""}
                           </div>
                         </div>
-                        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                        <div className="monitor-rule-actions">
                           <ToggleSwitch checked={!!rule.enabled} onChange={() => void handleToggleRule(rule)} title={rule.enabled ? "暂停规则" : "启用规则"} />
                           <button className="small" style={{ color: "var(--red)" }} onClick={() => void handleDeleteRule(rule.rule_id)} type="button">删除</button>
                         </div>

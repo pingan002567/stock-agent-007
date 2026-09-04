@@ -6,8 +6,9 @@ import { PageHead } from "@/components/ui/PageHead";
 import { Pagination } from "@/components/ui/Pagination";
 import { formatTimeAgo } from "@/utils/format";
 import { apiPost, apiDelete } from "@/api/client";
-import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { StatusDot } from "@/components/ui/StatusDot";
+import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
+import { useAppState } from "@/hooks/useAppState";
 
 interface TaskItem { task_id: string; title: string; status?: string; source?: string; progress?: number; current_step?: string; created_at?: string }
 interface TaskStep { step_id?: string; name?: string; status?: string; skill?: string; tool?: string; duration_ms?: number }
@@ -15,6 +16,7 @@ interface ToolExecution { execution_id?: string; tool_name?: string; status?: st
 interface ScheduledTask {
   task_id: string; name: string; prompt?: string; schedule: string; enabled: boolean;
   next_run_at?: string | null; last_run_at?: string | null; last_status?: string | null; last_error?: string | null;
+  last_report_id?: string | null; last_run_id?: string | null; skip_reason?: string | null;
 }
 
 const SCHEDULE_LABEL = (s: string): string => {
@@ -25,8 +27,9 @@ const SCHEDULE_LABEL = (s: string): string => {
   return s;
 };
 
-/** 定时任务卡(mockup 08):到点自动发起 Copilot run,产物落聊天会话 */
+/** 定时任务卡:到点自动发起 Copilot run,结束后落值班简报到报告库 */
 function ScheduledTasksCard() {
+  const { setCurrentScreen } = useAppState();
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const load = useCallback(async () => {
@@ -66,7 +69,7 @@ function ScheduledTasksCard() {
       <div className="panel-body" style={{ padding: 0 }}>
         <table className="data-table">
           <thead>
-            <tr><th>任务</th><th>周期</th><th className="num">下次</th><th>上次结果</th><th style={{ width: 150 }}></th></tr>
+            <tr><th>任务</th><th>周期</th><th className="num">下次</th><th>上次结果</th><th style={{ width: 210 }}></th></tr>
           </thead>
           <tbody>
             {tasks.map((t) => (
@@ -77,11 +80,16 @@ function ScheduledTasksCard() {
                 <td>
                   {t.last_status === "running" ? <StatusDot tone="busy">运行中</StatusDot>
                     : t.last_status === "completed" ? <StatusDot tone="ok">成功 · {formatTimeAgo(t.last_run_at ?? undefined)}</StatusDot>
-                    : t.last_status === "failed" ? <StatusDot tone="bad">失败</StatusDot>
+                    : t.last_status === "failed" ? <StatusDot tone="bad">失败{t.last_error ? ` · ${t.last_error}` : ""}</StatusDot>
+                    : t.last_status === "skipped" ? <StatusDot tone="off">已跳过 · {t.last_error?.replace("已跳过：", "") || "休市"}</StatusDot>
+                    : t.skip_reason ? <span className="muted" style={{ fontSize: 12 }}>今日{t.skip_reason}</span>
                     : <span className="muted" style={{ fontSize: 12 }}>未运行</span>}
                 </td>
                 <td>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "flex-end", paddingRight: 6 }}>
+                    {t.last_report_id ? (
+                      <button className="small" onClick={() => setCurrentScreen("reports")} type="button">报告</button>
+                    ) : null}
                     <button className="small" disabled={busyId === t.task_id} onClick={() => void runNow(t)} type="button">立即运行</button>
                     <button className="small" style={{ color: "var(--red)" }} onClick={() => void remove(t)} type="button">✕</button>
                     <ToggleSwitch checked={t.enabled} disabled={busyId === t.task_id} onChange={() => void toggle(t)} />

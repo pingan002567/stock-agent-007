@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from backend.schemas import StockContext
+from backend.stock_domain.market_structure import get_market_structure
 
 
 def generate_stock_dashboard(context: StockContext, mode: str = "research") -> dict:
@@ -22,9 +23,8 @@ def generate_stock_dashboard(context: StockContext, mode: str = "research") -> d
     
     # 生成持仓建议
     holding_advice = _generate_holding_advice(context)
-    
-    # 生成技术面分析
-    technical_analysis = _generate_technical_analysis(context)
+    market_structure = get_market_structure(context.symbol)
+    technical_analysis = _generate_technical_analysis(context, market_structure)
     
     # 生成基本面分析
     fundamental_analysis = _generate_fundamental_analysis(context)
@@ -50,6 +50,7 @@ def generate_stock_dashboard(context: StockContext, mode: str = "research") -> d
         "holding_advice": holding_advice,
         "technical_analysis": technical_analysis,
         "fundamental_analysis": fundamental_analysis,
+        "market_structure": market_structure,
         "followups": ["追问基本面变化", "比较同板块标的", "生成持仓影响"],
         "disclaimer": "仅供研究，不构成投资建议。",
     }
@@ -83,33 +84,47 @@ def _generate_holding_advice(context: StockContext) -> dict:
     }
 
 
-def _generate_technical_analysis(context: StockContext) -> dict:
-    """生成技术面分析"""
+def _generate_technical_analysis(context: StockContext, market_structure: dict | None = None) -> dict:
+    """技术面：消费 get_market_structure 的 L0，不再用现价 ±5% 假支撑。"""
     change_pct = context.price.change_pct
-    
-    # 根据涨跌幅判断趋势
-    if change_pct >= 3:
-        trend = "强势上涨"
-        momentum = "强"
+    ms = market_structure or {}
+    tech = ms.get("technical") if isinstance(ms.get("technical"), dict) else {}
+
+    ma_stack = tech.get("ma_stack")
+    rsi = tech.get("rsi14")
+    if ma_stack == "bullish" or (isinstance(rsi, (int, float)) and rsi >= 60):
+        trend = "偏多"
+        momentum = "强" if isinstance(rsi, (int, float)) and rsi >= 70 else "中"
+    elif ma_stack == "bearish" or (isinstance(rsi, (int, float)) and rsi <= 40):
+        trend = "偏空"
+        momentum = "强" if isinstance(rsi, (int, float)) and rsi <= 30 else "中"
     elif change_pct >= 1:
         trend = "温和上涨"
         momentum = "中"
-    elif change_pct >= 0:
-        trend = "横盘整理"
-        momentum = "弱"
-    elif change_pct >= -1:
+    elif change_pct <= -1:
         trend = "温和下跌"
         momentum = "弱"
     else:
-        trend = "弱势下跌"
-        momentum = "强"
-    
+        trend = "横盘整理"
+        momentum = "弱"
+
+    support = tech.get("support_20")
+    resistance = tech.get("resistance_20")
     return {
         "trend": trend,
         "momentum": momentum,
         "change_pct": change_pct,
-        "support": round(context.price.last * 0.95, 2) if context.price.last else None,
-        "resistance": round(context.price.last * 1.05, 2) if context.price.last else None,
+        "support": support,
+        "resistance": resistance,
+        "ma5": tech.get("ma5"),
+        "ma10": tech.get("ma10"),
+        "ma20": tech.get("ma20"),
+        "ma60": tech.get("ma60"),
+        "rsi14": rsi,
+        "volume_ratio": tech.get("volume_ratio"),
+        "degraded": bool(tech.get("degraded")),
+        "missing": tech.get("missing") or [],
+        "source": "market_structure",
     }
 
 

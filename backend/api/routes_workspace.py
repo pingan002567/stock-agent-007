@@ -4,9 +4,9 @@
 服务→重写 plist→bootstrap 新目录），本进程随之被 launchd 终止；前端收到响应后
 轮询 /api/health 等新档案上线再整页刷新。
 
-开发态（``start.sh`` 直连 uvicorn）优先走 Tauri ``service_cli install`` 桥；
-HTTP ``/switch`` 在无 launchd 时也会 spawn install，但 ``start.sh`` 重启会覆盖——
-见 ``start.sh`` 对 launchd 后端的复用逻辑。
+开发态（``make dev-stack`` / ``scripts/stack.sh`` 直连 uvicorn）优先走 Tauri ``service_cli install`` 桥；
+HTTP ``/switch`` 在无 launchd 时也会 spawn install，但 ``make dev-stack`` 重启会覆盖——
+见 ``scripts/stack.sh`` 对 launchd 后端的复用逻辑。
 """
 from __future__ import annotations
 
@@ -133,3 +133,38 @@ def workspace_switch(payload: dict):
         "target": str(target),
         "port": int(config.get("port") or service_cli.DEFAULT_PORT),
     }
+
+
+@router.post("/remove")
+def workspace_remove(payload: dict):
+    """从注册表移除工作区，并可选删除本地数据目录。不可删除当前或 launchd 注册目录。"""
+    raw = str(payload.get("data_dir") or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="data_dir is required")
+    delete_files = bool(payload.get("delete_files", True))
+    try:
+        target = _resolved_dir(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    current = paths.data_dir().resolve()
+    if target == current:
+        raise HTTPException(status_code=400, detail="不能删除当前正在使用的工作区")
+
+    config = service_cli.read_service_config()
+    if config and config.get("data_dir"):
+        configured = Path(str(config["data_dir"])).expanduser().resolve()
+        if target == configured:
+            raise HTTPException(
+                status_code=409,
+                detail="不能删除 launchd 已注册的工作区，请先切换到其他工作区",
+            )
+
+    service_cli.remove_from_workspace_registry(target)
+    if delete_files:
+        try:
+            service_cli.delete_workspace_directory(target)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"删除数据目录失败: {exc}") from exc
+
+    return {"ok": True, "removed": str(target), "delete_files": delete_files}

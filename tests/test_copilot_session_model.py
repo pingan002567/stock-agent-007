@@ -32,3 +32,20 @@ def test_session_default_model_persists_and_updates(tmp_path):
 
     detail = client.get(f"/api/copilot/sessions/{session['session_id']}").json()
     assert detail["default_model"] == alt_ref
+
+
+def test_reconnect_with_slot_keeps_session_model(tmp_path, monkeypatch):
+    from backend.app_services.copilot_service import CopilotService
+    from backend.bootstrap import create_services
+
+    services = create_services(db_path=tmp_path / "slot.sqlite3", files_root=tmp_path / "files")
+    monkeypatch.setenv("WORKBENCH_DEERFLOW_MODE", "stub")
+    slot = {
+        "api_key": "sk-session",
+        "base_url": "https://api.deepseek.com",
+        "model_name": "deepseek-v4-flash",
+        "provider_id": "deepseek",
+    }
+    status = services.copilot_service._reconnect_with_slot(slot)
+    assert services.copilot_service.deerflow.model_name == "deepseek-v4-flash"
+    assert status["model_name"] == "deepseek-v4-flash"

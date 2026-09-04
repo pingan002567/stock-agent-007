@@ -43,6 +43,7 @@ def test_tool_bridge_registry_includes_default_tools_and_blocks_real_orders(brid
         "get_backtest_result",
         "get_daily_history",
         "get_industry_context",
+        "get_market_structure",
         "get_decision_journal_entry",
         "get_monitor_events",
         "get_monitor_rules",
@@ -595,6 +596,7 @@ def test_tool_bridge_lists_report_templates_generates_report_and_reads_quality(b
         "monitor_review",
         "strategy_backtest",
         "paper_portfolio_review",
+        "ops_briefing",
     }
 
     report = bridge.execute(
@@ -843,3 +845,31 @@ def test_tool_bridge_industry_context_degrades_cleanly_and_computes_percentiles(
     )["result"]
     assert by_industry["degraded"] is False
     assert "target" not in by_industry
+
+
+def test_tool_bridge_market_structure_hk_has_no_chip_ratios(bridge, monkeypatch):
+    from backend.stock_domain import market_structure
+
+    monkeypatch.setattr(
+        market_structure,
+        "get_daily_history",
+        lambda *a, **k: {
+            "items": [
+                {
+                    "date": f"2026-01-{i + 1:02d}",
+                    "open": 10 + i,
+                    "high": 10.5 + i,
+                    "low": 9.5 + i,
+                    "close": 10 + i,
+                    "volume": 1000,
+                }
+                for i in range(20)
+            ],
+            "source": "akshare",
+        },
+    )
+    monkeypatch.setattr(market_structure, "_snapshot_block", lambda *a, **k: {"degraded": True, "reason": "test"})
+    result = bridge.execute("get_market_structure", {"symbol": "HK00700"}, AuthorityLevel.A2)["result"]
+    assert result["chip"]["degraded"] is True
+    assert "profit_ratio" not in result["chip"]
+    assert result["technical"]["ma5"] is not None

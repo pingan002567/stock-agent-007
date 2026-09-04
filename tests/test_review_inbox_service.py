@@ -127,6 +127,33 @@ def test_review_inbox_generates_decision_journal_missing_snapshot_and_not_closed
 
 
 def test_review_inbox_generates_high_and_medium_monitor_event_items(services):
+    from backend.schemas import EventContext, now_iso
+
+    ts = now_iso()
+    services.repo.save_monitor_event(
+        EventContext(
+            event_id="event_aapl_concentration",
+            source="risk_rule",
+            symbol="AAPL",
+            title="AAPL 仓位超过规则上限",
+            severity="high",
+            triggered_at=ts,
+            trigger_rule="single_position_weight > 15%",
+            evidence=[{"type": "portfolio_snapshot", "ref": "local_sqlite"}],
+        )
+    )
+    services.repo.save_monitor_event(
+        EventContext(
+            event_id="event_hk00700_sentiment",
+            source="intel",
+            symbol="HK00700",
+            title="腾讯控股新闻情绪转弱",
+            severity="medium",
+            triggered_at=ts,
+            trigger_rule="negative_news_density >= medium",
+            evidence=[{"type": "news_cluster", "ref": "intel"}],
+        )
+    )
     items = {
         item.item_key: item
         for item in services.review_inbox_service.list_items()
@@ -322,3 +349,29 @@ def test_review_inbox_actions_only_write_review_inbox_state_and_leave_sources_un
         ).fetchone()[0]
         == 1
     )
+
+
+def test_review_inbox_includes_failed_scheduled_task(services):
+    services.repo.set_config(
+        "scheduled_tasks",
+        {
+            "items": [
+                {
+                    "task_id": "sched_premarket",
+                    "name": "盘前简报",
+                    "prompt": "x",
+                    "schedule": "daily@08:30",
+                    "enabled": True,
+                    "last_status": "failed",
+                    "last_error": "timeout after 900s",
+                    "last_run_at": "2026-09-04T00:30:00+00:00",
+                    "last_run_id": "run_forced",
+                }
+            ]
+        },
+    )
+    items = {item.item_key: item for item in services.review_inbox_service.list_items()}
+    key = "scheduled_task:sched_premarket:run_forced:failed"
+    assert key in items
+    assert items[key].priority == "high"
+    assert items[key].item_type == "scheduled_task_failed"

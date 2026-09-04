@@ -9,13 +9,15 @@ Single-user, locally-run AI investment workbench (Tauri desktop client). A FastA
 ## Commands
 
 ```bash
-# Desktop client — backend :8686 + Tauri shell (loads .env, sets AI defaults).
-# Flags: --dev (backend hot reload), --backend-only, --port PORT. Safe under `sh start.sh`.
-./start.sh
-./start.sh --dev            # backend hot reload + Tauri desktop
+# Desktop client — backend via launchd (installed from splash on first run).
+make run                    # Tauri only; backend managed by service_cli / launchd
 
-# Backend only (when using a built .app or debugging)
-./start.sh --backend-only
+# Dev stack (direct uvicorn; temporarily disables launchd)
+make dev-stack              # uvicorn + Tauri
+make dev                    # uvicorn --reload + Tauri
+
+# API-only dev
+make backend-dev
 
 # Manual backend
 uv run uvicorn backend.app:app --host 127.0.0.1 --port 8686
@@ -59,7 +61,7 @@ Request flow: **React pages → REST `/api/*` + SSE → FastAPI routers (`backen
 ### Agent runtime (`backend/agent_runtime/`)
 - `DeerFlowClientAdapter` (`deerflow_client.py`) is the boundary around DeerFlow. It is deliberately **copyright-safe**: it maps LangGraph-style stream events through `DeerFlowEventMapper` without importing DeerFlow internals, so tests can feed plain dicts/objects.
 - Runtime mode is selected by `DeerFlowClientAdapter.from_env()` via env vars, with fallback **direct → embedded → stub**:
-  - `WORKBENCH_AI_MODE=direct` — generates DeerFlow config on the fly from `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `WORKBENCH_AI_MODEL`. This is the default set by `start.sh` because it needs no pre-existing config files.
+  - `WORKBENCH_AI_MODE=direct` — generates DeerFlow config on the fly from credentials / env. Env hints are set in launchd plist or `scripts/load-env.sh` (dev-stack).
   - `embedded` — uses a real embedded DeerFlow graph (auto-upgrades to direct when prerequisites are met).
   - `stub` — final fallback; no real model calls. Tests run in stub mode.
   - Check `/api/health` to see the resolved `active_client` and degraded state.

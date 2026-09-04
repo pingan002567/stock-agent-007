@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from backend.persistence.repositories import WorkbenchRepository
 from backend.schemas import AIState, HoldingInfo, LatestReport, PriceSnapshot, StockContext, StockRelation
 from backend.stock_domain.catalog import get_stock, normalize_symbol, search_stocks
+from backend.stock_domain.catalog_tools import enrich_stock_master
 from backend.stock_domain.quote_tools import get_realtime_quote
 
 
@@ -21,6 +22,13 @@ class ContextBuilder:
             normalized = str(stock["symbol"]) if stock else normalized
         if not stock:
             raise KeyError(f"unknown stock: {symbol}")
+
+        if self.repo.get_stock_master(normalized) and (
+            not str(stock.get("industry") or "").strip()
+            or not stock.get("aliases")
+        ):
+            enrich_stock_master(normalized)
+            stock = get_stock(normalized) or stock
 
         watchlist = {item.symbol.upper(): item for item in self.repo.list_watchlist()}
         holdings = {item.symbol.upper(): item for item in self.repo.list_holdings()}

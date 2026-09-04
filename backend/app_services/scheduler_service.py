@@ -14,10 +14,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from uuid import uuid4
 
-from backend.schemas import AuthorityLevel, CopilotRequest, now_iso
+from backend.schemas import AuthorityLevel, CopilotRequest, ReportGenerateRequest, now_iso
 
 logger = logging.getLogger("scheduler")
 
@@ -25,26 +25,98 @@ CONFIG_KEY = "scheduled_tasks"
 CHECK_INTERVAL_SECONDS = 30
 RUN_TIMEOUT_SECONDS = 900
 
+DUTY_PREAMBLE = (
+    "你是值班研究员。只做研究，不出买卖指令，禁止自动交易。\n"
+    "必须调用：get_portfolio_snapshot、get_monitor_events、summarize_review_inbox。\n"
+    "持仓+自选合计超过 15 只时，只深拉权重最高与今日异动 Top 8，其余一行涨跌，禁止逐只深研。\n"
+    "A 股讨论抛压/套牢时必须 get_market_structure；港美股禁止写获利/套牢比例。\n"
+    "输出：一句话结论；今日关注最多 3 条；例外（降级/告警/失败）。禁止编造数字。\n"
+    "不要调用 generate_report，系统会在运行结束后自动落盘值班简报。"
+)
+
 DEFAULT_TASKS: list[dict[str, Any]] = [
     {
         "task_id": "sched_premarket",
         "name": "盘前简报",
-        "prompt": "生成今日盘前简报:汇总自选与持仓相关的隔夜要闻与情报,列出今天需要重点关注的标的和风险点。",
+        "prompt": "汇总自选与持仓相关的隔夜要闻与情报，列出今天需要重点关注的标的和风险点。",
         "page": "chat",
-        "authority_level": "A2",
+        "authority_level": "A3",
         "schedule": "daily@08:30",
         "enabled": True,
+        "calendar": "CN",
+    },
+    {
+        "task_id": "sched_close",
+        "name": "收盘体检",
+        "prompt": "复盘今日持仓与自选涨跌、盯盘未处理事件、数据源是否降级、风控距硬限。列出例外，不要编造未拉到的数字。",
+        "page": "chat",
+        "authority_level": "A3",
+        "schedule": "daily@15:15",
+        "enabled": True,
+        "calendar": "CN",
     },
     {
         "task_id": "sched_weekly_review",
         "name": "周度复盘",
-        "prompt": "生成本周组合复盘报告:本周持仓表现、盯盘事件回顾、风险状况变化与下周关注点。",
+        "prompt": "本周持仓表现、盯盘事件回顾、风险状况变化与下周关注点。",
         "page": "chat",
         "authority_level": "A3",
         "schedule": "weekly@7@17:00",
         "enabled": False,
     },
 ]
+
+
+def infer_ops_session(task: dict[str, Any]) -> str:
+    task_id = str(task.get("task_id") or "")
+    name = str(task.get("name") or "")
+    if task_id == "sched_weekly_review" or "周" in name:
+        return "weekly"
+    if "收盘" in name or task_id.endswith("_close") or "close" in task_id:
+        return "close"
+    return "premarket"
+
+
+def uses_cn_session_calendar(task: dict[str, Any]) -> bool:
+    calendar = str(task.get("calendar") or "").upper()
+    if calendar == "CN":
+        return True
+    if calendar:
+        return False
+    return str(task.get("task_id") or "") in {"sched_premarket", "sched_close"}
+
+
+def next_duty_run(task: dict[str, Any], after: datetime) -> Optional[datetime]:
+    schedule = str(task.get("schedule") or "")
+    nxt = compute_next_run(schedule, after)
+    if nxt is None or not uses_cn_session_calendar(task):
+        return nxt
+    from backend.stock_domain.trading_calendar import is_trading_day
+
+    for _ in range(400):
+        if is_trading_day("CN", nxt.date()):
+            return nxt
+        nxt = compute_next_run(schedule, nxt)
+        if nxt is None:
+            return None
+    return nxt
+
+
+def skip_reason_for(task: dict[str, Any], now: datetime | None = None) -> str | None:
+    if not uses_cn_session_calendar(task):
+        return None
+    from backend.stock_domain.trading_calendar import is_trading_day
+
+    day = (now or datetime.now()).date()
+    if not is_trading_day("CN", day):
+        return "休市"
+    return None
+
+
+def cap_duty_authority(raw: str | None) -> AuthorityLevel:
+    """定时值班固定 A3：要读持仓/待办，且不超过自动交易门槛。"""
+    _ = raw
+    return AuthorityLevel.A3
 
 
 def compute_next_run(schedule: str, after: datetime) -> Optional[datetime]:
@@ -80,25 +152,46 @@ def compute_next_run(schedule: str, after: datetime) -> Optional[datetime]:
 
 
 class SchedulerService:
-    def __init__(self, *, repo, copilot_service, audit_service) -> None:
+    def __init__(self, *, repo, copilot_service, audit_service, report_service=None, alert_sink: Callable[[str, str], None] | None = None) -> None:
         self.repo = repo
         self.copilot_service = copilot_service
         self.audit_service = audit_service
+        self.report_service = report_service
+        self.alert_sink = alert_sink
         self._loop_task: asyncio.Task | None = None
 
     # ── 存取(repo config 单键,属主唯一) ──
 
     def list_tasks(self) -> list[dict[str, Any]]:
-        data = self.repo.get_config(CONFIG_KEY, {"items": DEFAULT_TASKS})
+        data = self.repo.get_config(CONFIG_KEY, {"items": []})
         items = list(data.get("items") or [])
+        if not items:
+            items = [dict(item) for item in DEFAULT_TASKS]
+            self._save(items)
+        else:
+            known = {item.get("task_id") for item in items}
+            added = False
+            for seed in DEFAULT_TASKS:
+                if seed["task_id"] not in known and seed["task_id"] == "sched_close":
+                    items.append(dict(seed))
+                    added = True
+            if added:
+                self._save(items)
         now = datetime.now()
         for item in items:
-            nxt = compute_next_run(str(item.get("schedule") or ""), now)
+            nxt = next_duty_run(item, now)
             item["next_run_at"] = nxt.isoformat(timespec="minutes") if (nxt and item.get("enabled")) else None
+            item["skip_reason"] = skip_reason_for(item, now) if item.get("enabled") else None
         return items
 
     def _save(self, items: list[dict[str, Any]]) -> None:
-        self.repo.set_config(CONFIG_KEY, {"items": items})
+        persistable: list[dict[str, Any]] = []
+        for item in items:
+            row = dict(item)
+            row.pop("next_run_at", None)
+            row.pop("skip_reason", None)
+            persistable.append(row)
+        self.repo.set_config(CONFIG_KEY, {"items": persistable})
 
     def upsert_task(self, payload: dict[str, Any]) -> dict[str, Any]:
         schedule = str(payload.get("schedule") or "")
@@ -117,6 +210,10 @@ class SchedulerService:
             "enabled": bool(payload.get("enabled", True)),
             "last_run_at": (existing or {}).get("last_run_at"),
             "last_status": (existing or {}).get("last_status"),
+            "last_run_id": (existing or {}).get("last_run_id"),
+            "last_error": (existing or {}).get("last_error"),
+            "last_report_id": (existing or {}).get("last_report_id"),
+            "calendar": payload.get("calendar") if payload.get("calendar") is not None else (existing or {}).get("calendar"),
         }
         if existing:
             items[items.index(existing)] = record
@@ -146,16 +243,30 @@ class SchedulerService:
         task = next((t for t in items if t["task_id"] == task_id), None)
         if task is None:
             raise KeyError(task_id)
-        return await self._execute(task)
+        return await self._execute(task, honor_calendar=False)
 
-    async def _execute(self, task: dict[str, Any]) -> dict[str, Any]:
+    async def _execute(self, task: dict[str, Any], *, honor_calendar: bool = False) -> dict[str, Any]:
+        if honor_calendar:
+            reason = skip_reason_for(task)
+            if reason:
+                outcome = {
+                    "run_id": None,
+                    "status": "skipped",
+                    "error": f"已跳过：{reason}",
+                    "report_id": None,
+                }
+                self._write_run_trace(task, outcome)
+                return outcome
         stamp = datetime.now().strftime("%m-%d %H:%M")
         request = CopilotRequest(
-            message=f"[定时任务·{task['name']} {stamp}] {task['prompt']}",
+            message=(
+                f"[定时任务·{task['name']} {stamp}]\n{DUTY_PREAMBLE}\n\n"
+                f"用户任务：{task.get('prompt') or ''}"
+            ),
             page=task.get("page") or "chat",
-            authority_level=AuthorityLevel(task.get("authority_level") or "A2"),
+            authority_level=cap_duty_authority(str(task.get("authority_level") or "A2")),
         )
-        outcome = {"run_id": None, "status": "failed", "error": None}
+        outcome: dict[str, Any] = {"run_id": None, "status": "failed", "error": None, "report_id": None}
         try:
             run = self.copilot_service.create_run(request)
             outcome["run_id"] = run.run_id
@@ -171,7 +282,12 @@ class SchedulerService:
             outcome["error"] = f"timeout after {RUN_TIMEOUT_SECONDS}s"
         except Exception as exc:  # 单任务失败不拖垮循环
             outcome["error"] = str(exc)[:200]
-        # 回写执行痕迹(重读避免覆盖并发修改)
+        self._persist_ops_briefing(task, outcome)
+        self._write_run_trace(task, outcome)
+        self._notify_duty_outcome(task, outcome)
+        return outcome
+
+    def _write_run_trace(self, task: dict[str, Any], outcome: dict[str, Any]) -> None:
         items = self.list_tasks()
         task_rec = next((t for t in items if t["task_id"] == task["task_id"]), None)
         if task_rec is not None:
@@ -179,13 +295,64 @@ class SchedulerService:
             task_rec["last_status"] = outcome["status"]
             task_rec["last_run_id"] = outcome["run_id"]
             task_rec["last_error"] = outcome["error"]
+            task_rec["last_report_id"] = outcome.get("report_id")
             self._save(items)
         self.audit_service.record(
             "scheduled task executed",
             f"{task['task_id']} -> {outcome['status']}"
             + (f" ({outcome['error']})" if outcome["error"] else ""),
         )
-        return outcome
+
+    def _notify_duty_outcome(self, task: dict[str, Any], outcome: dict[str, Any]) -> None:
+        if outcome.get("status") != "failed" or self.alert_sink is None:
+            return
+        name = str(task.get("name") or task.get("task_id") or "值班任务")
+        detail = str(outcome.get("error") or "定时任务未收口")
+        try:
+            self.alert_sink(f"值班失败 · {name}", detail[:400])
+        except Exception:
+            logger.exception("duty alert push failed")
+
+    def _copilot_narrative(self, run_id: str | None) -> str:
+        if not run_id:
+            return ""
+        try:
+            messages = self.repo.list_copilot_run_messages(run_id)
+        except Exception:
+            return ""
+        finals = [item.text.strip() for item in messages if item.kind == "final_answer" and item.text.strip()]
+        return finals[-1] if finals else ""
+
+    def _persist_ops_briefing(self, task: dict[str, Any], outcome: dict[str, Any]) -> None:
+        if self.report_service is None:
+            return
+        session = infer_ops_session(task)
+        title_map = {
+            "premarket": "盘前值班简报",
+            "close": "收盘值班简报",
+            "weekly": "周度值班复盘",
+        }
+        try:
+            report = self.report_service.generate(
+                ReportGenerateRequest(
+                    report_type="ops_briefing",
+                    source_type="scheduled_task",
+                    source_id=str(task["task_id"]),
+                    title=f"{title_map.get(session, '值班简报')} · {task.get('name') or task['task_id']}",
+                    options={
+                        "session": session,
+                        "run_id": outcome.get("run_id"),
+                        "run_status": outcome.get("status"),
+                        "run_error": outcome.get("error"),
+                        "narrative": self._copilot_narrative(outcome.get("run_id")),
+                        "task_name": task.get("name"),
+                    },
+                )
+            )
+            outcome["report_id"] = report.report_id
+        except Exception as exc:
+            logger.exception("ops_briefing persist failed for %s", task.get("task_id"))
+            outcome["report_error"] = str(exc)[:200]
 
     # ── 循环(monitor_service 同款生命周期) ──
 
@@ -212,10 +379,10 @@ class SchedulerService:
                 for task in self.list_tasks():
                     if not task.get("enabled"):
                         continue
-                    nxt = compute_next_run(str(task.get("schedule") or ""), last_check)
+                    nxt = next_duty_run(task, last_check)
                     if nxt and last_check < nxt <= now:
                         logger.info("scheduled task due: %s", task["task_id"])
-                        await self._execute(task)
+                        await self._execute(task, honor_calendar=True)
                 last_check = now
             except asyncio.CancelledError:
                 raise

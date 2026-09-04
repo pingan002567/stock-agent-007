@@ -217,6 +217,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   useEffect(() => { void refreshAll(); }, []);
 
+  useEffect(() => {
+    const onWorkspaceChanged = () => { void refreshAll(); };
+    window.addEventListener("workspace-changed", onWorkspaceChanged);
+    return () => window.removeEventListener("workspace-changed", onWorkspaceChanged);
+  }, [refreshAll]);
+
   // 全量数据后台自动刷新（首次加载完成后启动，每 60 秒一次）
   // refreshAll is stable (useCallback with []) — safe to omit from deps
    

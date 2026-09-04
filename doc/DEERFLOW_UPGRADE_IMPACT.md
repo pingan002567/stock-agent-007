@@ -70,7 +70,7 @@ uv sync --extra test
 
 **结果（验证通过）：**
 - venv = arm64，`cryptography 49.0.0` 走 wheel **零编译**，`deerflow v2.1.0`（含 `channel_connections`）。
-- 默认 `uv` 已是 arm64（`~/.local/bin/uv` 在 PATH 最前），`start.sh` 的 `uv run` 自动用 arm64，无需改 PATH。
+- 默认 `uv` 已是 arm64（`~/.local/bin/uv` 在 PATH 最前），`make dev-stack` / `scripts/stack.sh` 的 `uv run` 自动用 arm64，无需改 PATH。
 - 导入全过；`test_copilot_*`(24) + `test_deerflow_adapter`(13) 通过；`test_services`(52 passed，仅 8 个 akshare 未装的旧失败，与升级无关) —— **零新增回归**。
 
 **遗留：**

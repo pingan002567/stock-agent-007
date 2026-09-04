@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { compactModelLabelFromRef } from "@/lib/compactModelLabel";
 
 export type SessionModelOption = { value: string; label: string };
 
@@ -16,7 +17,7 @@ export function SessionModelPicker({
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  const label = useMemo(() => {
+  const fullLabel = useMemo(() => {
     const hit = options.find((item) => item.value === value);
     if (hit) return hit.label;
     if (value && value.includes("/")) {
@@ -25,6 +26,11 @@ export function SessionModelPicker({
     }
     return value || "AI 模型";
   }, [options, value]);
+
+  const compactLabel = useMemo(
+    () => compactModelLabelFromRef(value, fullLabel),
+    [value, fullLabel],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -48,12 +54,13 @@ export function SessionModelPicker({
       <button
         type="button"
         className="model-pill model-pill-btn"
-        title="切换本会话使用的模型"
+        title={fullLabel !== compactLabel ? `${fullLabel}（点击切换）` : "切换本会话使用的模型"}
         disabled={disabled}
         aria-expanded={open}
+        aria-label={`当前模型 ${fullLabel}`}
         onClick={() => setOpen((v) => !v)}
       >
-        {label}
+        {compactLabel}
         <span className="model-pill-caret">▾</span>
       </button>
       {open && (

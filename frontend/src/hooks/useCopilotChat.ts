@@ -91,6 +91,7 @@ const TOOL_LABELS: Record<string, string> = {
   snooze_inbox_item: "稍后提醒",
   mark_inbox_item_done: "完成待办",
   get_industry_context: "行业格局",
+  get_market_structure: "市场结构",
   get_monitor_events: "监控事件",
   get_monitor_rules: "监控规则",
   evaluate_monitor_rules: "评估规则",
@@ -148,6 +149,7 @@ function useCopilotChatState() {
     refreshCopilotContext,
     appDataCache,
     globalLoading,
+    lastRefreshTime,
   } = useAppState();
 
   const [sessions, setSessions] = useState<CopilotSession[]>([]);
@@ -175,7 +177,7 @@ function useCopilotChatState() {
       llm_providers?: { default_model?: string | null };
     } | undefined;
     return settings?.llm_providers?.default_model ?? null;
-  }, [appDataCache, globalLoading]);
+  }, [appDataCache, globalLoading, lastRefreshTime]);
 
   const sessionModelRef = currentSession?.default_model
     ?? draftSessionModel
@@ -198,7 +200,7 @@ function useCopilotChatState() {
       }
     }
     return rows;
-  }, [appDataCache, globalLoading]);
+  }, [appDataCache, globalLoading, lastRefreshTime]);
 
   // memo 化：否则每次渲染重建，会让依赖它们的 handleSend 等 useCallback 全部失效
   const loadMessages = useCallback(async (sessionId: string, runId?: string) => {
@@ -605,6 +607,7 @@ function useCopilotChatState() {
   }, [ensureSession, currentScreen, stock, setCopilotStreaming, loadSessions]);
 
   const handleStop = useCallback(() => {
+    const sid = currentSessionIdRef.current;
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
     sendingRef.current = false;
@@ -612,6 +615,11 @@ function useCopilotChatState() {
     setStreamMessage(null);
     setCopilotStreaming(false);
     setSending(false);
+    if (sid) {
+      void fetchSessionMessages(sid).then((items) => {
+        if (currentSessionIdRef.current === sid) setMessages(items);
+      });
+    }
   }, [setCopilotStreaming]);
 
   const handleCopy = useCallback(async (msg: CopilotMessage) => {

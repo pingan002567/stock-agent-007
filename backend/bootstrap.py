@@ -367,7 +367,11 @@ def create_services(
     from backend.app_services.scheduler_service import SchedulerService
 
     scheduler_service = SchedulerService(
-        repo=repo, copilot_service=copilot_service, audit_service=audit_service
+        repo=repo,
+        copilot_service=copilot_service,
+        audit_service=audit_service,
+        report_service=report_service,
+        alert_sink=channel_notifier.push,
     )
 
     llm_provider_service = LlmProviderService(

@@ -144,11 +144,11 @@ chmod +x install.sh
 # 3. 配置 API Key（安装脚本会提示）
 vi .env
 
-# 4. 启动桌面客户端（后端 + Tauri 壳）
-./start.sh
+# 4. 启动桌面客户端（引导页会注册 launchd 并启动后端）
+make run
 
-# 开发模式（后端热重载）
-./start.sh --dev
+# 开发：脚本直连 uvicorn + 热重载（会临时停用 launchd）
+make dev
 ```
 
 ### Windows
@@ -245,18 +245,18 @@ cd frontend && npm install && cd ..
 cp .env.example .env
 vi .env                      # 或用记事本打开
 
-# 6. 启动后端
-./start.sh --backend-only
+# 6. 启动桌面客户端（引导页注册 launchd 后端）
+make run
 
-# 7. 启动 Tauri 桌面壳（需 Rust + tauri-cli，见 install.sh 提示）
-cd desktop/src-tauri && cargo tauri dev
+# 开发热重载（可选，会临时停用 launchd）
+# make dev
 ```
 
 ### 访问地址
 
 | 服务 | 地址 |
 |------|------|
-| **桌面客户端** | Tauri 应用（`./start.sh` 自动启动） |
+| **桌面客户端** | Tauri 应用（`make run`；后端由 launchd 承载） |
 | **后端 API** | http://127.0.0.1:8686 |
 | **API 文档** | http://127.0.0.1:8686/docs |
 
@@ -413,9 +413,9 @@ stock-agent-001/
 │       └── ...
 ├── doc/                    # 项目文档
 ├── tests/                  # 测试文件
-├── scripts/                # 工具脚本
+├── scripts/                # 工具脚本（load-env、stack）
+├── Makefile                # 构建 / 运行 / 打包入口
 ├── install.sh              # 安装脚本
-├── start.sh                # 启动脚本
 └── pyproject.toml          # Python 项目配置
 ```
 
