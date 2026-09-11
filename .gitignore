@@ -44,6 +44,11 @@ log/
 .ac360/
 .opencode/
 .deer-flow/users/
+.deer-flow/.retrieval/
+.deer-flow/.skills_view.projection.lock
+.deer-flow/skills_view/
+*.sqlite3-shm
+*.sqlite3-wal
 *.png
 ui-mockup.html
 chat-init-snapshot.md
