@@ -3,21 +3,72 @@ from __future__ import annotations
 import asyncio
 import contextvars
 from concurrent.futures import CancelledError
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 import importlib
 import os
 import threading
-from typing import Any, AsyncIterator, Dict
+from typing import Any, AsyncIterator, Dict, Iterator
 from uuid import uuid4
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from backend.agent_runtime import skill_specs
 from backend.agent_runtime.deerflow_config import generate_config
-from backend.agent_runtime.prompt_envelope import render_prompt_envelope
+from backend.agent_runtime.prompt_envelope import is_usable_session_title, render_prompt_envelope
 from backend.agent_runtime.tool_bridge import WorkbenchToolBridge
 from backend.app_services.permission_guard import PermissionDenied
 from backend.schemas import AuthorityLevel
+
+def _turn_upload_files(attachments: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    files: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in attachments or []:
+        filename = str(item.get("filename") or "")
+        if not filename or filename in seen:
+            continue
+        seen.add(filename)
+        files.append({"filename": filename, "size": int(item.get("size") or 0)})
+    return files
+
+
+@contextmanager
+def _with_human_message_kwargs(extra_kwargs: dict[str, Any]) -> Iterator[None]:
+    """Merge additional_kwargs onto DeerFlowClient-built HumanMessage.
+
+    Embedded ``DeerFlowClient.stream`` constructs ``HumanMessage(content=...)``
+    without workbench metadata. Same seam as turn uploads: inject
+    ``files`` / ``human_input_response`` so UploadsMiddleware and (upstream)
+    clarification resume can see them.
+    """
+    if not extra_kwargs:
+        yield
+        return
+    from langchain_core.messages import HumanMessage
+
+    original = HumanMessage.__init__
+
+    def wrapped(self: Any, *args: Any, **kwargs: Any) -> None:
+        extra = dict(kwargs.get("additional_kwargs") or {})
+        for key, value in extra_kwargs.items():
+            if key not in extra:
+                extra[key] = value
+        kwargs["additional_kwargs"] = extra
+        original(self, *args, **kwargs)
+
+    HumanMessage.__init__ = wrapped  # type: ignore[method-assign]
+    try:
+        yield
+    finally:
+        HumanMessage.__init__ = original  # type: ignore[method-assign]
+
+
+@contextmanager
+def _with_turn_upload_files(files: list[dict[str, Any]]) -> Iterator[None]:
+    """Backward-compatible alias for upload-only injection."""
+    with _with_human_message_kwargs({"files": files} if files else {}):
+        yield
+
 
 SYNC_STREAM_QUEUE_MAXSIZE = 64
 
@@ -35,6 +86,50 @@ def _recursion_limit(subagent_enabled: bool) -> int:
     if raw.isdigit() and int(raw) > 0:
         return int(raw)
     return default
+
+
+def _wire_native_tool_groups(client: Any) -> None:
+    """Honor DeerFlow ``AgentConfig.tool_groups`` on the embedded client path.
+
+    ``make_lead_agent`` already passes ``groups=agent_config.tool_groups`` into
+    ``get_available_tools``. ``DeerFlowClient._get_tools`` currently ignores that
+    field — bridge the same native API at the adapter boundary (no custom allowlist).
+    """
+
+    def _get_tools(*, model_name: str | None = None, subagent_enabled: bool = False):
+        from deerflow.config.agents_config import load_agent_config
+        from deerflow.tools import get_available_tools
+
+        groups = None
+        agent_name = getattr(client, "_agent_name", None)
+        if agent_name:
+            try:
+                agent_cfg = load_agent_config(agent_name)
+            except FileNotFoundError:
+                agent_cfg = None
+            if agent_cfg is not None:
+                groups = agent_cfg.tool_groups
+        return get_available_tools(
+            model_name=model_name,
+            groups=groups,
+            subagent_enabled=subagent_enabled,
+        )
+
+    client._get_tools = _get_tools  # instance shadow of the class staticmethod
+
+
+def _client_kwargs_from(adapter: "DeerFlowClientAdapter", base: Any, *, agent_name: str) -> dict[str, Any]:
+    """Build DeerFlowClient kwargs for a sibling client sharing checkpointer/config."""
+    return {
+        "config_path": adapter.config_path,
+        "checkpointer": getattr(base, "_checkpointer", None),
+        "model_name": getattr(base, "_model_name", None) or adapter.model_name,
+        "thinking_enabled": getattr(base, "_thinking_enabled", adapter.thinking_enabled),
+        "subagent_enabled": getattr(base, "_subagent_enabled", adapter.subagent_enabled),
+        "plan_mode": getattr(base, "_plan_mode", adapter.plan_mode),
+        "agent_name": agent_name,
+        "available_skills": getattr(base, "_available_skills", None),
+    }
 
 
 @dataclass
@@ -121,18 +216,18 @@ class DeerFlowEventMapper:
             content = self._get(message, "content")
             if role == "tool" or self._get(message, "tool_call_id"):
                 result_call_id = self._get(message, "tool_call_id") or self._get(message, "id")
-                events.append(
-                    {
-                        "type": "tool_result",
-                        "payload": {
-                            "call_id": result_call_id,
-                            "tool": self._get(message, "name")
-                            or self._get(message, "tool")
-                            or "tool",
-                            "result": content,
-                        },
-                    }
-                )
+                tool_payload: dict[str, Any] = {
+                    "call_id": result_call_id,
+                    "tool": self._get(message, "name")
+                    or self._get(message, "tool")
+                    or "tool",
+                    "result": content,
+                }
+                # DeerFlow ≥ human_input: ToolMessage.artifact.human_input
+                artifact = self._get(message, "artifact")
+                if artifact is not None:
+                    tool_payload["artifact"] = artifact
+                events.append({"type": "tool_result", "payload": tool_payload})
             elif role in ("ai", "assistant") and content:
                 # Only assistant content is the answer. Human (the prompt envelope) /
                 # system messages must never be echoed into the bubble.
@@ -177,15 +272,10 @@ class DeerFlowEventMapper:
     def _map_values(self, payload: Any) -> list[dict[str, Any]]:
         events: list[dict[str, Any]] = []
         title = self._get(payload, "title")
-        # DeerFlow 用线程首条 HumanMessage 生成标题,而首条是 prompt envelope
-        # JSON——形如 JSON 的"标题"必须拦下,否则会话标题变成 {"envelope_version"...
-        if (
-            title
-            and isinstance(title, str)
-            and title.strip()
-            and not title.strip().startswith(("{", "["))
-        ):
-            events.append({"type": "title", "payload": {"title": title.strip()}})
+        # DeerFlow 用线程首条 HumanMessage 生成标题；首条是 prompt envelope
+        # （JSON 或 <workbench_context>），必须拦下，否则会话标题泄漏内部上下文。
+        if is_usable_session_title(title if isinstance(title, str) else None):
+            events.append({"type": "title", "payload": {"title": str(title).strip()}})
         summary: dict[str, Any] = {"phase": "values"}
         status = self._get(payload, "status")
         if status:
@@ -297,6 +387,46 @@ class DeerFlowClientAdapter:
         self.plan_mode = plan_mode
         self.client_capabilities = client_capabilities or []
         self._active_client_override: str | None = "stub" if client is None else None
+        # Per-authority DeerFlowClient instances (same checkpointer). Avoids races
+        # when concurrent streams need different AgentConfig.tool_groups.
+        self._clients_by_agent: dict[str, Any] = {}
+        if client is not None:
+            _wire_native_tool_groups(client)
+            name = getattr(client, "_agent_name", None)
+            if name:
+                self._clients_by_agent[name] = client
+
+    def _client_for_authority(self, authority_level: str | None) -> Any:
+        """Pick/create the DeerFlowClient whose AgentConfig.tool_groups match authority."""
+        from backend.agent_runtime.deerflow_config import (
+            agent_name_for_authority,
+            ensure_authority_agents,
+        )
+
+        if self.client is None:
+            return None
+        ensure_authority_agents()
+        agent_name = agent_name_for_authority(authority_level)
+        cached = self._clients_by_agent.get(agent_name)
+        if cached is not None:
+            return cached
+
+        # Reuse the primary client if it has no agent_name yet.
+        primary_name = getattr(self.client, "_agent_name", None)
+        if not primary_name and agent_name not in self._clients_by_agent:
+            self.client._agent_name = agent_name
+            _wire_native_tool_groups(self.client)
+            # Force rebuild on next stream so groups take effect.
+            self.client._agent = None
+            self.client._agent_config_key = None
+            self._clients_by_agent[agent_name] = self.client
+            return self.client
+
+        client_cls = type(self.client)
+        sibling = client_cls(**_client_kwargs_from(self, self.client, agent_name=agent_name))
+        _wire_native_tool_groups(sibling)
+        self._clients_by_agent[agent_name] = sibling
+        return sibling
 
     @classmethod
     def from_env(
@@ -369,9 +499,8 @@ class DeerFlowClientAdapter:
         )
         mode: str
 
-        # Runtime-level delegation flag: per-turn enablement is decided by
-        # skill_specs.subagent_intent_enabled and passed explicitly on every
-        # stream() call; this only sets the client default + status reporting.
+        # Runtime-level flags: Lead Agent decides per-turn delegation. Env can
+        # still force the whole client off for ops.
         subagent_supported = skill_specs.subagent_supported()
         plan_mode_supported = skill_specs.plan_mode_supported()
 
@@ -473,6 +602,8 @@ class DeerFlowClientAdapter:
                 config_path=config_path,
                 model_name=model_name,
                 thinking_enabled=thinking_enabled,
+                subagent_enabled=subagent_supported,
+                plan_mode=plan_mode_supported,
             )
 
         # Try modes in priority order: explicit request first, then fallback
@@ -492,6 +623,8 @@ class DeerFlowClientAdapter:
                 config_path=config_path,
                 model_name=model_name,
                 thinking_enabled=thinking_enabled,
+                subagent_enabled=subagent_supported,
+                plan_mode=plan_mode_supported,
             )
 
         # Embedded mode (default): try auto-upgrade to direct when prerequisites
@@ -527,6 +660,8 @@ class DeerFlowClientAdapter:
                     config_path=config_path,
                     model_name=model_name,
                     thinking_enabled=thinking_enabled,
+                    subagent_enabled=subagent_supported,
+                    plan_mode=plan_mode_supported,
                 )
             return cls(
                 mode="embedded",
@@ -547,6 +682,8 @@ class DeerFlowClientAdapter:
             config_path=config_path,
             model_name=model_name,
             thinking_enabled=thinking_enabled,
+            subagent_enabled=subagent_supported,
+            plan_mode=plan_mode_supported,
         )
 
     def status(self) -> AgentRuntimeStatus:
@@ -641,6 +778,14 @@ class DeerFlowClientAdapter:
         # 复用 _memory_call 的护栏语义：stub/降级模式返回 supported=False
         return self._memory_call("upload_files", thread_id, files)
 
+    def list_uploads(self, thread_id: str) -> dict[str, Any]:
+        """List files in a session thread's uploads directory."""
+        return self._memory_call("list_uploads", thread_id)
+
+    def delete_upload(self, thread_id: str, filename: str) -> dict[str, Any]:
+        """Delete one uploaded file (and companion .md for convertible types)."""
+        return self._memory_call("delete_upload", thread_id, filename)
+
     def _existing_thread_msg_ids(self, thread_id: str | None) -> set[str]:
         """DeerFlow message ids already in the thread's checkpoint (prior runs).
 
@@ -676,10 +821,12 @@ class DeerFlowClientAdapter:
         skill_trace: list[dict[str, Any]] | None = None,
         history: list[dict[str, str]] | None = None,
         session_id: str | None = None,
-        subagent_enabled: bool = False,
-        plan_mode: bool = False,
+        subagent_enabled: bool = True,
+        plan_mode: bool = True,
         budget: Dict[str, Any] | None = None,
         model_name: str | None = None,
+        attachments: list[dict[str, Any]] | None = None,
+        human_input_response: dict[str, Any] | None = None,
     ) -> AsyncIterator[Dict[str, Any]]:
         effective_model = model_name or self.model_name
         # Both direct and embedded modes use DeerFlowClient.stream()
@@ -696,12 +843,13 @@ class DeerFlowClientAdapter:
             )
             envelope_message = render_prompt_envelope(
                 user_message=message,
-                skill_trace=skill_trace or [],
                 context=context,
-                budget=budget,
             )
             try:
-                raw_stream = self.client.stream(
+                active_client = self._client_for_authority(
+                    str(context.get("_authority_level") or "")
+                ) or self.client
+                raw_stream = active_client.stream(
                     message=envelope_message,
                     # Per-session thread: the DeerFlow checkpointer keeps full
                     # multi-turn state across runs of the same conversation. NOTE: on
@@ -714,13 +862,10 @@ class DeerFlowClientAdapter:
                     thinking_enabled=self.thinking_enabled,
                     subagent_enabled=subagent_enabled,
                     # plan_mode（TodoMiddleware）：write_todos 计划清单进流 +
-                    # 未完成 todo 阻止提前收口。按 intent 决定（见 skill_specs）。
+                    # 未完成 todo 阻止提前收口。默认开，可用 WORKBENCH_AI_PLAN_MODE=off 关掉。
                     plan_mode=plan_mode,
-                    # Subagent runs (rebalance_plan / strategy_backtest) fan out to
-                    # delegated graphs, so each turn burns more LangGraph super-steps;
-                    # give them extra headroom over the default 100 so a legitimate
-                    # multi-step plan doesn't trip GRAPH_RECURSION_LIMIT. Loop
-                    # detection still hard-stops genuine repeat loops.
+                    # Subagent turns fan out to nested graphs; extra LangGraph
+                    # super-steps avoid GRAPH_RECURSION_LIMIT on legitimate plans.
                     recursion_limit=_recursion_limit(subagent_enabled),
                 )
             except Exception as exc:
@@ -749,20 +894,27 @@ class DeerFlowClientAdapter:
                 )
 
             stream_started = False
+            turn_files = _turn_upload_files(attachments)
+            human_kwargs: dict[str, Any] = {}
+            if turn_files:
+                human_kwargs["files"] = turn_files
+            if human_input_response:
+                human_kwargs["human_input_response"] = human_input_response
             try:
-                async for raw_event in self._iterate_raw_stream(raw_stream):
-                    stream_started = True
-                    self._clear_degraded()
-                    for event in mapper.map(raw_event):
-                        event = self._apply_alias(event)
-                        if event.get("type") == "tool_result":
-                            refs = event.get("payload", {}).get("evidence_refs", [])
-                            for ref in refs:
-                                if ref not in tool_evidence_refs:
-                                    tool_evidence_refs.append(ref)
-                        elif event.get("type") == "final":
-                            event.setdefault("payload", {})["tool_evidence_refs"] = list(tool_evidence_refs)
-                        yield event
+                with _with_human_message_kwargs(human_kwargs):
+                    async for raw_event in self._iterate_raw_stream(raw_stream):
+                        stream_started = True
+                        self._clear_degraded()
+                        for event in mapper.map(raw_event):
+                            event = self._apply_alias(event)
+                            if event.get("type") == "tool_result":
+                                refs = event.get("payload", {}).get("evidence_refs", [])
+                                for ref in refs:
+                                    if ref not in tool_evidence_refs:
+                                        tool_evidence_refs.append(ref)
+                            elif event.get("type") == "final":
+                                event.setdefault("payload", {})["tool_evidence_refs"] = list(tool_evidence_refs)
+                            yield event
             except _ToolExecutionTerminalError as exc:
                 self._set_degraded(exc.reason)
                 for event in exc.leading_events:
@@ -837,8 +989,9 @@ class DeerFlowClientAdapter:
             return
 
         try:
+            resolved_skill = self._stub_skill_from_message(skill, message, context)
             tool_name, arguments, default_level = self._stub_tool_for_skill(
-                skill, message, context
+                resolved_skill, message, context
             )
         except Exception:
             yield {
@@ -1053,6 +1206,48 @@ class DeerFlowClientAdapter:
             if callable(getattr(client, name, None)):
                 capabilities.append(name)
         return capabilities
+
+    def _stub_skill_from_message(
+        self, skill: str, message: str, context: Dict[str, Any]
+    ) -> str:
+        """Stub-only heuristic: pick a domain tool family from the user text.
+
+        Production routing is DeerFlow Lead Agent. Tests still need a deterministic
+        tool so the workbench contract can be exercised without a model.
+        """
+        if skill and skill not in {"lead-agent", "copilot", "copilot_chat", ""}:
+            return skill
+        page = str(context.get("page") or "")
+        lower = message.lower()
+
+        def has(*words: str) -> bool:
+            return any(word in message for word in words)
+
+        if message.startswith("[定时任务·") or "你是值班研究员" in message:
+            return "risk-officer"
+        if self._wants_review_inbox(message) or self._wants_decision_journal_review(message):
+            return "risk-officer"
+        if (
+            ("paper" in lower and has("复盘", "调仓效果", "绩效归因"))
+            or "paper portfolio" in lower
+            or ("sandbox" in lower and has("复盘", "绩效"))
+        ):
+            return "risk-officer"
+        if has("报告", "复盘", "总结", "简报", "盘前") or "report" in lower:
+            return "report-writer"
+        if has("回测", "策略") or any(word in lower for word in ("backtest", "strategy")):
+            return "strategy-analyst"
+        if has("调仓", "拟单", "仓位"):
+            return "rebalance-planner"
+        if has("风险", "风控", "集中度"):
+            return "risk-officer"
+        if has("盯盘", "异动", "提醒"):
+            return "stock-monitor"
+        if has("研究", "深研", "分析") or "research" in lower:
+            return "stock-researcher"
+        if page == "holdings":
+            return "risk-officer"
+        return "stock-researcher"
 
     def _stub_tool_for_skill(
         self, skill: str, message: str, context: Dict[str, Any]

@@ -1430,14 +1430,19 @@ const NAV_GROUPS: NavGroupDef[] = [
 ];
 
 const APP_VERSION = "0.1.0";
+const SETTING_TAB_KEYS = new Set<string>(NAV_GROUPS.flatMap((g) => g.items.map((i) => i.key)));
 
-export default function Settings() {
+function initialSettingTab(tab?: string): SettingTab {
+  return tab && SETTING_TAB_KEYS.has(tab) ? (tab as SettingTab) : "appearance";
+}
+
+export default function Settings({ initialTab }: { initialTab?: string } = {}) {
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [runtimeMetrics, setRuntimeMetrics] = useState<RuntimeMetricSnapshot | null>(null);
   const [providerEvents, setProviderEvents] = useState<ProviderEvent[]>([]);
   const [copilotRuns, setCopilotRuns] = useState<CopilotRunLog[]>([]);
   const [regressionCases, setRegressionCases] = useState<RegressionCase[]>([]);
-  const [activeTab, setActiveTab] = useState<SettingTab>("appearance");
+  const [activeTab, setActiveTab] = useState<SettingTab>(() => initialSettingTab(initialTab));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [riskPolicies, setRiskPolicies] = useState<RiskPolicy[]>([]);

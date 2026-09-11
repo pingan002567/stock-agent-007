@@ -339,7 +339,7 @@ def cmd_doctor(_args: argparse.Namespace) -> dict[str, Any]:
         "repo_root": str(paths.REPO_ROOT),
         "venv_python": str(_venv_python()),
         "venv_python_exists": _venv_python().is_file(),
-        "frontend_dist_exists": paths.frontend_dist().is_dir(),
+        "frontend_dist_exists": (paths.frontend_dist() / "index.html").is_file(),
         "service_installed": service_installed,
         "service_loaded": service_loaded,
         "service_pid": _service_pid(),

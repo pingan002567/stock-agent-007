@@ -1,6 +1,6 @@
 ---
 name: rebalance-planner
-description: 生成调仓草案。适用场景：基于当前持仓和风险策略生成多套调仓方案（加/减/换仓）并预估影响。
+description: 生成调仓草案。适用场景：基于当前持仓和风险策略生成多套调仓方案。Lead 委派本技能时，收口前必须同时委派 risk-officer。
 allowed-tools:
   - get_portfolio_snapshot
   - get_active_risk_policy
@@ -35,3 +35,4 @@ allowed-tools:
 ## 约束
 - 草案生成后状态 `pending_user_confirmation`，需用户显式确认
 - 不自动执行任何交易，标注 `auto_trade=false`、`research_only=true`
+- **收口前必须 `task(risk-officer)`**，并把风控结论写入最终回答，不可省略

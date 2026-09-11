@@ -65,6 +65,10 @@
   - 后端关键技术栈决策记录。
   - 项目架构的强依赖文档。
 
+- [DEERFLOW_SINGLE_LAYER_PLAN.md](./DEERFLOW_SINGLE_LAYER_PLAN.md)
+  - Copilot 双层编排收成一层的实施方案：只留 DeerFlow 当导演。
+  - P0–P4 删除顺序、验收、黄金路径与回滚点。
+
 ## 当前关键产物
 
 - 前端工程位于 **[frontend/](../frontend/)**（React + TypeScript + Vite）
@@ -78,10 +82,10 @@
 3. AI 可以主动盯盘、生成研究、诊断风险、规划调仓，但 V1 不自动真实下单。
 4. DeerFlow 只承担 agent runtime 和编排边界；daily_stock_analysis 只作为领域能力参考和工具适配来源。
 5. 所有高风险输出都需要证据、置信度、反对理由、有效期、权限等级和审计记录。
-6. `skill_trace` 是 Copilot 的声明式解释元数据，不是产品运行时 Team Run；多 agent 协作只作为研发交付流程。
-7. DeerFlow embedded client 只通过 `DeerFlowClientAdapter` 可选启用；默认 stub，失败自动回退，且不暴露 TeamRun/sub-agent 产品入口。
+6. `skill_trace` 是 DeerFlow `task()` 的 observed 投影，不是预规划 Team Run。
+7. DeerFlow embedded client 只通过 `DeerFlowClientAdapter` 消费；测试走 stub，失败回退。子代理是 DeerFlow 原生产能力，不再用 Python 预编排替代。
 8. `WorkbenchToolBridge` 是 Copilot/DeerFlow 调用股票、持仓、风险和拟单草案能力的唯一桥接层；`place_real_order` 始终 blocked。
-9. Embedded prompt 只能接收精简 envelope，不把本地 secret/env/full holdings/full watchlist/full history/full report/ledger detail 透传给 DeerFlow。
+9. Embedded prompt 只允许 page/symbol/authority 元数据，不把本地 secret/env/full holdings/full watchlist/full history/full report/ledger detail 透传给 DeerFlow。
 10. `MonitorService` 负责持久化盯盘规则、状态和事件；规则评估必须本地确定性执行，不调用 LLM。
 11. `StrategyService` 负责持久化策略库和 append-only 回测历史；Copilot 触发回测必须走已知 ToolBridge 工具并写 ledger。
 12. `ReportService` 负责 code-first 模板、报告生成、append-only 质量检查和 Markdown 归档；报告页与 Demo 必须走真实 API，不使用占位质检数据。

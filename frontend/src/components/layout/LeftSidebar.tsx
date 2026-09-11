@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useCopilotChat } from "@/hooks/useCopilotChat";
 import type { CopilotSession } from "@/api/client";
 import { ResizeHandle } from "@/components/ui/ResizeHandle";
+import { displaySessionTitle } from "@/lib/sessionTitle";
 
 /** 三栏布局左栏：品牌 + 会话列表 + 底部工作区/设置（Cursor 式沉底）。 */
 
@@ -32,7 +33,7 @@ export function LeftSidebar({ onOpenSettings, onOpenWorkspace }: {
   onOpenWorkspace: () => void;
 }) {
   const {
-    sessions, currentSession,
+    sessions, currentSession, sessionActivity,
     switchSession, handleNewSession, handleRenameSession, handleDeleteSession,
   } = useCopilotChat();
 
@@ -123,7 +124,12 @@ export function LeftSidebar({ onOpenSettings, onOpenWorkspace }: {
         {groups.map((g) => (
           <div key={g.label + g.items[0]?.session_id}>
             <div className="sess-group">{g.label}</div>
-            {g.items.map((s) => (
+            {g.items.map((s) => {
+              const activity = sessionActivity[s.session_id];
+              const meta = activity?.summary
+                ?? ((s.message_count ?? 0) > 0 ? `${s.message_count} 条消息` : "未开始");
+              const liveKind = activity?.kind;
+              return (
               <div key={s.session_id}>
                 {renamingId === s.session_id ? (
                   <div className="session-rename">
@@ -141,15 +147,27 @@ export function LeftSidebar({ onOpenSettings, onOpenWorkspace }: {
                   </div>
                 ) : (
                   <div
-                    className={`sess${s.session_id === currentSession?.session_id ? " active" : ""}`}
+                    className={[
+                      "sess",
+                      s.session_id === currentSession?.session_id ? "active" : "",
+                      liveKind ? `live live-${liveKind}` : "",
+                    ].filter(Boolean).join(" ")}
                     onClick={() => switchSession(s.session_id)}
                   >
                     {/* 标题行右侧挂 mono 时间（TeamClaw 卡片解剖）,hover 时让位给操作按钮 */}
                     <div className="sess-head">
-                      <div className="sess-title">{s.title}</div>
+                      <div className="sess-title">{displaySessionTitle(s.title)}</div>
                       <span className="sess-time">{sessTime(s)}</span>
                     </div>
-                    <div className="sess-meta">{(s.message_count ?? 0) > 0 ? `${s.message_count} 条消息` : "未开始"}</div>
+                    <div className="sess-meta">
+                      {liveKind && (
+                        <span
+                          className={`sess-live-dot${liveKind === "clarification" ? " wait" : ""}${liveKind === "error" ? " err" : ""}`}
+                          aria-hidden
+                        />
+                      )}
+                      <span className="sess-meta-text">{meta}</span>
+                    </div>
                     <div className="sess-actions">
                       <button
                         className="session-action-btn" title="重命名"
@@ -178,7 +196,8 @@ export function LeftSidebar({ onOpenSettings, onOpenWorkspace }: {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         ))}
       </nav>

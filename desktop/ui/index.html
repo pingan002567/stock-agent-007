@@ -42,7 +42,7 @@
   button.ghost { background: transparent; border: 1px solid #2a2e3a; color: #8a8f9c; margin-top: 8px; }
   .err { color: #e05a5a; font-size: 12px; margin-top: 10px; white-space: pre-wrap; word-break: break-all; }
 
-  /* 首启欢迎页：单屏，唯一决定 = 工作目录 */
+  /* 首启欢迎页：单屏，唯一决定 = 工作区文件夹 */
   .welcome { text-align: center; }
   .welcome-logo {
     width: 64px; height: 64px; margin: 0 auto 18px; border-radius: 16px;
@@ -85,11 +85,11 @@
     <!-- 探活/过渡态 -->
     <div id="gate-splash" class="gate active" style="text-align:center">
       <div class="spinner"></div>
-      <div id="splash-text">正在连接 Stock Agent 后端…</div>
+      <div id="splash-text">正在打开工作台…</div>
       <div class="hint" id="splash-hint"></div>
     </div>
 
-    <!-- 首启欢迎页：环境检查静默（失败才显示），唯一决定 = 工作目录 -->
+    <!-- 首启欢迎页：环境检查静默（失败才显示），唯一决定 = 工作区文件夹 -->
     <div id="gate-setup" class="gate welcome">
       <div class="welcome-logo">
         <svg width="40" height="40" viewBox="0 0 100 100">
@@ -107,7 +107,7 @@
         </svg>
       </div>
       <h1>欢迎使用 Stock Agent</h1>
-      <p class="welcome-sub">AI 驱动的个人投资工作台。数据完全存储在本机，选择一个工作目录即可开始。</p>
+      <p class="welcome-sub">资料保存在这台电脑上。先选一个文件夹，会话、持仓和设置都会放在这里。</p>
 
       <div class="env-err" id="envErr" style="display:none"></div>
 
@@ -116,7 +116,7 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
         </span>
         <span class="dir-info">
-          <span class="dir-label">工作目录</span>
+          <span class="dir-label">工作区</span>
           <div class="dir-path" id="dirPath"></div>
         </span>
         <button class="dir-change" id="browseBtn" type="button">更改…</button>
@@ -158,7 +158,27 @@
     } catch (_) { return false; }
   }
 
+  // 等 frontend/dist/index.html 落盘再跳转，避免 make build & make run 并行时
+  // vite 清空 dist 窗口期导航到 {"detail":"Not Found"} / 503。
+  async function waitFrontendDist(rounds = 60) {
+    if (!invoke) return true;
+    for (let i = 0; i < rounds; i++) {
+      try {
+        const d = await cli("doctor");
+        if (d.frontend_dist_exists) return true;
+      } catch (_) { /* empty */ }
+      $("splash-hint").textContent = "正在等待界面构建完成…";
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    return false;
+  }
+
   async function enter(port) {
+    if (!(await waitFrontendDist())) {
+      $("splash-text").textContent = "界面文件未就绪";
+      $("splash-hint").textContent = "请先执行 make build，再重新打开应用（不要用 make build & make run 并行）";
+      return;
+    }
     localStorage.setItem("sa.lastGoodPort", String(port));
     const url = `http://127.0.0.1:${port}/?_=${Date.now()}`;
     // WKWebView 拦截 tauri://→http:// 的 JS 顶层跳转（静默失败），优先走 Rust 原生导航
@@ -168,11 +188,11 @@
     window.location.replace(url);
   }
 
-  // ── 首启欢迎页：环境检查静默，失败才显示；唯一决定 = 工作目录 ──
+  // ── 首启欢迎页：环境检查静默，失败才显示；唯一决定 = 工作区 ──
   const ENV_LABELS = {
-    platform_ok: "仅支持 macOS",
-    venv_python_exists: "缺少 Python 运行时（请先运行 ./install.sh）",
-    frontend_dist_exists: "缺少前端产物（请先运行 cd frontend && npm run build）",
+    platform_ok: "请在 Mac 上打开此应用",
+    venv_python_exists: "还没有装好运行环境，请先运行安装脚本 ./install.sh",
+    frontend_dist_exists: "还没有生成界面文件，请先完成安装",
   };
   let chosenDir = "";
   function openSetup(d) {
@@ -191,7 +211,7 @@
   if (!dialogOpen) $("browseBtn").style.display = "none";
   $("browseBtn").addEventListener("click", async () => {
     try {
-      const picked = await dialogOpen({ directory: true, defaultPath: chosenDir, title: "选择 Stock Agent 工作目录" });
+      const picked = await dialogOpen({ directory: true, defaultPath: chosenDir, title: "选择工作区文件夹" });
       if (picked) { chosenDir = picked; $("dirPath").textContent = picked; }
     } catch (e) { $("setupErr").textContent = String(e); }
   });
@@ -211,7 +231,7 @@
     (async function tick() {
       if (await probe(DEFAULT_PORT)) return enter(DEFAULT_PORT);
       if (Date.now() - started > 8000)
-        $("splash-hint").innerHTML = "请用 Tauri 打开本应用（<code>make run</code>），在引导页完成服务注册";
+        $("splash-hint").innerHTML = "请用桌面应用打开（<code>make run</code>），在欢迎页选择工作区";
       setTimeout(tick, 800);
     })();
   }
@@ -225,10 +245,10 @@
       return legacyLoop();
     }
 
-    $("splash-hint").textContent = "正在检测环境（doctor）…";
+    $("splash-hint").textContent = "正在检查环境…";
     let d;
     try { d = await cli("doctor"); }
-    catch (e) { $("splash-hint").textContent = "doctor 失败: " + String(e); return; }
+    catch (e) { $("splash-hint").textContent = "环境检查失败: " + String(e); return; }
     $("splash-hint").textContent = "";
 
     if (d.backend_healthy) {
@@ -242,7 +262,7 @@
     }
 
     if (!d.service_installed) {
-      openSetup(d); // 首启向导：检测 → 工作目录 → 注册
+      openSetup(d); // 首启向导：检测 → 工作区 → 注册
       return;
     }
 

@@ -8,10 +8,17 @@ import {
   createStreamUrl,
   updateSession,
   deleteSession,
+  type UploadedFileInfo,
 } from "@/api/copilot";
 import type { CopilotSession, CopilotMessage } from "@/api/client";
 import { skillTraceItems, type SkillTraceItem } from "@/api/copilot";
 import { parseTaskToolArgs } from "@/components/features/taskToolMeta";
+import {
+  createHumanInputTextResponse,
+  parseHumanInputRequest,
+  type HumanInputResponse,
+} from "@/lib/humanInput";
+import { isUsableSessionTitle } from "@/lib/sessionTitle";
 
 // ── Streaming message types ──
 
@@ -53,6 +60,8 @@ export interface StreamMessage {
   answerText: string;
   /** AI 反问澄清的问题文本（ask_clarification）；出现即等待用户下一条消息回答 */
   clarificationText: string | null;
+  /** DeerFlow-native human_input_request；有则渲染 HumanInputCard */
+  clarificationRequest: import("@/lib/humanInput").HumanInputRequest | null;
   finalPayload: Record<string, unknown> | null;
   errorText: string | null;
 }
@@ -64,9 +73,11 @@ const TOOL_LABELS: Record<string, string> = {
   get_daily_history: "历史行情",
   search_stock_intel: "情报搜索",
   add_watchlist_item: "添加自选",
+  list_watchlist: "查看自选",
   remove_watchlist_item: "删除自选",
   get_portfolio_snapshot: "持仓快照",
   upsert_holding: "调整持仓",
+  remove_holding: "删除持仓",
   analyze_portfolio_risk: "组合风险",
   get_active_risk_policy: "风险策略",
   list_risk_policies: "风险策略列表",
@@ -123,6 +134,44 @@ export function toolLabel(name: string): string {
   return TOOL_LABELS[name] || name;
 }
 
+/** 左栏会话副行：进行中的轻量进度（不展开思维链） */
+export type SessionActivityKind =
+  | "reasoning"
+  | "tools"
+  | "answering"
+  | "clarification"
+  | "error";
+
+export interface SessionActivity {
+  kind: SessionActivityKind;
+  summary: string;
+}
+
+/** 从流式快照派生左栏文案；final 不计为活动态 */
+export function summarizeSessionActivity(msg: StreamMessage): SessionActivity | null {
+  if (msg.clarificationText || msg.clarificationRequest) {
+    return { kind: "clarification", summary: "等待你的回复" };
+  }
+  if (msg.phase === "error" || msg.errorText) {
+    return { kind: "error", summary: "出错 · 可重试" };
+  }
+  if (msg.phase === "final") return null;
+  if (msg.phase === "answering") {
+    return { kind: "answering", summary: "正在回复…" };
+  }
+  if (msg.phase === "tools") {
+    const running = msg.tools.filter((t) => t.status === "running");
+    if (running.length > 1) {
+      return { kind: "tools", summary: `正在调用 · ${running.length} 个工具` };
+    }
+    const focus = running[0] ?? msg.tools[msg.tools.length - 1];
+    if (focus) {
+      return { kind: "tools", summary: `正在调用 · ${toolLabel(focus.name)}` };
+    }
+  }
+  return { kind: "reasoning", summary: "正在思考…" };
+}
+
 /** tool_result 载荷 → 展示文本：优先 text/output/result；工具桥（stub/embedded）把
  * 结构化结果平铺在载荷顶层（{call_id, ...result}），此时序列化剩余载荷兜底，
  * 否则工具卡预览和右栏详情都拿不到内容。 */
@@ -139,7 +188,7 @@ export function extractToolResultText(payload: Record<string, unknown> | null | 
 
 // ── Hook ──
 // 聊天状态是应用级单例（经 CopilotChatProvider 提供）：聊天主屏与业务页侧栏
-// 共享同一份会话/消息/EventSource，切屏不断流、不状态分裂。
+// 共享同一份会话/消息；SSE 按 session_id 保活，切屏/切会话不断流（Stop/删除才关）。
 
 function useCopilotChatState() {
   const {
@@ -153,6 +202,7 @@ function useCopilotChatState() {
   } = useAppState();
 
   const [sessions, setSessions] = useState<CopilotSession[]>([]);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const currentSessionIdRef = useRef(currentSessionId);
   useEffect(() => { currentSessionIdRef.current = currentSessionId; }, [currentSessionId]);
@@ -163,11 +213,104 @@ function useCopilotChatState() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [toolOpen, setToolOpen] = useState<Set<string>>(new Set());
 
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const sendingRef = useRef(false);
+  // 按会话保活 SSE：切会话/新建对话不断开在途流，只切换视图；Stop/删除才关连接
+  const streamsRef = useRef(new Map<string, EventSource>());
+  const streamSnapshotsRef = useRef(new Map<string, StreamMessage>());
+  /** 后台 error 在 snapshot 清掉后仍短暂留在左栏 */
+  const stickyActivityRef = useRef<Record<string, SessionActivity>>({});
+  const [sessionActivity, setSessionActivity] = useState<Record<string, SessionActivity>>({});
+  const activityFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [draftSessionModel, setDraftSessionModel] = useState<string | null>(null);
   // 「新建对话」不立即建库(否则积累空会话):置起意向标记,首条消息时才真正创建
   const pendingNewRef = useRef(false);
+
+  const viewingSession = useCallback((sid: string) => currentSessionIdRef.current === sid, []);
+
+  const flushSessionActivity = useCallback(() => {
+    activityFlushTimerRef.current = null;
+    const next: Record<string, SessionActivity> = { ...stickyActivityRef.current };
+    for (const [sid, snap] of streamSnapshotsRef.current) {
+      const summary = summarizeSessionActivity(snap);
+      if (summary) next[sid] = summary;
+    }
+    setSessionActivity((prev) => {
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(next);
+      if (
+        prevKeys.length === nextKeys.length
+        && nextKeys.every((k) => prev[k]?.kind === next[k]?.kind && prev[k]?.summary === next[k]?.summary)
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }, []);
+
+  const syncSessionActivity = useCallback((immediate = false) => {
+    if (immediate) {
+      if (activityFlushTimerRef.current) {
+        clearTimeout(activityFlushTimerRef.current);
+        activityFlushTimerRef.current = null;
+      }
+      flushSessionActivity();
+      return;
+    }
+    if (activityFlushTimerRef.current) return;
+    activityFlushTimerRef.current = setTimeout(flushSessionActivity, 280);
+  }, [flushSessionActivity]);
+
+  const syncGlobalStreaming = useCallback(() => {
+    setCopilotStreaming(streamsRef.current.size > 0);
+  }, [setCopilotStreaming]);
+
+  const patchStream = useCallback((sid: string, updater: (prev: StreamMessage) => StreamMessage | null) => {
+    const prev = streamSnapshotsRef.current.get(sid);
+    if (!prev) return;
+    const next = updater(prev);
+    if (next) streamSnapshotsRef.current.set(sid, next);
+    else streamSnapshotsRef.current.delete(sid);
+    if (viewingSession(sid)) setStreamMessage(next);
+    syncSessionActivity();
+  }, [viewingSession, syncSessionActivity]);
+
+  const bindStream = useCallback((sid: string, msg: StreamMessage) => {
+    delete stickyActivityRef.current[sid];
+    streamSnapshotsRef.current.set(sid, msg);
+    // ES 登记前也先点亮全局 busy，避免 bind→open 间隙被当成空闲
+    setCopilotStreaming(true);
+    if (viewingSession(sid)) {
+      setStreamMessage(msg);
+      setReasoningText(msg.reasoningText || "");
+      setSending(true);
+    }
+    syncSessionActivity(true);
+  }, [viewingSession, setCopilotStreaming, syncSessionActivity]);
+
+  const releaseStream = useCallback((sid: string, es?: EventSource | null) => {
+    const current = streamsRef.current.get(sid);
+    if (es && current && current !== es) return false;
+    if (current) {
+      streamsRef.current.delete(sid);
+      try { current.close(); } catch { /* empty */ }
+    }
+    streamSnapshotsRef.current.delete(sid);
+    syncGlobalStreaming();
+    if (viewingSession(sid)) {
+      setSending(false);
+      setReasoningText("");
+    }
+    syncSessionActivity(true);
+    return true;
+  }, [viewingSession, syncGlobalStreaming, syncSessionActivity]);
+
+  useEffect(() => () => {
+    for (const es of streamsRef.current.values()) {
+      try { es.close(); } catch { /* empty */ }
+    }
+    streamsRef.current.clear();
+    streamSnapshotsRef.current.clear();
+    if (activityFlushTimerRef.current) clearTimeout(activityFlushTimerRef.current);
+  }, []);
 
   const currentSession = sessions.find((s) => s.session_id === currentSessionId);
 
@@ -220,6 +363,7 @@ function useCopilotChatState() {
         loadMessages(items[0].session_id);
       }
     } catch { /* empty */ }
+    finally { setSessionsLoaded(true); }
   }, [loadMessages]);
 
   // 挂载时加载会话列表；loadSessions 为异步加载，setState 发生在 await 之后，
@@ -231,28 +375,28 @@ function useCopilotChatState() {
 
   const switchSession = useCallback(async (id: string) => {
     if (id === currentSessionId) return;
-    eventSourceRef.current?.close();
-    eventSourceRef.current = null;
-    sendingRef.current = false;
+    // 不断开其他会话的在途 SSE，只切换视图并恢复目标会话的流式快照
     pendingNewRef.current = false;
     setDraftSessionModel(null);
+    currentSessionIdRef.current = id;
     setCurrentSessionId(id);
     setMessages([]);
     setStreamingReasoningText("");
-    setStreamMessage(null);
-    setCopilotStreaming(false);
-    setSending(false);
+    delete stickyActivityRef.current[id];
+    const snap = streamSnapshotsRef.current.get(id) ?? null;
+    setStreamMessage(snap);
+    setSending(streamsRef.current.has(id));
+    setReasoningText(snap?.reasoningText || "");
+    syncGlobalStreaming();
+    syncSessionActivity(true);
     // 锚点跟随：切换会话时恢复该会话的 symbol 锚点(个股档案等页随 stock 联动)
     const anchor = sessions.find((s) => s.session_id === id)?.anchor_symbol;
     if (anchor) setStock(anchor);
     await loadMessages(id);
-  }, [currentSessionId, sessions, setStock, loadMessages, setCopilotStreaming, setStreamingReasoningText]);
+  }, [currentSessionId, sessions, setStock, loadMessages, setStreamingReasoningText, syncGlobalStreaming, syncSessionActivity]);
 
   const handleNewSession = useCallback(async () => {
-    eventSourceRef.current?.close();
-    eventSourceRef.current = null;
-    sendingRef.current = false;
-    // 懒建:只清空视图并置新建意向,首条消息时 ensureSession 才创建会话
+    // 懒建:只清空视图并置新建意向；后台会话的 SSE 继续跑
     pendingNewRef.current = true;
     setDraftSessionModel(null);
     currentSessionIdRef.current = null;
@@ -260,9 +404,10 @@ function useCopilotChatState() {
     setMessages([]);
     setStreamingReasoningText("");
     setStreamMessage(null);
-    setCopilotStreaming(false);
     setSending(false);
-  }, [setCopilotStreaming, setStreamingReasoningText]);
+    setReasoningText("");
+    syncGlobalStreaming();
+  }, [setStreamingReasoningText, syncGlobalStreaming]);
 
   const handleRenameSession = useCallback(async (sid: string, val: string) => {
     const trimmed = val.trim();
@@ -275,16 +420,22 @@ function useCopilotChatState() {
 
   const handleDeleteSession = useCallback(async (sid: string) => {
     try {
+      delete stickyActivityRef.current[sid];
+      releaseStream(sid);
       await deleteSession(sid);
       setSessions((prev) => prev.filter((s) => s.session_id !== sid));
       if (currentSessionId === sid) {
         const next = sessions.find((s) => s.session_id !== sid);
+        currentSessionIdRef.current = next?.session_id || null;
         setCurrentSessionId(next?.session_id || null);
         setMessages([]);
+        const snap = next ? (streamSnapshotsRef.current.get(next.session_id) ?? null) : null;
+        setStreamMessage(snap);
+        setSending(!!next && streamsRef.current.has(next.session_id));
         if (next) await loadMessages(next.session_id);
       }
     } catch { /* empty */ }
-  }, [currentSessionId, sessions, loadMessages]);
+  }, [currentSessionId, sessions, loadMessages, releaseStream]);
 
   // 确保有当前会话（发消息/上传附件共用）：无则复用最近会话或新建
   const ensureSession = useCallback(async (): Promise<string> => {
@@ -322,15 +473,40 @@ function useCopilotChatState() {
   }, []);
 
   // symbolOverride:「问 AI」快捷入口按卡片上下文指定锚点,不依赖全局 stock 的当前值
-  const handleSend = useCallback(async (input: string, symbolOverride?: string) => {
-    const text = input.trim();
-    if (!text || sendingRef.current) return;
+  const handleSend = useCallback(async (
+    input: string,
+    symbolOverride?: string,
+    attachments: UploadedFileInfo[] = [],
+    humanInputResponse?: HumanInputResponse | null,
+  ) => {
+    let text = input.trim();
+    if (!text && !humanInputResponse) return;
     if (symbolOverride) setStock(symbolOverride);
-    sendingRef.current = true;
-    setSending(true);
-    setCopilotStreaming(true);
-    setReasoningText("AI 正在思考...");
-    setStreamMessage({
+
+    let sid: string;
+    try {
+      sid = await ensureSession();
+    } catch {
+      return;
+    }
+    // 同一会话禁止并发；其它会话可在后台继续流式回复
+    if (streamsRef.current.has(sid)) return;
+
+    const priorSnap = streamSnapshotsRef.current.get(sid);
+    const openRequest = priorSnap?.clarificationRequest
+      ?? (priorSnap?.clarificationText
+        ? parseHumanInputRequest({ question: priorSnap.clarificationText, call_id: priorSnap.runId })
+        : null);
+    let responseMeta = humanInputResponse ?? null;
+    if (openRequest && !responseMeta && text) {
+      responseMeta = createHumanInputTextResponse(openRequest, text);
+    }
+    if (humanInputResponse && !text) {
+      text = humanInputResponse.value;
+    }
+    delete stickyActivityRef.current[sid];
+
+    const initialStream: StreamMessage = {
       runId: "",
       phase: "reasoning",
       reasoningText: "AI 正在思考...",
@@ -341,14 +517,22 @@ function useCopilotChatState() {
       steps: [],
       answerText: "",
       clarificationText: null,
+      clarificationRequest: null,
       finalPayload: null,
       errorText: null,
-    });
+    };
+    bindStream(sid, initialStream);
 
     try {
-      const sid = await ensureSession();
-
-      const run = await sendMessage(sid, text, currentScreen, symbolOverride ?? stock);
+      const run = await sendMessage(
+        sid,
+        text,
+        currentScreen,
+        symbolOverride ?? stock,
+        attachments,
+        responseMeta,
+      );
+      bindStream(sid, { ...initialStream, runId: run.run_id });
 
       const userMsg: CopilotMessage = {
         message_id: `msg-${Date.now()}`,
@@ -356,12 +540,14 @@ function useCopilotChatState() {
         role: "user",
         kind: "user_message",
         text,
-        payload: {},
+        payload: attachments.length ? { attachments } : {},
         created_at: new Date().toISOString(),
         run_id: run.run_id,
       };
       // 乐观追加用户消息；本轮结束后会用服务端持久化消息整体对齐（见 final 处理）
-      setMessages((prev) => [...prev, userMsg]);
+      if (viewingSession(sid)) {
+        setMessages((prev) => [...prev, userMsg]);
+      }
 
       // 收集完整的流式数据
       let finalAnswerText = "";
@@ -369,15 +555,21 @@ function useCopilotChatState() {
       let errorText: string | null = null;
 
       const es = new EventSource(createStreamUrl(sid, run.run_id));
-      eventSourceRef.current = es;
+      streamsRef.current.set(sid, es);
+      syncGlobalStreaming();
+      let settled = false;
+
+      // Named keepalive from the backend. Must be a real EventSource event
+      // (not an SSE comment) so WKWebView does not idle-cut the socket.
+      es.addEventListener("ping", () => {});
 
       // 只处理title事件（更新session标题）
       es.addEventListener("title", (streamEvent: Event) => {
         try {
           const data = JSON.parse((streamEvent as MessageEvent).data);
-          const t = (data?.payload?.title as string) || "";
-          // 双保险:JSON 形状的标题(prompt envelope 泄漏)不入会话列表
-          if (t && sid && !t.trimStart().startsWith("{") && !t.trimStart().startsWith("[")) {
+          const t = String((data?.payload?.title as string) || "").trim();
+          // 双保险：prompt envelope / JSON 泄漏不入会话列表
+          if (t && sid && isUsableSessionTitle(t)) {
             setSessions((prev) => prev.map((s) =>
               s.session_id === sid ? { ...s, title: t } : s
             ));
@@ -385,12 +577,20 @@ function useCopilotChatState() {
         } catch { /* empty */ }
       });
 
-      // AI 反问澄清：展示问题卡片，等待用户以下一条消息回答
+      // AI 反问澄清：DeerFlow-native human_input 卡片；下一条消息 / 卡片提交即回答
       es.addEventListener("clarification", (streamEvent: Event) => {
         try {
           const data = JSON.parse((streamEvent as MessageEvent).data);
-          const q = String((data?.payload as Record<string, unknown>)?.question || "");
-          if (q) setStreamMessage((prev) => prev ? { ...prev, clarificationText: q } : prev);
+          const payload = (data?.payload || {}) as Record<string, unknown>;
+          const request = parseHumanInputRequest(payload);
+          const q = request?.question || String(payload.question || "");
+          if (q || request) {
+            patchStream(sid, (prev) => ({
+              ...prev,
+              clarificationText: q || prev.clarificationText,
+              clarificationRequest: request,
+            }));
+          }
         } catch { /* empty */ }
       });
 
@@ -400,7 +600,7 @@ function useCopilotChatState() {
           const data = JSON.parse((streamEvent as MessageEvent).data);
           const items = skillTraceItems((data?.payload as Record<string, unknown>)?.items);
           if (items.length > 0) {
-            setStreamMessage((prev) => prev ? { ...prev, skillTrace: items } : prev);
+            patchStream(sid, (prev) => ({ ...prev, skillTrace: items }));
           }
         } catch { /* empty */ }
       });
@@ -413,8 +613,7 @@ function useCopilotChatState() {
           const t = String(p.text || p.latest_text || "");
           // 只展示真实推理文本;裸 phase 名("values" 等快照占位)是噪声,不进气泡
           if (t) {
-            setStreamMessage((prev) => {
-              if (!prev) return prev;
+            patchStream(sid, (prev) => {
               const isNew = prev.reasoningLog[prev.reasoningLog.length - 1] !== t;
               const last = prev.steps[prev.steps.length - 1];
               let steps = prev.steps;
@@ -432,6 +631,7 @@ function useCopilotChatState() {
                 steps,
               };
             });
+            if (viewingSession(sid)) setReasoningText(t);
           }
         } catch { /* empty */ }
       });
@@ -451,7 +651,7 @@ function useCopilotChatState() {
             }
             const todos = (args as { todos?: PlanTodo[] })?.todos;
             if (Array.isArray(todos)) {
-              setStreamMessage((prev) => prev ? { ...prev, todos } : prev);
+              patchStream(sid, (prev) => ({ ...prev, todos }));
             }
             return;
           }
@@ -464,8 +664,7 @@ function useCopilotChatState() {
             taskDescription = meta.description;
             taskPrompt = meta.prompt;
           }
-          setStreamMessage((prev) => {
-            if (!prev) return prev;
+          patchStream(sid, (prev) => {
             if (prev.tools.some((t) => t.callId === callId)) return prev;
             const tool: StreamToolCall = {
               callId, name, status: "running", subagentType, taskDescription, taskPrompt,
@@ -487,12 +686,12 @@ function useCopilotChatState() {
           const p = (data?.payload || {}) as Record<string, unknown>;
           const callId = String(p.call_id || "");
           const resultText = extractToolResultText(p);
-          setStreamMessage((prev) => prev ? {
+          patchStream(sid, (prev) => ({
             ...prev,
             tools: prev.tools.map((t) => t.callId === callId ? { ...t, status: "done", resultText } : t),
             steps: prev.steps.map((st) => st.kind === "tool" && st.tool.callId === callId
               ? { ...st, tool: { ...st.tool, status: "done" as const, resultText } } : st),
-          } : prev);
+          }));
         } catch { /* empty */ }
       });
 
@@ -503,7 +702,7 @@ function useCopilotChatState() {
           const t = (data?.payload?.text as string) || "";
           if (t) {
             finalAnswerText += t;
-            setStreamMessage((prev) => prev ? { ...prev, phase: "answering", answerText: prev.answerText + t } : prev);
+            patchStream(sid, (prev) => ({ ...prev, phase: "answering", answerText: prev.answerText + t }));
           }
         } catch { /* empty */ }
       });
@@ -518,39 +717,53 @@ function useCopilotChatState() {
             finalAnswerText = (finalPayload.conclusion as string) || "";
           }
         } catch { /* empty */ }
-        
-        // 关闭EventSource
-        es.close();
-        eventSourceRef.current = null;
 
-        // 用户已切到别的会话：丢弃这条在途回调，避免把旧会话的结果串进当前视图
-        if (currentSessionIdRef.current !== sid) return;
+        settled = true;
+        if (streamsRef.current.get(sid) === es) {
+          streamsRef.current.delete(sid);
+          try { es.close(); } catch { /* empty */ }
+        }
+        syncGlobalStreaming();
+
+        const snapBeforeClear = streamSnapshotsRef.current.get(sid);
+        const waitingClarify = Boolean(
+          snapBeforeClear?.clarificationRequest || snapBeforeClear?.clarificationText
+          || (finalPayload as { clarification?: unknown } | null)?.clarification,
+        );
+        if (waitingClarify) {
+          stickyActivityRef.current[sid] = { kind: "clarification", summary: "等待你的回复" };
+        } else {
+          delete stickyActivityRef.current[sid];
+        }
+
+        // 后台完成：清掉快照，切回该会话时靠 loadMessages 拿完整历史
+        if (!viewingSession(sid)) {
+          streamSnapshotsRef.current.delete(sid);
+          syncSessionActivity(true);
+          loadSessions();
+          return;
+        }
 
         // 先把流式气泡切到「完成」态，保留答案作为过渡，避免重载前闪空
-        setStreamMessage((prev) => prev ? { ...prev, phase: "final", answerText: finalAnswerText, finalPayload } : prev);
-
+        patchStream(sid, (prev) => ({ ...prev, phase: "final", answerText: finalAnswerText, finalPayload }));
         setReasoningText("");
-        setCopilotStreaming(false);
         setSending(false);
-        sendingRef.current = false;
 
         // 用服务端持久化消息整体对齐：含 tool_call/tool_result（→ 历史工具卡）与
         // 真实 message_id，同时清掉流式气泡。setMessages 与 setStreamMessage 在同一回调里，
         // React 自动批处理为单次渲染，不会出现答案重复或闪烁。
         const sessionId = sid;
-        if (sessionId) {
-          fetchSessionMessages(sessionId)
-            .then((items) => {
-              // 在途期间用户可能已新建/切换会话；若当前会话已不是本轮 run 的会话，
-              // 丢弃这批历史消息，避免把旧会话的流信息覆盖进新对话。
-              if (currentSessionIdRef.current !== sessionId) return;
-              setMessages(items);
-              setStreamMessage(null);
-            })
-            .catch(() => { /* 重载失败则保留流式气泡，答案仍可见 */ });
-        } else {
-          setStreamMessage(null);
-        }
+        fetchSessionMessages(sessionId)
+          .then((items) => {
+            // 在途期间用户可能已新建/切换会话；若当前会话已不是本轮 run 的会话，
+            // 丢弃这批历史消息，避免把旧会话的流信息覆盖进新对话。
+            if (currentSessionIdRef.current !== sessionId) return;
+            setMessages(items);
+            streamSnapshotsRef.current.delete(sessionId);
+            setStreamMessage(null);
+            syncSessionActivity(true);
+          })
+          .catch(() => { /* 重载失败则保留流式气泡，答案仍可见 */ });
         loadSessions();
       });
 
@@ -559,6 +772,7 @@ function useCopilotChatState() {
         // 浏览器原生 EventSource 在「连接层中断」时也会派发 error 事件，
         // 这类事件不带 data。只有带 data 的才是服务端真正发出的业务错误，
         // 否则误把一次网络抖动渲染成「错误: null」并杀掉整轮对话。
+        if (settled || streamsRef.current.get(sid) !== es) return;
         const raw = (streamEvent as MessageEvent).data;
         if (raw === undefined || raw === null) {
           errorText = "连接中断，请重新发送消息";
@@ -571,12 +785,14 @@ function useCopilotChatState() {
           }
         }
 
-        // 关闭EventSource
-        es.close();
-        eventSourceRef.current = null;
+        stickyActivityRef.current[sid] = { kind: "error", summary: "出错 · 可重试" };
+        releaseStream(sid, es);
 
-        // 用户已切到别的会话：丢弃这条在途回调
-        if (currentSessionIdRef.current !== sid) return;
+        // 用户已切到别的会话：丢弃这条在途回调（后台也清掉快照）
+        if (!viewingSession(sid)) {
+          loadSessions();
+          return;
+        }
 
         // 创建错误消息
         const errorMsg: CopilotMessage = {
@@ -591,36 +807,37 @@ function useCopilotChatState() {
         };
         setMessages((prev) => [...prev, errorMsg]);
         setStreamMessage(null);
-
         setReasoningText("");
-        setCopilotStreaming(false);
         setSending(false);
-        sendingRef.current = false;
         loadSessions();
       });
     } catch {
-      sendingRef.current = false;
-      setReasoningText("");
-      setCopilotStreaming(false);
-      setSending(false);
+      releaseStream(sid);
+      if (viewingSession(sid)) {
+        setStreamMessage(null);
+        setReasoningText("");
+        setSending(false);
+      }
     }
-  }, [ensureSession, currentScreen, stock, setCopilotStreaming, loadSessions]);
+  }, [
+    ensureSession, currentScreen, stock, setStock, loadSessions,
+    bindStream, patchStream, releaseStream, syncGlobalStreaming, syncSessionActivity, viewingSession,
+  ]);
 
   const handleStop = useCallback(() => {
     const sid = currentSessionIdRef.current;
-    eventSourceRef.current?.close();
-    eventSourceRef.current = null;
-    sendingRef.current = false;
-    setReasoningText("");
-    setStreamMessage(null);
-    setCopilotStreaming(false);
-    setSending(false);
-    if (sid) {
-      void fetchSessionMessages(sid).then((items) => {
-        if (currentSessionIdRef.current === sid) setMessages(items);
-      });
+    if (!sid) {
+      setStreamMessage(null);
+      setReasoningText("");
+      setSending(false);
+      return;
     }
-  }, [setCopilotStreaming]);
+    releaseStream(sid);
+    setStreamMessage(null);
+    void fetchSessionMessages(sid).then((items) => {
+      if (currentSessionIdRef.current === sid) setMessages(items);
+    });
+  }, [releaseStream]);
 
   const handleCopy = useCallback(async (msg: CopilotMessage) => {
     try {
@@ -641,12 +858,14 @@ function useCopilotChatState() {
 
   return {
     sessions,
+    sessionsLoaded,
     currentSessionId,
     currentSession,
     messages,
     sending,
     reasoningText,
     streamMessage,
+    sessionActivity,
     copiedId,
     toolOpen,
     loadSessions,

@@ -1,0 +1,7 @@
+name: workbench-a2
+description: Workbench lead agent (authority A2)
+tool_groups:
+- a2-research
+- files
+- search
+- sandbox-exec

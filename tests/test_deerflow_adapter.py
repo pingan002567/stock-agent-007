@@ -35,6 +35,24 @@ def test_event_mapper_maps_ai_message_tuple_to_partial_answer():
     assert events[0]["payload"]["text"] == "正在分析 AAPL 风险"
 
 
+def test_event_mapper_drops_workbench_context_title():
+    events = collect_mapped(
+        [
+            (
+                "values",
+                {"title": "<workbench_context> page: chat authority: A2", "messages": []},
+            )
+        ]
+    )
+    assert all(event["type"] != "title" for event in events)
+
+    ok = collect_mapped([("values", {"title": "白酒股咨询", "messages": []})])
+    assert any(
+        event["type"] == "title" and event["payload"]["title"] == "白酒股咨询"
+        for event in ok
+    )
+
+
 @dataclass
 class StreamEvent:
     type: str
@@ -98,6 +116,33 @@ def test_event_mapper_maps_openai_style_function_tool_call_arguments():
         "tool": "get_stock_context",
         "arguments": {"symbol": "AAPL"},
     }
+
+
+def test_event_mapper_forwards_tool_artifact():
+    mapper = DeerFlowEventMapper()
+    events = mapper.map(
+        {
+            "type": "messages-tuple",
+            "data": {
+                "type": "tool",
+                "name": "ask_clarification",
+                "tool_call_id": "c1",
+                "content": "❓ 选哪只？",
+                "artifact": {
+                    "human_input": {
+                        "version": 1,
+                        "kind": "human_input_request",
+                        "source": "ask_clarification",
+                        "request_id": "clarification:c1",
+                        "question": "选哪只？",
+                        "input_mode": "choice_with_other",
+                    }
+                },
+            },
+        }
+    )
+    assert events[0]["type"] == "tool_result"
+    assert events[0]["payload"]["artifact"]["human_input"]["question"] == "选哪只？"
 
 
 def test_event_mapper_maps_tool_message_to_tool_result():
@@ -368,6 +413,8 @@ def test_adapter_memory_and_upload_passthrough_guard_stub_and_real_modes():
     stub = DeerFlowClientAdapter(mode="stub", client=None)
     assert stub.memory_status()["supported"] is False
     assert stub.upload_files("t-1", ["/tmp/x.pdf"])["supported"] is False
+    assert stub.list_uploads("t-1")["supported"] is False
+    assert stub.delete_upload("t-1", "x.pdf")["supported"] is False
     assert stub.clear_memory()["supported"] is False
 
     class FakeMemoryClient:
@@ -377,6 +424,12 @@ def test_adapter_memory_and_upload_passthrough_guard_stub_and_real_modes():
         def upload_files(self, thread_id, files):
             return {"success": True, "files": [{"filename": "x.pdf"}], "thread": thread_id}
 
+        def list_uploads(self, thread_id):
+            return {"files": [{"filename": "x.pdf", "size": 12}], "count": 1, "thread": thread_id}
+
+        def delete_upload(self, thread_id, filename):
+            return {"success": True, "message": f"Deleted {filename}", "thread": thread_id}
+
     real = DeerFlowClientAdapter(mode="embedded", client=FakeMemoryClient())
     status = real.memory_status()
     assert status["supported"] is True
@@ -385,5 +438,25 @@ def test_adapter_memory_and_upload_passthrough_guard_stub_and_real_modes():
     assert upload["supported"] is True
     assert upload["success"] is True
     assert upload["thread"] == "sess-9"
+    listed = real.list_uploads("sess-9")
+    assert listed["supported"] is True
+    assert listed["count"] == 1
+    deleted = real.delete_upload("sess-9", "x.pdf")
+    assert deleted["supported"] is True
+    assert deleted["success"] is True
     # FakeMemoryClient 没有 clear_memory：单方法缺失也应降级而非抛错
     assert real.clear_memory()["supported"] is False
+
+
+def test_turn_upload_files_marked_on_envelope_human_message():
+    from langchain_core.messages import HumanMessage
+
+    from backend.agent_runtime.deerflow_client import _turn_upload_files, _with_turn_upload_files
+
+    files = _turn_upload_files([{"filename": "test.csv", "size": 12}, {"filename": "test.csv", "size": 99}])
+    assert files == [{"filename": "test.csv", "size": 12}]
+    with _with_turn_upload_files(files):
+        tagged = HumanMessage(content='{"envelope_version":"v0.22","user_message":"分析一下这个文件"}')
+        plain = HumanMessage(content="not an envelope")
+    assert tagged.additional_kwargs["files"] == files
+    assert plain.additional_kwargs["files"] == files

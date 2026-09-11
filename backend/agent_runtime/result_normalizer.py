@@ -4,8 +4,10 @@ from typing import Any, Dict
 
 
 class ResultNormalizer:
+    """Gateway-only final polish. Does not invent confidence or counter-arguments."""
+
     def normalize_final(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(result, dict):
+            result = {"conclusion": str(result or "")}
         result.setdefault("disclaimer", "仅供研究，不构成投资建议。")
-        result.setdefault("confidence", "medium")
-        result.setdefault("counter_reasons", ["真实数据源接入后需复核。"])
         return result

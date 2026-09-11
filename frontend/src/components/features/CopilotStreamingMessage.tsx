@@ -1,11 +1,16 @@
 import { type StreamMessage, type StreamToolCall } from "@/hooks/useCopilotChat";
 import { CopilotFinalMeta, SkillTraceChain } from "@/components/features/CopilotFinalMeta";
 import { ThoughtTimeline } from "@/components/features/ThoughtTimeline";
+import { HumanInputCard } from "@/components/features/HumanInputCard";
+import type { HumanInputResponse } from "@/lib/humanInput";
 
 interface Props {
   streamMessage: StreamMessage;
   /** 提供时流式工具卡可点击（聊天中心主区 → 右栏详情联动） */
   onToolClick?: (tool: StreamToolCall) => void;
+  /** Human Input Card 提交（选项 / 卡片内文本） */
+  onClarifySubmit?: (response: HumanInputResponse, displayText: string) => void;
+  clarifyPending?: boolean;
 }
 
 const PHASE_LABELS: Record<string, string> = {
@@ -24,11 +29,17 @@ const PHASE_COLORS: Record<string, string> = {
   reasoning: "var(--blue)",
 };
 
-export function CopilotStreamingMessage({ streamMessage, onToolClick }: Props) {
+export function CopilotStreamingMessage({
+  streamMessage,
+  onToolClick,
+  onClarifySubmit,
+  clarifyPending,
+}: Props) {
   const hasContent = streamMessage.answerText.length > 0 || streamMessage.phase === "final" || streamMessage.phase === "error";
   const phaseLabel = PHASE_LABELS[streamMessage.phase] || "推理中";
   const phaseColor = PHASE_COLORS[streamMessage.phase] || "var(--blue)";
   const streamingActive = streamMessage.phase !== "final" && streamMessage.phase !== "error";
+  const clarificationRequest = streamMessage.clarificationRequest;
 
   return (
     <div className={`msg ai${hasContent ? "" : " streaming"}`}>
@@ -67,19 +78,34 @@ export function CopilotStreamingMessage({ streamMessage, onToolClick }: Props) {
       )}
       {/* 思维链时间线(deer-flow 借鉴):推理/工具按序交错,早期步骤折叠 */}
       <ThoughtTimeline steps={streamMessage.steps} active={streamingActive} onToolClick={onToolClick} />
-      {streamMessage.clarificationText && (
+      {clarificationRequest && (
+        <HumanInputCard
+          request={clarificationRequest}
+          pending={clarifyPending}
+          onSubmit={onClarifySubmit
+            ? (response) => {
+                void onClarifySubmit(response, response.value);
+              }
+            : undefined}
+        />
+      )}
+      {!clarificationRequest && streamMessage.clarificationText && (
         <div className="clarification-card">
           <div className="clarification-title">AI 需要你的补充信息</div>
           <div style={{ whiteSpace: "pre-wrap" }}>{streamMessage.clarificationText}</div>
           <div className="clarification-hint">直接在下方输入框回答即可继续</div>
         </div>
       )}
-      {streamMessage.answerText && (
+      {/* 澄清卡已承载问题正文：不再把 conclusion / partial 当回答贴一遍 */}
+      {!clarificationRequest && !streamMessage.clarificationText && streamMessage.answerText && (
         <div className={streamMessage.phase === "final" ? "" : "cursor-blink"}>
           {streamMessage.answerText}
         </div>
       )}
-      {streamMessage.phase === "final" && streamMessage.finalPayload && (
+      {streamMessage.phase === "final"
+        && streamMessage.finalPayload
+        && !clarificationRequest
+        && !streamMessage.clarificationText && (
         <CopilotFinalMeta payload={streamMessage.finalPayload} />
       )}
       {streamMessage.errorText && (

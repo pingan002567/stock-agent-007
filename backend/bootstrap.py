@@ -23,7 +23,6 @@ from backend.app_services.copilot_context_builder import CopilotContextBuilder
 from backend.app_services.copilot_service import CopilotService
 from backend.app_services.decision_journal_service import DecisionJournalService
 from backend.app_services.execution_policy import ExecutionPolicy
-from backend.app_services.intent_router import IntentRouter
 from backend.app_services.data_collector_service import DataCollectorService
 from backend.app_services.monitor_service import MonitorService
 from backend.app_services.paper_portfolio_service import PaperPortfolioService
@@ -343,7 +342,6 @@ def create_services(
         repo=repo,
         context_builder=context_builder,
         copilot_context_builder=copilot_context_builder,
-        intent_router=IntentRouter(),
         permission_guard=permission_guard,
         task_service=task_service,
         audit_service=audit_service,

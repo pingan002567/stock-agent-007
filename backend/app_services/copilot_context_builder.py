@@ -11,26 +11,8 @@ from backend.persistence.repositories import WorkbenchRepository
 from backend.schemas import model_to_dict
 from backend.stock_domain.portfolio_tools import summarize_portfolio
 
-# Intent → required context sections mapping.
-# Controls which data is loaded when an intent is known.
-# "overview" is the default fallback when intent is unknown or not matched.
-INTENT_TO_CONTEXT_SECTIONS: dict[str, set[str]] = {
-    "stock_research":           {"holdings", "risk_policy"},
-    "risk_review":              {"holdings", "risk_policy"},
-    "rebalance_plan":           {"holdings", "risk_policy"},
-    "strategy_backtest":        {"holdings", "risk_policy"},
-    "monitor_event":            {"monitor"},
-    "report_write":             {"reports"},
-    "review_inbox":             {"inbox"},
-    "decision_journal_review":  {"journal"},
-    "paper_portfolio_review":   {"paper_portfolio"},
-    "pre_trade_review":         {"holdings", "risk_policy"},
-    "execution_request":        set(),  # blocked — minimal context
-    # 兜底轻量化：闲聊零预取——不再每轮预注入全景 overview，模型需要时用
-    # 工具按需自取（get_stock_context / 组合与监控工具都在白名单内）。
-    # 锚定了 symbol 的聊天仍带 symbol_summary（见 build 的 symbol 分支）。
-    "copilot_chat":             set(),
-}
+# Prefetch maps were retired: Lead Agent loads domain data via tools.
+# build() only returns page + optional symbol_summary for UI chips.
 
 
 class CopilotContextBuilder:
@@ -52,6 +34,7 @@ class CopilotContextBuilder:
         self._cache = cache or ContextCache()
 
     def build(self, *, page: str, symbol: str | None = None, intent: str | None = None) -> dict[str, Any]:
+        del intent  # ignored: Copilot no longer prefetches by intent
         normalized_page = page if page in {
             "overview",
             "holdings",
@@ -65,36 +48,12 @@ class CopilotContextBuilder:
             # 每轮闲聊预注入全景 overview(与 copilot_chat 零预取冲突)
             "chat",
         } else "overview"
-        # Determine which sections to load based on intent
-        sections = INTENT_TO_CONTEXT_SECTIONS.get(intent, {normalized_page}) if intent else {normalized_page}
         payload: dict[str, Any] = {"page": normalized_page}
-
-        if symbol and (
-            sections & {"holdings", "stock", "risk_policy"}
-            or normalized_page == "stock"
-            or intent == "copilot_chat"
-        ):
-            payload["symbol_summary"] = self._symbol_summary(symbol)
-
-        if "holdings" in sections:
-            payload["holdings"] = self._holdings_summary()
-        if "risk_policy" in sections:
-            payload["active_risk_policy"] = self._policy_summary()
-        if "monitor" in sections:
-            payload["monitor"] = self._monitor_summary()
-        if "reports" in sections:
-            payload["reports"] = self._reports_summary(limit=5)
-        if "tasks" in sections or normalized_page == "tasks":
-            payload["tasks"] = self._tasks_summary(limit=5)
-        if "journal" in sections:
-            payload["journal"] = self._build_journal()
-        if "inbox" in sections:
-            payload["inbox"] = self._inbox_summary()
-        if "overview" in sections or normalized_page == "overview":
-            payload["overview"] = self._build_overview_content()
-        if "paper_portfolio" in sections:
-            payload["paper_portfolio"] = self._build_paper_portfolio()
-
+        if symbol:
+            try:
+                payload["symbol_summary"] = self._symbol_summary(symbol)
+            except Exception:
+                payload["symbol_summary"] = {"symbol": symbol, "status": "unavailable"}
         return payload
 
     def _build_overview_content(self) -> dict[str, Any]:

@@ -8,7 +8,7 @@ from backend.agent_runtime import skill_specs
 # Single source of truth: labels / intent-mapping / skill registry are generated
 # from skill_specs (SKILL.md frontmatter + the WORKBENCH_SKILLS table).
 SKILL_LABELS: Dict[str, str] = skill_specs.skill_labels()
-INTENT_SKILLS: Dict[str, set[str]] = skill_specs.intent_skills()
+INTENT_SKILLS: Dict[str, set[str]] = {"copilot": skill_specs.subagent_names()}
 
 
 @dataclass(frozen=True)

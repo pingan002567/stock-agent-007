@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AppStateProvider, useAppState } from "@/hooks/useAppState";
+import { AppActionsProvider, type SettingsTabHint } from "@/hooks/useAppActions";
 import { CopilotChatProvider } from "@/hooks/useCopilotChat";
 import { ChatDetailProvider, useChatDetail } from "@/hooks/useChatDetail";
 import { TopBar } from "@/components/layout/TopBar";
@@ -9,9 +10,13 @@ import { FunctionDock } from "@/components/layout/FunctionDock";
 import { CopilotPanel } from "@/components/features/CopilotPanel";
 import { SettingsModal } from "@/components/features/SettingsModal";
 import { WorkspaceModal } from "@/components/features/WorkspaceModal";
+import { SetupWizard } from "@/components/features/SetupWizard";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ToastProvider, useToast } from "@/hooks/useToast";
-import { setOnApiError } from "@/api/client";
+import { ApiError, setOnApiError } from "@/api/client";
+import { fetchSetupStatus, type SetupStatus } from "@/api/setup";
+import { interceptAnchorClick, isAppLocalHref, openExternalUrl } from "@/lib/openExternalUrl";
+import { shouldShowSetupWizard } from "@/lib/onboarding";
 
 /** 三栏骨架（doc/design/three-column-mockup.html）：
  * 左栏会话+设置 │ 中栏常驻聊天 │ 右侧功能坞（图标条 + 可展开业务面板）。
@@ -22,7 +27,17 @@ function AppShell() {
   const { currentScreen, setCurrentScreen } = useAppState();
   const { open: detailOpen, closeDetail } = useChatDetail();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTabHint | undefined>();
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const openSettings = useCallback((tab?: SettingsTabHint) => {
+    setSettingsTab(tab);
+    setSettingsOpen(true);
+  }, []);
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(false);
+    setSettingsTab(undefined);
+  }, []);
+  const openWorkspace = useCallback(() => setWorkspaceOpen(true), []);
 
   // 顶栏统一控制左右栏折叠（TeamClaw 式），状态持久化
   const [leftCollapsed, setLeftCollapsed] = useState(
@@ -63,36 +78,75 @@ function AppShell() {
   ].filter(Boolean).join(" ");
 
   return (
-    <div className={appCls}>
-      <TopBar
-        leftCollapsed={leftCollapsed}
-        onToggleLeft={toggleLeft}
-        dockCollapsed={dockCollapsed}
-        onToggleDock={toggleDock}
-      />
-      <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
-        <LeftSidebar
-          onOpenSettings={() => setSettingsOpen(true)}
-          onOpenWorkspace={() => setWorkspaceOpen(true)}
+    <AppActionsProvider openSettings={openSettings} openWorkspace={openWorkspace}>
+      <div className={appCls}>
+        <TopBar
+          leftCollapsed={leftCollapsed}
+          onToggleLeft={toggleLeft}
+          dockCollapsed={dockCollapsed}
+          onToggleDock={toggleDock}
         />
-      </ErrorBoundary>
-      <main className="center">
         <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
-          <CopilotPanel />
+          <LeftSidebar
+            onOpenSettings={() => openSettings()}
+            onOpenWorkspace={openWorkspace}
+          />
         </ErrorBoundary>
-      </main>
-      <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
-        {!dockCollapsed && <FunctionDock />}
-      </ErrorBoundary>
-      <BottomBar
-        leftCollapsed={leftCollapsed}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onOpenWorkspace={() => setWorkspaceOpen(true)}
-      />
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <WorkspaceModal open={workspaceOpen} onClose={() => setWorkspaceOpen(false)} />
-    </div>
+        <main className="center">
+          <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
+            <CopilotPanel />
+          </ErrorBoundary>
+        </main>
+        <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
+          {!dockCollapsed && <FunctionDock />}
+        </ErrorBoundary>
+        <BottomBar
+          leftCollapsed={leftCollapsed}
+          onOpenSettings={() => openSettings()}
+          onOpenWorkspace={openWorkspace}
+        />
+        <SettingsModal open={settingsOpen} initialTab={settingsTab} onClose={closeSettings} />
+        <WorkspaceModal open={workspaceOpen} onClose={() => setWorkspaceOpen(false)} />
+      </div>
+    </AppActionsProvider>
   );
+}
+
+function SetupGate({ children }: { children: ReactNode }) {
+  const [status, setStatus] = useState<SetupStatus | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchSetupStatus().then((next) => {
+      if (!cancelled) setStatus(next);
+    }).catch((err) => {
+      if (cancelled) return;
+      // 旧后端没有这条接口时不要挡住主界面
+      if (err instanceof ApiError && err.status === 404) {
+        setStatus({ completed: true, required: false, model_connected: false, default_model: null });
+        return;
+      }
+      setError(err instanceof Error ? err.message : "无法确认是否需要开始设置");
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (!status && !error) {
+    return <div className="setup-boot">正在打开工作台…</div>;
+  }
+  if (error && !status) {
+    return (
+      <div className="setup-boot">
+        <p>{error}</p>
+        <button type="button" className="primary" onClick={() => window.location.reload()}>重试</button>
+      </div>
+    );
+  }
+  if (status && shouldShowSetupWizard(status)) {
+    return <SetupWizard initialStatus={status} onFinished={() => setStatus({ ...status, completed: true, required: false })} />;
+  }
+  return <>{children}</>;
 }
 
 function AppContent() {
@@ -105,11 +159,34 @@ function AppContent() {
     });
     return () => setOnApiError(null);
   }, [showToast]);
+  useEffect(() => {
+    const onClick = (ev: MouseEvent) => {
+      interceptAnchorClick(ev);
+    };
+    document.addEventListener("click", onClick, true);
+    document.addEventListener("auxclick", onClick, true);
+    const origOpen = window.open.bind(window);
+    window.open = ((url?: string | URL, target?: string, features?: string) => {
+      const href = typeof url === "string" ? url : url?.toString();
+      if (href && !isAppLocalHref(href)) {
+        void openExternalUrl(href);
+        return null;
+      }
+      return origOpen(url, target, features);
+    }) as typeof window.open;
+    return () => {
+      document.removeEventListener("click", onClick, true);
+      document.removeEventListener("auxclick", onClick, true);
+      window.open = origOpen;
+    };
+  }, []);
   return (
     <AppStateProvider>
       <CopilotChatProvider>
         <ChatDetailProvider>
-          <AppShell />
+          <SetupGate>
+            <AppShell />
+          </SetupGate>
         </ChatDetailProvider>
       </CopilotChatProvider>
     </AppStateProvider>

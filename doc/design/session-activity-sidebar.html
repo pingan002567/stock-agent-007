@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>原型 · 左栏会话活动态</title>
+  <style>
+    :root, :root.dark {
+      --canvas: #1e1e1e;
+      --sidebar: #252526;
+      --left-sidebar-w: 280px;
+      --surface: #2d2d2d;
+      --surface-2: #333333;
+      --selected: rgba(255, 255, 255, 0.06);
+      --selected-strong: rgba(255, 255, 255, 0.10);
+      --ink: #e4e4e4;
+      --ink-2: #cccccc;
+      --muted: #9d9d9d;
+      --faint: #6e6e6e;
+      --line: rgba(255, 255, 255, 0.08);
+      --line-soft: rgba(255, 255, 255, 0.05);
+      --blue: #0078d4;
+      --green: #3fb950;
+      --red: #f85149;
+      --red-soft: rgba(248, 81, 73, 0.14);
+      --amber: #d29922;
+      --amber-soft: rgba(210, 153, 34, 0.14);
+      --mono: "JetBrains Mono", "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --sans: "PingFang SC", "Noto Sans SC", "Source Han Sans SC", -apple-system, BlinkMacSystemFont, "Microsoft YaHei", system-ui, sans-serif;
+      --radius: 8px;
+      --msg-time: var(--faint);
+      color-scheme: dark;
+    }
+    :root.light {
+      --canvas: #ffffff;
+      --sidebar: #f3f3f3;
+      --surface: #ffffff;
+      --surface-2: #f8f8f8;
+      --selected: rgba(0, 0, 0, 0.04);
+      --selected-strong: rgba(0, 0, 0, 0.07);
+      --ink: #1f1f1f;
+      --ink-2: #333333;
+      --muted: #616161;
+      --faint: #8a8a8a;
+      --line: rgba(0, 0, 0, 0.08);
+      --line-soft: rgba(0, 0, 0, 0.05);
+      --msg-time: var(--faint);
+      color-scheme: light;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: var(--sans);
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--ink);
+      background: #111;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .frame {
+      width: min(1100px, 100%);
+      height: min(720px, 92vh);
+      display: grid;
+      grid-template-columns: var(--left-sidebar-w) minmax(0, 1fr) 300px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--canvas);
+      box-shadow: 0 16px 48px rgba(0,0,0,.45);
+    }
+
+    /* ─── Left sidebar (mirrors product) ─── */
+    .left-sidebar {
+      display: flex;
+      flex-direction: column;
+      background: var(--sidebar);
+      border-right: 1px solid var(--line-soft);
+      min-height: 0;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; padding: 12px 14px 8px; }
+    .brand-logo {
+      width: 34px; height: 34px; border-radius: 9px; flex: none;
+      background: linear-gradient(145deg, var(--surface), var(--surface-2));
+      border: 1px solid var(--line);
+      display: grid; place-items: center; color: var(--ink-2);
+    }
+    .brand-name { font-weight: 700; font-size: 14px; color: var(--ink); }
+    .brand-sub { font-family: var(--mono); font-size: 10px; color: var(--faint); margin-top: 1px; }
+
+    .left-actions { display: flex; gap: 6px; padding: 0 12px 10px; }
+    .new-chat {
+      flex: 1; display: flex; align-items: center; gap: 8px;
+      height: 34px; padding: 0 12px; border: none; border-radius: var(--radius);
+      background: var(--blue); color: #fff; font-weight: 600; font-size: 13px; cursor: pointer;
+    }
+    .side-icon-btn {
+      width: 34px; height: 34px; display: grid; place-items: center;
+      border-radius: var(--radius); color: var(--muted);
+      background: transparent; border: 1px solid var(--line); cursor: pointer;
+    }
+
+    .sessions { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 8px 8px; }
+    .sess-group {
+      font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
+      color: var(--msg-time); padding: 12px 10px 6px;
+    }
+
+    .sess {
+      position: relative; cursor: pointer;
+      padding: 8px 10px 8px 14px; border-radius: var(--radius);
+      transition: background 0.15s;
+    }
+    .sess:hover { background: var(--selected); }
+    .sess.active { background: var(--selected-strong); }
+    .sess.active::before {
+      content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px;
+      border-radius: 1px; background: var(--blue);
+    }
+
+    .sess-head { display: flex; align-items: baseline; gap: 8px; }
+    .sess-title {
+      flex: 1; min-width: 0;
+      font-size: 13px; color: var(--muted);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .sess.active .sess-title { color: var(--ink); font-weight: 550; }
+    .sess-time {
+      flex: none; font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+    }
+
+    /* P0 activity row */
+    .sess-meta {
+      display: flex; align-items: center; gap: 6px;
+      font-family: var(--mono); font-size: 10.5px; color: var(--msg-time); margin-top: 2px;
+      min-width: 0;
+    }
+    .sess-meta-text {
+      min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    .live-dot {
+      width: 6px; height: 6px; border-radius: 50%; flex: none;
+      background: var(--amber);
+      box-shadow: 0 0 0 0 rgba(210, 153, 34, 0.45);
+      animation: pulse-dot 1.4s ease-out infinite;
+    }
+    .live-dot.wait { background: var(--blue); box-shadow: none; animation: none; }
+    .live-dot.err { background: var(--red); box-shadow: none; animation: none; }
+    @keyframes pulse-dot {
+      0% { box-shadow: 0 0 0 0 rgba(210, 153, 34, 0.45); }
+      70% { box-shadow: 0 0 0 6px rgba(210, 153, 34, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(210, 153, 34, 0); }
+    }
+
+    .sess.live .sess-title { color: var(--ink-2); }
+    .sess.live .sess-meta { color: var(--amber); }
+    .sess.live.wait .sess-meta { color: var(--blue); }
+    .sess.live.err .sess-meta { color: var(--red); }
+
+    .sess-actions {
+      position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+      display: none; gap: 2px;
+    }
+    .sess:hover .sess-actions { display: flex; }
+    .sess:hover .sess-time { opacity: 0; }
+    .session-action-btn {
+      width: 22px; height: 22px; border: none; border-radius: 4px;
+      background: transparent; color: var(--muted); cursor: pointer; font-size: 12px;
+    }
+    .session-action-btn:hover { background: var(--selected-strong); color: var(--ink); }
+    .session-action-btn.danger:hover { color: var(--red); }
+
+    .left-foot {
+      border-top: 1px solid var(--line-soft);
+      padding: 6px 8px; display: flex; align-items: center; gap: 4px;
+    }
+    .left-foot-user {
+      flex: 1; display: flex; align-items: center; gap: 8px;
+      height: 34px; padding: 0 8px; border: none; border-radius: var(--radius);
+      background: transparent; color: var(--ink-2); cursor: pointer; text-align: left;
+    }
+    .left-foot-user:hover { background: var(--selected); }
+    .left-foot-avatar {
+      width: 22px; height: 22px; border-radius: 50%;
+      display: grid; place-items: center; background: var(--blue); color: #fff;
+      font-size: 11px; font-weight: 700;
+    }
+    .left-foot-icon {
+      width: 34px; height: 34px; border: none; border-radius: var(--radius);
+      background: transparent; color: var(--muted); cursor: pointer;
+      display: grid; place-items: center;
+    }
+
+    /* ─── Center preview ─── */
+    .center {
+      display: flex; flex-direction: column; min-width: 0; background: var(--canvas);
+    }
+    .center-head {
+      height: 44px; padding: 0 18px; display: flex; align-items: center;
+      border-bottom: 1px solid var(--line-soft); gap: 10px;
+    }
+    .center-head h1 {
+      margin: 0; font-size: 13px; font-weight: 650; color: var(--ink);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .center-badge {
+      font-family: var(--mono); font-size: 10px; padding: 2px 7px;
+      border-radius: 999px; border: 1px solid var(--line); color: var(--muted);
+    }
+    .center-badge.live { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 40%, transparent); background: var(--amber-soft); }
+    .center-badge.wait { color: var(--blue); background: rgba(0,120,212,.12); border-color: rgba(0,120,212,.28); }
+    .center-badge.err { color: var(--red); background: var(--red-soft); border-color: rgba(248,81,73,.28); }
+
+    .center-body {
+      flex: 1; overflow: auto; padding: 28px 32px; display: flex; flex-direction: column; gap: 16px;
+    }
+    .bubble {
+      max-width: 520px; padding: 10px 14px; border-radius: 10px;
+      font-size: 13px; line-height: 1.55;
+    }
+    .bubble.user {
+      align-self: flex-end;
+      background: rgba(0,120,212,.14); color: var(--ink);
+    }
+    .bubble.ai {
+      align-self: flex-start; color: var(--ink-2);
+      border: 1px solid var(--line-soft);
+    }
+    .bubble.ai.streaming {
+      border-color: color-mix(in srgb, var(--amber) 35%, transparent);
+    }
+    .stream-line {
+      display: flex; align-items: center; gap: 8px;
+      font-family: var(--mono); font-size: 11px; color: var(--amber); margin-bottom: 8px;
+    }
+    .hint {
+      margin-top: auto; padding-top: 20px;
+      font-size: 12px; color: var(--faint); line-height: 1.6;
+    }
+
+    /* ─── Spec panel ─── */
+    .spec {
+      background: var(--sidebar);
+      border-left: 1px solid var(--line-soft);
+      padding: 16px 14px; overflow: auto;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .spec h2 {
+      margin: 0; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--faint); font-family: var(--mono); font-weight: 600;
+    }
+    .spec p { margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+    .spec-card {
+      background: var(--canvas); border: 1px solid var(--line-soft);
+      border-radius: var(--radius); padding: 10px 12px;
+    }
+    .spec-card strong { display: block; color: var(--ink); font-size: 12.5px; margin-bottom: 4px; }
+    .spec-card code {
+      font-family: var(--mono); font-size: 10.5px; color: var(--amber);
+    }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 6px; }
+    .toolbar button {
+      border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+      border-radius: 6px; padding: 5px 8px; font-size: 11.5px; cursor: pointer;
+    }
+    .toolbar button:hover { background: var(--selected-strong); }
+    .toolbar button.on { border-color: var(--blue); color: var(--blue); }
+
+    .note {
+      font-size: 11.5px; color: var(--faint); line-height: 1.5;
+      border-top: 1px solid var(--line-soft); padding-top: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="frame" id="frame">
+    <aside class="left-sidebar">
+      <div class="brand">
+        <div class="brand-logo" aria-hidden>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M4 19V5M9 19v-6M14 19V9M19 19v-9" />
+          </svg>
+        </div>
+        <div>
+          <div class="brand-name">Stock Agent</div>
+          <div class="brand-sub">原型 · 会话活动态</div>
+        </div>
+      </div>
+
+      <div class="left-actions">
+        <button class="new-chat" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+          新建对话
+        </button>
+        <button class="side-icon-btn" type="button" title="搜索">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        </button>
+      </div>
+
+      <nav class="sessions" id="sessions"></nav>
+
+      <div class="left-foot">
+        <button class="left-foot-user" type="button">
+          <span class="left-foot-avatar">W</span>
+          <span>工作区</span>
+        </button>
+        <button class="left-foot-icon" type="button" title="设置">⚙</button>
+      </div>
+    </aside>
+
+    <main class="center">
+      <div class="center-head">
+        <h1 id="centerTitle">—</h1>
+        <span class="center-badge" id="centerBadge">空闲</span>
+      </div>
+      <div class="center-body">
+        <div class="bubble user" id="userBubble">用户消息</div>
+        <div class="bubble ai" id="aiBubble">
+          <div class="stream-line" id="streamLine" hidden>
+            <span class="live-dot" id="streamDot"></span>
+            <span id="streamLabel">正在思考…</span>
+          </div>
+          <div id="aiText">助手回复预览</div>
+        </div>
+        <div class="hint">
+          左栏副行替换「N 条消息」为活动文案；仅一行，不展开思维链。
+          点左侧会话切换；右侧可模拟状态推进。
+        </div>
+      </div>
+    </main>
+
+    <aside class="spec">
+      <h2>检查项</h2>
+      <p>对照规划 P0：副行状态 + 呼吸点。点击会话看中栏是否与左栏一致。</p>
+
+      <div class="spec-card">
+        <strong>当前选中 · 推进状态</strong>
+        <div class="toolbar" id="phaseBtns" style="margin-top:8px"></div>
+      </div>
+
+      <div class="spec-card"><strong>空闲</strong><code>12 条消息</code> · 无点</div>
+      <div class="spec-card"><strong>推理</strong><code>正在思考…</code> · 琥珀点脉冲</div>
+      <div class="spec-card"><strong>工具</strong><code>正在调用 · 历史行情</code></div>
+      <div class="spec-card"><strong>多工具</strong><code>正在调用 · 3 个工具</code></div>
+      <div class="spec-card"><strong>作答</strong><code>正在回复…</code></div>
+      <div class="spec-card"><strong>澄清</strong><code>等待你的回复</code> · 蓝点静止</div>
+      <div class="spec-card"><strong>错误</strong><code>出错 · 可重试</code> · 红点</div>
+
+      <div class="toolbar">
+        <button type="button" id="themeBtn">切换浅色</button>
+        <button type="button" id="simAdvance">自动演示一轮</button>
+      </div>
+
+      <div class="note">
+        文件：<code>doc/design/session-activity-sidebar.html</code><br/>
+        浏览器直接打开即可。此文件仅原型，未接入产品代码。
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    const PHASES = {
+      idle:          { meta: null, badge: "空闲", badgeCls: "", live: false, center: "上一轮已结束。副行回到消息数。" },
+      reasoning:     { meta: "正在思考…", badge: "思考中", badgeCls: "live", live: "live", center: "模型在推理，尚未调工具。" },
+      tools:         { meta: "正在调用 · 历史行情", badge: "调工具", badgeCls: "live", live: "live", center: "工具卡进行中：get_daily_history → 历史行情。" },
+      tools_multi:   { meta: "正在调用 · 3 个工具", badge: "调工具", badgeCls: "live", live: "live", center: "多个 running 工具时聚合为数量，避免副行过长。" },
+      answering:     { meta: "正在回复…", badge: "回复中", badgeCls: "live", live: "live", center: "partial_answer 流式输出中。" },
+      clarification: { meta: "等待你的回复", badge: "待澄清", badgeCls: "wait", live: "live wait", center: "ask_clarification：等待用户下一条消息。" },
+      error:         { meta: "出错 · 可重试", badge: "错误", badgeCls: "err", live: "live err", center: "流式 error；用户重发或切走后可清掉。" },
+    };
+
+    const sessions = [
+      { id: "a", title: "茅台估值与持仓再平衡", time: "11:02", count: 18, phase: "tools", user: "帮我看看 600519 近一年走势，并评估是否该减仓。", group: "今天" },
+      { id: "b", title: "美股科技股周度回顾", time: "10:41", count: 6, phase: "answering", user: "总结本周 NVDA / MSFT / AAPL。", group: "今天" },
+      { id: "c", title: "监控规则怎么配", time: "09:18", count: 4, phase: "clarification", user: "帮我设一个跌破均线的提醒。", group: "今天" },
+      { id: "d", title: "回测均线策略失败", time: "昨天", count: 9, phase: "error", user: "跑一下双均线回测。", group: "本周" },
+      { id: "e", title: "自选股清理", time: "昨天", count: 3, phase: "idle", user: "把自选清空一下。", group: "本周" },
+      { id: "f", title: "行业比较：白酒 vs 医药", time: "周一", count: 22, phase: "reasoning", user: "对比白酒和创新药的景气度。", group: "更早" },
+      { id: "g", title: "Paper 组合绩效", time: "上週", count: 11, phase: "tools_multi", user: "分析 paper 组合回撤。", group: "更早" },
+    ];
+
+    let activeId = "a";
+    let autoTimer = null;
+
+    function metaFor(s) {
+      const p = PHASES[s.phase];
+      return p.meta ?? `${s.count} 条消息`;
+    }
+
+    function renderList() {
+      const nav = document.getElementById("sessions");
+      const groups = [];
+      for (const s of sessions) {
+        const last = groups[groups.length - 1];
+        if (last && last.label === s.group) last.items.push(s);
+        else groups.push({ label: s.group, items: [s] });
+      }
+      nav.innerHTML = groups.map((g) => `
+        <div>
+          <div class="sess-group">${g.label}</div>
+          ${g.items.map((s) => {
+            const p = PHASES[s.phase];
+            const liveCls = p.live ? ` ${p.live}` : "";
+            const active = s.id === activeId ? " active" : "";
+            const dot = p.live
+              ? `<span class="live-dot${p.live.includes("wait") ? " wait" : ""}${p.live.includes("err") ? " err" : ""}"></span>`
+              : "";
+            return `
+              <div class="sess${active}${liveCls}" data-id="${s.id}">
+                <div class="sess-head">
+                  <div class="sess-title">${s.title}</div>
+                  <span class="sess-time">${s.time}</span>
+                </div>
+                <div class="sess-meta">${dot}<span class="sess-meta-text">${metaFor(s)}</span></div>
+                <div class="sess-actions">
+                  <button class="session-action-btn" title="重命名">✎</button>
+                  <button class="session-action-btn danger" title="删除">✕</button>
+                </div>
+              </div>`;
+          }).join("")}
+        </div>
+      `).join("");
+
+      nav.querySelectorAll(".sess").forEach((el) => {
+        el.addEventListener("click", () => {
+          activeId = el.dataset.id;
+          renderAll();
+        });
+      });
+    }
+
+    function renderCenter() {
+      const s = sessions.find((x) => x.id === activeId);
+      const p = PHASES[s.phase];
+      document.getElementById("centerTitle").textContent = s.title;
+      const badge = document.getElementById("centerBadge");
+      badge.textContent = p.badge;
+      badge.className = `center-badge ${p.badgeCls}`.trim();
+
+      document.getElementById("userBubble").textContent = s.user;
+      const line = document.getElementById("streamLine");
+      const ai = document.getElementById("aiBubble");
+      const aiText = document.getElementById("aiText");
+      const streamDot = document.getElementById("streamDot");
+      const streamLabel = document.getElementById("streamLabel");
+
+      if (s.phase === "idle") {
+        line.hidden = true;
+        ai.classList.remove("streaming");
+        aiText.textContent = "好的，自选已清空。还可以继续帮你筛一批候选。";
+      } else {
+        line.hidden = false;
+        ai.classList.add("streaming");
+        streamLabel.textContent = metaFor(s);
+        streamDot.className = "live-dot"
+          + (s.phase === "clarification" ? " wait" : "")
+          + (s.phase === "error" ? " err" : "");
+        aiText.textContent = p.center;
+      }
+
+      document.querySelectorAll("#phaseBtns button").forEach((btn) => {
+        btn.classList.toggle("on", btn.dataset.phase === s.phase);
+      });
+    }
+
+    function renderAll() {
+      renderList();
+      renderCenter();
+    }
+
+    // phase buttons
+    const phaseOrder = ["idle", "reasoning", "tools", "tools_multi", "answering", "clarification", "error"];
+    const labels = {
+      idle: "空闲", reasoning: "思考", tools: "单工具", tools_multi: "多工具",
+      answering: "回复", clarification: "澄清", error: "错误",
+    };
+    const phaseBtns = document.getElementById("phaseBtns");
+    phaseOrder.forEach((ph) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.dataset.phase = ph;
+      b.textContent = labels[ph];
+      b.addEventListener("click", () => {
+        const s = sessions.find((x) => x.id === activeId);
+        s.phase = ph;
+        renderAll();
+      });
+      phaseBtns.appendChild(b);
+    });
+
+    document.getElementById("themeBtn").addEventListener("click", () => {
+      const root = document.documentElement;
+      const light = root.classList.toggle("light");
+      if (light) root.classList.remove("dark");
+      else root.classList.add("dark");
+      document.getElementById("themeBtn").textContent = light ? "切换深色" : "切换浅色";
+    });
+
+    document.getElementById("simAdvance").addEventListener("click", () => {
+      if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+      const seq = ["reasoning", "tools", "tools_multi", "answering", "idle"];
+      let i = 0;
+      const s = sessions.find((x) => x.id === activeId);
+      autoTimer = setInterval(() => {
+        s.phase = seq[i];
+        renderAll();
+        i += 1;
+        if (i >= seq.length) { clearInterval(autoTimer); autoTimer = null; }
+      }, 1100);
+    });
+
+    renderAll();
+  </script>
+</body>
+</html>

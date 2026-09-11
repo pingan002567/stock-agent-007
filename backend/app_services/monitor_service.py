@@ -563,7 +563,7 @@ class MonitorService:
         keyword = rule.keyword.lower()
         matches = []
         for symbol in self._rule_symbols(rule):
-            intel = search_stock_intel(symbol, rule.keyword)
+            intel = search_stock_intel(symbol, rule.keyword, limit=None)
             hit_items = [item for item in intel["items"] if keyword in str(item.get("title", "")).lower()]
             if not hit_items:
                 continue
@@ -794,7 +794,7 @@ class MonitorService:
                     keyword = str(cond.get("keyword", ""))
                     if keyword:
                         try:
-                            intel = search_stock_intel(symbol, keyword)
+                            intel = search_stock_intel(symbol, keyword, limit=None)
                             hits = [item for item in intel.get("items", []) if keyword.lower() in str(item.get("title", "")).lower()]
                             if hits:
                                 s = min(25, len(hits) * 10)

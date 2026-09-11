@@ -771,6 +771,9 @@ class CopilotRequest(BaseModel):
     authority_level: AuthorityLevel = AuthorityLevel.A4
     session_id: Optional[str] = None
     client_message_id: Optional[str] = None
+    attachments: List[Dict[str, Any]] = Field(default_factory=list)
+    # DeerFlow-native HumanMessage.additional_kwargs.human_input_response
+    human_input_response: Optional[Dict[str, Any]] = None
 
 
 class CopilotSessionUpdateRequest(BaseModel):
@@ -792,6 +795,8 @@ class CopilotSessionMessageRequest(BaseModel):
     symbol: Optional[str] = None
     authority_level: Optional[AuthorityLevel] = None
     client_message_id: Optional[str] = None
+    attachments: List[Dict[str, Any]] = Field(default_factory=list)
+    human_input_response: Optional[Dict[str, Any]] = None
 
 
 class CopilotRun(BaseModel):

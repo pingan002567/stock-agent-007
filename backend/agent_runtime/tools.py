@@ -14,7 +14,7 @@ Usage in config.yaml (tools section):
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
@@ -84,11 +84,28 @@ class StockInput(BaseModel):
 class HistoryInput(BaseModel):
     symbol: str = Field(description="股票代码，如 AAPL、600519")
     days: int = Field(default=30, description="历史天数（默认30天）")
+    detail: Literal["summary", "ohlc", "full"] = Field(
+        default="summary",
+        description=(
+            "返回粒度。summary（默认）=区间涨跌/最高最低/均量/波动率/最大回撤 + 最近5根；"
+            "ohlc=按 fields/limit 投影的K线；full=全量原始K线（很占上下文，仅在确需逐日数据时用）"
+        ),
+    )
+    fields: list[str] | None = Field(
+        default=None,
+        description="detail=ohlc 时挑选字段，如 ['date','close']。默认 date/open/high/low/close/volume",
+    )
+    limit: int | None = Field(default=None, description="最多返回多少根K线（从最近往前数）")
 
 
 class IntelInput(BaseModel):
     symbol: str = Field(description="股票代码，如 AAPL、600519")
     query: str = Field(default="", description="搜索关键词")
+    fields: list[str] | None = Field(
+        default=None,
+        description="挑选字段，如 ['title','published_at']。默认 type/title/source/published_at/url",
+    )
+    limit: int | None = Field(default=8, description="最多返回多少条情报（默认8）")
 
 
 class DraftOrderInput(BaseModel):
@@ -100,6 +117,10 @@ class DraftListInput(BaseModel):
     symbol: str | None = Field(default=None, description="股票代码筛选")
     status: str | None = Field(default=None, description="草案状态筛选")
     limit: int | None = Field(default=20, description="返回条数上限")
+    fields: list[str] | None = Field(
+        default=None,
+        description="挑选字段；默认 draft_id/symbol/status/target_weight_pct/created_at/valid_until",
+    )
 
 
 class DraftGetInput(BaseModel):
@@ -123,7 +144,24 @@ class WatchlistAddInput(BaseModel):
 
 
 class WatchlistRemoveInput(BaseModel):
-    symbol: str = Field(description="股票代码，如 AAPL、600519")
+    symbol: str | None = Field(
+        default=None,
+        description="要删除的股票代码。与 clear_all 二选一；clear_all=true 时忽略本字段",
+    )
+    clear_all: bool = Field(
+        default=False,
+        description="是否清空全部自选（用户明确说「清空自选」时用）",
+    )
+
+
+class WatchlistListInput(BaseModel):
+    group_name: str | None = Field(default=None, description="按分组筛选（可选）")
+    monitored_only: bool = Field(default=False, description="只返回已开启盯盘的自选")
+    limit: int | None = Field(default=50, description="返回条数上限（默认50）")
+    fields: list[str] | None = Field(
+        default=None,
+        description="挑选字段；默认 symbol/name/group/monitored",
+    )
 
 
 class HoldingUpsertInput(BaseModel):
@@ -133,6 +171,17 @@ class HoldingUpsertInput(BaseModel):
     cost: float = Field(description="成本价")
     market_value: float | None = Field(default=None, description="当前市值（可选，不提供时由系统估算 = quantity * cost）")
     weight_pct: float | None = Field(default=None, description="仓位权重百分比（可选）")
+
+
+class HoldingRemoveInput(BaseModel):
+    symbol: str | None = Field(
+        default=None,
+        description="要删除的股票代码。与 clear_all 二选一；clear_all=true 时忽略本字段",
+    )
+    clear_all: bool = Field(
+        default=False,
+        description="是否清空全部持仓（用户明确说「全部清空/清仓」时用）",
+    )
 
 
 class ReviewCreateInput(BaseModel):
@@ -158,6 +207,14 @@ class MonitorEventsInput(BaseModel):
     symbol: str | None = Field(default=None, description="股票代码筛选")
     severity: str | None = Field(default=None, description="严重级别筛选")
     limit: int | None = Field(default=10, description="返回条数上限")
+    fields: list[str] | None = Field(
+        default=None,
+        description="挑选字段；默认 event_id/symbol/title/severity/trigger_rule/created_at",
+    )
+    include_explanation: bool = Field(
+        default=False,
+        description="是否附带 explanation（默认否，省上下文；需要归因时再开）",
+    )
 
 
 class MonitorEvalInput(BaseModel):
@@ -214,6 +271,14 @@ class BacktestRunInput(BaseModel):
 class BacktestGetInput(BaseModel):
     run_id: str | None = Field(default=None, description="回测运行ID")
     strategy_id: str | None = Field(default=None, description="策略ID（未提供run_id时取最新）")
+    detail: Literal["summary", "full"] = Field(
+        default="summary",
+        description="summary（默认）=指标/周期/标的等摘要；full=含 signals/candidate_actions 等全量（很占上下文）",
+    )
+    fields: list[str] | None = Field(
+        default=None,
+        description="挑选字段；默认 summary 档为 run_id/strategy_*/period/universe/metrics/…",
+    )
 
 
 class ReportGenerateInput(BaseModel):
@@ -223,6 +288,11 @@ class ReportGenerateInput(BaseModel):
     template_id: str | None = Field(default=None, description="报告模板ID")
     title: str | None = Field(default=None, description="报告标题")
     options: dict[str, Any] | None = Field(default=None, description="额外选项")
+    detail: Literal["summary", "full"] = Field(
+        default="summary",
+        description="summary（默认）=元数据+路径，不含正文；full=含完整 content（很长）",
+    )
+    fields: list[str] | None = Field(default=None, description="挑选返回字段")
 
 
 class ReportQualityInput(BaseModel):
@@ -370,12 +440,14 @@ get_stock_financial = _tool(
 )
 get_daily_history = _tool(
     "get_daily_history",
-    "获取指定股票的历史K线数据，支持自定义天数。返回每日开盘价、收盘价、最高价、最低价、成交量。",
+    "获取指定股票的历史K线。默认返回区间统计（涨跌幅/最高最低/均量/波动率/最大回撤）加最近5根，"
+    "足够判断走势；需要逐日数据再用 detail='ohlc' 配 fields/limit，或 detail='full' 取全量。",
     HistoryInput, AuthorityLevel.A2,
 )
 search_stock_intel = _tool(
     "search_stock_intel",
-    "搜索指定股票的相关情报资讯，如新闻、公告、研报摘要。",
+    "搜索指定股票的相关情报资讯，如新闻、公告、研报摘要。默认返回最近8条的标题/来源/时间/链接，"
+    "可用 fields 指定字段、limit 调整条数。",
     IntelInput, AuthorityLevel.A2,
 )
 add_watchlist_item = _tool(
@@ -383,9 +455,14 @@ add_watchlist_item = _tool(
     "添加股票到自选列表。需要提供股票代码，股票名称和分组可选。",
     WatchlistAddInput, AuthorityLevel.A2,
 )
+list_watchlist = _tool(
+    "list_watchlist",
+    "列出当前自选股。清空自选前应先调用本工具确认列表；可用 group_name / monitored_only / limit 筛选。",
+    WatchlistListInput, AuthorityLevel.A2,
+)
 remove_watchlist_item = _tool(
     "remove_watchlist_item",
-    "从自选列表中删除指定的股票。",
+    "删除自选：传 symbol 删单票；clear_all=true 清空全部自选。用户说「清空自选」时用 clear_all，不要瞎猜代码。",
     WatchlistRemoveInput, AuthorityLevel.A2,
 )
 get_industry_context = _tool(
@@ -400,7 +477,7 @@ get_market_structure = _tool(
 )
 get_monitor_events = _tool(
     "get_monitor_events",
-    "获取盯盘监控事件列表，可按股票、严重级别筛选。",
+    "获取盯盘监控事件列表。默认精简字段；需要归因时设 include_explanation=true。",
     MonitorEventsInput, AuthorityLevel.A2,
 )
 get_monitor_rules = _tool(
@@ -430,7 +507,7 @@ list_strategies = _tool(
 )
 get_backtest_result = _tool(
     "get_backtest_result",
-    "获取回测结果详情，可按回测运行ID或策略ID查询。",
+    "获取回测结果。默认 summary（指标/周期/标的）；需要 signals 等全量时用 detail='full'。",
     BacktestGetInput, AuthorityLevel.A2,
 )
 list_report_templates = _tool(
@@ -440,7 +517,7 @@ list_report_templates = _tool(
 )
 generate_report = _tool(
     "generate_report",
-    "生成指定类型和来源的分析报告。支持 stock_research、monitor_review、strategy_backtest、paper_portfolio_review、ops_briefing（值班简报，通常由定时任务自动落盘）。",
+    "生成分析报告。默认只返回元数据+路径（不含正文）；需要全文时用 detail='full'。",
     ReportGenerateInput, AuthorityLevel.A2,
 )
 get_report_quality = _tool(
@@ -459,6 +536,11 @@ upsert_holding = _tool(
     "upsert_holding",
     "添加或更新持仓数据。仅修改本系统数据，不涉及真实交易。需要提供股票代码、名称、持仓数量和成本价，市值和权重可选。",
     HoldingUpsertInput, AuthorityLevel.A3,
+)
+remove_holding = _tool(
+    "remove_holding",
+    "删除持仓：传 symbol 删单票；clear_all=true 清空全部。仅改本系统数据，不涉及真实交易。用户说「清空持仓/清仓」时用本工具，不要用 quantity=0 的 upsert。",
+    HoldingRemoveInput, AuthorityLevel.A3,
 )
 analyze_portfolio_risk = _tool(
     "analyze_portfolio_risk",
@@ -559,7 +641,7 @@ generate_draft_order = _tool(
 )
 list_rebalance_drafts = _tool(
     "list_rebalance_drafts",
-    "获取拟单草案列表。",
+    "获取拟单草案列表。默认精简字段；可用 fields/limit 控制返回体量。",
     DraftListInput, AuthorityLevel.A4,
 )
 get_rebalance_draft = _tool(

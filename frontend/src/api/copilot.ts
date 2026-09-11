@@ -1,5 +1,6 @@
 import { api } from "./client";
 import type { CopilotSession, CopilotMessage, CopilotRun } from "./client";
+import type { HumanInputResponse } from "@/lib/humanInput";
 
 // ── 规范化事件类型常量 ──
 export const EVENT_FINAL = "final";
@@ -83,7 +84,9 @@ export async function sendMessage(
   sessionId: string,
   message: string,
   page: string,
-  symbol: string
+  symbol: string,
+  attachments: UploadedFileInfo[] = [],
+  humanInputResponse?: HumanInputResponse | null,
 ): Promise<CopilotRun> {
   return api<CopilotRun>(
     `/api/copilot/sessions/${encodeURIComponent(sessionId)}/messages`,
@@ -95,6 +98,8 @@ export async function sendMessage(
         symbol,
         authority_level: DEFAULT_AUTHORITY_LEVEL,
         client_message_id: `web-${Date.now()}`,
+        attachments,
+        ...(humanInputResponse ? { human_input_response: humanInputResponse } : {}),
       }),
     }
   );
@@ -103,7 +108,22 @@ export async function sendMessage(
 export interface UploadedFileInfo {
   filename: string;
   size: number;
-  markdown_file?: string;
+  markdown_file?: string | null;
+}
+
+export interface SessionUploadsList {
+  supported: boolean;
+  files: UploadedFileInfo[];
+  count: number;
+}
+
+async function readUploadError(res: Response, fallback: string): Promise<never> {
+  let detail = `${res.status}`;
+  try {
+    const body = await res.json();
+    detail = typeof body?.detail === "string" ? body.detail : JSON.stringify(body?.detail ?? body);
+  } catch { /* empty */ }
+  throw new Error(`${fallback}: ${detail}`);
 }
 
 export async function uploadSessionFiles(
@@ -117,15 +137,41 @@ export async function uploadSessionFiles(
     method: "POST",
     body: form,
   });
-  if (!res.ok) {
-    let detail = `${res.status}`;
-    try {
-      const body = await res.json();
-      detail = typeof body?.detail === "string" ? body.detail : JSON.stringify(body?.detail ?? body);
-    } catch { /* empty */ }
-    throw new Error(`上传失败: ${detail}`);
-  }
+  if (!res.ok) await readUploadError(res, "上传失败");
   return res.json();
+}
+
+export function sessionUploadsFromHttp(
+  status: number,
+  body: Partial<SessionUploadsList> | null | undefined,
+): SessionUploadsList {
+  // 旧后端只有 POST /uploads，GET 是 FastAPI 通用 404 {"detail":"Not Found"}。
+  // 切会话时不能因此弹红字；按空列表降级，上传成功仍可用 POST 返回值填芯片。
+  if (status === 404) {
+    return { supported: true, files: [], count: 0 };
+  }
+  return {
+    supported: body?.supported !== false,
+    files: body?.files || [],
+    count: body?.count ?? (body?.files || []).length,
+  };
+}
+
+export async function listSessionUploads(sessionId: string): Promise<SessionUploadsList> {
+  // 不走 api()：stub 用 200 {supported:false} 表达能力，全局错误 toast 会误伤
+  const res = await fetch(`/api/copilot/sessions/${encodeURIComponent(sessionId)}/uploads`);
+  if (res.status === 404) return sessionUploadsFromHttp(404, null);
+  if (!res.ok) await readUploadError(res, "读取附件失败");
+  const body = await res.json() as SessionUploadsList;
+  return sessionUploadsFromHttp(res.status, body);
+}
+
+export async function deleteSessionUpload(sessionId: string, filename: string): Promise<void> {
+  const res = await fetch(
+    `/api/copilot/sessions/${encodeURIComponent(sessionId)}/uploads/${encodeURIComponent(filename)}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) await readUploadError(res, "删除附件失败");
 }
 
 export function createStreamUrl(sessionId: string, runId: string): string {

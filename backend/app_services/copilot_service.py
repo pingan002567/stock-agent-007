@@ -5,18 +5,23 @@ import json
 import os
 import time
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, AsyncIterator, Dict, Optional
 from uuid import uuid4
 
 from backend.agent_runtime import skill_specs
 from backend.agent_runtime.deerflow_client import DeerFlowClientAdapter
+from backend.agent_runtime.human_input import (
+    build_human_input_request,
+    extract_human_input_from_tool_result,
+    normalize_human_input_response,
+)
 from backend.agent_runtime.result_normalizer import ResultNormalizer
 from backend.agent_runtime.skill_registry import SkillRegistry
 from backend.app_services.audit_service import AuditService
 from backend.app_services.context_builder import ContextBuilder
 from backend.app_services.copilot_context_builder import CopilotContextBuilder
-from backend.app_services.intent_router import IntentRouter
 from backend.app_services.permission_guard import PermissionGuard
 from backend.app_services.runtime_observer import RuntimeObserver
 from backend.app_services.task_service import TaskService
@@ -50,6 +55,33 @@ from backend.app_services.copilot_session_state import (
 )
 
 
+def _normalize_message_attachments(raw: list[Any] | None) -> list[dict[str, Any]]:
+    """Keep basename-only attachment records for the user message bubble."""
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw or []:
+        if isinstance(item, dict):
+            filename = str(item.get("filename") or "")
+            size = int(item.get("size") or 0)
+            markdown_file = item.get("markdown_file")
+        else:
+            filename = str(getattr(item, "filename", "") or "")
+            size = int(getattr(item, "size", 0) or 0)
+            markdown_file = getattr(item, "markdown_file", None)
+        safe = Path(filename).name
+        if not filename or safe != filename or filename in {".", ".."}:
+            continue
+        if "/" in filename or "\\" in filename or filename in seen:
+            continue
+        seen.add(filename)
+        record: dict[str, Any] = {"filename": filename, "size": max(size, 0)}
+        md_name = Path(str(markdown_file)).name if markdown_file else ""
+        if md_name and md_name == str(markdown_file):
+            record["markdown_file"] = md_name
+        records.append(record)
+    return records
+
+
 @dataclass
 class CopilotRunState:
     request: CopilotRequest
@@ -59,8 +91,6 @@ class CopilotRunState:
     intent: str
     skill: str
     skill_trace: list[dict[str, Any]]
-    # 本轮委派预算快照（skill_specs.IntentBudget 的 dict 形态），随 envelope 下发
-    budget: dict[str, Any] = field(default_factory=dict)
 
 
 class CopilotService:
@@ -70,7 +100,6 @@ class CopilotService:
         repo: WorkbenchRepository,
         context_builder: ContextBuilder,
         copilot_context_builder: CopilotContextBuilder,
-        intent_router: IntentRouter,
         permission_guard: PermissionGuard,
         task_service: TaskService,
         audit_service: AuditService,
@@ -82,7 +111,6 @@ class CopilotService:
         self.repo = repo
         self.context_builder = context_builder
         self.copilot_context_builder = copilot_context_builder
-        self.intent_router = intent_router
         self.permission_guard = permission_guard
         self.task_service = task_service
         self.audit_service = audit_service
@@ -413,25 +441,42 @@ class CopilotService:
             authority_level=payload.authority_level or session.authority_level,
             session_id=session_id,
             client_message_id=payload.client_message_id,
+            attachments=_normalize_message_attachments(payload.attachments),
+            human_input_response=normalize_human_input_response(payload.human_input_response),
         )
         return self.create_run(request)
 
     def create_run(self, request: CopilotRequest) -> CopilotRun:
-        intent = self.intent_router.route(request.message, request.page, request.symbol)
-        required = AuthorityLevel(intent.required_authority)
-        self.permission_guard.require(request.authority_level, required, intent.name)
-        self.skill_registry.get(intent.skill)
         session = self._ensure_session(request)
         run_id = f"run_{uuid4().hex[:10]}"
-        skill_trace = self._build_skill_trace(intent.name, request)
+        skill_trace: list[dict[str, Any]] = []
+        title = self._derive_title(anchor_symbol=request.symbol, message=request.message)
         task = self.task_service.create(
-            title=f"Copilot: {intent.name}",
-            source=intent.skill,
-            current_step="skill_plan_ready",
+            title=f"Copilot: {title}",
+            source="lead-agent",
+            current_step="accepted",
             run_id=run_id,
             skill_trace=skill_trace,
         )
         message_id = f"message_{uuid4().hex[:12]}"
+        user_payload: dict[str, Any] = {
+            "request": {
+                "page": request.page,
+                "symbol": request.symbol,
+                "authority_level": request.authority_level.value,
+            },
+            "intent": "copilot",
+            "skill": "lead-agent",
+            "skills": [],
+        }
+        attachments = _normalize_message_attachments(request.attachments)
+        if attachments:
+            user_payload["attachments"] = attachments
+        human_input_response = normalize_human_input_response(request.human_input_response)
+        if human_input_response:
+            user_payload["human_input_response"] = human_input_response
+            # Keep normalized copy on the request for stream injection
+            request.human_input_response = human_input_response
         self.repo.save_copilot_message(
             CopilotMessage(
                 message_id=message_id,
@@ -444,16 +489,7 @@ class CopilotService:
                 run_id=run_id,
                 task_id=task.task_id,
                 client_message_id=request.client_message_id,
-                payload={
-                    "request": {
-                        "page": request.page,
-                        "symbol": request.symbol,
-                        "authority_level": request.authority_level.value,
-                    },
-                    "intent": intent.name,
-                    "skill": intent.skill,
-                    "skills": [item["skill"] for item in skill_trace],
-                },
+                payload=user_payload,
             )
         )
         session = self._refresh_session_title(session, request)
@@ -462,16 +498,14 @@ class CopilotService:
             session_id=session.session_id,
             message_id=message_id,
             task_id=task.task_id,
-            intent=intent.name,
-            skill=intent.skill,
+            intent="copilot",
+            skill="lead-agent",
             skill_trace=skill_trace,
-            budget=skill_specs.intent_budget_dict(intent.name),
         )
-        skill_names = ",".join(item["skill"] for item in skill_trace)
         self.audit_service.record(
             "Copilot run created",
-            f"{intent.name} skill={intent.skill} trace={skill_names}",
-            required,
+            f"lead-agent page={request.page} symbol={request.symbol or '-'}",
+            request.authority_level,
         )
         runtime_status = self.deerflow.status().to_dict()
         run_slot = self._resolve_session_slot(session.session_id)
@@ -487,8 +521,8 @@ class CopilotService:
                 tool_call_count=0,
                 started_at=now_iso(),
                 payload={
-                    "intent": intent.name,
-                    "skill": intent.skill,
+                    "intent": "copilot",
+                    "skill": "lead-agent",
                     "page": request.page,
                     "symbol": request.symbol,
                 },
@@ -497,9 +531,9 @@ class CopilotService:
         return CopilotRun(
             run_id=run_id,
             task_id=task.task_id,
-            intent=intent.name,
-            skill=intent.skill,
-            skills=[item["skill"] for item in skill_trace],
+            intent="copilot",
+            skill="lead-agent",
+            skills=[],
             session_id=session.session_id,
             message_id=message_id,
         )
@@ -575,26 +609,18 @@ class CopilotService:
             raise KeyError(run_id)
 
         request = state.request
-        # 上下文构建是同步的 repo/provider I/O（_symbol_summary 可能命中数据源），直接在
-        # async 生成器里调用会阻塞事件循环、拖慢首字节并卡住其他并发请求。卸载到线程池。
-        # SQLite 连接以 check_same_thread=False 打开，这里均为只读查询，跨线程安全。
+        # UI chips (symbol relation) still use the builder. The model only sees
+        # page/symbol/authority in <workbench_context>; checkpoint is conversation truth.
         context = await asyncio.to_thread(
             self.copilot_context_builder.build,
             page=request.page,
             symbol=request.symbol,
-            intent=state.intent,
         )
-        session_state = self._get_or_create_session_state(state.session_id)
-        if session_state.total_runs > 0:
-            context["session_state"] = session_state.to_context()
-
-        previous_tool_calls = await asyncio.to_thread(
-            self._get_previous_tool_calls, state.session_id, run_id
-        )
-        if previous_tool_calls:
-            context["previous_tool_calls"] = previous_tool_calls
-
-        runtime_context = {**context, "_authority_level": request.authority_level.value}
+        runtime_context = {
+            "page": request.page,
+            "symbol": request.symbol,
+            "_authority_level": request.authority_level.value,
+        }
         resolved_task_id = task_id or state.task_id
         # 按工具名捕获最近一次有意义的结果，供 final 阶段回填。
         # 单一累加器替代散落的硬编码 if 块（见 _capture_tool_result）。
@@ -608,26 +634,13 @@ class CopilotService:
         delegated_calls: dict[str, str] = {}  # task 工具 call_id → 委派技能名
         final_seen = False
         # ask_clarification：ClarificationMiddleware 把反问以同名 ToolMessage 落进
-        # 流后直接终止本轮（用户下一条消息即回答）。捕获它以便：
-        # ①发专用 clarification SSE；②final 空壳时用问题文本兜底 conclusion。
+        # 流后直接终止本轮（用户下一条消息即回答）。捕获它以便发专用 clarification SSE。
+        # 不再把问题正文塞进 final.conclusion（避免与 Human Input Card 重复 + 信心度/引用）。
         clarification_payload: Dict[str, Any] | None = None
+        # call_id → ask_clarification tool args (harness 2.1 has no artifact.human_input)
+        clarification_args_by_call: dict[str, dict[str, Any]] = {}
 
-        skill_trace_payload = {
-            "phase": "budget",
-            "items": state.skill_trace,
-            "budget": state.budget,
-            "note": "委派预算白名单（非必跑链）；实际委派由模型按需发起，行状态随委派事件推进。",
-        }
-        skill_event = SSEEvent(
-            run_id=run_id,
-            task_id=resolved_task_id,
-            type="skill_trace",
-            payload=skill_trace_payload,
-        )
-        # 只进流不落库:预算声明是瞬态提示,final 里已带完整 trace,
-        # 落库只会在每轮留下一条前端永不渲染的 system 行
-        yield skill_event
-        self._update_task_step(resolved_task_id, "skill_trace_declared", 20)
+        self._update_task_step(resolved_task_id, "accepted", 20)
 
         try:
             run_slot = self._resolve_session_slot(state.session_id)
@@ -641,10 +654,13 @@ class CopilotService:
                     skill_trace=state.skill_trace,
                     history=[],
                     session_id=state.session_id,
-                    subagent_enabled=skill_specs.subagent_intent_enabled(state.intent),
-                    plan_mode=skill_specs.plan_mode_intent_enabled(state.intent),
-                    budget=state.budget,
+                    subagent_enabled=skill_specs.subagent_supported(),
+                    plan_mode=skill_specs.plan_mode_supported(),
                     model_name=run_slot.get("model_name"),
+                    attachments=list(request.attachments or []),
+                    human_input_response=normalize_human_input_response(
+                        getattr(request, "human_input_response", None)
+                    ),
                     ):
                     payload = event["payload"]
                     self._capture_tool_result(event, captured)
@@ -655,13 +671,30 @@ class CopilotService:
                     if observed_sse:
                         yield observed_sse
                     if (
+                        event["type"] == "tool_call"
+                        and str(payload.get("tool") or "") == "ask_clarification"
+                    ):
+                        call_id = str(payload.get("call_id") or "")
+                        raw_args = payload.get("arguments")
+                        if isinstance(raw_args, str):
+                            try:
+                                raw_args = json.loads(raw_args)
+                            except (TypeError, ValueError):
+                                raw_args = {}
+                        if call_id and isinstance(raw_args, dict):
+                            clarification_args_by_call[call_id] = raw_args
+                    if (
                         event["type"] == "tool_result"
                         and str(payload.get("tool") or "") == "ask_clarification"
                     ):
-                        clarification_payload = {
-                            "question": str(payload.get("result") or ""),
-                            "call_id": payload.get("call_id"),
-                        }
+                        call_id = str(payload.get("call_id") or "")
+                        clarification_payload = extract_human_input_from_tool_result(payload)
+                        if clarification_payload is None:
+                            clarification_payload = build_human_input_request(
+                                args=clarification_args_by_call.get(call_id),
+                                call_id=call_id or None,
+                                formatted_result=str(payload.get("result") or ""),
+                            )
                         clarification_sse = SSEEvent(
                             run_id=run_id,
                             task_id=resolved_task_id,
@@ -677,24 +710,21 @@ class CopilotService:
                         try:
                             payload = self.result_normalizer.normalize_final(payload)
                             payload["skill_trace"] = state.skill_trace
-                            compliance = self._budget_compliance(state, delegated_calls)
-                            if compliance:
-                                payload["budget_compliance"] = compliance
                             payload.setdefault(
                                 "evidence_refs",
-                                self._evidence_refs(state.skill_trace, context),
+                                self._evidence_refs(
+                                    state.skill_trace, context, tool_call_events
+                                ),
                             )
                             if clarification_payload:
                                 payload["clarification"] = clarification_payload
-                                _conclusion_now = str(payload.get("conclusion") or "")
-                                # 反问中断的 final 往往没有正文，用问题文本兜底，
-                                # 避免持久化一条空壳回答。
-                                if (
-                                    not _conclusion_now
-                                    or _conclusion_now
-                                    == "DeerFlow embedded stream completed."
-                                ):
-                                    payload["conclusion"] = clarification_payload["question"]
+                                # 反问轮次只保留 Human Input Card：丢掉模型开场白 /
+                                # 占位 conclusion 与信心度、引用，避免再冒一张 final 气泡。
+                                payload["conclusion"] = ""
+                                payload["confidence"] = None
+                                payload["evidence_refs"] = []
+                                payload["disclaimer"] = None
+                                payload["suggested_actions"] = []
                             if last_report_result:
                                 self.copilot_context_builder._cache.invalidate(
                                     "reports_summary"
@@ -723,9 +753,15 @@ class CopilotService:
                                         **(last_report_result.get("execution_guard") or {}),
                                         "auto_trade": False,
                                     }
-                            if any(
-                                item["skill"] in {"rebalance-planner", "strategy-analyst"}
-                                for item in state.skill_trace
+                            trade_like_tools = {
+                                "generate_draft_order",
+                                "run_strategy_backtest",
+                                "confirm_rebalance_draft",
+                                "place_real_order",
+                            }
+                            if last_draft_result or last_review_result or any(
+                                str(item.get("tool") or "") in trade_like_tools
+                                for item in tool_call_events
                             ):
                                 payload["execution_guard"] = {
                                     "research_only": True,
@@ -825,7 +861,9 @@ class CopilotService:
                             payload.setdefault("skill_trace", state.skill_trace)
                             payload.setdefault(
                                 "evidence_refs",
-                                self._evidence_refs(state.skill_trace, context),
+                                self._evidence_refs(
+                                    state.skill_trace, context, tool_call_events
+                                ),
                             )
                     sse_event = SSEEvent(
                         run_id=run_id,
@@ -837,10 +875,12 @@ class CopilotService:
                         tool_call_events.append(payload)
                     elif event["type"] == "tool_result":
                         tool_result_events.append(payload)
-                    # Handle final events - skip empty ones, keep the one with content
+                    # Handle final events - skip empty ones, keep the one with content.
+                    # Clarification rounds intentionally have empty conclusion; still emit
+                    # final so the client closes the stream and history marks the run done.
                     if event["type"] == "final":
                         conclusion = str(payload.get("conclusion") or "")
-                        if not conclusion:
+                        if not conclusion and not clarification_payload:
                             # Skip empty final events
                             continue
                         if final_seen:
@@ -854,15 +894,7 @@ class CopilotService:
                         self._persist_stream_event(state, sse_event)
                     yield sse_event
                     if event["type"] in ("final", "error"):
-                        turn = self._build_turn_summary(
-                            intent=state.intent,
-                            user_message=request.message,
-                            tool_call_events=tool_call_events,
-                            tool_result_events=tool_result_events,
-                            final_payload=payload if event["type"] == "final" else None,
-                            error_payload=payload if event["type"] == "error" else None,
-                        )
-                        self._update_session_state(state.session_id, turn)
+                        pass
         except Exception as exc:
             error_sse = SSEEvent(
                 run_id=run_id,
@@ -892,15 +924,6 @@ class CopilotService:
             )
             self._persist_stream_event(state, final_sse)
             yield final_sse
-            turn = self._build_turn_summary(
-                intent=state.intent,
-                user_message=request.message,
-                tool_call_events=tool_call_events,
-                tool_result_events=tool_result_events,
-                final_payload=None,
-                error_payload={"error": str(exc)},
-            )
-            self._update_session_state(state.session_id, turn)
             self._update_task_step(
                 resolved_task_id, "stream_crashed", 100, status="failed"
             )
@@ -1007,15 +1030,14 @@ class CopilotService:
             ),
             session_id=session.session_id,
             client_message_id=user_message.client_message_id,
+            attachments=_normalize_message_attachments(user_message.payload.get("attachments")),
+            human_input_response=normalize_human_input_response(
+                user_message.payload.get("human_input_response")
+            ),
         )
-        intent_name = (
-            str(user_message.payload.get("intent") or "")
-            or self.intent_router.route(
-                request.message, request.page, request.symbol
-            ).name
-        )
-        skill_name = str(user_message.payload.get("skill") or "") or task.source
-        skill_trace = task.skill_trace or self._build_skill_trace(intent_name, request)
+        intent_name = str(user_message.payload.get("intent") or "") or "copilot"
+        skill_name = str(user_message.payload.get("skill") or "") or "lead-agent"
+        skill_trace = list(task.skill_trace or [])
         return CopilotRunState(
             request=request,
             session_id=session.session_id,
@@ -1024,7 +1046,6 @@ class CopilotService:
             intent=intent_name,
             skill=skill_name,
             skill_trace=skill_trace,
-            budget=skill_specs.intent_budget_dict(intent_name),
         )
 
     def _persist_stream_event(self, state: CopilotRunState, event: SSEEvent) -> None:
@@ -1152,14 +1173,14 @@ class CopilotService:
         if event_type == "clarification":
             # 不落成 final_answer：断流恢复用 final_answer 判定本轮是否收口，
             # 反问事件混进去会误判（且产生一条空壳回答）。
-            data = {
-                "question": payload.get("question"),
-                "call_id": payload.get("call_id"),
-            }
+            # 透传 DeerFlow-native human_input_request 字段（含 legacy question/call_id）。
+            data = dict(payload) if isinstance(payload, dict) else {}
+            data.setdefault("question", payload.get("question") if isinstance(payload, dict) else None)
+            data.setdefault("call_id", payload.get("call_id") if isinstance(payload, dict) else None)
             return (
                 "assistant",
                 "clarification",
-                str(payload.get("question") or ""),
+                str((payload or {}).get("question") or ""),
                 data,
             )
         if event_type == "error":
@@ -1187,6 +1208,10 @@ class CopilotService:
             "blocker_codes": payload.get("blocker_codes") or [],
             "next_actions": payload.get("next_actions") or [],
         }
+        if payload.get("clarification"):
+            data["clarification"] = payload.get("clarification")
+        if payload.get("suggested_actions"):
+            data["suggested_actions"] = payload.get("suggested_actions")
         return (
             "assistant",
             "final_answer",
@@ -1365,41 +1390,6 @@ class CopilotService:
         state = self._get_or_create_session_state(session_id)
         state.apply_turn(turn)
 
-    def _build_skill_trace(
-        self, intent_name: str, request: CopilotRequest
-    ) -> list[dict[str, Any]]:
-        # 预算语义（skill_specs.INTENT_BUDGETS）：trace 列出的是"可委派"白名单
-        # 而非必跑链——available=模型可按需拉、required=合规必跑、blocked=阻断占位。
-        # 实际委派发生时由 stream_run 把对应行推进 delegated/done。
-        budget = skill_specs.intent_budget(intent_name)
-        authority = skill_specs.skill_authority()
-        trace = []
-        rows = [
-            *((name, "required" if name in budget.required_skills else "available")
-              for name in budget.allowed_skills),
-            *((name, "blocked") for name in budget.guard_skills),
-        ]
-        for index, (skill_name, status) in enumerate(rows, start=1):
-            spec = self.skill_registry.skills[skill_name]
-            if spec.locked or not spec.enabled:
-                status = "blocked"
-            trace.append(
-                {
-                    "step": index,
-                    "skill": spec.name,
-                    "label": spec.label,
-                    "tools": spec.tools,
-                    "authority_level": authority[skill_name],
-                    "status": status,
-                    "purpose": self._skill_purpose(skill_name),
-                    "handoff": None,  # 无必跑链即无固定交棒；保留键以兼容消费方
-                    "blocked_reason": "real order execution is disabled in V1"
-                    if status == "blocked"
-                    else None,
-                }
-            )
-        return trace
-
     def _observe_delegation(
         self,
         state: CopilotRunState,
@@ -1408,11 +1398,7 @@ class CopilotService:
         task_id: str,
         delegated_calls: dict[str, str],
     ) -> SSEEvent | None:
-        """把 DeerFlow ``task`` 工具的实际委派映射回 skill_trace 行状态。
-
-        tool_call(task) → 对应行 delegated（预算外则追加 over_budget 行并审计）；
-        tool_result(同 call_id) → done。有变化时返回增量 skill_trace SSE。
-        """
+        """Record observed ``task()`` delegations onto skill_trace (projection only)."""
         etype = event["type"]
         payload = event["payload"]
         if etype == "tool_call" and str(payload.get("tool") or "") == "task":
@@ -1428,29 +1414,21 @@ class CopilotService:
                 return None
             delegated_calls[call_id] = skill
             row = next((r for r in state.skill_trace if r.get("skill") == skill), None)
+            labels = skill_specs.skill_labels()
+            authority = skill_specs.skill_authority()
             if row is None:
-                # 预算外委派：prompt 级预算是软约束，越界要看得见并可审计
                 state.skill_trace.append({
                     "step": len(state.skill_trace) + 1,
                     "skill": skill,
-                    "label": skill,
-                    "authority_level": skill_specs.skill_authority().get(skill, "?"),
-                    "status": "over_budget",
-                    "purpose": "预算白名单之外的委派",
+                    "label": labels.get(skill, skill),
+                    "authority_level": authority.get(skill, "?"),
+                    "status": "delegated",
+                    "purpose": self._skill_purpose(skill),
                     "handoff": None,
                     "blocked_reason": None,
                 })
-                self.audit_service.record(
-                    "Copilot delegation over budget", f"{state.intent} -> {skill}"
-                )
-            elif row.get("status") in ("available", "required"):
+            elif row.get("status") in ("available", "required", None, ""):
                 row["status"] = "delegated"
-            max_subagents = int(state.budget.get("max_subagents") or 0)
-            if max_subagents and len(delegated_calls) > max_subagents:
-                self.audit_service.record(
-                    "Copilot delegation count over budget",
-                    f"{state.intent}: {len(delegated_calls)} > {max_subagents}",
-                )
             return self._skill_trace_sse(state, run_id, task_id)
         if etype == "tool_result":
             skill = delegated_calls.get(str(payload.get("call_id") or ""))
@@ -1458,7 +1436,7 @@ class CopilotService:
                 return None
             row = next(
                 (r for r in state.skill_trace
-                 if r.get("skill") == skill and r.get("status") in ("delegated", "over_budget")),
+                 if r.get("skill") == skill and r.get("status") == "delegated"),
                 None,
             )
             if row is None:
@@ -1477,38 +1455,9 @@ class CopilotService:
             payload={
                 "phase": "observed",
                 "items": state.skill_trace,
-                "budget": state.budget,
                 "note": "实际委派进度（由 task 工具事件推进）。",
             },
         )
-
-    def _budget_compliance(
-        self, state: CopilotRunState, delegated_calls: dict[str, str]
-    ) -> dict[str, Any] | None:
-        """收口时的预算合规核对：required_skills 未实际委派 → 标注并审计。
-
-        stub 运行时没有真实委派能力，跳过（否则测试/离线模式全部误报）。
-        """
-        if getattr(self.deerflow, "mode", "") == "stub":
-            return None
-        required = [str(s) for s in (state.budget.get("required_skills") or [])]
-        if not required:
-            return None
-        satisfied = set(delegated_calls.values())
-        missing = [s for s in required if s not in satisfied]
-        if not missing:
-            return None
-        for row in state.skill_trace:
-            if row.get("skill") in missing:
-                row["status"] = "missed"
-        self.audit_service.record(
-            "Copilot required skill missed",
-            f"{state.intent}: {','.join(missing)} 未参与本轮结论",
-        )
-        return {
-            "missing_required": missing,
-            "warning": "合规必跑项未参与本轮结论，请谨慎采信；建议重新发起并要求风控评估。",
-        }
 
     def _suggest_actions(
         self,
@@ -1644,21 +1593,24 @@ class CopilotService:
         ).label
 
     def _evidence_refs(
-        self, skill_trace: list[dict[str, Any]], context: Dict[str, Any]
+        self,
+        skill_trace: list[dict[str, Any]],
+        context: Dict[str, Any],
+        tool_call_events: list[dict[str, Any]] | None = None,
     ) -> list[str]:
-        refs = ["intent_router", "skill_registry"]
+        refs = ["skill_registry", "lead-agent"]
         if context:
             refs.extend(["copilot_context_builder", "provider_router"])
-        risk_only = len(skill_trace) == 1 and skill_trace[0]["skill"] == "risk-officer"
-        if risk_only:
-            refs.extend(
-                ["decision_journal_entry", "paper_order", "paper_portfolio_snapshot"]
-            )
-        elif any(item["skill"] == "risk-officer" for item in skill_trace):
+        tools = {
+            str(item.get("tool") or "")
+            for item in (tool_call_events or [])
+        }
+        observed = {str(item.get("skill") or "") for item in skill_trace}
+        if "risk-officer" in observed or "evaluate_policy_risk" in tools:
             refs.append("portfolio_risk")
-        if any(item["skill"] == "strategy-analyst" for item in skill_trace):
+        if "strategy-analyst" in observed or "run_strategy_backtest" in tools:
             refs.extend(["strategy_spec", "backtest_run", "research_only"])
-        if any(item["skill"] == "rebalance-planner" for item in skill_trace):
+        if "rebalance-planner" in observed or "generate_draft_order" in tools:
             refs.extend(
                 [
                     "draft_order_guard:auto_trade_false",
@@ -1666,12 +1618,6 @@ class CopilotService:
                     "pre_trade_review",
                 ]
             )
-        if (
-            skill_trace
-            and skill_trace[0]["skill"] == "risk-officer"
-            and len(skill_trace) == 1
-        ):
-            refs.append("review_inbox_state")
         return refs
 
     def _update_task_step(

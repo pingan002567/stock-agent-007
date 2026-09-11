@@ -48,6 +48,16 @@ def _model_supports_vision(model_name: str) -> bool:
     return any(hint in name for hint in _VISION_MODEL_HINTS)
 
 
+CONTEXT_WINDOW_TOKENS = 300_000
+
+
+def _context_window() -> int:
+    raw = os.getenv("WORKBENCH_AI_CONTEXT_WINDOW", "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return CONTEXT_WINDOW_TOKENS
+
+
 def _build_model_config() -> dict[str, Any]:
     """Build the ``models`` section from env vars."""
     # 运行时（reconnect）env 可能已被设置页更新，这里逐次现读，不用 import
@@ -68,6 +78,9 @@ def _build_model_config() -> dict[str, Any]:
         "model": model_name,
         "supports_thinking": False,
         "supports_vision": _model_supports_vision(model_name),
+        # 声明上下文窗口。summarization 的 fraction 触发器与 keep 策略都读
+        # model.profile["max_input_tokens"]，缺了就只能退回固定 token 阈值。
+        "profile": {"max_input_tokens": _context_window()},
     }
     if api_key:
         model_cfg["openai_api_key"] = api_key
@@ -79,14 +92,14 @@ def _build_model_config() -> dict[str, Any]:
 A2_TOOLS = [
     "get_stock_context", "get_daily_history", "search_stock_intel",
     "get_industry_context", "get_market_structure",
-    "add_watchlist_item", "remove_watchlist_item",
+    "add_watchlist_item", "list_watchlist", "remove_watchlist_item",
     "get_monitor_events", "get_monitor_rules", "evaluate_monitor_rules",
     "list_strategies", "get_backtest_result",
     "list_report_templates", "generate_report", "get_report_quality",
 ]
 
 A3_TOOLS = [
-    "get_portfolio_snapshot", "upsert_holding",
+    "get_portfolio_snapshot", "upsert_holding", "remove_holding",
     "analyze_portfolio_risk", "get_active_risk_policy",
     "list_risk_policies", "evaluate_policy_risk",
     "upsert_monitor_rule", "delete_monitor_rule",
@@ -113,6 +126,67 @@ for t in A4_TOOLS:
     TOOL_GROUP_MAP[t] = "a4-planner"
 for t in A5_BLOCKED:
     TOOL_GROUP_MAP[t] = "a5-blocked"
+
+# DeerFlow AgentConfig.tool_groups：按会话 authority 选 lead 可见工具组。
+# files/search/sandbox-exec 是沙箱与检索组；a5-blocked 永不进入 schema。
+# Builtin（task / ask_clarification / present_files）由 get_available_tools
+# 在 groups 过滤之外始终注入，无需写进 AgentConfig。
+_AUTHORITY_AGENT_NAMES = {
+    "A2": "workbench-a2",
+    "A3": "workbench-a3",
+    "A4": "workbench-a4",
+}
+
+
+def tool_groups_for_authority(level: str | None) -> list[str]:
+    """Map request authority → DeerFlow tool_groups (native get_available_tools filter)."""
+    normalized = str(level or "A2").strip().upper() or "A2"
+    groups = ["a2-research", "files", "search"]
+    if _sandbox_mode() != "readonly":
+        groups.append("sandbox-exec")
+    if normalized in {"A3", "A4", "A5"}:
+        groups.append("a3-risk")
+    if normalized in {"A4", "A5"}:
+        groups.append("a4-planner")
+    return groups
+
+
+def agent_name_for_authority(level: str | None) -> str:
+    normalized = str(level or "A2").strip().upper() or "A2"
+    if normalized in {"A4", "A5"}:
+        return _AUTHORITY_AGENT_NAMES["A4"]
+    if normalized == "A3":
+        return _AUTHORITY_AGENT_NAMES["A3"]
+    return _AUTHORITY_AGENT_NAMES["A2"]
+
+
+def ensure_authority_agents() -> None:
+    """Write DeerFlow AgentConfig YAMLs so tool_groups are loadable by agent_name.
+
+    DeerFlow 原生合同：``load_agent_config(name).tool_groups`` →
+    ``get_available_tools(groups=...)``. Embedded ``DeerFlowClient`` 默认忽略
+    该字段；适配层把它接到 ``_get_tools``，不另造 allowlist。
+    """
+    import yaml
+    from deerflow.config.paths import get_paths
+
+    agents_dir = get_paths().agents_dir
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    for level, name in _AUTHORITY_AGENT_NAMES.items():
+        agent_dir = agents_dir / name
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "name": name,
+            "description": f"Workbench lead agent (authority {level})",
+            "tool_groups": tool_groups_for_authority(level),
+            # skills 省略（None）：prompt 仍加载全部启用 skill；工具裁剪只靠 tool_groups。
+            # 这样不会走 skill allowed-tools 并集把 task/bash/read_file 滤掉。
+        }
+        config_path = agent_dir / "config.yaml"
+        config_path.write_text(
+            yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
 
 
 def _sandbox_mode() -> str:
@@ -298,6 +372,8 @@ def generate_config(target_dir: str | Path = "data") -> str:
             {"name": "a3-risk"},
             {"name": "a4-planner"},
             {"name": "a5-blocked"},
+            {"name": "files"},
+            {"name": "search"},
             {"name": "sandbox-exec"},
         ],
         "skills": {
@@ -321,9 +397,17 @@ def generate_config(target_dir: str | Path = "data") -> str:
         "summarization": {
             "enabled": True,
             "trigger": [{"type": "tokens", "value": 32000}],
-            "keep": {"type": "messages", "value": 10},
-            "preserve_recent_skill_count": 5,
-            "preserve_recent_skill_tokens": 25000,
+            "keep": {"type": "tokens", "value": 12000},
+            # 关键：摘要前会先 trim_messages(max_tokens=..., start_on="human")。
+            # 默认 4000 太小——agent 轮次里一个 user 消息后面跟着一长串 tool 结果,
+            # 4000 token 的窗口里找不到 human 边界就返回空,摘要退化成
+            # "Previous conversation was too long to summarize.",而 RemoveMessage
+            # 照样把整段历史删光。给足预算才能真正产出摘要。
+            # 注意：设 null 不等于关闭——DeerFlow 只在非 None 时才透传该参数,
+            # null 会落回 LangChain 自己的默认值 4000。
+            "trim_tokens_to_summarize": 16000,
+            "preserve_recent_skill_count": 3,
+            "preserve_recent_skill_tokens": 8000,
         },
         "loop_detection": {
             "enabled": True,
@@ -335,11 +419,29 @@ def generate_config(target_dir: str | Path = "data") -> str:
             "recovery_timeout_sec": 60,
         },
         "token_usage": {"enabled": True},
-        # run 级 token 硬预算(意图预算管"能拉谁",这里管"最多烧多少")
+        # run 级 token 硬预算。注意语义：这里比的是**本轮所有模型调用的
+        # input+output 累加和**,而每次调用都要重发整个上下文,所以它约等于
+        # 「模型调用次数 × 单次上下文」,不是「上下文有多大」。拿它当上下文
+        # 窗口用会让长任务在第 6~7 步就被硬停。按 300k 窗口 + 压缩后 ≤32k
+        # 的单次上下文估算,一轮 30 步左右才到上限。
         "token_budget": {
             "enabled": True,
-            "max_tokens": int(os.getenv("WORKBENCH_RUN_TOKEN_BUDGET", "300000")),
+            "max_tokens": int(os.getenv("WORKBENCH_RUN_TOKEN_BUDGET", "1000000")),
             "warn_threshold": 0.8,
+        },
+        # 单条工具结果的上限。超过 externalize_min_chars 就落盘成文件 + 预览,
+        # 模型要全文得自己 read_file,避免一条结果永久占住每一次后续调用的上下文。
+        # DeerFlow 默认 12000 太松:我们的行情类工具单条 8~9.5k 字符,正好钻过去。
+        "tool_output": {
+            "enabled": True,
+            "externalize_min_chars": 4000,
+            "tool_overrides": {
+                "get_daily_history": 2000,
+                "search_stock_intel": 3000,
+                "list_rebalance_drafts": 3000,
+                "get_market_structure": 3000,
+                "analyze_portfolio_risk": 3000,
+            },
         },
         "memory": {
             "enabled": True,
@@ -367,5 +469,8 @@ def generate_config(target_dir: str | Path = "data") -> str:
 
     with open(config_path, "w", encoding="utf-8") as f:
         yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+    # DeerFlow AgentConfig（按 authority 的 tool_groups）与主 config 一并落地。
+    ensure_authority_agents()
 
     return str(config_path.resolve())

@@ -5,6 +5,12 @@ import { formatLocalTime } from "@/utils/format";
 import { CopilotFinalMeta } from "@/components/features/CopilotFinalMeta";
 import { ThoughtTimeline } from "@/components/features/ThoughtTimeline";
 import type { StreamStep, StreamToolCall } from "@/hooks/useCopilotChat";
+import { attachmentsFromMessagePayload } from "@/lib/sessionUploads";
+import { HumanInputCard } from "@/components/features/HumanInputCard";
+import {
+  parseHumanInputRequest,
+  type HumanInputResponse,
+} from "@/lib/humanInput";
 
 /** 从 AI 回答文本中移除嵌入的 XML 式工具调用标签 */
 function stripToolCallTags(text: string): string {
@@ -34,14 +40,27 @@ interface Props {
   tools?: ToolInfo[];
   /** 提供时工具卡可点击（聊天中心主区 → 右栏详情联动） */
   onToolClick?: (tool: ToolInfo) => void;
+  /** 历史澄清卡的已答态（来自后续用户消息的 human_input_response） */
+  clarifiedResponse?: HumanInputResponse | null;
+  /** 未答澄清卡可交互（点选项 / 卡内提交） */
+  onClarifySubmit?: (response: HumanInputResponse, displayText: string) => void;
+  clarifyPending?: boolean;
 }
 
 /** final / error 两个分支共用的「调用了 N 个工具」折叠区 */
-export function CopilotMessageItem({ msg, tools, onToolClick }: Props) {
+export function CopilotMessageItem({
+  msg,
+  tools,
+  onToolClick,
+  clarifiedResponse,
+  onClarifySubmit,
+  clarifyPending,
+}: Props) {
   const ev = parseCopilotEvent(msg as unknown as Record<string, unknown>);
   const isUser = msg.role === "user";
   const isFinal = msg.kind === "final_answer";
   const isErrorEvent = ev.type === "error";
+  const isClarification = msg.kind === "clarification" || ev.type === "clarification";
   const hasTools = tools && tools.length > 0;
   // 持久化消息与流式共用思维链时间线形态(官方"过程即结果":收口不坍缩成计数条)。
   // 推理文本未落库,历史时间线只有工具步。
@@ -68,17 +87,66 @@ export function CopilotMessageItem({ msg, tools, onToolClick }: Props) {
 
   if (isUser) {
     cls += " user";
-    body = <MarkdownRenderer text={msg.text || ""} />;
+    const attachments = attachmentsFromMessagePayload(msg.payload);
+    body = (
+      <>
+        {attachments.length > 0 && (
+          <div className="upload-chips msg-attachments">
+            {attachments.map((f) => (
+              <span
+                key={f.filename}
+                className="upload-chip"
+                title={f.markdown_file ? `已转 Markdown：${f.markdown_file}` : f.filename}
+              >
+                <span className="upload-chip-name">{f.filename}</span>
+                {f.markdown_file ? <span className="upload-chip-ok">✓</span> : null}
+              </span>
+            ))}
+          </div>
+        )}
+        <MarkdownRenderer text={msg.text || ""} />
+      </>
+    );
+  } else if (isClarification) {
+    cls += " ai";
+    const request = parseHumanInputRequest(msg.payload)
+      ?? parseHumanInputRequest({ question: msg.text, call_id: (msg.payload as { call_id?: string })?.call_id });
+    body = (
+      <>
+        {hasTools && <ThoughtTimeline steps={toolSteps} active={false} onToolClick={handleTimelineClick} />}
+        {request ? (
+          <HumanInputCard
+            request={request}
+            answeredResponse={clarifiedResponse ?? null}
+            pending={clarifyPending}
+            onSubmit={
+              clarifiedResponse || !onClarifySubmit
+                ? undefined
+                : (response) => {
+                    void onClarifySubmit(response, response.value);
+                  }
+            }
+          />
+        ) : (
+          <div className="clarification-card">
+            <div className="clarification-title">AI 需要你的补充信息</div>
+            <div style={{ whiteSpace: "pre-wrap" }}>{msg.text}</div>
+            <div className="clarification-hint">直接在下方输入框回答即可继续</div>
+          </div>
+        )}
+      </>
+    );
   } else if (isFinal) {
     cls += " ai";
     const evPayload = ev.payload as Record<string, unknown>;
+    // 澄清轮次的 final 只作收口标记；正文已在 Human Input Card，这里不重复渲染。
+    if (evPayload.clarification) {
+      return null;
+    }
     const raw = (evPayload.conclusion as string) || msg.text || "";
     body = (
       <>
         {hasTools && <ThoughtTimeline steps={toolSteps} active={false} onToolClick={handleTimelineClick} />}
-        {Boolean(evPayload.clarification) && (
-          <div className="clarification-hint" style={{ marginBottom: 4 }}>❓ AI 反问澄清 · 回复即可继续</div>
-        )}
         <MarkdownRenderer text={stripToolCallTags(raw)} />
         <CopilotFinalMeta payload={evPayload} />
       </>

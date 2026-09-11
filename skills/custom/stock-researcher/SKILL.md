@@ -1,6 +1,6 @@
 ---
 name: stock-researcher
-description: 分析个股基本面、技术面、行业竞争格局和情报，输出带投资论点、三情景、正反论据与引用的结构化研究。适用场景：单只股票深度研究。触发词：分析、研究、估值、基本面、技术面、行业地位。
+description: 仅在用户要深度研究（投资论点、三情景、正反方、引用）时委派。单指标/现价/PE 查询不要委派，由 Lead 直接调 get_stock_context。触发词：深度研究、全面分析、基本面、技术面、行业地位。
 allowed-tools:
   - get_stock_context
   - get_stock_financial

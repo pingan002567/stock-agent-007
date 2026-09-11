@@ -70,7 +70,7 @@ def test_copilot_session_message_history_and_persisted_stream_recovery(tmp_path)
         body = "".join(response.iter_text())
 
     events = parse_sse_events(body)
-    assert events[0]["type"] == "skill_trace"
+    assert events[0]["type"] == "reasoning"
     assert events[-1]["type"] == "final"
     assert all(event["run_id"] == run["run_id"] for event in events)
     assert all(event["task_id"] == run["task_id"] for event in events)
@@ -82,12 +82,33 @@ def test_copilot_session_message_history_and_persisted_stream_recovery(tmp_path)
     messages = client.get(f"/api/copilot/sessions/{session['session_id']}/messages")
     assert messages.status_code == 200
     items = messages.json()["items"]
-    # 预算声明 skill_trace 只进流不落库(final 里已带 trace),历史里没有 system 行
+    # observed skill_trace 只在实际 task() 时进流；预算声明已删除，历史里没有 system 行
     assert items[0]["role"] == "user"
     assert {item["kind"] for item in items} >= {"user_message", "final_answer"}
     assert all(item["kind"] != "skill_trace" for item in items)
     assert any(item["run_id"] == run["run_id"] and item["task_id"] == run["task_id"] for item in items)
     assert any(item["client_message_id"] == "client-msg-001" for item in items)
+
+
+def test_copilot_session_message_persists_attachments_on_user_bubble(tmp_path):
+    client = make_client(tmp_path)
+    session_id = client.post("/api/copilot/sessions", json={}).json()["session_id"]
+    started = client.post(
+        f"/api/copilot/sessions/{session_id}/messages",
+        json={
+            "message": "解读这份研报",
+            "attachments": [
+                {"filename": "年报.pdf", "size": 1200, "markdown_file": "年报.md"},
+                {"filename": "../secret.txt", "size": 9},
+            ],
+        },
+    )
+    assert started.status_code == 200
+    items = client.get(f"/api/copilot/sessions/{session_id}/messages").json()["items"]
+    user = next(item for item in items if item["role"] == "user")
+    assert user["payload"]["attachments"] == [
+        {"filename": "年报.pdf", "size": 1200, "markdown_file": "年报.md"}
+    ]
 
 
 def test_legacy_copilot_chat_remains_compatible_and_returns_session_fields(tmp_path):
@@ -109,7 +130,9 @@ def test_legacy_copilot_chat_remains_compatible_and_returns_session_fields(tmp_p
     assert payload["message_id"]
     assert payload["run_id"]
     assert payload["task_id"]
-    assert payload["skills"]
+    assert payload["skills"] == []
+    assert payload["skill"] == "lead-agent"
+    assert payload["intent"] == "copilot"
 
     with client.stream("GET", f"/api/copilot/stream/{payload['run_id']}") as response:
         assert response.status_code == 200
@@ -217,8 +240,8 @@ def test_copilot_context_builder_redacts_full_holdings_reports_and_tool_args(tmp
     assert "super-secret-tool-argument" not in serialized
     assert report.content not in serialized
     assert "markdown_path" not in serialized
-    assert "quantity\": 999" not in serialized
-    assert "cost\": 123.45" not in serialized
+    assert payload["page"] == "holdings"
+    assert "holdings" not in payload
 
 
 def test_execution_policy_allows_only_low_risk_automatic_actions():
@@ -313,22 +336,31 @@ def test_execution_policy_auto_safe_full_set():
 
 def test_clarification_tool_result_emits_sse_and_backfills_empty_final(tmp_path):
     """ask_clarification：同名 tool_result 应发专用 clarification SSE；
-    final 空壳（占位 conclusion）时用问题文本兜底，不落空回答。"""
+    final 空壳不再用问题正文兜底（避免与 Human Input Card 重复）。"""
     client = make_client(tmp_path)
     services = client.app.state.services
 
-    question = "❓ 你指的是哪只白酒股？\n  1. 600519 贵州茅台\n  2. 000858 五粮液"
+    question = "你指的是哪只白酒股？"
+    formatted = "❓ 你指的是哪只白酒股？\n  1. 600519 贵州茅台\n  2. 000858 五粮液"
 
     async def fake_stream(**kwargs):
         # title 是瞬态事件：不应被持久化（历史上曾兜底成空 final_answer）
         yield {"type": "title", "payload": {"title": "白酒股咨询"}}
         yield {
             "type": "tool_call",
-            "payload": {"call_id": "c-clar-1", "tool": "ask_clarification", "arguments": {}},
+            "payload": {
+                "call_id": "c-clar-1",
+                "tool": "ask_clarification",
+                "arguments": {
+                    "question": question,
+                    "clarification_type": "ambiguous_requirement",
+                    "options": ["600519 贵州茅台", "000858 五粮液"],
+                },
+            },
         }
         yield {
             "type": "tool_result",
-            "payload": {"call_id": "c-clar-1", "tool": "ask_clarification", "result": question},
+            "payload": {"call_id": "c-clar-1", "tool": "ask_clarification", "result": formatted},
         }
         yield {
             "type": "final",
@@ -359,24 +391,35 @@ def test_clarification_tool_result_emits_sse_and_backfills_empty_final(tmp_path)
     body = client.get(
         f"/api/copilot/sessions/{session['session_id']}/stream/{run['run_id']}"
     ).text
-    events = parse_sse_events(body)
+    events = [e for e in parse_sse_events(body) if e.get("type")]
     types = [e["type"] for e in events]
     assert "clarification" in types
     clarification = next(e for e in events if e["type"] == "clarification")
     assert clarification["payload"]["question"] == question
     assert clarification["payload"]["call_id"] == "c-clar-1"
+    assert clarification["payload"]["kind"] == "human_input_request"
+    assert clarification["payload"]["input_mode"] == "choice_with_other"
+    assert clarification["payload"]["request_id"] == "clarification:c-clar-1"
+    assert len(clarification["payload"]["options"]) == 2
 
     final = next(e for e in events if e["type"] == "final")
-    assert final["payload"]["conclusion"] == question
+    assert (final["payload"].get("conclusion") or "") == ""
     assert final["payload"]["clarification"]["question"] == question
+    assert final["payload"].get("confidence") in (None, "")
+    assert not (final["payload"].get("evidence_refs") or [])
 
-    # 持久化侧：clarification 事件与兜底后的 final 都能从历史消息读回
+    # 持久化侧：clarification 事件可读回；final 可为空壳收口标记
     messages = client.get(
         f"/api/copilot/sessions/{session['session_id']}/messages"
     ).json()["items"]
     kinds = {m["kind"] for m in messages}
     assert "clarification" in kinds
     persisted_final = [m for m in messages if m["kind"] == "final_answer"]
-    assert persisted_final and question in (persisted_final[-1]["text"] or "")
-    # title 事件不落库：不产生空壳 final_answer
-    assert all((m["text"] or "").strip() for m in persisted_final)
+    assert persisted_final
+    assert not (persisted_final[-1]["text"] or "").strip()
+    assert persisted_final[-1]["payload"].get("clarification", {}).get("question") == question
+    # title 事件不落库：不额外产生带正文的 final_answer
+    assert all(
+        (not (m["text"] or "").strip()) or "clarification" in (m.get("payload") or {})
+        for m in persisted_final
+    )

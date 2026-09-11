@@ -17,7 +17,11 @@ function renderInline(text: string): React.ReactNode[] {
     } else if (part.startsWith("[") && part.includes("](")) {
       const m = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
       if (m) {
-        out.push(<a key={key++} href={m[2]}>{m[1]}</a>);
+        out.push(
+          <a key={key++} href={m[2]}>
+            {m[1]}
+          </a>,
+        );
       } else {
         out.push(<span key={key++}>{part}</span>);
       }

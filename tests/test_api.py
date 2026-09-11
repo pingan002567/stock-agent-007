@@ -91,8 +91,8 @@ def test_health_and_app_shell(tmp_path, monkeypatch):
     assert agent_runtime["active_client"] == "stub"
     assert agent_runtime["degraded"] is True
     assert agent_runtime["degraded_reason"]
-    assert agent_runtime["subagent_enabled"] is False
-    assert agent_runtime["plan_mode"] is False
+    assert agent_runtime["subagent_enabled"] is True
+    assert agent_runtime["plan_mode"] is True
     assert agent_runtime["client_capabilities"] == []
     assert agent_runtime["thinking_enabled"] is True
     assert payload["stock_domain"] == "provider-router"
@@ -212,25 +212,24 @@ def test_copilot_sse_uses_fake_embedded_deerflow_mapper(tmp_path, monkeypatch):
 
     events = parse_sse_events(body)
     assert [event["type"] for event in events] == [
-        "skill_trace",
         "partial_answer",
         "tool_call",
         "tool_result",
         "reasoning",
         "final",
     ]
-    assert events[1]["payload"]["text"] == "fake embedded partial"
-    assert events[2]["payload"]["tool"] == events[3]["payload"]["tool"] == "get_quote"
+    assert events[0]["payload"]["text"] == "fake embedded partial"
+    assert events[1]["payload"]["tool"] == events[2]["payload"]["tool"] == "get_quote"
     assert (
-        events[2]["payload"]["call_id"] == events[3]["payload"]["call_id"] == "call_1"
+        events[1]["payload"]["call_id"] == events[2]["payload"]["call_id"] == "call_1"
     )
-    assert events[2]["payload"]["arguments"] == {"symbol": "AAPL"}
+    assert events[1]["payload"]["arguments"] == {"symbol": "AAPL"}
     assert [
         event
         for event in events
         if event["type"] == "partial_answer"
         and event["payload"]["text"] == "fake embedded partial"
-    ] == [events[1]]
+    ] == [events[0]]
     assert events[-1]["payload"]["usage"] == {"total_tokens": 9}
     assert "skill_trace" in events[-1]["payload"]
     # Embedded final always carries tool_evidence_refs; get_quote is not a workbench
@@ -276,11 +275,10 @@ def test_copilot_sse_supports_sync_embedded_generator(tmp_path, monkeypatch):
 
     events = parse_sse_events(body)
     assert [event["type"] for event in events] == [
-        "skill_trace",
         "partial_answer",
         "final",
     ]
-    assert events[1]["payload"]["text"] == "sync embedded partial"
+    assert events[0]["payload"]["text"] == "sync embedded partial"
     assert events[-1]["payload"]["usage"] == {"total_tokens": 4}
 
 
@@ -555,25 +553,24 @@ def test_copilot_strategy_backtest_uses_known_tool_bridge_tool(tmp_path, monkeyp
         },
     ).json()
 
-    assert run["intent"] == "strategy_backtest"
-    assert run["skill"] == "strategy-analyst"
-    assert run["skills"] == ["strategy-analyst", "report-writer"]
+    assert run["intent"] == "copilot"
+    assert run["skill"] == "lead-agent"
+    assert run["skills"] == []
 
     with client.stream("GET", f"/api/copilot/stream/{run['run_id']}") as response:
         body = "".join(response.iter_text())
 
     events = parse_sse_events(body)
     assert [event["type"] for event in events] == [
-        "skill_trace",
         "reasoning",
         "tool_call",
         "tool_result",
         "partial_answer",
         "final",
     ]
+    assert events[1]["payload"]["tool"] == "run_strategy_backtest"
     assert events[2]["payload"]["tool"] == "run_strategy_backtest"
-    assert events[3]["payload"]["tool"] == "run_strategy_backtest"
-    assert events[3]["payload"]["result"]["execution_guard"]["auto_trade"] is False
+    assert events[2]["payload"]["result"]["execution_guard"]["auto_trade"] is False
     assert events[-1]["payload"]["execution_guard"]["research_only"] is True
     assert events[-1]["payload"]["execution_guard"]["auto_trade"] is False
 
@@ -604,9 +601,9 @@ def test_copilot_monitor_report_stream_includes_report_quality_and_disclaimer(
         },
     ).json()
 
-    assert run["intent"] == "report_write"
-    # 预算语义：skills 是 report_write 的委派白名单（非关键词硬选的必跑链）
-    assert "stock-monitor" in run["skills"] and "report-writer" in run["skills"]
+    assert run["intent"] == "copilot"
+    assert run["skill"] == "lead-agent"
+    assert run["skills"] == []
 
     with client.stream("GET", f"/api/copilot/stream/{run['run_id']}") as response:
         assert response.status_code == 200
@@ -614,22 +611,21 @@ def test_copilot_monitor_report_stream_includes_report_quality_and_disclaimer(
 
     events = parse_sse_events(body)
     assert [event["type"] for event in events] == [
-        "skill_trace",
         "reasoning",
         "tool_call",
         "tool_result",
         "partial_answer",
         "final",
     ]
-    assert events[2]["payload"]["tool"] == "generate_report"
-    assert events[3]["payload"]["result"]["report_type"] == "monitor_review"
+    assert events[1]["payload"]["tool"] == "generate_report"
+    assert events[2]["payload"]["result"]["report_type"] == "monitor_review"
     assert (
         events[-1]["payload"]["report_id"]
-        == events[3]["payload"]["result"]["report_id"]
+        == events[2]["payload"]["result"]["report_id"]
     )
     assert (
         events[-1]["payload"]["quality_status"]
-        == events[3]["payload"]["result"]["quality_status"]
+        == events[2]["payload"]["result"]["quality_status"]
     )
     assert events[-1]["payload"]["disclaimer"] == "仅供研究，不构成投资建议。"
 
@@ -939,7 +935,7 @@ def test_holdings_risk_and_copilot_chat(tmp_path):
     payload = run.json()
     assert payload["run_id"].startswith("run_")
     assert payload["task_id"].startswith("task_")
-    assert payload["skill"] == "risk-officer"
+    assert payload["skill"] == "lead-agent"
 
 
 def test_risk_policy_api_active_create_update_activate_and_audit(tmp_path):
@@ -1879,22 +1875,18 @@ def test_copilot_sse_stream_contains_final_disclaimer(tmp_path, monkeypatch):
         body = "".join(response.iter_text())
 
     assert "event: reasoning" in body
-    assert "event: skill_trace" in body
     assert "event: final" in body
-    assert "risk-officer" in body
-    assert "report-writer" in body
     parsed_events = parse_sse_events(body)
     assert [event["type"] for event in parsed_events] == [
-        "skill_trace",
         "reasoning",
         "tool_call",
         "tool_result",
         "partial_answer",
         "final",
     ]
-    assert parsed_events[2]["payload"]["tool"] == "evaluate_policy_risk"
+    assert parsed_events[1]["payload"]["tool"] == "evaluate_policy_risk"
     assert (
-        parsed_events[3]["payload"]["result"]["risk_policy_ref"]["policy_id"]
+        parsed_events[2]["payload"]["result"]["risk_policy_ref"]["policy_id"]
         == "default-conservative"
     )
     assert {event["run_id"] for event in parsed_events} == {run["run_id"]}
@@ -1908,15 +1900,7 @@ def test_copilot_sse_stream_contains_final_disclaimer(tmp_path, monkeypatch):
     ][0]
     event = json.loads(data_line.removeprefix("data: "))
     assert "disclaimer" in event["payload"]
-    assert [item["skill"] for item in event["payload"]["skill_trace"]] == [
-        "stock-researcher",
-        "risk-officer",
-        "report-writer",
-    ]
-    assert all(
-        {"step", "skill", "status", "handoff"} <= set(item)
-        for item in event["payload"]["skill_trace"]
-    )
+    assert event["payload"].get("skill_trace") in ([], None) or event["payload"]["skill_trace"] == []
 
 
 def test_task_detail_and_stream_surface_tool_execution_ledger(tmp_path, monkeypatch):
@@ -2044,34 +2028,21 @@ def test_copilot_rebalance_trace_keeps_execution_disabled(tmp_path, monkeypatch)
     )
     assert run_response.status_code == 200
     run = run_response.json()
-    assert run["skill"] == "rebalance-planner"
-    assert run["skills"] == [
-        "stock-researcher",
-        "risk-officer",
-        "rebalance-planner",
-        "report-writer",
-        "execution-agent-disabled",
-    ]
+    assert run["skill"] == "lead-agent"
+    assert run["skills"] == []
 
     tasks = client.get("/api/tasks").json()["items"]
     task = next(item for item in tasks if item["task_id"] == run["task_id"])
-    assert [item["skill"] for item in task["skill_trace"]] == run["skills"]
-    assert task["skill_trace"][-1]["status"] == "blocked"
+    assert task["skill_trace"] == []
 
     with client.stream("GET", f"/api/copilot/stream/{run['run_id']}") as response:
         assert response.status_code == 200
         body = "".join(response.iter_text())
 
-    assert "event: skill_trace" in body
-    assert "execution-agent-disabled" in body
-    assert "real order execution is disabled in V1" in body
     events = parse_sse_events(body)
     final_event = [event for event in events if event["type"] == "final"][0]
     assert final_event["payload"]["execution_guard"]["auto_trade"] is False
     assert final_event["payload"]["execution_guard"]["status"] == "real_order_disabled"
-    assert (
-        final_event["payload"]["skill_trace"][-1]["skill"] == "execution-agent-disabled"
-    )
     assert (
         "draft_order_guard:auto_trade_false"
         in final_event["payload"]["tool_evidence_refs"]
@@ -2109,16 +2080,15 @@ def test_copilot_pre_trade_review_stream_returns_review_without_creating_paper_o
 
     events = parse_sse_events(body)
     assert [event["type"] for event in events] == [
-        "skill_trace",
         "reasoning",
         "tool_call",
         "tool_result",
         "partial_answer",
         "final",
     ]
+    assert events[1]["payload"]["tool"] == "create_pre_trade_review"
+    assert events[1]["payload"]["arguments"] == {"draft_id": draft["draft_id"]}
     assert events[2]["payload"]["tool"] == "create_pre_trade_review"
-    assert events[2]["payload"]["arguments"] == {"draft_id": draft["draft_id"]}
-    assert events[3]["payload"]["tool"] == "create_pre_trade_review"
     final_payload = events[-1]["payload"]
     assert final_payload["review_id"].startswith("review_")
     assert final_payload["status"] in {"passed", "warning", "blocked"}
@@ -2151,16 +2121,15 @@ def test_copilot_pre_trade_review_stream_fails_without_confirmed_draft_and_recor
 
     events = parse_sse_events(body)
     assert [event["type"] for event in events] == [
-        "skill_trace",
         "reasoning",
         "tool_call",
         "error",
         "partial_answer",
         "final",
     ]
+    assert events[1]["payload"]["tool"] == "create_pre_trade_review"
     assert events[2]["payload"]["tool"] == "create_pre_trade_review"
-    assert events[3]["payload"]["tool"] == "create_pre_trade_review"
-    assert "confirm a draft first" in events[3]["payload"]["error"]
+    assert "confirm a draft first" in events[2]["payload"]["error"]
     assert events[-1]["payload"]["runtime_error"]
     assert services.repo.list_pre_trade_reviews(limit=None) == []
     detail = client.get(f"/api/tasks/{run['task_id']}").json()
@@ -2209,8 +2178,9 @@ def test_copilot_paper_portfolio_review_uses_read_only_tool_chain_without_creati
         },
     ).json()
 
-    assert run["intent"] == "paper_portfolio_review"
-    assert run["skills"] == ["risk-officer"]
+    assert run["intent"] == "copilot"
+    assert run["skill"] == "lead-agent"
+    assert run["skills"] == []
 
     with client.stream("GET", f"/api/copilot/stream/{run['run_id']}") as response:
         assert response.status_code == 200
@@ -2218,16 +2188,15 @@ def test_copilot_paper_portfolio_review_uses_read_only_tool_chain_without_creati
 
     events = parse_sse_events(body)
     assert [event["type"] for event in events] == [
-        "skill_trace",
         "reasoning",
         "tool_call",
         "tool_result",
         "partial_answer",
         "final",
     ]
+    assert events[1]["payload"]["tool"] == "analyze_paper_performance"
     assert events[2]["payload"]["tool"] == "analyze_paper_performance"
-    assert events[3]["payload"]["tool"] == "analyze_paper_performance"
-    assert events[3]["payload"]["result"]["since_baseline"]["initial_equity"] > 0
+    assert events[2]["payload"]["result"]["since_baseline"]["initial_equity"] > 0
     assert client.get("/api/paper-orders").json()["items"] == []
 
     detail = client.get(f"/api/tasks/{run['task_id']}").json()
@@ -2533,8 +2502,8 @@ def test_copilot_decision_journal_review_uses_read_only_journal_tool_without_cre
             "authority_level": "A4",
         },
     ).json()
-    assert run["intent"] == "decision_journal_review"
-    assert run["skills"] == ["risk-officer"]
+    assert run["intent"] == "copilot"
+    assert run["skills"] == []
 
     with client.stream("GET", f"/api/copilot/stream/{run['run_id']}") as response:
         assert response.status_code == 200
@@ -2542,17 +2511,16 @@ def test_copilot_decision_journal_review_uses_read_only_journal_tool_without_cre
 
     events = parse_sse_events(body)
     assert [event["type"] for event in events] == [
-        "skill_trace",
         "reasoning",
         "tool_call",
         "tool_result",
         "partial_answer",
         "final",
     ]
+    assert events[1]["payload"]["tool"] == "list_decision_journal"
     assert events[2]["payload"]["tool"] == "list_decision_journal"
-    assert events[3]["payload"]["tool"] == "list_decision_journal"
-    assert events[3]["payload"]["result"]["count"] >= 1
-    assert events[3]["payload"]["result"]["items"][0]["entry_id"] == entry["entry_id"]
+    assert events[2]["payload"]["result"]["count"] >= 1
+    assert events[2]["payload"]["result"]["items"][0]["entry_id"] == entry["entry_id"]
     assert client.get("/api/paper-orders").json()["items"] == before_orders
     after_counts = {
         "orders": len(services.repo.list_paper_orders(limit=None)),
@@ -2571,7 +2539,7 @@ def test_copilot_decision_journal_review_uses_read_only_journal_tool_without_cre
 def test_copilot_blocks_real_execution_without_team_run_runtime(tmp_path):
     client = make_client(tmp_path)
 
-    denied_by_authority = client.post(
+    started = client.post(
         "/api/copilot/chat",
         json={
             "message": "真实下单买入 AAPL 20 股",
@@ -2580,20 +2548,11 @@ def test_copilot_blocks_real_execution_without_team_run_runtime(tmp_path):
             "authority_level": "A4",
         },
     )
-    assert denied_by_authority.status_code == 403
-    assert "requires A5" in denied_by_authority.json()["detail"]
-
-    denied_by_disabled_skill = client.post(
-        "/api/copilot/chat",
-        json={
-            "message": "真实下单买入 AAPL 20 股",
-            "page": "holdings",
-            "symbol": "AAPL",
-            "authority_level": "A5",
-        },
-    )
-    assert denied_by_disabled_skill.status_code == 403
-    assert "disabled" in denied_by_disabled_skill.json()["detail"]
+    assert started.status_code == 200
+    run = started.json()
+    assert run["intent"] == "copilot"
+    assert run["skill"] == "lead-agent"
+    assert client.get("/api/paper-orders").json()["items"] == []
 
     assert client.get("/api/team-runs").status_code == 404
     assert client.get("/api/teamrun").status_code == 404
@@ -2743,9 +2702,11 @@ def test_settings_expose_tool_bridge_registry_without_enabling_real_orders(tmp_p
         "list_review_inbox",
         "list_risk_policies",
         "list_strategies",
+        "list_watchlist",
         "mark_inbox_item_done",
         "place_real_order",
         "reject_rebalance_draft",
+        "remove_holding",
         "remove_watchlist_item",
         "run_strategy_backtest",
         "search_stock_intel",
@@ -2886,21 +2847,20 @@ def test_copilot_review_inbox_prompts_use_read_only_inbox_tools_only(
             "authority_level": "A4",
         },
     ).json()
-    assert run["intent"] == "review_inbox"
+    assert run["intent"] == "copilot"
 
     with client.stream("GET", f"/api/copilot/stream/{run['run_id']}") as response:
         events = parse_sse_events("".join(response.iter_text()))
 
     assert [event["type"] for event in events] == [
-        "skill_trace",
         "reasoning",
         "tool_call",
         "tool_result",
         "partial_answer",
         "final",
     ]
+    assert events[1]["payload"]["tool"] == expected_tool
     assert events[2]["payload"]["tool"] == expected_tool
-    assert events[3]["payload"]["tool"] == expected_tool
     detail = client.get(f"/api/tasks/{run['task_id']}").json()
     assert [
         (item["tool"], item["status"], item["domain"])
@@ -3061,6 +3021,24 @@ def test_upload_text_sniff_edges():
     assert not _looks_like_utf8_text(b"\xff\xfe" + b"a" * 100)
 
 
+def test_present_uploads_hides_companion_markdown():
+    from backend.api.routes_copilot import _is_safe_upload_filename, _present_uploads
+
+    presented = _present_uploads(
+        [
+            {"filename": "report.pdf", "size": 10},
+            {"filename": "report.md", "size": 4},
+            {"filename": "notes.md", "size": 3},
+        ]
+    )
+    assert [item["filename"] for item in presented] == ["report.pdf", "notes.md"]
+    assert presented[0]["markdown_file"] == "report.md"
+    assert _is_safe_upload_filename("report.pdf")
+    assert not _is_safe_upload_filename("..")
+    assert not _is_safe_upload_filename("../secret.txt")
+    assert not _is_safe_upload_filename("foo\\bar.pdf")
+
+
 def test_upload_files_deerflow_capability_gate(tmp_path, monkeypatch):
     """上传接收范围对齐 DeerFlow 文件能力：文本嗅探放行、Office/图片按扩展名、二进制 415。"""
     client = make_client(tmp_path)
@@ -3106,3 +3084,70 @@ def test_upload_files_deerflow_capability_gate(tmp_path, monkeypatch):
     assert resp.status_code == 415
     assert "unsupported binary file" in resp.json()["detail"]
     assert len(captured) == calls_before
+
+
+def test_list_and_delete_session_uploads(tmp_path, monkeypatch):
+    """GET 列表：stub 200+supported=false；companion .md 不进 chips；DELETE 404/400/409。"""
+    client = make_client(tmp_path)
+    services = client.app.state.services
+    session_id = client.post("/api/copilot/sessions", json={}).json()["session_id"]
+
+    stub_list = client.get(f"/api/copilot/sessions/{session_id}/uploads")
+    assert stub_list.status_code == 200
+    assert stub_list.json() == {"supported": False, "files": [], "count": 0}
+
+    stub_delete = client.delete(f"/api/copilot/sessions/{session_id}/uploads/report.pdf")
+    assert stub_delete.status_code == 409
+    assert "不支持读附件" in stub_delete.json()["detail"]
+
+    missing_session = client.get("/api/copilot/sessions/no-such-session/uploads")
+    assert missing_session.status_code == 404
+
+    def fake_list(_thread_id):
+        return {
+            "supported": True,
+            "files": [
+                {"filename": "report.pdf", "size": 120},
+                {"filename": "report.md", "size": 40},
+                {"filename": "notes.md", "size": 16},
+                {"filename": "chart.png", "size": 80},
+            ],
+            "count": 4,
+        }
+
+    def fake_delete(_thread_id, filename):
+        if filename == "missing.pdf":
+            return {"supported": True, "error": "File not found: missing.pdf"}
+        if filename == "report.pdf":
+            return {"supported": True, "success": True, "message": "Deleted report.pdf"}
+        return {"supported": True, "success": True, "message": f"Deleted {filename}"}
+
+    monkeypatch.setattr(services.copilot_service.deerflow, "list_uploads", fake_list)
+    monkeypatch.setattr(services.copilot_service.deerflow, "delete_upload", fake_delete)
+
+    listed = client.get(f"/api/copilot/sessions/{session_id}/uploads")
+    assert listed.status_code == 200
+    body = listed.json()
+    assert body["supported"] is True
+    names = [item["filename"] for item in body["files"]]
+    assert names == ["report.pdf", "notes.md", "chart.png"]
+    report = next(item for item in body["files"] if item["filename"] == "report.pdf")
+    assert report["markdown_file"] == "report.md"
+
+    assert client.delete(f"/api/copilot/sessions/{session_id}/uploads/report.pdf").status_code == 200
+    assert client.delete(f"/api/copilot/sessions/{session_id}/uploads/missing.pdf").status_code == 404
+    # TestClient 会把 uploads/../x 归一成删会话；用 %2e%2e 保持单段 path param
+    traversal = client.delete(f"/api/copilot/sessions/{session_id}/uploads/%2e%2e")
+    assert traversal.status_code == 400
+    assert client.delete(
+        f"/api/copilot/sessions/{session_id}/uploads/foo%5Cbar.pdf"
+    ).status_code == 400
+
+    stub_post = make_client(tmp_path)
+    sid = stub_post.post("/api/copilot/sessions", json={}).json()["session_id"]
+    blocked = stub_post.post(
+        f"/api/copilot/sessions/{sid}/uploads",
+        files=[("files", ("note.txt", b"hello", "text/plain"))],
+    )
+    assert blocked.status_code == 409
+    assert "不支持读附件" in blocked.json()["detail"]

@@ -25,7 +25,7 @@ from backend.persistence.repositories import WorkbenchRepository
 from backend.schemas import AuthorityLevel, HoldingPosition, RebalanceDraftDecisionNoteRequest, RebalanceDraftStatus, ReportGenerateRequest, model_to_dict
 from backend.stock_domain.financial_tools import get_stock_financial
 from backend.stock_domain.history_tools import get_daily_history
-from backend.stock_domain.intel_tools import search_stock_intel
+from backend.stock_domain.intel_tools import INTEL_DEFAULT_LIMIT, search_stock_intel
 from backend.stock_domain.portfolio_tools import summarize_portfolio
 
 
@@ -167,8 +167,10 @@ class WorkbenchToolBridge:
             "confirm_rebalance_draft": self._confirm_draft,
             "reject_rebalance_draft": self._reject_draft,
             "add_watchlist_item": self._add_watchlist_item,
+            "list_watchlist": self._list_watchlist,
             "remove_watchlist_item": self._remove_watchlist_item,
             "upsert_holding": self._upsert_holding,
+            "remove_holding": self._remove_holding,
             "place_real_order": self._place_real_order,
         }
         self._specs = {
@@ -196,7 +198,7 @@ class WorkbenchToolBridge:
                 AuthorityLevel.A2,
                 "low",
                 True,
-                {"symbol": "str", "days": "int"},
+                {"symbol": "str", "days": "int", "detail": "str", "fields": "list", "limit": "int"},
                 ["daily_history", "provider_router"],
             ),
             "search_stock_intel": ToolSpec(
@@ -205,7 +207,7 @@ class WorkbenchToolBridge:
                 AuthorityLevel.A2,
                 "medium",
                 True,
-                {"symbol": "str", "query": "str"},
+                {"symbol": "str", "query": "str", "fields": "list", "limit": "int"},
                 ["stock_intel", "provider_router"],
             ),
             "get_portfolio_snapshot": ToolSpec(
@@ -576,13 +578,22 @@ class WorkbenchToolBridge:
                 {"symbol": "str", "name": "str?", "group_name": "str?"},
                 ["watchlist_item", "local_sqlite"],
             ),
+            "list_watchlist": ToolSpec(
+                "list_watchlist",
+                "research",
+                AuthorityLevel.A2,
+                "low",
+                True,
+                {"group_name": "str?", "monitored_only": "bool", "limit": "int", "fields": "list"},
+                ["watchlist_item", "local_sqlite"],
+            ),
             "remove_watchlist_item": ToolSpec(
                 "remove_watchlist_item",
                 "research",
                 AuthorityLevel.A2,
                 "low",
                 True,
-                {"symbol": "str"},
+                {"symbol": "str?", "clear_all": "bool"},
                 ["watchlist_item", "local_sqlite"],
             ),
             "upsert_holding": ToolSpec(
@@ -592,6 +603,15 @@ class WorkbenchToolBridge:
                 "medium",
                 True,
                 {"symbol": "str", "name": "str", "quantity": "float", "cost": "float", "market_value": "float?", "weight_pct": "float?"},
+                ["holding_position", "local_sqlite", "audit_log"],
+            ),
+            "remove_holding": ToolSpec(
+                "remove_holding",
+                "portfolio",
+                AuthorityLevel.A3,
+                "medium",
+                True,
+                {"symbol": "str?", "clear_all": "bool"},
                 ["holding_position", "local_sqlite", "audit_log"],
             ),
             "place_real_order": ToolSpec(
@@ -747,10 +767,21 @@ class WorkbenchToolBridge:
         return get_stock_financial(str(arguments.get("symbol") or "AAPL"))
 
     def _get_daily_history(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        return get_daily_history(str(arguments.get("symbol") or "AAPL"), int(arguments.get("days") or 30))
+        return get_daily_history(
+            str(arguments.get("symbol") or "AAPL"),
+            int(arguments.get("days") or 30),
+            detail=str(arguments.get("detail") or "summary"),
+            fields=arguments.get("fields"),
+            limit=arguments.get("limit"),
+        )
 
     def _search_stock_intel(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        return search_stock_intel(str(arguments.get("symbol") or "AAPL"), str(arguments.get("query") or ""))
+        return search_stock_intel(
+            str(arguments.get("symbol") or "AAPL"),
+            str(arguments.get("query") or ""),
+            fields=arguments.get("fields"),
+            limit=arguments.get("limit", INTEL_DEFAULT_LIMIT),
+        )
 
     def _get_portfolio_snapshot(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return summarize_portfolio(self.repo.list_holdings())
@@ -781,16 +812,107 @@ class WorkbenchToolBridge:
         return get_market_structure(str(arguments.get("symbol") or ""))
 
     def _get_monitor_events(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from backend.stock_domain.result_projection import (
+            MONITOR_EVENT_FIELDS,
+            project_items,
+        )
+
         symbol = str(arguments.get("symbol") or "").upper() or None
         severity = str(arguments.get("severity") or "") or None
         limit = int(arguments.get("limit") or 10)
         items = self.monitor_service.list_events(symbol=symbol, severity=severity, limit=limit)
-        explanation = self.monitor_service.explain_event(event=items[0]) if items else self.monitor_service.empty_explanation()
-        return {
-            "items": [model_to_dict(item) for item in items],
+        payload: dict[str, Any] = {
+            "items": project_items(
+                [model_to_dict(item) for item in items],
+                arguments.get("fields") or MONITOR_EVENT_FIELDS,
+            ),
             "status": model_to_dict(self.monitor_service.get_status()),
-            "explanation": explanation,
         }
+        if bool(arguments.get("include_explanation")):
+            explanation = (
+                self.monitor_service.explain_event(event=items[0])
+                if items
+                else self.monitor_service.empty_explanation()
+            )
+            payload["explanation"] = explanation
+        return payload
+
+    def _get_backtest_result(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from backend.stock_domain.result_projection import (
+            BACKTEST_SUMMARY_FIELDS,
+            DETAIL_FULL,
+            project_mapping,
+        )
+
+        run_id = str(arguments.get("run_id") or "")
+        if run_id:
+            raw = model_to_dict(self.strategy_service.get_backtest(run_id))
+        else:
+            strategy_id = str(arguments.get("strategy_id") or "concentration-control")
+            runs = self.strategy_service.list_backtests(strategy_id, limit=1)
+            if not runs:
+                raise KeyError(f"backtest not found for strategy {strategy_id}")
+            raw = model_to_dict(runs[0])
+        detail = str(arguments.get("detail") or "summary")
+        if detail == DETAIL_FULL and not arguments.get("fields"):
+            return raw
+        fields = arguments.get("fields") or BACKTEST_SUMMARY_FIELDS
+        projected = project_mapping(raw, fields)
+        projected["detail"] = detail
+        return projected
+
+    def _generate_report(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from backend.stock_domain.result_projection import (
+            DETAIL_FULL,
+            REPORT_SUMMARY_FIELDS,
+            project_mapping,
+        )
+
+        report = self.report_service.generate(
+            ReportGenerateRequest(
+                report_type=str(arguments.get("report_type") or "stock_research"),
+                source_type=str(arguments.get("source_type") or "stock"),
+                source_id=str(arguments.get("source_id") or arguments.get("symbol") or "AAPL"),
+                template_id=str(arguments["template_id"]) if arguments.get("template_id") else None,
+                title=str(arguments["title"]) if arguments.get("title") else None,
+                options=dict(arguments.get("options") or {}),
+            )
+        )
+        raw = model_to_dict(report)
+        detail = str(arguments.get("detail") or "summary")
+        if detail == DETAIL_FULL and not arguments.get("fields"):
+            return raw
+        fields = arguments.get("fields") or REPORT_SUMMARY_FIELDS
+        projected = project_mapping(raw, fields)
+        projected["detail"] = detail
+        if detail != DETAIL_FULL and "content" not in projected:
+            projected["content_hint"] = "正文已省略。需要全文时用 detail='full'，或读 markdown_path。"
+        return projected
+
+    def _list_rebalance_drafts(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from backend.stock_domain.result_projection import (
+            DRAFT_LIST_FIELDS,
+            project_items,
+            truncation_note,
+        )
+
+        items = self.rebalance_draft_service.list(
+            symbol=str(arguments.get("symbol") or "").upper() or None,
+            status=str(arguments.get("status") or "") or None,
+            limit=int(arguments.get("limit") or 20),
+        )
+        rows = [model_to_dict(item) for item in items]
+        projected = project_items(rows, arguments.get("fields") or DRAFT_LIST_FIELDS)
+        payload: dict[str, Any] = {"items": projected, "count": len(projected)}
+        note = truncation_note(
+            returned=len(projected),
+            total=len(rows),
+            tool="list_rebalance_drafts",
+            hint="调高 limit 或用 fields 指定字段。",
+        )
+        if note:
+            payload["truncated"] = note
+        return payload
 
     def _get_monitor_rules(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -857,31 +979,8 @@ class WorkbenchToolBridge:
         )
         return model_to_dict(run)
 
-    def _get_backtest_result(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        run_id = str(arguments.get("run_id") or "")
-        if run_id:
-            return model_to_dict(self.strategy_service.get_backtest(run_id))
-        strategy_id = str(arguments.get("strategy_id") or "concentration-control")
-        runs = self.strategy_service.list_backtests(strategy_id, limit=1)
-        if not runs:
-            raise KeyError(f"backtest not found for strategy {strategy_id}")
-        return model_to_dict(runs[0])
-
     def _list_report_templates(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return {"items": [model_to_dict(item) for item in self.report_service.list_templates()]}
-
-    def _generate_report(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        report = self.report_service.generate(
-            ReportGenerateRequest(
-                report_type=str(arguments.get("report_type") or "stock_research"),
-                source_type=str(arguments.get("source_type") or "stock"),
-                source_id=str(arguments.get("source_id") or arguments.get("symbol") or "AAPL"),
-                template_id=str(arguments["template_id"]) if arguments.get("template_id") else None,
-                title=str(arguments["title"]) if arguments.get("title") else None,
-                options=dict(arguments.get("options") or {}),
-            )
-        )
-        return model_to_dict(report)
 
     def _get_report_quality(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return self.report_service.get_quality(str(arguments.get("report_id") or ""))
@@ -895,14 +994,6 @@ class WorkbenchToolBridge:
             source_mode="tool_bridge",
         )
         return self.rebalance_draft_service.to_tool_result(draft)
-
-    def _list_rebalance_drafts(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        items = self.rebalance_draft_service.list(
-            symbol=str(arguments.get("symbol") or "").upper() or None,
-            status=str(arguments.get("status") or "") or None,
-            limit=int(arguments.get("limit") or 20),
-        )
-        return {"items": [model_to_dict(item) for item in items], "count": len(items)}
 
     def _get_rebalance_draft(self, arguments: dict[str, Any]) -> dict[str, Any]:
         draft_id = str(arguments.get("draft_id") or "").strip()
@@ -946,15 +1037,40 @@ class WorkbenchToolBridge:
         item = WI(
             symbol=symbol,
             name=str(arguments.get("name") or ""),
-            group_name=str(arguments.get("group_name") or ""),
+            group=str(arguments.get("group_name") or arguments.get("group") or "观察池"),
         )
         saved = self.repo.upsert_watchlist_item(item)
         return model_to_dict(saved)
 
+    def _list_watchlist(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from backend.stock_domain.result_projection import project_items
+
+        group = str(arguments.get("group_name") or arguments.get("group") or "").strip() or None
+        monitored_only = bool(arguments.get("monitored_only"))
+        limit = arguments.get("limit")
+        limit_n = int(limit) if limit is not None else 50
+        items = self.repo.list_watchlist()
+        rows = [model_to_dict(item) for item in items]
+        if group:
+            rows = [row for row in rows if str(row.get("group") or "") == group]
+        if monitored_only:
+            rows = [row for row in rows if bool(row.get("monitored"))]
+        fields = arguments.get("fields") or ("symbol", "name", "group", "monitored")
+        projected = project_items(rows, fields, limit_n)
+        return {"items": projected, "count": len(projected), "total": len(rows)}
+
     def _remove_watchlist_item(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        clear_all = bool(arguments.get("clear_all"))
         symbol = str(arguments.get("symbol") or "").upper()
+        if clear_all:
+            items = self.repo.list_watchlist()
+            removed: list[str] = []
+            for item in items:
+                if self.repo.delete_watchlist_item(item.symbol):
+                    removed.append(item.symbol.upper())
+            return {"cleared": True, "removed": removed, "count": len(removed)}
         if not symbol:
-            raise ValueError("remove_watchlist_item requires a symbol")
+            raise ValueError("remove_watchlist_item requires symbol, or clear_all=true")
         deleted = self.repo.delete_watchlist_item(symbol)
         return {"symbol": symbol, "deleted": deleted}
 
@@ -985,6 +1101,27 @@ class WorkbenchToolBridge:
         )
         saved = self.repo.upsert_holding(position)
         return model_to_dict(saved)
+
+    def _remove_holding(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        clear_all = bool(arguments.get("clear_all"))
+        symbol = str(arguments.get("symbol") or "").upper()
+        if clear_all:
+            holdings = self.repo.list_holdings()
+            removed: list[str] = []
+            for item in holdings:
+                if self.repo.delete_holding(item.symbol):
+                    removed.append(item.symbol.upper())
+            # 演示组合被整清时，关掉 demo 标记，避免 UI 仍提示「示例持仓」
+            if not self.repo.list_holdings():
+                flag = dict(self.repo.get_config("demo_portfolio", {}) or {})
+                flag["active"] = False
+                flag["cleared"] = True
+                self.repo.set_config("demo_portfolio", flag)
+            return {"cleared": True, "removed": removed, "count": len(removed)}
+        if not symbol:
+            raise ValueError("remove_holding requires symbol, or clear_all=true")
+        deleted = self.repo.delete_holding(symbol)
+        return {"symbol": symbol, "deleted": deleted}
 
     def _create_pre_trade_review(self, arguments: dict[str, Any]) -> dict[str, Any]:
         draft_id = str(arguments.get("draft_id") or "").strip()

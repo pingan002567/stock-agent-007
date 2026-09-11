@@ -1,8 +1,12 @@
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    Manager,
+    Manager, WebviewWindowBuilder,
 };
+
+/// 引导 UI 与后端服务管理 CLI 之间的唯一桥：跑 `python -m backend.service_cli <args>`
+/// 并解析其单 JSON 出口（doc/DESKTOP_APP_PLAN.md §3.1.1：探测判定全在 doctor，
+/// 壳只做转发与渲染）。阶段 1 开发形态直接用仓库 .venv；阶段 2 打包后换 portable runtime。
 
 /// 引导 UI 与后端服务管理 CLI 之间的唯一桥：跑 `python -m backend.service_cli <args>`
 /// 并解析其单 JSON 出口（doc/DESKTOP_APP_PLAN.md §3.1.1：探测判定全在 doctor，
@@ -51,6 +55,50 @@ fn navigate(webview_window: tauri::WebviewWindow, url: String) -> Result<(), Str
     webview_window.navigate(parsed).map_err(|e| e.to_string())
 }
 
+/// 聊天/情报里的外链在 WebView 里点开会顶掉整个工作台，改走系统浏览器。
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    open_in_system_browser(&url)
+}
+
+fn is_app_webview_url(url: &str) -> bool {
+    if url == "about:blank" || url.is_empty() {
+        return false;
+    }
+    let Ok(parsed) = url.parse::<tauri::Url>() else {
+        return false;
+    };
+    match parsed.scheme() {
+        "tauri" => true,
+        "http" | "https" => matches!(
+            parsed.host_str(),
+            Some("127.0.0.1" | "localhost" | "tauri.localhost")
+        ),
+        _ => false,
+    }
+}
+
+fn open_in_system_browser(url: &str) -> Result<(), String> {
+    let parsed: tauri::Url = url.parse().map_err(|e| format!("bad url: {e}"))?;
+    match parsed.scheme() {
+        "http" | "https" | "mailto" => {}
+        other => return Err(format!("unsupported url scheme: {other}")),
+    }
+    #[cfg(target_os = "macos")]
+    let status = std::process::Command::new("open").arg(url).status();
+    #[cfg(target_os = "windows")]
+    let status = std::process::Command::new("cmd")
+        .args(["/C", "start", "", url])
+        .status();
+    #[cfg(target_os = "linux")]
+    let status = std::process::Command::new("xdg-open").arg(url).status();
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(format!("open browser exited {s}")),
+        Err(e) => Err(format!("open browser failed: {e}")),
+    }
+}
+
 fn repo_root() -> std::path::PathBuf {
     // 开发形态：desktop/src-tauri 相对仓库根固定为 ../..；可用 STOCKAGENT_REPO_ROOT 覆盖
     if let Ok(dir) = std::env::var("STOCKAGENT_REPO_ROOT") {
@@ -66,8 +114,35 @@ fn repo_root() -> std::path::PathBuf {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![service_cli, navigate])
+        .invoke_handler(tauri::generate_handler![service_cli, navigate, open_external])
         .setup(|app| {
+            let window_cfg = app
+                .config()
+                .app
+                .windows
+                .first()
+                .cloned()
+                .ok_or("missing window config")?;
+            WebviewWindowBuilder::from_config(app.handle(), &window_cfg)?
+                .on_navigation(|url| {
+                    let href = url.as_str();
+                    if href == "about:blank" || is_app_webview_url(href) {
+                        true
+                    } else {
+                        let _ = open_in_system_browser(href);
+                        false
+                    }
+                })
+                .on_new_window(|url, _features| {
+                    // target=_blank / window.open 默认会新开 WebView，打到本机后端就是 {"detail":"Not Found"}
+                    let href = url.as_str();
+                    if !is_app_webview_url(href) && href != "about:blank" {
+                        let _ = open_in_system_browser(href);
+                    }
+                    tauri::webview::NewWindowResponse::Deny
+                })
+                .build()?;
+
             // 空白页自愈：实测两种情况会让 webview 停在 about:blank——
             // (1) wry 初始导航偶发不触发（启动竞态）；(2) navigate 到不可达端口
             // 加载失败。轮询检测到 blank 就拉回引导页，引导页自会重新决策。
@@ -80,12 +155,23 @@ pub fn run() {
                     .clone()
                     .map(|u| u.to_string())
                     .unwrap_or_else(|| "tauri://localhost".into());
-                std::thread::spawn(move || loop {
-                    std::thread::sleep(std::time::Duration::from_secs(3));
-                    if let Some(w) = handle.get_webview_window("main") {
+                std::thread::spawn(move || {
+                    let mut last_good = home_url.clone();
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_secs(3));
+                        let Some(w) = handle.get_webview_window("main") else { continue };
                         let url = w.url().map(|u| u.to_string()).unwrap_or_default();
                         if url == "about:blank" {
-                            let _ = w.navigate(home_url.parse().unwrap());
+                            if let Ok(home) = last_good.parse() {
+                                let _ = w.navigate(home);
+                            }
+                        } else if is_app_webview_url(&url) {
+                            last_good = url;
+                        } else {
+                            let _ = open_in_system_browser(&url);
+                            if let Ok(home) = last_good.parse() {
+                                let _ = w.navigate(home);
+                            }
                         }
                     }
                 });
@@ -121,6 +207,9 @@ pub fn run() {
         })
         // 关窗即隐藏：常驻托盘，避免误关杀掉正在看的流式对话
         .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();

@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from backend.app_services.permission_guard import PermissionDenied
 from backend.agent_runtime.deerflow_client import DeerFlowClientAdapter
-from backend.agent_runtime.prompt_envelope import build_prompt_envelope
+from backend.agent_runtime.prompt_envelope import build_prompt_envelope, render_prompt_envelope
 from backend.agent_runtime.tool_bridge import WorkbenchToolBridge
 from backend.bootstrap import create_services
 from backend.schemas import (
@@ -959,19 +959,29 @@ def test_permission_allows_draft_but_blocks_execution(services):
     assert "real order execution is disabled" in str(exc.value)
 
 
-def test_copilot_create_run_permission_denied_does_not_create_session(services):
+def test_copilot_a2_can_create_run_but_a3_tools_fail_at_execute(services):
     before = len(services.repo.list_copilot_sessions(limit=200))
-    with pytest.raises(PermissionDenied):
-        services.copilot_service.create_run(
-            CopilotRequest(
-                message="分析 AAPL 风险",
-                page="stock",
-                symbol="AAPL",
-                authority_level=AuthorityLevel.A2,
-            )
+    run = services.copilot_service.create_run(
+        CopilotRequest(
+            message="分析 AAPL 风险",
+            page="stock",
+            symbol="AAPL",
+            authority_level=AuthorityLevel.A2,
         )
+    )
     after = len(services.repo.list_copilot_sessions(limit=200))
-    assert after == before
+    assert after == before + 1
+    assert run.intent == "copilot"
+    assert run.skill == "lead-agent"
+
+    async def collect():
+        return [event async for event in services.copilot_service.stream_run(run.run_id, run.task_id)]
+
+    events = asyncio.run(collect())
+    errors = [event for event in events if event.type == "error"]
+    assert errors
+    blob = json.dumps(errors[0].payload, ensure_ascii=False)
+    assert "requires A3" in blob or "PermissionDenied" in blob or "权限" in blob
 
 
 def test_copilot_routes_and_streams_events(services):
@@ -983,13 +993,10 @@ def test_copilot_routes_and_streams_events(services):
         return [event async for event in services.copilot_service.stream_run(run.run_id, run.task_id)]
 
     events = asyncio.run(collect())
-    assert run.skill == "risk-officer"
+    assert run.skill == "lead-agent"
     assert [event.type for event in events][-1] == "final"
     assert "disclaimer" in events[-1].payload
-    assert events[-1].payload["skill_trace"]
-    assert events[-1].payload["skill_trace"][-1]["skill"] == "report-writer"
-    # 预算语义：白名单行是"可委派"而非"必跑"
-    assert events[-1].payload["skill_trace"][-1]["status"] == "available"
+    assert events[-1].payload.get("skill_trace") in ([], None)
 
 
 def test_copilot_rebalance_uses_multi_skill_trace(services):
@@ -997,25 +1004,14 @@ def test_copilot_rebalance_uses_multi_skill_trace(services):
         CopilotRequest(message="先分析 AAPL 风险，再给出调仓草案", page="holdings", symbol="AAPL", authority_level=AuthorityLevel.A4)
     )
     task = services.repo.get_task(run.task_id)
-    skills = [item["skill"] for item in task.skill_trace]
-    assert skills == [
-        "stock-researcher",
-        "risk-officer",
-        "rebalance-planner",
-        "report-writer",
-        "execution-agent-disabled",
-    ]
-    assert skills.index("risk-officer") < skills.index("rebalance-planner")
-    assert all({"step", "skill", "status", "handoff"} <= set(item) for item in task.skill_trace)
-    assert task.skill_trace[-1]["status"] == "blocked"
-    assert "real order execution is disabled" in task.skill_trace[-1]["blocked_reason"]
+    assert run.skill == "lead-agent"
+    assert task.skill_trace == []
 
     async def collect():
         return [event async for event in services.copilot_service.stream_run(run.run_id, run.task_id)]
 
     events = asyncio.run(collect())
-    assert any(event.type == "skill_trace" for event in events)
-    assert events[-1].payload["skill_trace"][-1]["skill"] == "execution-agent-disabled"
+    assert events[-1].payload["execution_guard"]["auto_trade"] is False
     assert "auto_trade_false" in events[-1].payload["evidence_refs"]
     assert events[-1].payload["draft_id"].startswith("draft_")
     assert events[-1].payload["draft_status"] == "pending_user_confirmation"
@@ -1037,17 +1033,17 @@ def test_copilot_strategy_backtest_routes_to_strategy_analyst_and_records_ledger
     )
     task = services.repo.get_task(run.task_id)
 
-    assert run.intent == "strategy_backtest"
-    assert run.skill == "strategy-analyst"
-    assert [item["skill"] for item in task.skill_trace] == ["strategy-analyst", "report-writer"]
+    assert run.intent == "copilot"
+    assert run.skill == "lead-agent"
+    assert task.skill_trace == []
 
     async def collect():
         return [event async for event in services.copilot_service.stream_run(run.run_id, run.task_id)]
 
     events = asyncio.run(collect())
-    assert [event.type for event in events] == ["skill_trace", "reasoning", "tool_call", "tool_result", "partial_answer", "final"]
-    assert events[2].payload["tool"] == "run_strategy_backtest"
-    assert events[3].payload["result"]["strategy_id"] == "concentration-control"
+    assert [event.type for event in events] == ["reasoning", "tool_call", "tool_result", "partial_answer", "final"]
+    assert events[1].payload["tool"] == "run_strategy_backtest"
+    assert events[2].payload["result"]["strategy_id"] == "concentration-control"
     assert events[-1].payload["execution_guard"]["research_only"] is True
     assert events[-1].payload["execution_guard"]["auto_trade"] is False
     assert "backtest_run" in events[-1].payload["tool_evidence_refs"]
@@ -1076,12 +1072,11 @@ def test_fake_embedded_client_stream_is_forwarded_through_copilot_stream(service
         return [event async for event in services.copilot_service.stream_run(run.run_id, run.task_id)]
 
     events = asyncio.run(collect())
-    assert [event.type for event in events] == ["skill_trace", "partial_answer", "tool_call", "tool_result", "final"]
-    assert events[1].payload["text"] == "fake embedded partial"
-    assert events[2].payload["tool"] == events[3].payload["tool"] == "get_quote"
+    assert [event.type for event in events] == ["partial_answer", "tool_call", "tool_result", "final"]
+    assert events[0].payload["text"] == "fake embedded partial"
+    assert events[1].payload["tool"] == events[2].payload["tool"] == "get_quote"
     assert events[-1].payload["conclusion"] == "fake embedded final"
     assert events[-1].payload["usage"] == {"total_tokens": 5}
-    assert events[-1].payload["skill_trace"][-1]["skill"] == "report-writer"
 
 
 def test_prompt_envelope_contains_expected_sections_and_excludes_full_dumps(services):
@@ -1102,49 +1097,27 @@ def test_prompt_envelope_contains_expected_sections_and_excludes_full_dumps(serv
         return [event async for event in services.copilot_service.stream_run(run.run_id, run.task_id)]
 
     events = asyncio.run(collect())
-    envelope = json.loads(captured["message"])
-
-    assert [event.type for event in events] == ["skill_trace", "final"]
-    assert {
-        "envelope_version",
-        "user_message",
-        "current_page",
-        "skill_trace",
-        "condensed_stock_context",
-        "condensed_page_context",
-        "safety_constraints",
-        "delegation_budget",
-    } <= set(envelope)
-    assert envelope["envelope_version"] == "v0.22"
-    # 委派预算（risk_review）：白名单 + 上限 + 权限帽，无合规必跑项
-    assert set(envelope["delegation_budget"]["allowed_skills"]) == {
-        "stock-researcher", "risk-officer", "report-writer",
-    }
-    assert envelope["delegation_budget"]["max_subagents"] == 3
-    assert envelope["delegation_budget"]["authority_cap"] == "A3"
-    assert envelope["delegation_budget"]["required_skills"] == []
-    assert envelope["current_page"] == "stock"
-    assert envelope["user_message"] == "分析 AAPL 风险"
-    assert envelope["condensed_stock_context"]["symbol"] == "AAPL"
-    assert isinstance(envelope["condensed_page_context"], dict)
-    assert "holdings" in envelope["condensed_page_context"]
-    assert "position_count" in envelope["condensed_page_context"]["holdings"]
-    assert "holding_summary" in envelope["condensed_stock_context"]
-    assert "latest_report_ref" in envelope["condensed_stock_context"]
-    assert "_authority_level" not in captured["message"]
-    assert "secret" in " ".join(envelope["safety_constraints"]).lower()
-    assert "environment" not in captured["message"].lower()
-    assert "full_watchlist" not in captured["message"].lower()
-    assert "tool_execution" not in captured["message"].lower()
-    assert "content" not in json.dumps(envelope["condensed_stock_context"].get("latest_report_ref", {}), ensure_ascii=False)
+    message = captured["message"]
+    assert isinstance(message, str)
+    assert [event.type for event in events] == ["final"]
+    assert "<workbench_context>" in message
+    assert "page: stock" in message
+    assert "symbol: AAPL" in message
+    assert "authority: A4" in message
+    assert message.endswith("分析 AAPL 风险")
+    assert "envelope_version" not in message
+    assert "delegation_budget" not in message
+    assert "session_state" not in message
+    assert "full_watchlist" not in message.lower()
+    assert "tool_execution" not in message.lower()
+    assert "OPENAI_API_KEY" not in message
 
 
 def test_delegation_observation_and_required_skill_compliance(services):
-    """P1 预算语义：task 委派事件推进 trace 行状态；required 未跑 → 合规标注。"""
+    """Observed task() rows are projection-only; there is no required_skills miss."""
 
     class FakeClient:
         async def stream(self, **kwargs):
-            # 模型只委派了 rebalance-planner，跳过了必跑的 risk-officer
             yield ("messages-tuple", {
                 "type": "ai", "id": "m1", "content": "",
                 "tool_calls": [{
@@ -1166,25 +1139,22 @@ def test_delegation_observation_and_required_skill_compliance(services):
             page="holdings", symbol="AAPL", authority_level=AuthorityLevel.A4,
         )
     )
-    assert run.intent == "rebalance_plan"
+    assert run.intent == "copilot"
 
     async def collect():
         return [event async for event in services.copilot_service.stream_run(run.run_id, run.task_id)]
 
     events = asyncio.run(collect())
 
-    # 委派观测：出现 observed 阶段的 skill_trace 增量事件
     observed = [e for e in events if e.type == "skill_trace" and e.payload.get("phase") == "observed"]
     assert observed, "task 委派应触发 observed skill_trace 事件"
 
     final = events[-1]
     assert final.type == "final"
     trace = {item["skill"]: item["status"] for item in final.payload["skill_trace"]}
-    assert trace["rebalance-planner"] == "done"           # 实际委派并完成
-    assert trace["risk-officer"] == "missed"              # 必跑项被模型省略
-    assert trace["execution-agent-disabled"] == "blocked"  # 守卫行不变
-    compliance = final.payload["budget_compliance"]
-    assert compliance["missing_required"] == ["risk-officer"]
+    assert trace["rebalance-planner"] == "done"
+    assert "risk-officer" not in trace
+    assert "budget_compliance" not in final.payload
 
 
 def test_serialize_tool_call_persists_task_meta(services):
@@ -1210,57 +1180,53 @@ def test_serialize_tool_call_persists_task_meta(services):
 def test_build_prompt_envelope_trims_runtime_context():
     envelope = build_prompt_envelope(
         user_message="分析 AAPL 风险",
-        skill_trace=[{"step": 1, "skill": "stock-researcher", "purpose": "读取上下文", "authority_level": "A2", "status": "planned", "tools": ["get_stock_context"]}],
         context={
             "_authority_level": "A4",
+            "page": "stock",
             "symbol": "AAPL",
-            "name": "Apple",
-            "market": "NASDAQ",
-            "industry": "Consumer Electronics",
-            "sector": "Technology",
-            "price": {"last": 193.7, "change_pct": 1.2, "updated_at": "now", "source": "mock_adapter", "degraded": False},
-            "relation": {"in_watchlist": True, "in_holdings": True, "monitored": True},
-            "holding": {"weight_pct": 18.5, "market_value": 1000000, "quantity": 9999},
-            "ai_state": {"score": 82, "risk_label": "集中度高", "stance": "谨慎增持", "confidence": "medium"},
-            "latest_report": {"report_id": "report_aapl", "generated_at": "now", "content": "should-not-leak"},
+            "holdings": {"items": [{"quantity": 9999}]},
             "watchlist": [{"symbol": "AAPL"}],
             "history": [{"close": 1}],
             "env": {"OPENAI_API_KEY": "secret"},
         },
     )
-
+    rendered = render_prompt_envelope(
+        user_message="分析 AAPL 风险",
+        context={
+            "_authority_level": "A4",
+            "page": "stock",
+            "symbol": "AAPL",
+        },
+    )
     dumped = json.dumps(envelope, ensure_ascii=False)
-    assert envelope["condensed_stock_context"]["holding_summary"] == {"weight_pct": 18.5, "market_value": 1000000, "pnl_pct": None}
+    assert envelope["current_page"] == "stock"
+    assert envelope["anchor_symbol"] == "AAPL"
+    assert envelope["user_message"] == "分析 AAPL 风险"
+    assert "envelope_version" not in envelope
     assert "quantity" not in dumped
-    assert '"watchlist":' not in dumped
-    assert "history" not in dumped
     assert "OPENAI_API_KEY" not in dumped
-    assert "should-not-leak" not in dumped
+    assert "envelope_version" not in rendered
+    assert rendered.endswith("分析 AAPL 风险")
+    assert "<workbench_context>" in rendered
 
 
 def test_prompt_envelope_includes_page_scoped_context_without_full_payloads():
     envelope = build_prompt_envelope(
         user_message="今天我需要处理什么？",
-        skill_trace=[{"step": 1, "skill": "risk-officer", "purpose": "读取待办", "authority_level": "A3", "status": "planned"}],
         context={
             "_authority_level": "A4",
             "page": "overview",
             "overview": {
-                "inbox": {
-                    "summary": {"open_count": 2, "high_count": 1},
-                    "items": [{"item_key": "x", "title": "处理草案", "payload": "short"}],
-                },
-                "reports": {"items": [{"report_id": "report_1", "content": "should-not-leak"}]},
+                "inbox": {"items": [{"payload": "should-not-leak"}]},
             },
-            "symbol_summary": {"symbol": "AAPL", "name": "Apple", "holding": {"weight_pct": 18.5, "quantity": 999}},
+            "symbol_summary": {"symbol": "AAPL", "holding": {"quantity": 999}},
         },
     )
-
     dumped = json.dumps(envelope, ensure_ascii=False)
     assert envelope["current_page"] == "overview"
-    assert envelope["condensed_stock_context"]["symbol"] == "AAPL"
-    assert envelope["condensed_page_context"]["overview"]["inbox"]["summary"]["open_count"] == 2
+    assert envelope["anchor_symbol"] == "AAPL"
     assert "should-not-leak" not in dumped
+    assert "quantity" not in dumped
     assert "_authority_level" not in dumped
 
 
@@ -1273,13 +1239,13 @@ def test_stub_copilot_stream_uses_tool_bridge_events(services):
         return [event async for event in services.copilot_service.stream_run(run.run_id, run.task_id)]
 
     events = asyncio.run(collect())
-    assert [event.type for event in events] == ["skill_trace", "reasoning", "tool_call", "tool_result", "partial_answer", "final"]
-    assert events[2].payload["tool"] == "evaluate_policy_risk"
+    assert [event.type for event in events] == ["reasoning", "tool_call", "tool_result", "partial_answer", "final"]
+    assert events[1].payload["tool"] == "evaluate_policy_risk"
     # authority_level rides on the tool_result payload (from the bridge spec), not the
     # tool_call event — the tool_call payload mirrors the real mapper ({call_id,tool,arguments}).
-    assert events[3].payload["authority_level"] == "A3"
-    assert events[3].payload["tool"] == "evaluate_policy_risk"
-    assert any(item["symbol"] == "AAPL" for item in events[3].payload["result"]["risks"])
+    assert events[2].payload["authority_level"] == "A3"
+    assert events[2].payload["tool"] == "evaluate_policy_risk"
+    assert any(item["symbol"] == "AAPL" for item in events[2].payload["result"]["risks"])
     assert "risk_policy" in events[-1].payload["tool_evidence_refs"]
     executions = services.repo.list_tool_executions(task_id=run.task_id)
     assert [(item.tool, item.status, item.call_id, item.source_mode) for item in executions] == [
@@ -1299,9 +1265,9 @@ def test_copilot_risk_preference_phrase_keeps_expected_event_chain(services):
         return [event async for event in services.copilot_service.stream_run(run.run_id, run.task_id)]
 
     events = asyncio.run(collect())
-    assert [event.type for event in events] == ["skill_trace", "reasoning", "tool_call", "tool_result", "partial_answer", "final"]
+    assert [event.type for event in events] == ["reasoning", "tool_call", "tool_result", "partial_answer", "final"]
+    assert events[1].payload["tool"] == "evaluate_policy_risk"
     assert events[2].payload["tool"] == "evaluate_policy_risk"
-    assert events[3].payload["tool"] == "evaluate_policy_risk"
 
 
 def test_stub_copilot_overview_chat_runs_research_tool(services):
@@ -1315,8 +1281,8 @@ def test_stub_copilot_overview_chat_runs_research_tool(services):
         return [event async for event in services.copilot_service.stream_run(run.run_id, run.task_id)]
 
     events = asyncio.run(collect())
-    assert [event.type for event in events] == ["skill_trace", "reasoning", "tool_call", "tool_result", "partial_answer", "final"]
-    assert events[2].payload["tool"] == "get_stock_context"
+    assert [event.type for event in events] == ["reasoning", "tool_call", "tool_result", "partial_answer", "final"]
+    assert events[1].payload["tool"] == "get_stock_context"
     assert events[-1].payload["tool_evidence_refs"]
 
 
@@ -1331,10 +1297,10 @@ def test_stub_copilot_monitor_explanation_uses_monitor_tool_chain(services):
         return [event async for event in services.copilot_service.stream_run(run.run_id, run.task_id)]
 
     events = asyncio.run(collect())
-    assert [event.type for event in events] == ["skill_trace", "reasoning", "tool_call", "tool_result", "partial_answer", "final"]
+    assert [event.type for event in events] == ["reasoning", "tool_call", "tool_result", "partial_answer", "final"]
+    assert events[1].payload["tool"] == "get_monitor_events"
     assert events[2].payload["tool"] == "get_monitor_events"
-    assert events[3].payload["tool"] == "get_monitor_events"
-    assert events[3].payload["result"]["items"]
+    assert events[2].payload["result"]["items"]
     assert "disclaimer" in events[-1].payload
 
 
@@ -1366,8 +1332,8 @@ def test_fake_embedded_unknown_tool_is_passed_through_without_ledger(services):
         return [event async for event in services.copilot_service.stream_run(run.run_id, run.task_id)]
 
     events = asyncio.run(collect())
-    assert [event.type for event in events] == ["skill_trace", "tool_call", "tool_result", "final"]
-    assert events[1].payload["tool"] == "deerflow_internal_tool"
+    assert [event.type for event in events] == ["tool_call", "tool_result", "final"]
+    assert events[0].payload["tool"] == "deerflow_internal_tool"
     assert services.repo.list_tool_executions(task_id=run.task_id) == []
 
 
@@ -1763,13 +1729,11 @@ def test_plan_mode_intents_and_env_override(monkeypatch):
     from backend.agent_runtime import skill_specs
 
     monkeypatch.delenv("WORKBENCH_AI_PLAN_MODE", raising=False)
-    assert skill_specs.plan_mode_intent_enabled("rebalance_plan") is True
-    assert skill_specs.plan_mode_intent_enabled("copilot_chat") is False
+    assert skill_specs.plan_mode_supported() is True
     monkeypatch.setenv("WORKBENCH_AI_PLAN_MODE", "off")
-    assert skill_specs.plan_mode_intent_enabled("rebalance_plan") is False
     assert skill_specs.plan_mode_supported() is False
     monkeypatch.setenv("WORKBENCH_AI_PLAN_MODE", "all")
-    assert skill_specs.plan_mode_intent_enabled("copilot_chat") is True
+    assert skill_specs.plan_mode_supported() is True
 
 
 def test_tool_search_auto_enabled_only_with_enabled_mcp_server(tmp_path, monkeypatch):

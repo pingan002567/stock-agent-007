@@ -40,6 +40,18 @@ describe("CopilotMessageItem", () => {
     expect(container.textContent).toContain("分析 AAPL");
   });
 
+  it("renders attachments on the user bubble, not as pending composer chips", () => {
+    const msg = makeMsg({
+      role: "user",
+      kind: "user_message",
+      text: "解读这份研报",
+      payload: { attachments: [{ filename: "年报.pdf", size: 1200, markdown_file: "年报.md" }] },
+    });
+    const { container } = render(<CopilotMessageItem msg={msg} />);
+    expect(container.querySelector(".msg-attachments")).toBeTruthy();
+    expect(container.textContent).toContain("年报.pdf");
+  });
+
   it("renders final answer", () => {
     const msg = makeMsg({
       kind: "final_answer",
@@ -71,6 +83,18 @@ describe("CopilotMessageItem", () => {
     const { container } = render(<CopilotMessageItem msg={msg} />);
     expect(container.querySelector(".msg.error")).toBeTruthy();
     expect(container.textContent).toContain("API timeout");
+  });
+
+  it("renders markdown links that the app can intercept", () => {
+    const msg = makeMsg({
+      kind: "final_answer",
+      text: "见 [界面新闻](https://www.jiemian.com/article/1.html)",
+      payload: { type: "final_answer", conclusion: "见 [界面新闻](https://www.jiemian.com/article/1.html)" },
+    });
+    const { container } = render(<CopilotMessageItem msg={msg} />);
+    const link = container.querySelector("a");
+    expect(link?.getAttribute("href")).toBe("https://www.jiemian.com/article/1.html");
+    expect(link?.getAttribute("target")).toBeNull();
   });
 });
 
@@ -125,6 +149,7 @@ function makeStream(overrides: Partial<StreamMessage> = {}): StreamMessage {
     steps: [],
     answerText: "",
     clarificationText: null,
+    clarificationRequest: null,
     finalPayload: null,
     errorText: null,
     ...overrides,
@@ -221,5 +246,51 @@ describe("pairMessages", () => {
     const incompleteIndex = paired.findIndex((item) => item.t === "ai" && item.incomplete);
     expect(incompleteIndex).toBeGreaterThan(-1);
     expect(incompleteIndex).toBeLessThan(u2Index);
+  });
+
+  it("merges clarification + final into one card with tools", () => {
+    const msgs = [
+      makeMsg({ message_id: "u1", role: "user", kind: "user_message", text: "问一下", run_id: "run_c" }),
+      makeMsg({
+        message_id: "t1", role: "assistant", kind: "tool_call", text: "",
+        run_id: "run_c",
+        payload: { tool: "ask_clarification", call_id: "c1" },
+      }),
+      makeMsg({
+        message_id: "tr1", role: "assistant", kind: "tool_result", text: "",
+        run_id: "run_c",
+        payload: { tool: "ask_clarification", call_id: "c1", result: "ok" },
+      }),
+      makeMsg({
+        message_id: "cl1", role: "assistant", kind: "clarification", text: "范围？",
+        run_id: "run_c",
+        payload: {
+          kind: "human_input_request",
+          question: "范围？",
+          request_id: "clarification:c1",
+          call_id: "c1",
+          input_mode: "choice_with_other",
+          options: [{ id: "opt-1", label: "A", value: "A" }],
+        },
+      }),
+      makeMsg({
+        message_id: "f1", role: "assistant", kind: "final_answer",
+        text: "好，那我一次只问一个，按顺序来。第 1 个问题：",
+        run_id: "run_c",
+        payload: {
+          conclusion: "好，那我一次只问一个，按顺序来。第 1 个问题：",
+          confidence: "medium",
+          evidence_refs: [1, 2, 3, 4],
+        },
+      }),
+    ];
+    const paired = pairMessages(msgs);
+    const finals = paired.filter((item) => item.t === "ai" && item.msg.kind === "final_answer");
+    expect(finals).toHaveLength(0);
+    const clar = paired.find((item) => item.t === "msg" && item.msg.kind === "clarification");
+    expect(clar).toBeTruthy();
+    if (clar && clar.t === "msg") {
+      expect(clar.tools?.some((t) => t.name === "ask_clarification")).toBe(true);
+    }
   });
 });

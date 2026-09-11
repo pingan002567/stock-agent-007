@@ -10,6 +10,7 @@
     "dialog:allow-open",
     "core:window:allow-start-dragging",
     "allow-service-cli",
-    "allow-navigate"
+    "allow-navigate",
+    "allow-open-external"
   ]
 }

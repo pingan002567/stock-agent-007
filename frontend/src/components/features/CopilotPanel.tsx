@@ -1,16 +1,17 @@
 import React, { useRef, useCallback, useEffect, useMemo } from "react";
 import { useAppState } from "@/hooks/useAppState";
 import type { Screen } from "@/types";
-import { parseCopilotEvent, EVENT_FINAL, EVENT_ERROR, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, EVENT_PARTIAL_ANSWER } from "@/api/copilot";
+import { parseCopilotEvent, EVENT_FINAL, EVENT_ERROR, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, EVENT_PARTIAL_ANSWER, EVENT_CLARIFICATION } from "@/api/copilot";
 import { parseTaskToolPayload } from "@/components/features/taskToolMeta";
-import type { CopilotMessage } from "@/api/client";
+import type { CopilotMessage, HealthCheck } from "@/api/client";
 import { useCopilotChat, extractToolResultText, type StreamToolCall } from "@/hooks/useCopilotChat";
 import { useChatDetail } from "@/hooks/useChatDetail";
 import { CopilotMessageItem, type ToolInfo } from "@/components/features/CopilotMessageItem";
 import { CopilotStreamingMessage } from "@/components/features/CopilotStreamingMessage";
 import { ContextCard } from "@/components/features/ContextCard";
 import { NextActions } from "@/components/features/NextActions";
-import { RESEARCH_FUNNEL } from "@/lib/researchFunnel";
+import { EMPTY_CHAT_COPY, isModelReady, STARTER_PROMPTS } from "@/lib/onboarding";
+import type { HumanInputResponse } from "@/lib/humanInput";
 
 function dateHeader(dateStr: string): string {
   const d = new Date(dateStr);
@@ -40,7 +41,7 @@ type ToolItem = {
 };
 
 type GroupedItem =
-  | { t: "msg"; msg: CopilotMessage; aborted?: boolean }
+  | { t: "msg"; msg: CopilotMessage; aborted?: boolean; tools?: ToolItem[] }
   | { t: "ai"; msg: CopilotMessage; tools: ToolItem[]; incomplete?: boolean };
 
 function pushIncompleteRun(
@@ -74,6 +75,7 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
   // 相邻配对会全部落空、把成功的工具误判为失败。改为按 call_id 匹配。
   const completedRuns = new Set<string>();
   const runsWithOutput = new Set<string>();
+  const clarificationRuns = new Set<string>();
   const lastFinalIndex = new Map<string, number>();
   const resultByCallId = new Map<string, Record<string, unknown>>();
   for (let idx = 0; idx < msgs.length; idx++) {
@@ -88,6 +90,9 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
         lastFinalIndex.set(msg.run_id, idx);
       } else if (ev.type === EVENT_ERROR) {
         completedRuns.add(msg.run_id);
+      }
+      if (msg.kind === "clarification" || ev.type === EVENT_CLARIFICATION) {
+        clarificationRuns.add(msg.run_id);
       }
     }
     if (ev.type === EVENT_TOOL_RESULT) {
@@ -133,10 +138,31 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
     } else if (ev.type === EVENT_PARTIAL_ANSWER) {
       // 如果该 run 已完成，跳过 partial_answer
       if (msg.run_id && completedRuns.has(msg.run_id)) continue;
+      // 澄清轮的开场白/半截正文也不单独成泡，正文在 Human Input Card
+      if (rid && clarificationRuns.has(rid)) continue;
       out.push({ t: "msg", msg });
+    } else if (ev.type === EVENT_CLARIFICATION || msg.kind === "clarification") {
+      out.push({ t: "msg", msg, tools: [] });
     } else if (ev.type === EVENT_FINAL || ev.type === EVENT_ERROR) {
-      // 跳过空的 final_answer
-      if (ev.type === EVENT_FINAL && !msg.text) continue;
+      const payload = (ev.payload || {}) as Record<string, unknown>;
+      const isClarificationFinal = ev.type === EVENT_FINAL && (
+        Boolean(payload.clarification) || (rid !== "" && clarificationRuns.has(rid))
+      );
+      // 跳过空的 / 澄清轮次的 final_answer（问题正文只在 Human Input Card）
+      if (ev.type === EVENT_FINAL && (!msg.text || isClarificationFinal)) {
+        const tools = pendingTools.get(rid) || [];
+        pendingTools.delete(rid);
+        if (tools.length) {
+          for (let j = out.length - 1; j >= 0; j--) {
+            const item = out[j];
+            if (item.t === "msg" && item.msg.run_id === rid && item.msg.kind === "clarification") {
+              out[j] = { ...item, tools: [...(item.tools || []), ...tools] };
+              break;
+            }
+          }
+        }
+        continue;
+      }
       // 跳过非最后一条 final_answer（修复重复 final 问题）
       if (ev.type === EVENT_FINAL && rid && lastFinalIndex.get(rid) !== i) continue;
       const tools = pendingTools.get(rid) || [];
@@ -172,6 +198,7 @@ export function CopilotPanel() {
   const {
     copilotContextVersion,
     setCurrentScreen, setStock,
+    appDataCache, globalLoading, lastRefreshTime,
   } = useAppState();
 
   const {
@@ -179,6 +206,31 @@ export function CopilotPanel() {
     sending, streamMessage, copiedId,
     handleCopy, handleSend,
   } = useCopilotChat();
+
+  const answeredByRequestId = useMemo(() => {
+    const map = new Map<string, HumanInputResponse>();
+    for (const m of messages) {
+      if (m.role !== "user") continue;
+      const raw = (m.payload as { human_input_response?: unknown } | undefined)?.human_input_response;
+      if (!raw || typeof raw !== "object") continue;
+      const r = raw as HumanInputResponse;
+      if (r.kind === "human_input_response" && r.request_id && r.value) {
+        map.set(r.request_id, r);
+      }
+    }
+    return map;
+  }, [messages]);
+
+  const handleClarifySubmit = useCallback((response: HumanInputResponse, displayText: string) => {
+    void handleSend(displayText, undefined, [], response);
+  }, [handleSend]);
+
+  const modelReady = useMemo(() => {
+    void globalLoading;
+    void lastRefreshTime;
+    const health = appDataCache.current.health as HealthCheck | undefined;
+    return isModelReady(health);
+  }, [appDataCache, globalLoading, lastRefreshTime]);
 
   const { openDetail } = useChatDetail();
   // 工具卡 → 右栏详情联动
@@ -279,7 +331,38 @@ export function CopilotPanel() {
         <React.Fragment key={item.msg.message_id}>
           {showHeader && <div className="date-divider">{dateHeader(msgDate)}</div>}
           <div style={{ position: "relative" }}>
-            <CopilotMessageItem msg={item.msg} />
+            <CopilotMessageItem
+              msg={item.msg}
+              tools={item.tools?.map((t) => ({
+                name: t.name,
+                done: t.done,
+                failed: t.failed,
+                id: t.id,
+                resultText: t.resultText,
+                subagentType: t.subagentType,
+                taskDescription: t.taskDescription,
+                taskPrompt: t.taskPrompt,
+              }))}
+              onToolClick={item.tools?.length ? handleToolClick : undefined}
+              clarifiedResponse={
+                item.msg.kind === "clarification"
+                  ? answeredByRequestId.get(String(
+                    (item.msg.payload as { request_id?: string })?.request_id
+                    || `clarification:${(item.msg.payload as { call_id?: string })?.call_id || ""}`,
+                  )) ?? null
+                  : null
+              }
+              onClarifySubmit={
+                item.msg.kind === "clarification"
+                  && !answeredByRequestId.has(String(
+                    (item.msg.payload as { request_id?: string })?.request_id
+                    || `clarification:${(item.msg.payload as { call_id?: string })?.call_id || ""}`,
+                  ))
+                  ? handleClarifySubmit
+                  : undefined
+              }
+              clarifyPending={item.msg.kind === "clarification" ? sending : undefined}
+            />
             <button className="msg-copy" onClick={() => handleCopy(item.msg)} title="复制">
               {copiedId === item.msg.message_id ? "已复制" : "复制"}
             </button>
@@ -290,7 +373,7 @@ export function CopilotPanel() {
         </React.Fragment>
       );
     });
-  }, [messages, streamMessage?.runId, copiedId, handleCopy, handleNavigate, handleApi, handleToolClick]);
+  }, [messages, streamMessage?.runId, copiedId, handleCopy, handleNavigate, handleApi, handleToolClick, answeredByRequestId, handleClarifySubmit, sending]);
 
   return (
     <aside className="copilot-panel copilot-panel-main">
@@ -300,19 +383,19 @@ export function CopilotPanel() {
 
           {messages.length === 0 && !sending && (
             <div className="empty-state">
-              <div className="empty-title">按漏斗做研究</div>
-              <div className="empty-desc">圈候选 → 体检 → 深研 → 进自选。只做研究，不下单。</div>
-              <div className="funnel-chips">
-                {RESEARCH_FUNNEL.map((item) => (
+              <div className="empty-title">{EMPTY_CHAT_COPY.title}</div>
+              <div className="empty-desc">{EMPTY_CHAT_COPY.desc}</div>
+              <div className="starter-chips">
+                {STARTER_PROMPTS.map((item) => (
                   <button
-                    key={item.step}
+                    key={item.label}
                     type="button"
                     className="followup-chip"
-                    title={item.hint}
-                    disabled={sending}
+                    title={modelReady ? item.label : "请先接上对话模型"}
+                    disabled={sending || !modelReady}
                     onClick={() => void handleSend(item.prompt)}
                   >
-                    {item.step}
+                    {item.label}
                   </button>
                 ))}
               </div>
@@ -321,7 +404,14 @@ export function CopilotPanel() {
 
           {messageElements}
 
-          {streamMessage && <CopilotStreamingMessage streamMessage={streamMessage} onToolClick={handleStreamToolClick} />}
+          {streamMessage && (
+            <CopilotStreamingMessage
+              streamMessage={streamMessage}
+              onToolClick={handleStreamToolClick}
+              onClarifySubmit={handleClarifySubmit}
+              clarifyPending={sending}
+            />
+          )}
 
           <div ref={messagesEndRef} />
         </div>

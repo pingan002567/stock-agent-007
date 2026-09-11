@@ -32,7 +32,8 @@ def stock_context(symbol: str, request: Request, services: AppServices = Depends
 
 @router.get("/{symbol}/history")
 def stock_history(symbol: str, days: int = 30):
-    return get_daily_history(symbol, days)
+    # 前端K线图要逐日数据；瘦身默认只针对 agent 上下文。
+    return get_daily_history(symbol, days, detail="full")
 
 
 @router.get("/{symbol}/daily")
@@ -64,7 +65,7 @@ def import_us_share():
 
 @router.get("/{symbol}/intel")
 def stock_intel(symbol: str, q: str = ""):
-    return search_stock_intel(symbol, q)
+    return search_stock_intel(symbol, q, limit=None)
 
 
 @router.get("/{symbol}/sentiment")

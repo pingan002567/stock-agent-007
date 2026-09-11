@@ -26,8 +26,9 @@ v0.8~v0.20 期间，Direct 模式（`WORKBENCH_AI_MODE=direct`）使用手写 `l
 ### 约束
 
 - 不能绕过 `DeerFlowClient` 直接调用 LangGraph API
-- 如需自定义 `system_prompt`，通过 `render_prompt_envelope()` 嵌入到 `message` 参数中传递
-- 不开放 `subagent_enabled` / `plan_mode`（已锁定为 False）
+- 用户消息原文进 `stream()`；仅允许极短的 `<workbench_context>`（page / symbol / authority）
+- `subagent_enabled` / `plan_mode` 默认开；用 SKILL.md description 约束委派，不用 Python 按 intent 锁定 False
+- 会话真相是 DeerFlow checkpoint；SQLite 只做 UI 投影，不得再注入模型
 
 ### 实现
 

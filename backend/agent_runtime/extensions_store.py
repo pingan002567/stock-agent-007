@@ -66,7 +66,7 @@ def skills_view() -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for name, spec in skill_specs.WORKBENCH_SKILLS.items():
         if spec.is_subagent:
-            description, _tools = skill_specs._read_skill_md(name)
+            description, _tools, _body = skill_specs._read_skill_md(name)
         else:
             # 合成技能（如锁定禁用的执行代理守卫）无 SKILL.md，仍需在视图中可见
             description = spec.synthetic_description

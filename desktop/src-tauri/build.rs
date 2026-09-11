@@ -1,7 +1,7 @@
 fn main() {
     tauri_build::try_build(
         tauri_build::Attributes::new().app_manifest(
-            tauri_build::AppManifest::new().commands(&["service_cli", "navigate"]),
+            tauri_build::AppManifest::new().commands(&["service_cli", "navigate", "open_external"]),
         ),
     )
     .expect("failed to run tauri build");

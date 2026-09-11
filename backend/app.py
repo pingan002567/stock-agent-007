@@ -6,9 +6,8 @@ import threading
 from contextlib import asynccontextmanager
 
 try:
-    from fastapi import FastAPI
+    from fastapi import FastAPI, HTTPException
     from fastapi.responses import FileResponse
-    from fastapi.staticfiles import StaticFiles
     from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.requests import Request
     from starlette.responses import Response
@@ -42,6 +41,7 @@ from backend.api import (
     routes_tasks,
     routes_watchlist,
     routes_workspace,
+    routes_setup,
 )
 from backend import paths
 from backend.bootstrap import create_services
@@ -62,6 +62,26 @@ class _SpaCacheControlMiddleware(BaseHTTPMiddleware):
         elif path.startswith("/assets/"):
             response.headers["Cache-Control"] = "no-cache, must-revalidate"
         return response
+
+
+def _frontend_index() -> Path | None:
+    index = paths.frontend_dist() / "index.html"
+    return index if index.is_file() else None
+
+
+def _frontend_file(rel: str) -> Path | None:
+    """Resolve a file under frontend/dist with path-traversal protection."""
+    if not rel or rel.endswith("/"):
+        return None
+    dist = paths.frontend_dist().resolve()
+    if not dist.is_dir():
+        return None
+    candidate = (dist / rel).resolve()
+    try:
+        candidate.relative_to(dist)
+    except ValueError:
+        return None
+    return candidate if candidate.is_file() else None
 
 
 def _warmup_cache() -> None:
@@ -132,11 +152,18 @@ def create_app(
             "data_provider": provider_router.status().to_dict(),
             "data_dir": str(paths.data_dir().resolve()),
             "service_mode": "launchd" if service_cli.service_loaded() else "dev",
+            "frontend_ready": _frontend_index() is not None,
         }
 
     @app.get("/app", include_in_schema=False)
     def app_shell():
-        return FileResponse(paths.frontend_dist() / "index.html")
+        index = _frontend_index()
+        if index is None:
+            raise HTTPException(
+                status_code=503,
+                detail="frontend/dist missing; run: make build",
+            )
+        return FileResponse(index)
 
     for router in [
         routes_audit.router,
@@ -161,16 +188,38 @@ def create_app(
         routes_runtime.router,
         routes_scheduled_tasks.router,
         routes_settings.router,
+        routes_setup.router,
         routes_copilot.router,
         routes_channels.router,
         routes_workspace.router,
     ]:
         app.include_router(router)
 
-    dist_path = paths.frontend_dist()
-    if dist_path.is_dir():
-        app.mount(
-            "/", StaticFiles(directory=str(dist_path), html=True), name="frontend"
+    # 请求时解析 frontend/dist（勿仅在启动时 mount）：避免 dist 稍后构建完仍 404，
+    # 以及 vite 构建清空目录窗口期与引导页跳转撞车。
+    @app.get("/", include_in_schema=False)
+    def spa_root():
+        index = _frontend_index()
+        if index is None:
+            raise HTTPException(
+                status_code=503,
+                detail="frontend/dist missing; run: make build",
+            )
+        return FileResponse(index)
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa_static_or_fallback(full_path: str):
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        found = _frontend_file(full_path)
+        if found is not None:
+            return FileResponse(found)
+        index = _frontend_index()
+        if index is not None:
+            return FileResponse(index)
+        raise HTTPException(
+            status_code=503,
+            detail="frontend/dist missing; run: make build",
         )
 
     return app

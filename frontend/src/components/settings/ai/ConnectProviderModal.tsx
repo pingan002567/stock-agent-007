@@ -7,11 +7,13 @@ export function ConnectProviderModal({
   providerId,
   onClose,
   onConnected,
+  keyLabel = "API Key",
 }: {
   catalog: LlmProviderItem[];
   providerId: string;
   onClose: () => void;
   onConnected: () => void;
+  keyLabel?: string;
 }) {
   const [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState(false);
@@ -46,13 +48,13 @@ export function ConnectProviderModal({
       <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
         <div className="llm-dialog" role="dialog" aria-modal="true">
           <div className="settings-modal-head">
-            <span className="settings-modal-title">连接提供商</span>
+            <span className="settings-modal-title">连接模型服务</span>
             <button className="func-close" onClick={onClose} title="关闭" type="button">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
             </button>
           </div>
           <div className="llm-dialog-body">
-            <p className="llm-hint">未找到该提供商，请关闭后重试。</p>
+            <p className="llm-hint">未找到这项模型服务，请关闭后重试。</p>
           </div>
         </div>
       </div>
@@ -79,7 +81,7 @@ export function ConnectProviderModal({
           {provider.note && <p className="llm-hint">{provider.note}</p>}
           {provider.requires_key ? (
             <label className="page-stack" style={{ gap: 4 }}>
-              <span className="muted" style={{ fontSize: 12 }}>API Key</span>
+              <span className="muted" style={{ fontSize: 12 }}>{keyLabel}</span>
               <input
                 type="password"
                 autoFocus
@@ -90,7 +92,7 @@ export function ConnectProviderModal({
               />
             </label>
           ) : (
-            <p className="llm-hint">此提供商通常无需 Key，连接后即可在默认模型里选择。</p>
+            <p className="llm-hint">这项服务通常不用密钥，接上后就能选默认模型。</p>
           )}
           {error && <div className="ws-error">{error}</div>}
           <button

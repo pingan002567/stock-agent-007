@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
-from backend.agent_runtime.stream_adapter import to_sse
+from backend.agent_runtime.stream_adapter import SSE_HEADERS, to_sse
 from backend.api.deps import get_services
 from backend.bootstrap import AppServices
 from backend.app_services.permission_guard import PermissionDenied
@@ -69,6 +69,9 @@ _CONVERTIBLE_EXTENSIONS = {".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".x
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 _UPLOAD_MAX_BYTES = 50 * 1024 * 1024
 _TEXT_SNIFF_BYTES = 64 * 1024
+_UPLOADS_UNSUPPORTED_DETAIL = (
+    "当前 AI 运行时不支持读附件（需要 DeerFlow direct/embedded，不是 stub）"
+)
 
 
 def _looks_like_utf8_text(sample: bytes) -> bool:
@@ -83,6 +86,61 @@ def _looks_like_utf8_text(sample: bytes) -> bool:
     return True
 
 
+def _require_session(services: AppServices, session_id: str) -> None:
+    try:
+        services.copilot_service.get_session(session_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="session not found") from exc
+
+
+def _is_safe_upload_filename(filename: str) -> bool:
+    if not filename or filename in {".", ".."}:
+        return False
+    if "/" in filename or "\\" in filename:
+        return False
+    return Path(filename).name == filename
+
+
+def _present_uploads(files: list[dict]) -> list[dict]:
+    """Chip-facing listing: hide companion .md generated from Office/PDF."""
+    names = {str(item.get("filename") or "") for item in files}
+    presented: list[dict] = []
+    for item in files:
+        name = str(item.get("filename") or "")
+        if not name:
+            continue
+        suffix = Path(name).suffix.lower()
+        stem = Path(name).stem
+        if suffix == ".md" and any(f"{stem}{ext}" in names for ext in _CONVERTIBLE_EXTENSIONS):
+            continue
+        markdown_file = item.get("markdown_file")
+        if not markdown_file and suffix in _CONVERTIBLE_EXTENSIONS and f"{stem}.md" in names:
+            markdown_file = f"{stem}.md"
+        presented.append(
+            {
+                "filename": name,
+                "size": int(item.get("size") or 0),
+                "markdown_file": markdown_file or None,
+            }
+        )
+    return presented
+
+
+def _raise_if_upload_op_failed(result: dict, *, missing_as_404: bool = False) -> None:
+    if not result.get("supported"):
+        raise HTTPException(status_code=409, detail=_UPLOADS_UNSUPPORTED_DETAIL)
+    err = result.get("error")
+    if not err:
+        return
+    text = str(err)
+    lower = text.lower()
+    if missing_as_404 and "not found" in lower:
+        raise HTTPException(status_code=404, detail="file not found")
+    if "traversal" in lower or "unsafe" in lower:
+        raise HTTPException(status_code=400, detail="invalid filename")
+    raise HTTPException(status_code=500, detail=text)
+
+
 @router.post("/sessions/{session_id}/uploads")
 def upload_session_files(
     session_id: str,
@@ -95,10 +153,7 @@ def upload_session_files(
     接收范围即 DeerFlow 可消费范围：Office/PDF（自动转 Markdown）、
     图片（view_image）、任意 UTF-8 文本（read_file/grep，扩展名不限）。
     """
-    try:
-        services.copilot_service.get_session(session_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="session not found") from exc
+    _require_session(services, session_id)
     if not files:
         raise HTTPException(status_code=422, detail="no files provided")
 
@@ -134,9 +189,46 @@ def upload_session_files(
         result = services.copilot_service.deerflow.upload_files(session_id, local_paths)
 
     if not result.get("supported"):
-        raise HTTPException(status_code=409, detail=result)
+        raise HTTPException(status_code=409, detail=_UPLOADS_UNSUPPORTED_DETAIL)
     if result.get("error"):
         raise HTTPException(status_code=500, detail=result)
+    return result
+
+
+@router.get("/sessions/{session_id}/uploads")
+def list_session_uploads(
+    session_id: str,
+    request: Request,
+    services: AppServices = Depends(get_services),
+):
+    """列出会话线程里已上传、AI 下一轮可读的附件。
+
+    stub 运行时返回 200 ``{supported: false, files: [], count: 0}``，
+    方便前端禁用「+」而不是当成错误弹窗。
+    """
+    _require_session(services, session_id)
+    result = services.copilot_service.deerflow.list_uploads(session_id)
+    if not result.get("supported"):
+        return {"supported": False, "files": [], "count": 0}
+    if result.get("error"):
+        raise HTTPException(status_code=500, detail=result)
+    files = _present_uploads(list(result.get("files") or []))
+    return {"supported": True, "files": files, "count": len(files)}
+
+
+@router.delete("/sessions/{session_id}/uploads/{filename}")
+def delete_session_upload(
+    session_id: str,
+    filename: str,
+    request: Request,
+    services: AppServices = Depends(get_services),
+):
+    """删除会话附件。Office/PDF 会顺带删掉转换出的 companion ``.md``。"""
+    _require_session(services, session_id)
+    if not _is_safe_upload_filename(filename):
+        raise HTTPException(status_code=400, detail="invalid filename")
+    result = services.copilot_service.deerflow.delete_upload(session_id, filename)
+    _raise_if_upload_op_failed(result, missing_as_404=True)
     return result
 
 
@@ -182,6 +274,7 @@ def stream_session_run(session_id: str, run_id: str, request: Request, services:
     return StreamingResponse(
         to_sse(services.copilot_service.stream_run(run_id, session_id=session_id)),
         media_type="text/event-stream",
+        headers=SSE_HEADERS,
     )
 
 
@@ -200,4 +293,8 @@ def chat(payload: CopilotRequest, request: Request, services: AppServices = Depe
 def stream(run_id: str, request: Request, services: AppServices = Depends(get_services)):
     if not services.copilot_service.has_run(run_id):
         raise HTTPException(status_code=404, detail="copilot run not found")
-    return StreamingResponse(to_sse(services.copilot_service.stream_run(run_id)), media_type="text/event-stream")
+    return StreamingResponse(
+        to_sse(services.copilot_service.stream_run(run_id)),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )

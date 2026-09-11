@@ -63,9 +63,11 @@ def test_tool_bridge_registry_includes_default_tools_and_blocks_real_orders(brid
         "list_review_inbox",
         "list_risk_policies",
         "list_strategies",
+        "list_watchlist",
         "mark_inbox_item_done",
         "place_real_order",
         "reject_rebalance_draft",
+        "remove_holding",
         "remove_watchlist_item",
         "run_strategy_backtest",
         "search_stock_intel",
@@ -93,6 +95,36 @@ def test_tool_bridge_registry_includes_default_tools_and_blocks_real_orders(brid
     assert tools["place_real_order"]["enabled"] is False
     assert tools["place_real_order"]["risk"] == "blocked"
     assert "create_paper_order" not in tools
+
+
+def test_tool_bridge_lists_and_clears_watchlist(bridge):
+    bridge.repo.upsert_watchlist_item(
+        __import__("backend.schemas", fromlist=["WatchlistItem"]).WatchlistItem(
+            symbol="MSFT", name="Microsoft", group="观察池", monitored=True
+        )
+    )
+    listed = bridge.execute("list_watchlist", {}, AuthorityLevel.A2)
+    symbols = {item["symbol"] for item in listed["result"]["items"]}
+    assert "MSFT" in symbols
+
+    cleared = bridge.execute("remove_watchlist_item", {"clear_all": True}, AuthorityLevel.A2)
+    assert cleared["result"]["cleared"] is True
+    assert bridge.repo.list_watchlist() == []
+
+
+def test_tool_bridge_removes_holding_by_symbol_and_clear_all(bridge):
+    before = {item.symbol for item in bridge.repo.list_holdings()}
+    assert before
+
+    target = next(iter(before))
+    one = bridge.execute("remove_holding", {"symbol": target}, AuthorityLevel.A3)
+    assert one["result"]["deleted"] is True
+    assert target not in {item.symbol for item in bridge.repo.list_holdings()}
+
+    cleared = bridge.execute("remove_holding", {"clear_all": True}, AuthorityLevel.A4)
+    assert cleared["result"]["cleared"] is True
+    assert cleared["result"]["count"] >= 1
+    assert bridge.repo.list_holdings() == []
 
 
 def test_tool_bridge_monitor_rule_crud_with_partial_update_and_authority(bridge):
@@ -789,18 +821,30 @@ def test_tool_bridge_executes_monitor_tools_and_records_monitor_ledger(bridge):
 
 
 def test_tool_bridge_monitor_events_explanation_matches_returned_event(bridge):
-    fallback = bridge.execute("get_monitor_events", {"symbol": "HK00700", "limit": 1}, AuthorityLevel.A2)
+    fallback = bridge.execute(
+        "get_monitor_events",
+        {"symbol": "HK00700", "limit": 1, "include_explanation": True},
+        AuthorityLevel.A2,
+    )
     assert fallback["result"]["items"][0]["symbol"] == "HK00700"
     assert fallback["result"]["explanation"]["event"]["event_id"] == fallback["result"]["items"][0]["event_id"]
 
     bridge.monitor_service.upsert_rule({"symbol": "AAPL", "rule": "single_position_weight > 15%"})
     bridge.monitor_service.evaluate_once(source="manual")
 
-    miss = bridge.execute("get_monitor_events", {"symbol": "MSFT", "limit": 1}, AuthorityLevel.A2)
+    miss = bridge.execute(
+        "get_monitor_events",
+        {"symbol": "MSFT", "limit": 1, "include_explanation": True},
+        AuthorityLevel.A2,
+    )
     assert miss["result"]["items"] == []
     assert miss["result"]["explanation"]["event"] is None
 
-    hit = bridge.execute("get_monitor_events", {"symbol": "AAPL", "limit": 1}, AuthorityLevel.A2)
+    hit = bridge.execute(
+        "get_monitor_events",
+        {"symbol": "AAPL", "limit": 1, "include_explanation": True},
+        AuthorityLevel.A2,
+    )
     assert hit["result"]["items"][0]["symbol"] == "AAPL"
     assert hit["result"]["explanation"]["event"]["event_id"] == hit["result"]["items"][0]["event_id"]
 

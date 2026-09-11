@@ -466,7 +466,8 @@ def get_market_structure(symbol: str) -> dict[str, Any]:
         }
 
     market = str(stock["market"])
-    history = get_daily_history(normalized, 90)
+    # 技术指标要逐日数据：detail 的瘦身默认只服务 agent 上下文，域内计算取全量。
+    history = get_daily_history(normalized, 90, detail="full")
     hist_items = history.get("items") if isinstance(history, dict) else []
     if not isinstance(hist_items, list):
         hist_items = []

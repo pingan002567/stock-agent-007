@@ -1,4 +1,5 @@
 import { useCopilotChat } from "@/hooks/useCopilotChat";
+import { displaySessionTitle } from "@/lib/sessionTitle";
 
 function FoldLeftIcon() {
   return (
@@ -68,7 +69,7 @@ export function TopBar({ leftCollapsed, onToggleLeft, dockCollapsed, onToggleDoc
         data-tauri-drag-region=""
       >
         {leftCollapsed && leftToggle}
-        <span className="topbar3-title">{currentSession?.title || "新会话"}</span>
+        <span className="topbar3-title">{displaySessionTitle(currentSession?.title)}</span>
         {dockCollapsed && dockToggle}
       </div>
 
