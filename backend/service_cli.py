@@ -195,6 +195,12 @@ def _service_environment(data_dir: Path, *, switching: bool = False) -> dict[str
         "NO_PROXY": dotenv.get(
             "NO_PROXY", "eastmoney.com,push2.eastmoney.com,finance.sina.com.cn"
         ),
+        # Single-user desktop: full local sandbox unless .env overrides.
+        "WORKBENCH_SANDBOX_ALLOW_HOST_BASH": dotenv.get(
+            "WORKBENCH_SANDBOX_ALLOW_HOST_BASH", "1"
+        ),
+        "WORKBENCH_SANDBOX_WRITE": dotenv.get("WORKBENCH_SANDBOX_WRITE", "1"),
+        "WORKBENCH_AI_SKILL_EVOLUTION": dotenv.get("WORKBENCH_AI_SKILL_EVOLUTION", "1"),
     }
     # 切换档案时跳过重网络 seeding/warmup，health 探活更快通过
     if switching:
@@ -460,11 +466,15 @@ def cmd_status(_args: argparse.Namespace) -> dict[str, Any]:
 
 
 def cmd_restart(_args: argparse.Namespace) -> dict[str, Any]:
+    # Rewrite plist without switching=True so a prior workspace switch does not
+    # permanently pin WORKBENCH_SKIP_SEED=1 (which skips A-share import + industry sync).
+    config = read_service_config()
+    port = int(config["port"]) if config and config.get("port") else DEFAULT_PORT
+    if config and config.get("data_dir"):
+        _write_plist(port, Path(config["data_dir"]), switching=False)
     result = _launchctl("kickstart", "-k", f"{_launchd_domain()}/{LABEL}")
     if result.returncode != 0:
         raise RuntimeError(f"launchctl kickstart failed: {result.stderr.strip()}")
-    config = read_service_config()
-    port = int(config["port"]) if config and config.get("port") else DEFAULT_PORT
     healthy = False
     for _ in range(STARTUP_WAIT_ROUNDS):
         if probe_health(port):

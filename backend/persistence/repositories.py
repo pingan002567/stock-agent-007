@@ -36,7 +36,6 @@ from backend.schemas import (
     StrategySpec,
     ToolExecution,
     WatchlistItem,
-    EventContext,
     model_to_dict,
     now_iso,
 )
@@ -66,57 +65,7 @@ class WorkbenchRepository(
         self._lock = RLock()
 
     def seed_defaults(self) -> None:
-        if not self.list_watchlist():
-            for item in [
-                WatchlistItem(
-                    symbol="600519",
-                    name="贵州茅台",
-                    group="核心持仓",
-                    tags=["白酒", "持仓", "示例"],
-                    monitored=True,
-                ),
-                WatchlistItem(
-                    symbol="HK00700",
-                    name="腾讯控股",
-                    group="事件池",
-                    tags=["互联网", "港股", "示例"],
-                    monitored=True,
-                ),
-                WatchlistItem(
-                    symbol="AAPL",
-                    name="Apple",
-                    group="核心持仓",
-                    tags=["大型科技", "美股", "示例"],
-                    monitored=True,
-                ),
-            ]:
-                self.upsert_watchlist_item(item)
-        if not self.list_holdings():
-            for position in [
-                HoldingPosition(
-                    symbol="600519",
-                    name="贵州茅台",
-                    quantity=100,
-                    market_value=167840,
-                    weight_pct=14.2,
-                ),
-                HoldingPosition(
-                    symbol="HK00700",
-                    name="腾讯控股",
-                    quantity=400,
-                    market_value=154720,
-                    weight_pct=11.8,
-                ),
-                HoldingPosition(
-                    symbol="AAPL",
-                    name="Apple",
-                    quantity=120,
-                    market_value=23244,
-                    weight_pct=18.6,
-                ),
-            ]:
-                self.upsert_holding(position)
-            self.set_config("demo_portfolio", {"active": True, "symbols": ["600519", "HK00700", "AAPL"]})
+        self.purge_demo_portfolio()
         if not self.list_risk_policies():
             policy = self.save_risk_policy(
                 RiskPolicy(
@@ -232,61 +181,78 @@ class WorkbenchRepository(
             ]
             for r in seed_rules:
                 self.save_monitor_rule(r)
-        if not self.has_monitor_events():
-            import uuid
-
-            _ts = now_iso()
-            seed_events: list[EventContext] = [
-                EventContext(
-                    event_id=f"seed-event-{uuid.uuid4().hex[:8]}",
-                    source="system",
-                    symbol="DATA",
-                    title="系统启动：数据层运行正常",
-                    severity="low",
-                    triggered_at=_ts,
-                    trigger_rule="system_startup",
-                    evidence=[{"type": "system_event", "value": "workbench started"}],
-                    suggested_actions=["open_stock_context"],
-                ),
-                EventContext(
-                    event_id=f"seed-event-{uuid.uuid4().hex[:8]}",
-                    source="system",
-                    symbol="600519",
-                    title="贵州茅台 今日价格波动关注",
-                    severity="info",
-                    triggered_at=_ts,
-                    trigger_rule="system_startup",
-                    evidence=[{"type": "seed_event", "value": "seed data"}],
-                    suggested_actions=["open_stock_context"],
-                ),
-                EventContext(
-                    event_id=f"seed-event-{uuid.uuid4().hex[:8]}",
-                    source="system",
-                    symbol="HK00700",
-                    title="腾讯控股 今日价格波动关注",
-                    severity="info",
-                    triggered_at=_ts,
-                    trigger_rule="system_startup",
-                    evidence=[{"type": "seed_event", "value": "seed data"}],
-                    suggested_actions=["open_stock_context"],
-                ),
-                EventContext(
-                    event_id=f"seed-event-{uuid.uuid4().hex[:8]}",
-                    source="system",
-                    symbol="AAPL",
-                    title="Apple 今日价格波动关注",
-                    severity="info",
-                    triggered_at=_ts,
-                    trigger_rule="system_startup",
-                    evidence=[{"type": "seed_event", "value": "seed data"}],
-                    suggested_actions=["open_stock_context"],
-                ),
-            ]
-            for ev in seed_events:
-                self.save_monitor_event(ev)
         if not self.get_monitor_status():
             self.save_monitor_status(MonitorStatus(status="paused", auto_start=False))
         self._normalize_seed_concentration_strategy()
+
+    def seed_demo_portfolio(self) -> None:
+        """Test-only sample book. Production startup never calls this."""
+        if not self.list_watchlist():
+            for item in [
+                WatchlistItem(
+                    symbol="600519",
+                    name="贵州茅台",
+                    group="核心持仓",
+                    tags=["白酒", "持仓", "示例"],
+                    monitored=True,
+                ),
+                WatchlistItem(
+                    symbol="HK00700",
+                    name="腾讯控股",
+                    group="事件池",
+                    tags=["互联网", "港股", "示例"],
+                    monitored=True,
+                ),
+                WatchlistItem(
+                    symbol="AAPL",
+                    name="Apple",
+                    group="核心持仓",
+                    tags=["大型科技", "美股", "示例"],
+                    monitored=True,
+                ),
+            ]:
+                self.upsert_watchlist_item(item)
+        if not self.list_holdings():
+            for position in [
+                HoldingPosition(
+                    symbol="600519",
+                    name="贵州茅台",
+                    quantity=100,
+                    market_value=167840,
+                    weight_pct=14.2,
+                ),
+                HoldingPosition(
+                    symbol="HK00700",
+                    name="腾讯控股",
+                    quantity=400,
+                    market_value=154720,
+                    weight_pct=11.8,
+                ),
+                HoldingPosition(
+                    symbol="AAPL",
+                    name="Apple",
+                    quantity=120,
+                    market_value=23244,
+                    weight_pct=18.6,
+                ),
+            ]:
+                self.upsert_holding(position)
+            self.set_config("demo_portfolio", {"active": True, "symbols": ["600519", "HK00700", "AAPL"]})
+
+    def purge_demo_portfolio(self) -> None:
+        """Drop the first-run sample watchlist and holdings. Real books are left alone."""
+        demo_symbols = {"600519", "HK00700", "AAPL"}
+        for item in self.list_watchlist():
+            if item.symbol.upper() in demo_symbols and "示例" in (item.tags or []):
+                self.delete_watchlist_item(item.symbol)
+        if self.is_demo_portfolio():
+            self.clear_demo_portfolio()
+        with self._lock:
+            self.conn.execute(
+                "DELETE FROM monitor_event WHERE evidence_json LIKE ?",
+                ('%"seed_event"%',),
+            )
+            self.conn.commit()
 
     def is_demo_portfolio(self) -> bool:
         flag = self.get_config("demo_portfolio", {}) or {}

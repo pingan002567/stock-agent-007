@@ -472,7 +472,13 @@ get_industry_context = _tool(
 )
 get_market_structure = _tool(
     "get_market_structure",
-    "获取个股市场结构：本地技术量价（均线/RSI/MACD/ATR/支撑阻力）、估值与流动性快照；A 股另含东财筹码（获利/套牢）与资金流向。港美股无筹码数字。",
+    "获取个股市场结构：本地技术量价（均线/RSI/MACD/ATR/支撑阻力）、估值与流动性快照；A 股另含东财筹码（获利/套牢）与资金流向。港美股无筹码数字。看 freshness.stale / expected_as_of；stale 时不要把旧 K 线当天的量价。",
+    StockInput, AuthorityLevel.A2,
+)
+refresh_market_data = _tool(
+    "refresh_market_data",
+    "绕过行情与日K缓存，补拉该股最新报价、官方日K，并重试快照/筹码/资金流。同一标的在设置中的「同股补拉冷却」内只打穿一次。"
+    "用户明确要求刷新，或 get_market_structure/get_daily_history 的 stale=true 且问题依赖现价或今日量价时调用；不要每次 get_stock_context 都调用。",
     StockInput, AuthorityLevel.A2,
 )
 get_monitor_events = _tool(

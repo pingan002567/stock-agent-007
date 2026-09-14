@@ -17,6 +17,10 @@ def test_stub_maps_research_risk_rebalance_and_report():
     assert _skill("回测 concentration-control 策略", "strategy") == "strategy-analyst"
     assert _skill("今天有什么异动", "overview") == "stock-monitor"
     assert _skill("给我出一份报告", "stock") == "report-writer"
+    assert (
+        _skill("按轮动概览 -> 重点板块深挖 -> 催化剂日历输出组合报告", "overview")
+        == "sector-rotation-report"
+    )
 
 
 def test_stub_maps_inbox_journal_and_paper_before_report():
@@ -35,7 +39,7 @@ def test_stub_holdings_page_without_keywords_falls_to_risk():
 
 def test_stub_scheduled_briefing_uses_duty_path():
     msg = (
-        "[定时任务·盘前简报 09-04 08:30]\n你是值班研究员。只做研究，不出买卖指令，禁止自动交易。\n"
+        "[定时任务·盘前简报 09-04 08:30]\n你是值班研究员。可给目标价与操作观点，须声明不构成投资建议；禁止自动交易。\n"
         "用户任务：汇总自选与持仓相关的隔夜要闻。"
     )
     assert _skill(msg, "chat") == "risk-officer"

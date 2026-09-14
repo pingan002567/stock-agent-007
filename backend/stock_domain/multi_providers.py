@@ -169,8 +169,12 @@ class TushareMarketDataProvider:
         return find_spec("tushare") is not None and self._token is not None
 
     def _api(self):
+        if find_spec("tushare") is None:
+            raise ProviderError("tushare package is not installed")
+        if not self._token:
+            raise ProviderError("TUSHARE_TOKEN not set")
         if not self.is_available():
-            raise ProviderError("tushare optional dependency or TUSHARE_TOKEN not set")
+            raise ProviderError("tushare is not available")
         if self._pro is None:
             import tushare as ts  # type: ignore[import-not-found]
 
@@ -320,6 +324,147 @@ class TushareMarketDataProvider:
             },
             "items": items,
         }
+
+    def fetch_fund_flow_rows(self, symbol: str, limit: int = 12) -> list[dict[str, Any]]:
+        """A-share moneyflow, mapped onto the Eastmoney row shape the structure block reads.
+
+        ``moneyflow`` needs 2000 points and updates around 19:00. Amounts are 万元;
+        the structure layer stores 元, matching AKShare 主力净流入-净额.
+        """
+        normalized, stock = self._cn_stock(symbol)
+        end = datetime.now().strftime("%Y%m%d")
+        start = (datetime.now() - timedelta(days=40)).strftime("%Y%m%d")
+        frame = self._api().moneyflow(
+            ts_code=_ts_code(normalized, stock),
+            start_date=start,
+            end_date=end,
+        )
+        rows = [_moneyflow_row(item) for item in _frame_tail(frame, 80)]
+        rows = [row for row in rows if row.get("日期")]
+        rows.sort(key=lambda row: str(row.get("日期")))
+        if limit > 0:
+            rows = rows[-limit:]
+        return rows
+
+    def fetch_chip_cyq(self, symbol: str) -> list[dict[str, Any]]:
+        """Daily chip summary (cyq_perf), not the Eastmoney price histogram.
+
+        Official points table puts 每日筹码及胜率 at 10000. The call fails closed
+        if the account is refused; nothing is invented from the distribution API.
+        """
+        normalized, stock = self._cn_stock(symbol)
+        end = datetime.now().strftime("%Y%m%d")
+        start = (datetime.now() - timedelta(days=30)).strftime("%Y%m%d")
+        frame = self._api().cyq_perf(
+            ts_code=_ts_code(normalized, stock),
+            start_date=start,
+            end_date=end,
+        )
+        rows = [_cyq_perf_row(item) for item in _frame_tail(frame, 40)]
+        return [row for row in rows if row.get("日期")]
+
+    def fetch_spot_snapshot(self, symbol: str) -> dict[str, Any]:
+        """Valuation and liquidity from daily_basic. Not a live quote."""
+        normalized, stock = self._cn_stock(symbol)
+        ts_code = _ts_code(normalized, stock)
+        end = datetime.now().strftime("%Y%m%d")
+        start = (datetime.now() - timedelta(days=15)).strftime("%Y%m%d")
+        basic = _frame_tail(
+            self._api().daily_basic(ts_code=ts_code, start_date=start, end_date=end),
+            1,
+        )
+        daily = _frame_tail(
+            self._api().daily(ts_code=ts_code, start_date=start, end_date=end),
+            1,
+        )
+        if not basic and not daily:
+            return {}
+        return _tushare_snapshot(basic[0] if basic else {}, daily[0] if daily else {})
+
+    def _cn_stock(self, symbol: str) -> tuple[str, dict]:
+        normalized = normalize_symbol(symbol)
+        stock = get_stock(normalized)
+        if not stock:
+            raise ProviderError(f"unknown stock: {symbol}")
+        if str(stock.get("market")) != "CN":
+            raise ProviderError(f"tushare chip/fund-flow only cover CN: {normalized}")
+        return normalized, stock
+
+
+def _ts_date(value: Any) -> str:
+    raw = str(value or "").strip()
+    if len(raw) >= 8 and raw[:8].isdigit():
+        return f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}"
+    return raw[:10]
+
+
+def _wan_to_yuan(value: Any) -> float | None:
+    amount = _coerce_float(value)
+    if amount is None:
+        return None
+    return round(amount * 10000.0, 2)
+
+
+def _order_net_yuan(row: dict[str, Any], buy_key: str, sell_key: str) -> float | None:
+    buy = _coerce_float(row.get(buy_key))
+    sell = _coerce_float(row.get(sell_key))
+    if buy is None or sell is None:
+        return None
+    return round((buy - sell) * 10000.0, 2)
+
+
+def _moneyflow_row(row: dict[str, Any]) -> dict[str, Any]:
+    super_net = _order_net_yuan(row, "buy_elg_amount", "sell_elg_amount")
+    large_net = _order_net_yuan(row, "buy_lg_amount", "sell_lg_amount")
+    main_net = None
+    if super_net is not None or large_net is not None:
+        main_net = round((super_net or 0.0) + (large_net or 0.0), 2)
+    return {
+        "日期": _ts_date(row.get("trade_date")),
+        "主力净流入-净额": main_net,
+        "超大单净流入-净额": super_net,
+        "大单净流入-净额": large_net,
+        "source": "tushare.moneyflow",
+    }
+
+
+def _cyq_perf_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "日期": _ts_date(row.get("trade_date")),
+        "获利比例": row.get("winner_rate"),
+        "平均成本": row.get("weight_avg"),
+        "90成本-低": row.get("cost_5pct"),
+        "90成本-高": row.get("cost_95pct"),
+        "70成本-低": row.get("cost_15pct"),
+        "70成本-高": row.get("cost_85pct"),
+        "method": "tushare_cyq_perf",
+    }
+
+
+def _tushare_snapshot(basic: dict[str, Any], daily: dict[str, Any]) -> dict[str, Any]:
+    pre_close = _coerce_float(daily.get("pre_close"))
+    high = _coerce_float(daily.get("high"))
+    low = _coerce_float(daily.get("low"))
+    amplitude = None
+    if pre_close and high is not None and low is not None and pre_close > 0:
+        amplitude = round((high - low) / pre_close * 100.0, 4)
+    return {
+        "last": _coerce_float(basic.get("close") or daily.get("close")),
+        "open": _coerce_float(daily.get("open")),
+        "high": high,
+        "low": low,
+        "volume": _coerce_float(daily.get("vol")),
+        "amount": _wan_to_yuan(daily.get("amount")),
+        "turnover_pct": _coerce_float(basic.get("turnover_rate")),
+        "amplitude_pct": amplitude,
+        "volume_ratio": _coerce_float(basic.get("volume_ratio")),
+        "pe": _coerce_float(basic.get("pe_ttm") or basic.get("pe")),
+        "pb": _coerce_float(basic.get("pb")),
+        "total_market_cap": _wan_to_yuan(basic.get("total_mv")),
+        "float_market_cap": _wan_to_yuan(basic.get("circ_mv")),
+        "as_of": _ts_date(basic.get("trade_date") or daily.get("trade_date")),
+        "source": "tushare.daily_basic",
+    }
 
 
 def _ts_code(symbol: str, stock: dict) -> str:

@@ -17,7 +17,12 @@ def test_custom_agents_come_from_skill_md():
         "rebalance-planner",
         "stock-monitor",
         "report-writer",
+        "sector-rotation-report",
     }
+    rotation = agents["sector-rotation-report"]
+    assert "轮动概览" in rotation["system_prompt"]
+    assert "place_real_order" in rotation["disallowed_tools"]
+    assert "task" in rotation["disallowed_tools"]
     researcher = agents["stock-researcher"]
     assert "反方" in researcher["system_prompt"]
     assert "不要委派" in researcher["description"] or "不要委派" in researcher["system_prompt"]

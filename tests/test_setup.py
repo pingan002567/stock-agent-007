@@ -80,14 +80,14 @@ def test_setup_finish_seeds_demo_and_keeps_paid_sources_off(tmp_path, monkeypatc
     payload = client.post("/api/setup/finish").json()
     assert payload["completed"] is True
     assert payload["required"] is False
-    assert payload["demo"] is True
+    assert payload["demo"] is False
     finished_states = (payload.get("data_sources") or {}).get("provider_states") or {}
     assert finished_states["tushare"]["enabled"] is False
     assert finished_states["tickflow"]["enabled"] is False
     assert finished_states["longbridge"]["enabled"] is False
     assert finished_states["eastmoney"]["enabled"] is True
     assert finished_states["yfinance"]["enabled"] is True
-    assert {item.symbol.upper() for item in repo.list_holdings()} == {"600519", "HK00700", "AAPL"}
+    assert repo.list_holdings() == []
 
     again = client.get("/api/setup").json()
     assert again["required"] is False
@@ -120,4 +120,4 @@ def test_finish_setup_helper_marks_completed(tmp_path, monkeypatch):
     client = make_client(tmp_path)
     result = finish_setup(client.app.state.services.repo)
     assert result["completed"] is True
-    assert result["demo"] is True
+    assert result["demo"] is False

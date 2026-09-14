@@ -69,6 +69,37 @@ def _frontend_index() -> Path | None:
     return index if index.is_file() else None
 
 
+_STATIC_ASSET_SUFFIXES = {
+    ".css",
+    ".gif",
+    ".ico",
+    ".jpeg",
+    ".jpg",
+    ".js",
+    ".map",
+    ".mjs",
+    ".png",
+    ".svg",
+    ".wasm",
+    ".webp",
+    ".woff",
+    ".woff2",
+}
+
+
+def _is_static_asset(rel: str) -> bool:
+    """Hashed build files must not fall through to index.html.
+
+    A missing ``/assets/*.js`` that returns the SPA shell is served as
+    ``text/html``. WKWebView then rejects the dynamic import with
+    "'text/html' is not a valid JavaScript MIME type."
+    """
+    path = rel.split("?", 1)[0].split("#", 1)[0]
+    if path.startswith("assets/"):
+        return True
+    return Path(path).suffix.lower() in _STATIC_ASSET_SUFFIXES
+
+
 def _frontend_file(rel: str) -> Path | None:
     """Resolve a file under frontend/dist with path-traversal protection."""
     if not rel or rel.endswith("/"):
@@ -214,6 +245,8 @@ def create_app(
         found = _frontend_file(full_path)
         if found is not None:
             return FileResponse(found)
+        if _is_static_asset(full_path):
+            raise HTTPException(status_code=404, detail="Not Found")
         index = _frontend_index()
         if index is not None:
             return FileResponse(index)

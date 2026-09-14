@@ -26,6 +26,12 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   handleRetry = () => {
+    const message = this.state.error?.message ?? "";
+    const staleChunk = /MIME type|dynamically imported module|Importing a module script failed/i.test(message);
+    if (staleChunk) {
+      window.location.reload();
+      return;
+    }
     this.setState({ hasError: false, error: null });
   };
 

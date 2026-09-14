@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from backend.agent_runtime.disclaimer import RESEARCH_DISCLAIMER
 from backend.app_services.audit_service import AuditService
 from backend.app_services.context_builder import ContextBuilder
 from backend.app_services.decision_journal_service import DecisionJournalService
@@ -265,7 +266,7 @@ class ReportService:
         subtitle = title_slide.placeholders[1]
         subtitle.text = (
             f"{report.symbol or ''} · {report.report_type}"
-            f" · {report.created_at[:10]}\n{report.disclaimer or '仅供研究，不构成投资建议。'}"
+            f" · {report.created_at[:10]}\n{report.disclaimer or RESEARCH_DISCLAIMER}"
         )
 
         def clean(text: str) -> str:
@@ -761,7 +762,7 @@ class ReportService:
                 "- `execution_guard.auto_trade = false`（研究态，禁止自动下单）",
                 "",
                 "---",
-                "_仅供研究，不构成投资建议。_",
+                f"_{RESEARCH_DISCLAIMER}_",
             ]
         )
         return Report(
@@ -851,7 +852,7 @@ class ReportService:
                 "- `execution_guard.auto_trade = false`（研究态，禁止自动下单）",
                 "",
                 "---",
-                "_仅供研究，不构成投资建议。_",
+                f"_{RESEARCH_DISCLAIMER}_",
             ]
         )
         return Report(
@@ -869,7 +870,7 @@ class ReportService:
             source_label=source["source_label"],
             evidence_refs=list(dict.fromkeys([*source["evidence_refs"], *run.evidence_refs])),
             valid_until=(_utc_now() + timedelta(days=1)).isoformat(),
-            disclaimer="仅供研究，不构成投资建议。",
+            disclaimer=RESEARCH_DISCLAIMER,
             degraded=run.degraded,
             degraded_reason=run.degraded_reason,
             candidate_actions=candidate_actions,
@@ -952,7 +953,7 @@ class ReportService:
                 "- `execution_guard.auto_trade = false`（研究态，禁止自动下单）",
                 "",
                 "---",
-                "_仅供研究，不构成投资建议。_",
+                f"_{RESEARCH_DISCLAIMER}_",
             ]
         )
         return Report(
@@ -978,7 +979,7 @@ class ReportService:
                 )
             ),
             valid_until=(_utc_now() + timedelta(days=1)).isoformat(),
-            disclaimer="仅供研究，不构成投资建议。",
+            disclaimer=RESEARCH_DISCLAIMER,
             degraded=snapshot.degraded,
             execution_guard=execution_guard,
             risk_policy_ref=projection.latest_risk_policy_ref,
@@ -1129,7 +1130,7 @@ class ReportService:
                 "- `execution_guard.auto_trade = false`（研究态，禁止自动下单）",
                 "",
                 "---",
-                "_仅供研究，不构成投资建议。_",
+                f"_{RESEARCH_DISCLAIMER}_",
             ]
         )
         report_payload = {
@@ -1163,7 +1164,7 @@ class ReportService:
             source_label=source["source_label"],
             evidence_refs=list(source["evidence_refs"]),
             valid_until=(_utc_now() + timedelta(hours=18)).isoformat(),
-            disclaimer="仅供研究，不构成投资建议。",
+            disclaimer=RESEARCH_DISCLAIMER,
             degraded=run_failed or market_degraded,
             degraded_reason=(
                 str(payload.get("run_error") or market.get("degraded_reason") or "值班源数据降级")

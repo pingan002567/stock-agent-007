@@ -1,6 +1,5 @@
 import React, { useRef, useCallback, useEffect, useMemo } from "react";
 import { useAppState } from "@/hooks/useAppState";
-import type { Screen } from "@/types";
 import { parseCopilotEvent, EVENT_FINAL, EVENT_ERROR, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, EVENT_PARTIAL_ANSWER, EVENT_CLARIFICATION } from "@/api/copilot";
 import { parseTaskToolPayload } from "@/components/features/taskToolMeta";
 import type { CopilotMessage, HealthCheck } from "@/api/client";
@@ -9,7 +8,6 @@ import { useChatDetail } from "@/hooks/useChatDetail";
 import { CopilotMessageItem, type ToolInfo } from "@/components/features/CopilotMessageItem";
 import { CopilotStreamingMessage } from "@/components/features/CopilotStreamingMessage";
 import { ContextCard } from "@/components/features/ContextCard";
-import { NextActions } from "@/components/features/NextActions";
 import { EMPTY_CHAT_COPY, isModelReady, STARTER_PROMPTS } from "@/lib/onboarding";
 import type { HumanInputResponse } from "@/lib/humanInput";
 
@@ -197,7 +195,6 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
 export function CopilotPanel() {
   const {
     copilotContextVersion,
-    setCurrentScreen, setStock,
     appDataCache, globalLoading, lastRefreshTime,
   } = useAppState();
 
@@ -265,25 +262,6 @@ export function CopilotPanel() {
 
   useEffect(() => { scrollToBottom(); }, [messages, streamMessage, scrollToBottom]);
 
-  const handleNavigate = useCallback((screen: string, stockParam?: string) => {
-    if (stockParam) setStock(stockParam);
-    setCurrentScreen(screen as Screen);
-  }, [setStock, setCurrentScreen]);
-
-  const handleApi = useCallback(async (endpoint: string, symbol: string) => {
-    try {
-      if (endpoint === "watchlist") {
-        await fetch("/api/watchlist/items", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ symbol, name: symbol, market: "" }),
-        });
-      } else if (endpoint === "watchlist_remove") {
-        await fetch(`/api/watchlist/items/${encodeURIComponent(symbol)}`, { method: "DELETE" });
-      }
-    } catch { /* empty */ }
-  }, []);
-
   const messageElements = useMemo(() => {
     const paired = pairMessages(messages, streamMessage?.runId);
     /** Compute date-header flags by index — avoids let-reassignment in render */
@@ -303,11 +281,6 @@ export function CopilotPanel() {
       const msgDate = (ts || "").slice(0, 10);
 
       if (item.t === "ai") {
-        const evFinal = parseCopilotEvent(item.msg as unknown as Record<string, unknown>);
-        const isFinalAnswer = item.msg.kind === "final_answer";
-        const suggestedActions = isFinalAnswer
-          ? ((evFinal.payload as { suggested_actions?: Array<{ label: string; icon: string; action_type: string; screen?: string; stock?: string; endpoint?: string; symbol?: string }> }).suggested_actions)
-          : undefined;
         return (
           <React.Fragment key={item.msg.message_id}>
             {showHeader && <div className="date-divider">{dateHeader(msgDate)}</div>}
@@ -319,9 +292,6 @@ export function CopilotPanel() {
             </div>
             {item.incomplete && (
               <div className="msg-aborted">— 本轮未完成，未生成最终回答 —</div>
-            )}
-            {suggestedActions && suggestedActions.length > 0 && (
-              <NextActions actions={suggestedActions} onNavigate={handleNavigate} onApi={handleApi} />
             )}
           </React.Fragment>
         );
@@ -373,7 +343,7 @@ export function CopilotPanel() {
         </React.Fragment>
       );
     });
-  }, [messages, streamMessage?.runId, copiedId, handleCopy, handleNavigate, handleApi, handleToolClick, answeredByRequestId, handleClarifySubmit, sending]);
+  }, [messages, streamMessage?.runId, copiedId, handleCopy, handleToolClick, answeredByRequestId, handleClarifySubmit, sending]);
 
   return (
     <aside className="copilot-panel copilot-panel-main">

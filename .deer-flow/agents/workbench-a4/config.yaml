@@ -2,8 +2,8 @@ name: workbench-a4
 description: Workbench lead agent (authority A4)
 tool_groups:
 - a2-research
+- a3-risk
+- a4-planner
 - files
 - search
 - sandbox-exec
-- a3-risk
-- a4-planner

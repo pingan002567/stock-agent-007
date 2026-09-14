@@ -82,6 +82,14 @@ _RULES: list[_Rule] = [
         ),
     ),
     _Rule(
+        "sector_rotation_report", "sector-rotation-report", "A2",
+        lambda m, t, p: (
+            _any(m, ["轮动", "板块深挖", "催化剂日历", "行业轮动", "板块轮动"])
+            or ("组合报告" in m and _any(m, ["板块", "轮动", "催化剂"]))
+            or ("轮动概览" in m)
+        ),
+    ),
+    _Rule(
         "report_write", "report-writer", "A2",
         lambda m, t, p: _any(m, ["报告", "复盘", "总结", "简报", "盘前"]) or "report" in t,
     ),

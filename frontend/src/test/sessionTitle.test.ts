@@ -16,5 +16,6 @@ describe("isUsableSessionTitle", () => {
   it("falls back for display", () => {
     expect(displaySessionTitle("<workbench_context> page: ch")).toBe("新会话");
     expect(displaySessionTitle("板块分析")).toBe("板块分析");
+    expect(displaySessionTitle("[定时任务·盘前简报 09-14 08:30]")).toBe("盘前简报 09-14");
   });
 });

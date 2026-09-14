@@ -36,6 +36,7 @@ class ContextBuilder:
         watch_item = watchlist.get(normalized)
         reports = self.repo.list_reports(symbol=normalized, limit=1)
         latest = reports[0] if reports else None
+        research_status = _research_status(stock, latest is not None)
 
         price = get_realtime_quote(normalized)
         if price is None:
@@ -77,4 +78,16 @@ class ContextBuilder:
                 report_id=latest.report_id if latest else None,
                 generated_at=latest.created_at if latest else None,
             ),
+            research_status=research_status,
         )
+
+
+def _research_status(stock: dict, has_report: bool) -> str:
+    stance = str(stock.get("stance") or "").strip()
+    try:
+        score = int(stock.get("score") or 0)
+    except (TypeError, ValueError):
+        score = 0
+    if has_report or stance or score > 0:
+        return "已有研报"
+    return "未生成研报"

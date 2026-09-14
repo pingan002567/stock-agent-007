@@ -6,6 +6,7 @@ DEFAULT_TOOLS = [
     {"domain": "intel", "name": "search_stock_intel", "risk": "medium", "status": "enabled"},
     {"domain": "industry", "name": "get_industry_context", "risk": "low", "status": "enabled"},
     {"domain": "market-data", "name": "get_market_structure", "risk": "low", "status": "enabled"},
+    {"domain": "market-data", "name": "refresh_market_data", "risk": "low", "status": "enabled"},
     {"domain": "monitor", "name": "get_monitor_events", "risk": "low", "status": "enabled"},
     {"domain": "monitor", "name": "get_monitor_rules", "risk": "low", "status": "enabled"},
     {"domain": "monitor", "name": "evaluate_monitor_rules", "risk": "medium", "status": "enabled"},

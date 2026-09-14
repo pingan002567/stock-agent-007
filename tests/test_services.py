@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from backend.app_services.permission_guard import PermissionDenied
 from backend.agent_runtime.deerflow_client import DeerFlowClientAdapter
-from backend.agent_runtime.prompt_envelope import build_prompt_envelope, render_prompt_envelope
+from backend.agent_runtime.prompt_envelope import build_prompt_envelope, render_prompt_envelope, scheduled_task_session_title
 from backend.agent_runtime.tool_bridge import WorkbenchToolBridge
 from backend.bootstrap import create_services
 from backend.schemas import (
@@ -44,7 +44,9 @@ CANONICAL_EXECUTION_GUARD = {
 
 @pytest.fixture()
 def services(tmp_path):
-    return create_services(db_path=tmp_path / "workbench.sqlite3", files_root=tmp_path / "files")
+    created = create_services(db_path=tmp_path / "workbench.sqlite3", files_root=tmp_path / "files")
+    created.repo.seed_demo_portfolio()
+    return created
 
 
 def test_stock_search_supports_symbol_name_and_alias():
@@ -1175,6 +1177,12 @@ def test_serialize_tool_call_persists_task_meta(services):
     assert data["task_meta"]["subagent_type"] == "risk-officer"
     assert data["task_meta"]["description"] == "评估组合风险"
     assert "集中度" in data["task_meta"]["prompt"]
+
+
+def test_scheduled_task_session_title_uses_duty_name_not_brackets():
+    message = "[定时任务·盘前简报 09-14 08:30]\n你是值班研究员。汇总过夜要闻。"
+    assert scheduled_task_session_title(message) == "盘前简报 09-14"
+    assert scheduled_task_session_title("帮我看看持仓") is None
 
 
 def test_build_prompt_envelope_trims_runtime_context():

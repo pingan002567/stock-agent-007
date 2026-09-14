@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from backend.agent_runtime.disclaimer import RESEARCH_DISCLAIMER
 from backend.schemas import StockContext
 from backend.stock_domain.market_structure import get_market_structure
 
@@ -52,7 +53,7 @@ def generate_stock_dashboard(context: StockContext, mode: str = "research") -> d
         "fundamental_analysis": fundamental_analysis,
         "market_structure": market_structure,
         "followups": ["追问基本面变化", "比较同板块标的", "生成持仓影响"],
-        "disclaimer": "仅供研究，不构成投资建议。",
+        "disclaimer": RESEARCH_DISCLAIMER,
     }
 
 

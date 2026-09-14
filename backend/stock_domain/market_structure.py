@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from backend.schemas import now_iso
@@ -12,6 +13,7 @@ from backend.stock_domain.history_tools import get_daily_history
 from backend.stock_domain.provider_router import provider_router
 from backend.stock_domain.providers import AkShareMarketDataProvider, _safe_float
 from backend.stock_domain.series_order import _parse_time
+from backend.stock_domain.trading_calendar import expected_bar_date, session_bar_date
 
 
 def _bars_ascending(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -138,8 +140,13 @@ def compute_technical(items: list[dict[str, Any]]) -> dict[str, Any]:
         missing.append("macd")
 
     volume_ratio = None
-    if len(volumes) >= 21 and sum(volumes[-21:-1]) > 0:
-        volume_ratio = round(volumes[-1] / (sum(volumes[-21:-1]) / 20), 3)
+    provisional_last = bool(bars and bars[-1].get("provisional"))
+    official_volumes = volumes[:-1] if provisional_last else volumes
+    if provisional_last:
+        missing.append("volume_ratio")
+        volume_note = "今日量为行情拼接，量比未用拼接管计算"
+    elif len(official_volumes) >= 21 and sum(official_volumes[-21:-1]) > 0:
+        volume_ratio = round(official_volumes[-1] / (sum(official_volumes[-21:-1]) / 20), 3)
     else:
         missing.append("volume_ratio")
 
@@ -166,7 +173,9 @@ def compute_technical(items: list[dict[str, Any]]) -> dict[str, Any]:
             ma_stack = "mixed"
 
     volume_note = "成交量由额反推" if derived else None
-    if derived and all(v <= 0 for v in volumes):
+    if provisional_last:
+        volume_note = "今日量为行情拼接，量比未用拼接管计算"
+    elif derived and all(v <= 0 for v in volumes):
         volume_note = "成交量为 0"
         if "volume_ratio" not in missing:
             missing.append("volume_ratio")
@@ -178,6 +187,7 @@ def compute_technical(items: list[dict[str, Any]]) -> dict[str, Any]:
         "bar_count": len(bars),
         "as_of": str(bars[-1].get("date") or "")[:10],
         "last": last,
+        "provisional": provisional_last,
         "range_pct": range_pct,
         "ma5": ma[5],
         "ma10": ma[10],
@@ -281,6 +291,8 @@ def _chip_from_row(row: dict[str, Any], last: float | None, bars: list[dict[str,
         conc90 = round((high90 - low90) / last, 4)
     quality, quality_reason = _chip_quality(bars, len(bars))
     notes = ["非实时逐笔还原", "解禁/增发后分布会突变"]
+    if str(row.get("method") or "").startswith("tushare"):
+        notes.append("Tushare 每日筹码及胜率，盘后更新，不是盘中逐笔")
     if quality_reason:
         notes.append(quality_reason)
     if profit is None and avg_cost is None:
@@ -291,7 +303,7 @@ def _chip_from_row(row: dict[str, Any], last: float | None, bars: list[dict[str,
     return {
         "degraded": False,
         "reason": None,
-        "method": "eastmoney_cyq",
+        "method": str(row.get("method") or "eastmoney_cyq"),
         "as_of": as_of,
         "quality": quality,
         "profit_ratio": profit,
@@ -315,15 +327,97 @@ def _short_reason(prefix: str, exc: Exception) -> str:
     return f"{prefix}：{text[:160]}"
 
 
+def _bar_as_of(bars: list[dict[str, Any]]) -> str | None:
+    if not bars:
+        return None
+    return str(bars[-1].get("date") or "")[:10] or None
+
+
+def _session_quote(symbol: str) -> dict[str, Any]:
+    primary = _akshare_primary()
+    fetch = getattr(primary, "fetch_session_quote", None)
+    if fetch is None:
+        return {}
+    try:
+        payload = fetch(symbol)
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _provisional_bar(session: dict[str, Any], day: date) -> dict[str, Any] | None:
+    last = _safe_float(session.get("last"))
+    open_ = _safe_float(session.get("open"))
+    high = _safe_float(session.get("high"))
+    low = _safe_float(session.get("low"))
+    if not all(value is not None and value > 0 for value in (last, open_, high, low)):
+        return None
+    return {
+        "date": day.isoformat(),
+        "open": open_,
+        "high": high,
+        "low": low,
+        "close": last,
+        "provisional": True,
+        "source": "session_quote",
+    }
+
+
 def _akshare_primary() -> AkShareMarketDataProvider | None:
     primary = provider_router.primary
     return primary if isinstance(primary, AkShareMarketDataProvider) else None
+
+
+def _tushare_structure_provider() -> Any:
+    """Paid research fields follow an enabled Tushare account, not the quote provider.
+
+    A-share live quotes can stay on Eastmoney/Tencent. Chip, fund flow, and missing
+    valuation still use Tushare when the token is on and the package is installed.
+    """
+    try:
+        from backend.config.provider_policy import is_provider_usable
+
+        if not is_provider_usable(provider_router._data_sources_config(), "tushare"):
+            return None
+        provider = provider_router._get_provider("tushare", "CN")
+    except Exception:
+        return None
+    if getattr(provider, "name", "") != "tushare" or not provider.is_available():
+        return None
+    return provider
+
+
+def _load_cn_structure(method: str, *args: Any, **kwargs: Any) -> tuple[Any, str]:
+    """Prefer Tushare when the account is usable, then the AKShare primary.
+
+    A Tushare refusal still falls through so the page is not emptier than before.
+    """
+    attempts: list[tuple[str, Exception]] = []
+    configured = _tushare_structure_provider()
+    if configured is not None and callable(getattr(configured, method, None)):
+        try:
+            return getattr(configured, method)(*args, **kwargs), "tushare"
+        except Exception as exc:
+            attempts.append(("tushare", exc))
+    primary = _akshare_primary()
+    if primary is not None and callable(getattr(primary, method, None)):
+        try:
+            return getattr(primary, method)(*args, **kwargs), str(primary.name)
+        except Exception as exc:
+            attempts.append((str(primary.name), exc))
+    if not attempts:
+        raise RuntimeError("主数据源不支持该数据")
+    if len(attempts) == 1:
+        raise attempts[0][1]
+    raise RuntimeError("；".join(f"{name}: {exc}" for name, exc in attempts))
 
 
 def _chip_block(market: str, symbol: str, last: float | None, bars: list[dict[str, Any]]) -> dict[str, Any]:
     proxy = {
         "vwap_20d": _vwap(bars, 20),
         "volume_vs_20d": None,
+        "as_of": _bar_as_of(bars),
+        "label": "代理指标，非真实筹码",
     }
     vols = [_volume(b)[0] or 0.0 for b in bars]
     if len(vols) >= 21 and sum(vols[-21:-1]) > 0:
@@ -332,19 +426,12 @@ def _chip_block(market: str, symbol: str, last: float | None, bars: list[dict[st
     if market != "CN":
         return {
             "degraded": True,
-            "reason": "筹码分布仅覆盖 A 股（东财 CYQ）",
+            "reason": "筹码分布仅覆盖 A 股（东财 CYQ / Tushare 筹码胜率）",
             "proxy": proxy,
         }
 
-    primary = _akshare_primary()
-    if primary is None:
-        return {
-            "degraded": True,
-            "reason": "主数据源不是 AkShare，无法拉取筹码",
-            "proxy": proxy,
-        }
     try:
-        rows = primary.fetch_chip_cyq(symbol)
+        rows, source = _load_cn_structure("fetch_chip_cyq", symbol)
     except Exception as exc:
         return {
             "degraded": True,
@@ -359,17 +446,16 @@ def _chip_block(market: str, symbol: str, last: float | None, bars: list[dict[st
         }
     ranked = sorted(rows, key=lambda row: _parse_time(row.get("日期") or row.get("date")))
     latest = ranked[-1]
-    return _chip_from_row(latest, last, bars)
+    chip = _chip_from_row(latest, last, bars)
+    chip["source"] = latest.get("source") or source
+    return chip
 
 
 def _flow_block(market: str, symbol: str) -> dict[str, Any]:
     if market != "CN":
         return {"degraded": True, "reason": "个股资金流向仅覆盖 A 股"}
-    primary = _akshare_primary()
-    if primary is None:
-        return {"degraded": True, "reason": "主数据源不是 AkShare，无法拉取资金流"}
     try:
-        rows = primary.fetch_fund_flow_rows(symbol, limit=12)
+        rows, source = _load_cn_structure("fetch_fund_flow_rows", symbol, limit=12)
     except Exception as exc:
         return {"degraded": True, "reason": _short_reason("资金流接口失败", exc)}
     if not rows:
@@ -396,6 +482,7 @@ def _flow_block(market: str, symbol: str) -> dict[str, Any]:
     return {
         "degraded": False,
         "reason": None,
+        "source": ranked[0].get("source") or source,
         "as_of": latest.get("date"),
         "latest": latest,
         "main_net_1d": latest.get("main_net"),
@@ -404,20 +491,59 @@ def _flow_block(market: str, symbol: str) -> dict[str, Any]:
     }
 
 
-def _snapshot_block(market: str, symbol: str) -> dict[str, Any]:
+_SNAPSHOT_FIELDS = (
+    "last",
+    "open",
+    "high",
+    "low",
+    "volume",
+    "amount",
+    "turnover_pct",
+    "amplitude_pct",
+    "volume_ratio",
+    "pe",
+    "pb",
+    "total_market_cap",
+    "float_market_cap",
+)
+
+
+def _snapshot_block(market: str, symbol: str, session: dict[str, Any] | None = None) -> dict[str, Any]:
     if market == "CN":
-        primary = _akshare_primary()
-        if primary is None:
-            return {"degraded": True, "reason": "主数据源不是 AkShare"}
+        quote = dict(session or {})
+        em: dict[str, Any] = {}
+        em_error: str | None = None
+        em_source = "stock_individual_info_em"
         try:
-            snap = primary.fetch_spot_snapshot(symbol)
+            loaded, loaded_source = _load_cn_structure("fetch_spot_snapshot", symbol)
+            if isinstance(loaded, dict):
+                em = loaded
+                em_source = str(loaded.get("source") or loaded_source)
         except Exception as exc:
-            return {"degraded": True, "reason": _short_reason("个股快照失败", exc)}
-        if not snap:
-            return {"degraded": True, "reason": "个股快照无数据"}
-        snap["degraded"] = False
-        snap["reason"] = None
-        return snap
+            em_error = _short_reason("个股快照失败", exc)
+        if not quote and not em and em_error:
+            return {"degraded": True, "reason": em_error}
+        merged = {key: quote.get(key) for key in _SNAPSHOT_FIELDS if quote.get(key) not in (None, "")}
+        sources = {key: "session_quote" for key in merged}
+        for key in _SNAPSHOT_FIELDS:
+            if merged.get(key) not in (None, "") or em.get(key) in (None, ""):
+                continue
+            merged[key] = em[key]
+            sources[key] = em_source
+        missing = [key for key in ("pe", "pb", "total_market_cap", "float_market_cap", "turnover_pct", "amplitude_pct", "volume_ratio") if merged.get(key) in (None, "")]
+        if not merged and em_error:
+            return {"degraded": True, "reason": em_error, "missing": missing}
+        if not merged and not em:
+            return {"degraded": True, "reason": "个股快照无数据", "missing": missing}
+        merged["degraded"] = bool(missing)
+        merged["reason"] = em_error if missing and em_error else (None if not missing else "个股快照缺字段，未编造")
+        merged["missing"] = missing
+        merged["sources"] = sources
+        if quote.get("as_of"):
+            merged["as_of"] = quote.get("as_of")
+        elif em.get("as_of"):
+            merged["as_of"] = em.get("as_of")
+        return merged
     if market == "US":
         try:
             from backend.stock_domain.multi_providers import YFinanceMarketDataProvider
@@ -471,11 +597,35 @@ def get_market_structure(symbol: str) -> dict[str, Any]:
     hist_items = history.get("items") if isinstance(history, dict) else []
     if not isinstance(hist_items, list):
         hist_items = []
+    official_as_of = str(history.get("as_of") or "")[:10] if isinstance(history, dict) else ""
+    if not official_as_of and hist_items:
+        official_as_of = str(_bars_ascending(hist_items)[-1].get("date") or "")[:10]
+    expected = expected_bar_date(market)
+    session_day = session_bar_date(market) if market == "CN" else None
+    session = _session_quote(normalized) if market == "CN" else {}
+    provisional = None
+    needs_session_bar = session_day is not None and (not official_as_of or official_as_of < session_day.isoformat())
+    if needs_session_bar:
+        provisional = _provisional_bar(session, session_day)
+        if provisional is not None:
+            hist_items = list(hist_items) + [provisional]
     technical = compute_technical(hist_items)
-    bars = _bars_ascending(hist_items)
-    last = technical.get("last") if not technical.get("degraded") else _safe_float(stock.get("price"))
+    history_stale = bool(history.get("stale")) if isinstance(history, dict) else False
+    if not history_stale and official_as_of and official_as_of < expected.isoformat():
+        history_stale = True
+    if history_stale:
+        technical["stale"] = True
+        technical["degraded"] = True
+        technical["reason"] = (
+            f"官方日K停在 {official_as_of or '无'}，应有 {expected.isoformat()}"
+            + ("；指标含行情拼接的今日bar，非正式日K" if provisional else "；今日开高低量未补上")
+        )
+    elif provisional:
+        technical["provisional_note"] = "今日开高低量为行情拼接，非正式日K，未写入历史库"
+    bars = _bars_ascending([item for item in hist_items if not item.get("provisional")]) or _bars_ascending(hist_items)
+    last = technical.get("last") if technical.get("last") is not None else _safe_float(stock.get("price"))
     skip_chip_flow = _is_st_or_halted(stock) or _volume_dead(bars)
-    snapshot = _snapshot_block(market, normalized)
+    snapshot = _snapshot_block(market, normalized, session if market == "CN" else None)
     if skip_chip_flow and market == "CN":
         skip_reason = "ST/停牌或成交量长期为 0，跳过筹码与资金流"
         chip = {"degraded": True, "reason": skip_reason}
@@ -486,23 +636,37 @@ def get_market_structure(symbol: str) -> dict[str, Any]:
 
     extra = {
         "degraded": True,
-        "reason": "北向/融资/龙虎榜/解禁未在本期接入",
+        "coverage": "not_wired",
+        "reason": "北向/融资融券/龙虎榜/解禁未接入，不是本次拉取失败；行业新闻不能代替个股龙虎榜",
         "missing": ["northbound", "margin", "lhb", "unlock"],
     }
 
-    overall_degraded = bool(technical.get("degraded") and snapshot.get("degraded") and chip.get("degraded"))
+    gap_reasons = []
+    for name, block in (("technical", technical), ("snapshot", snapshot), ("chip", chip), ("flow", flow)):
+        if block.get("degraded") and block.get("reason"):
+            gap_reasons.append(f"{name}: {block['reason']}")
+    overall_degraded = any(block.get("degraded") for block in (technical, snapshot, chip, flow))
     history_source = history.get("source") if isinstance(history, dict) else "unavailable"
     if history_source == "mock_adapter":
         history_source = "unavailable"
+    freshness = {
+        "as_of": official_as_of or None,
+        "expected_as_of": expected.isoformat(),
+        "stale": history_stale,
+        "provisional": provisional is not None,
+        "non_session_dates_are_not_gaps": True,
+    }
     return _json_safe(
         {
             "symbol": normalized,
             "name": stock.get("name"),
             "market": market,
             "source": history_source,
-            "updated_at": now_iso(),
+            "updated_at": official_as_of or now_iso(),
+            "computed_at": now_iso(),
             "degraded": overall_degraded,
-            "reason": technical.get("reason") if overall_degraded else None,
+            "reason": "；".join(gap_reasons) if gap_reasons else None,
+            "freshness": freshness,
             "technical": technical,
             "snapshot": snapshot,
             "chip": chip,

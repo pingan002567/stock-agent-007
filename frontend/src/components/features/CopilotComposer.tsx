@@ -10,6 +10,7 @@ import { SessionModelPicker } from "@/components/features/SessionModelPicker";
 import { useAppState } from "@/hooks/useAppState";
 import { useCopilotChat } from "@/hooks/useCopilotChat";
 import { useToast } from "@/hooks/useToast";
+import { adoptNewSessionDraft, composerDraftKey } from "@/lib/composerDraft";
 import {
   UPLOADS_UNSUPPORTED_COPY,
   isImageUploadFilename,
@@ -31,7 +32,7 @@ export function CopilotComposer() {
   const { appDataCache, globalLoading, lastRefreshTime } = useAppState();
   const { showToast } = useToast();
 
-  const [input, setInput] = useState("");
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [uploading, setUploading] = useState(false);
   const [sessionFiles, setSessionFiles] = useState<UploadedFileInfo[]>([]);
   const [uploadsSupported, setUploadsSupported] = useState(true);
@@ -50,7 +51,14 @@ export function CopilotComposer() {
   const canUpload = uploadsSupported && !runtimeStub;
   const visionOk = modelSupportsVision(sessionModelRef);
 
+  const draftKey = composerDraftKey(currentSession?.session_id);
+  const input = drafts[draftKey] ?? "";
+  const setInput = (value: string) => {
+    setDrafts((prev) => (prev[draftKey] === value ? prev : { ...prev, [draftKey]: value }));
+  };
+
   const sessionIdRef = useRef<string | null>(currentSession?.session_id ?? null);
+  const promoteDraftRef = useRef(false);
 
   const refreshUploads = useCallback(async (sessionId: string) => {
     const listed = await listSessionUploads(sessionId);
@@ -69,6 +77,10 @@ export function CopilotComposer() {
       return;
     }
     if (prev && prev !== sid) setSessionFiles([]);
+    if (prev == null && promoteDraftRef.current) {
+      setDrafts((prevDrafts) => adoptNewSessionDraft(prevDrafts, sid));
+    }
+    promoteDraftRef.current = false;
     let cancelled = false;
     void listSessionUploads(sid).then((listed) => {
       if (cancelled) return;
@@ -86,6 +98,10 @@ export function CopilotComposer() {
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, []);
+
+  useEffect(() => {
+    autoResize();
+  }, [draftKey, input, autoResize]);
 
   const handleSend = () => {
     const text = input;
@@ -115,6 +131,7 @@ export function CopilotComposer() {
     }
     setUploading(true);
     try {
+      if (!currentSession?.session_id) promoteDraftRef.current = true;
       const sid = await ensureSession();
       const uploaded = await uploadSessionFiles(sid, files);
       const listed = await refreshUploads(sid);

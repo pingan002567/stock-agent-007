@@ -11,6 +11,7 @@ from backend.schemas import AuthorityLevel, PriceSnapshot, RebalanceDraftDecisio
 @pytest.fixture()
 def bridge(tmp_path):
     services = create_services(db_path=tmp_path / "bridge.sqlite3", files_root=tmp_path / "files")
+    services.repo.seed_demo_portfolio()
     return WorkbenchToolBridge(
         context_builder=services.context_builder,
         repo=services.repo,
@@ -44,6 +45,7 @@ def test_tool_bridge_registry_includes_default_tools_and_blocks_real_orders(brid
         "get_daily_history",
         "get_industry_context",
         "get_market_structure",
+        "refresh_market_data",
         "get_decision_journal_entry",
         "get_monitor_events",
         "get_monitor_rules",

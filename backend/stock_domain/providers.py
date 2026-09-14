@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from importlib.util import find_spec
+import logging
 import os
 import time
 import threading
@@ -10,6 +11,8 @@ from typing import Any, Protocol
 
 from backend.schemas import PriceSnapshot, now_iso
 from backend.stock_domain.catalog import get_stock, normalize_symbol
+
+_log = logging.getLogger("providers")
 
 # Fallback HK stock list (Stock Connect + major indices) used when AKShare HK APIs
 # are unreachable (e.g. network restrictions on Chinese financial data endpoints).
@@ -885,6 +888,9 @@ class AkShareMarketDataProvider:
             raise ProviderError(f"phase1 real data only covers CN market: {normalized}")
         try:
             row = self._find_cn_quote_row(normalized)
+            session = _session_from_mapping(row, volume_unit="lot")
+            if not _session_has_ohlc(session):
+                session = _merge_session(session, self._tencent_session_fields(normalized))
             return PriceSnapshot(
                 last=_number(row, "最新价"),
                 change_pct=_number(row, "涨跌幅"),
@@ -895,6 +901,7 @@ class AkShareMarketDataProvider:
                     "market": "CN",
                     "mode": "real",
                     "source_interface": "stock_zh_a_spot",
+                    "session": session,
                 },
             )
         except Exception:
@@ -1569,6 +1576,59 @@ class AkShareMarketDataProvider:
         )
         return _frame_records(frame)
 
+    def fetch_session_quote(self, symbol: str) -> dict[str, Any]:
+        """Live OHLC/liquidity/valuation already present on the quote row.
+
+        ``stock_individual_info_em`` is a separate, easier-to-drop call. Callers
+        should use this first and only ask that endpoint for fields still missing.
+        """
+        if not self.is_available():
+            return {}
+        normalized = normalize_symbol(symbol)
+        session: dict[str, Any] = {}
+        try:
+            session = _session_from_mapping(self._find_cn_quote_row(normalized), volume_unit="lot")
+        except Exception:
+            session = {}
+        if not _session_has_ohlc(session) or _session_missing_valuation(session):
+            try:
+                session = _merge_session(session, self._tencent_session_fields(normalized))
+            except Exception:
+                pass
+        if session.get("last") is None and not _session_has_ohlc(session):
+            return {}
+        session["as_of"] = datetime.now().strftime("%Y-%m-%d")
+        return session
+
+    def _tencent_session_fields(self, symbol: str) -> dict[str, Any]:
+        raw = self._tencent_quote_raw(symbol)
+        fields = _parse_tencent_fields(raw)
+        return _session_from_tencent(fields)
+
+    def _tencent_quote_raw(self, symbol: str) -> str:
+        import requests as _req
+
+        if symbol.startswith(("6", "688")):
+            tencent_sym = f"sh{symbol}"
+        elif symbol.startswith(("0", "3")):
+            tencent_sym = f"sz{symbol}"
+        else:
+            tencent_sym = symbol
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+            ),
+        }
+        resp = _req.get(
+            f"https://qt.gtimg.cn/q={tencent_sym}",
+            headers=headers,
+            timeout=15,
+        )
+        raw = resp.content.decode("gbk", errors="replace").strip()
+        if "=" not in raw:
+            raise ProviderError(f"Tencent API unexpected response for {symbol}")
+        return raw.split("=", 1)[1].strip().strip('" \n\r')
+
     def fetch_spot_snapshot(self, symbol: str) -> dict[str, Any]:
         frame = self._cached(
             ("spot_info_em", symbol),
@@ -1665,25 +1725,32 @@ class AkShareMarketDataProvider:
         列名以 akshare stock_board_industry_em.py 源码为准；未在源码确认的
         列一律不取。
         """
-        try:
-            frame = self._ak().stock_board_industry_name_em()
-            rows = _frame_tail(frame, 500)
-            items: list[dict[str, Any]] = []
-            for row in rows:
-                name = str(row.get("板块名称") or "")
-                if not name:
-                    continue
-                items.append({
-                    "industry": name,
-                    "board_code": str(row.get("板块代码") or ""),
-                    "rank": _safe_float(row.get("排名")),
-                    "change_pct": _safe_float(row.get("涨跌幅")),
-                    "turnover_pct": _safe_float(row.get("换手率")),
-                    "total_market_cap": _safe_float(row.get("总市值")),
-                })
-            return items
-        except Exception:
-            return []
+        last_err: Exception | None = None
+        for attempt in range(3):
+            try:
+                frame = self._ak().stock_board_industry_name_em()
+                rows = _frame_tail(frame, 500)
+                items: list[dict[str, Any]] = []
+                for row in rows:
+                    name = str(row.get("板块名称") or "")
+                    if not name:
+                        continue
+                    items.append({
+                        "industry": name,
+                        "board_code": str(row.get("板块代码") or ""),
+                        "rank": _safe_float(row.get("排名")),
+                        "change_pct": _safe_float(row.get("涨跌幅")),
+                        "turnover_pct": _safe_float(row.get("换手率")),
+                        "total_market_cap": _safe_float(row.get("总市值")),
+                    })
+                if items:
+                    return items
+            except Exception as exc:
+                last_err = exc
+                time.sleep(0.4 * (attempt + 1))
+        if last_err is not None:
+            _log.warning("fetch_industry_boards failed: %s", last_err)
+        return []
 
     def fetch_industry_constituents(self, industry: str) -> list[dict[str, Any]]:
         """东财行业板块成分股（含最新价/涨跌幅/换手率/PE/PB）。
@@ -1691,34 +1758,41 @@ class AkShareMarketDataProvider:
         cons_em 没有市值列：用 成交额/(换手率/100) 推算流通市值（cap_est），
         仅用于行业内排序，消费方须标注推算口径。
         """
-        try:
-            frame = self._ak().stock_board_industry_cons_em(symbol=industry)
-            rows = _frame_tail(frame, 2000)
-            items: list[dict[str, Any]] = []
-            for row in rows:
-                code = str(row.get("代码") or "")
-                if not code:
-                    continue
-                turnover_amount = _safe_float(row.get("成交额"))
-                turnover_pct = _safe_float(row.get("换手率"))
-                cap_est = (
-                    turnover_amount / (turnover_pct / 100)
-                    if turnover_amount and turnover_pct
-                    else None
-                )
-                items.append({
-                    "symbol": code,
-                    "name": str(row.get("名称") or ""),
-                    "price": _safe_float(row.get("最新价")),
-                    "change_pct": _safe_float(row.get("涨跌幅")),
-                    "turnover_pct": turnover_pct,
-                    "pe": _safe_float(row.get("市盈率-动态")),
-                    "pb": _safe_float(row.get("市净率")),
-                    "cap_est": cap_est,
-                })
-            return items
-        except Exception:
-            return []
+        last_err: Exception | None = None
+        for attempt in range(3):
+            try:
+                frame = self._ak().stock_board_industry_cons_em(symbol=industry)
+                rows = _frame_tail(frame, 2000)
+                items: list[dict[str, Any]] = []
+                for row in rows:
+                    code = str(row.get("代码") or "")
+                    if not code:
+                        continue
+                    turnover_amount = _safe_float(row.get("成交额"))
+                    turnover_pct = _safe_float(row.get("换手率"))
+                    cap_est = (
+                        turnover_amount / (turnover_pct / 100)
+                        if turnover_amount and turnover_pct
+                        else None
+                    )
+                    items.append({
+                        "symbol": code,
+                        "name": str(row.get("名称") or ""),
+                        "price": _safe_float(row.get("最新价")),
+                        "change_pct": _safe_float(row.get("涨跌幅")),
+                        "turnover_pct": turnover_pct,
+                        "pe": _safe_float(row.get("市盈率-动态")),
+                        "pb": _safe_float(row.get("市净率")),
+                        "cap_est": cap_est,
+                    })
+                if items:
+                    return items
+            except Exception as exc:
+                last_err = exc
+                time.sleep(0.4 * (attempt + 1))
+        if last_err is not None:
+            _log.warning("fetch_industry_constituents(%s) failed: %s", industry, last_err)
+        return []
 
     def import_hk_stock_master(self) -> list[dict[str, Any]]:
         """Fetch HK stock codes/names and return as list.
@@ -1821,7 +1895,7 @@ class AkShareMarketDataProvider:
             "invt": 2,
             "fid": "f3",
             "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048",
-            "fields": "f2,f3,f4,f5,f6,f12,f14,f15,f16,f17,f18",
+            "fields": "f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f14,f15,f16,f17,f18,f20,f21,f23",
         }
         headers = {
             "User-Agent": (
@@ -1869,6 +1943,13 @@ class AkShareMarketDataProvider:
                             "最高": item.get("f15"),
                             "最低": item.get("f16"),
                             "昨收": item.get("f18"),
+                            "换手率": item.get("f8"),
+                            "振幅": item.get("f7"),
+                            "量比": item.get("f10"),
+                            "市盈率-动态": item.get("f9"),
+                            "市净率": item.get("f23"),
+                            "总市值": item.get("f20"),
+                            "流通市值": item.get("f21"),
                         }
                     )
                 if not rows:
@@ -1938,6 +2019,7 @@ class AkShareMarketDataProvider:
                 "market": "CN",
                 "mode": "real",
                 "source_interface": "tencent_qt",
+                "session": _session_from_tencent(fields),
             },
         )
 
@@ -2225,21 +2307,33 @@ class AkShareMarketDataProvider:
 
     _REFRESH_TTL = 86400
 
-    def start_background_refresh(self, interval_seconds: int = 300) -> None:
+    def start_background_refresh(
+        self,
+        interval_seconds: int = 300,
+        interval_getter=None,
+    ) -> None:
         """Start a daemon thread that periodically warms expensive API caches.
 
-        User requests always read from ``_cached()`` — with the background
-        refresher running they never trigger a slow synchronous fetch.
+        ``interval_getter`` is read each cycle so a settings change applies on
+        the next sleep without restarting the thread.
         """
         thread = threading.Thread(
-            target=self._refresh_loop, args=(interval_seconds,), daemon=True
+            target=self._refresh_loop,
+            args=(interval_seconds, interval_getter),
+            daemon=True,
         )
         thread.start()
 
-    def _refresh_loop(self, interval: int) -> None:
+    def _refresh_loop(self, interval: int, interval_getter=None) -> None:
         self._warmup()
         while True:
-            time.sleep(interval)
+            sleep_for = interval
+            if interval_getter is not None:
+                try:
+                    sleep_for = int(interval_getter())
+                except Exception:
+                    sleep_for = interval
+            time.sleep(max(30, sleep_for))
             self._warmup()
 
     def _warmup(self) -> None:
@@ -2428,6 +2522,123 @@ def _first(row: dict[str, Any], *keys: str) -> Any:
 def _coerce_float(value: Any, default: float = 0.0) -> float:
     parsed = _safe_float(value)
     return parsed if parsed is not None else default
+
+
+_SESSION_FIELD_KEYS = {
+    "last": ("最新价", "最新", "last"),
+    "open": ("今开", "开盘", "open"),
+    "high": ("最高", "high"),
+    "low": ("最低", "low"),
+    "volume": ("成交量", "volume"),
+    "amount": ("成交额", "amount"),
+    "turnover_pct": ("换手率", "turnover_pct"),
+    "amplitude_pct": ("振幅", "amplitude_pct"),
+    "volume_ratio": ("量比", "volume_ratio"),
+    "pe": ("市盈率-动态", "市盈率(动)", "市盈率", "pe"),
+    "pb": ("市净率", "pb"),
+    "total_market_cap": ("总市值", "total_market_cap"),
+    "float_market_cap": ("流通市值", "float_market_cap"),
+    "prev_close": ("昨收", "prev_close"),
+}
+
+# qt.gtimg.cn tilde fields. Amount is 万元, market cap is 亿元, volume is 手.
+_TENCENT_INDEX = {
+    "last": 3,
+    "prev_close": 4,
+    "open": 5,
+    "volume": 6,
+    "high": 33,
+    "low": 34,
+    "amount_wan": 37,
+    "turnover_pct": 38,
+    "pe": 39,
+    "amplitude_pct": 43,
+    "float_market_cap_yi": 44,
+    "total_market_cap_yi": 45,
+    "pb": 46,
+    "volume_ratio": 49,
+}
+
+
+def _coerce_session_number(value: Any) -> float | None:
+    if isinstance(value, str):
+        value = value.replace("%", "").replace(",", "").strip()
+    return _safe_float(value)
+
+
+def _session_from_mapping(row: dict[str, Any], *, volume_unit: str | None = None) -> dict[str, Any]:
+    session: dict[str, Any] = {}
+    for name, keys in _SESSION_FIELD_KEYS.items():
+        for key in keys:
+            if key not in row:
+                continue
+            parsed = _coerce_session_number(row.get(key))
+            if parsed is not None:
+                session[name] = parsed
+                break
+    if volume_unit and session.get("volume") is not None:
+        session["volume_unit"] = volume_unit
+    return session
+
+
+def _session_from_tencent(fields: list[str]) -> dict[str, Any]:
+    def _at(index: int, scale: float = 1.0) -> float | None:
+        if index >= len(fields):
+            return None
+        parsed = _coerce_session_number(fields[index])
+        if parsed is None:
+            return None
+        return parsed * scale
+
+    session: dict[str, Any] = {}
+    for name, index in (
+        ("last", _TENCENT_INDEX["last"]),
+        ("prev_close", _TENCENT_INDEX["prev_close"]),
+        ("open", _TENCENT_INDEX["open"]),
+        ("high", _TENCENT_INDEX["high"]),
+        ("low", _TENCENT_INDEX["low"]),
+        ("volume", _TENCENT_INDEX["volume"]),
+        ("turnover_pct", _TENCENT_INDEX["turnover_pct"]),
+        ("amplitude_pct", _TENCENT_INDEX["amplitude_pct"]),
+        ("volume_ratio", _TENCENT_INDEX["volume_ratio"]),
+        ("pe", _TENCENT_INDEX["pe"]),
+        ("pb", _TENCENT_INDEX["pb"]),
+    ):
+        value = _at(index)
+        if value is not None:
+            session[name] = value
+    amount = _at(_TENCENT_INDEX["amount_wan"], 10000.0)
+    if amount is not None:
+        session["amount"] = amount
+    total_cap = _at(_TENCENT_INDEX["total_market_cap_yi"], 100000000.0)
+    if total_cap is not None:
+        session["total_market_cap"] = total_cap
+    float_cap = _at(_TENCENT_INDEX["float_market_cap_yi"], 100000000.0)
+    if float_cap is not None:
+        session["float_market_cap"] = float_cap
+    if session.get("volume") is not None:
+        session["volume_unit"] = "lot"
+    return session
+
+
+def _parse_tencent_fields(raw: str) -> list[str]:
+    return raw.split("~")
+
+
+def _session_has_ohlc(session: dict[str, Any]) -> bool:
+    return all(isinstance(session.get(key), (int, float)) and session[key] > 0 for key in ("open", "high", "low"))
+
+
+def _session_missing_valuation(session: dict[str, Any]) -> bool:
+    return any(session.get(key) is None for key in ("pe", "pb", "total_market_cap", "turnover_pct"))
+
+
+def _merge_session(primary: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(primary)
+    for key, value in extra.items():
+        if merged.get(key) in (None, "") and value not in (None, ""):
+            merged[key] = value
+    return merged
 
 
 def _safe_float(value: Any) -> float | None:

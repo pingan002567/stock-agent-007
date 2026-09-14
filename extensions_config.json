@@ -25,6 +25,9 @@
     "catalyst-tracker": {
       "enabled": true
     },
+    "sector-rotation-report": {
+      "enabled": true
+    },
     "worldcup-predictor": {
       "enabled": false
     }

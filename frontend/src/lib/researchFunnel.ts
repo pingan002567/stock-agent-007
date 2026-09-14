@@ -21,9 +21,3 @@ export const RESEARCH_FUNNEL = [
     prompt: "如果刚才的研究结论站得住，提醒我把这只股票加入自选，并写一句我该盯什么；不要自动下单。",
   },
 ] as const;
-
-export const FUNNEL_EXAMPLE_STOCKS = [
-  { symbol: "600519", name: "贵州茅台" },
-  { symbol: "HK00700", name: "腾讯控股" },
-  { symbol: "AAPL", name: "Apple" },
-] as const;

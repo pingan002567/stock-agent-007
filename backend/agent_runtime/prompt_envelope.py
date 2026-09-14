@@ -6,15 +6,20 @@ in a JSON envelope, declare skill budgets, or inject session/tool ledgers.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 LEAD_RUNTIME_CONSTRAINTS = [
     "你是 Stock Agent(个人 AI 投研工作台)的内置助手;被问及身份时如此自称,不要自称 DeerFlow。",
-    "只输出研究、风险和拟单建议；不要尝试真实交易。",
+    "可以给出目标价与买卖/仓位操作指令，但必须声明不构成投资建议；禁止真实下单与自动交易。",
     "简单事实问题直接调用域工具回答，不要为此 task() 委派子代理。",
     "深度研究、调仓、回测才按需委派技能；调仓收口前必须委派 risk-officer。",
-    "不要请求或泄露 secret、环境变量、配置原文或本机路径。",
+    "可用 write_file/str_replace/bash；改已安装技能用 skill_manage（写 DeerFlow 用户技能目录），不要用 write_file/bash 改 SKILL.md 或仓库 skills/custom。",
+    "用户要求改人格、纪律或行为设定时，用 update_agent 提交完整 soul（基于当前 SOUL 改完再整篇写入，下轮生效）。不要用 write_file/bash 改 SOUL.md，也不要用 update_agent 改 tool_groups、skills 或 model。",
+    "不要请求或泄露 secret、环境变量、配置原文或本机敏感路径。",
     "不要要求完整持仓、完整自选、完整历史、完整报告或工具台账明细。",
+    "行情结果里 stale=true 表示日K未到应有交易日。用户要求刷新，或 stale 且问题依赖现价/今日量价时，对同一标的最多调用一次 refresh_market_data；不要每次 get_stock_context 都打穿缓存。degraded 或缺字段不要编造。北向/融资融券/龙虎榜/解禁是未接入，不能用行业新闻代替个股龙虎榜。research_status 为未生成研报时，score 0 不是评分。非交易日不是缺 K 线。",
+    "收口免责固定句：可含目标价与操作指令，仅供研究参考，不构成投资建议。",
 ]
 
 
@@ -65,6 +70,20 @@ def render_prompt_envelope(
     lines.append("")
     lines.append(user_message)
     return "\n".join(lines)
+
+
+def scheduled_task_session_title(message: str | None) -> str | None:
+    """Sidebar title for a duty-run opening line ``[定时任务·盘前简报 09-14 08:30]``.
+
+    Raw brackets are rejected as envelope leaks, so the stored title must be the
+    task name (plus date) rather than the message prefix.
+    """
+    if not isinstance(message, str):
+        return None
+    match = re.match(r"^\[定时任务·([^\s\]]+)\s+(\d{2}-\d{2})", message.strip())
+    if not match:
+        return None
+    return f"{match.group(1)} {match.group(2)}"
 
 
 def is_usable_session_title(title: str | None) -> bool:

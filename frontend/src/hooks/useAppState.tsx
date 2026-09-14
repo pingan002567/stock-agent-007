@@ -117,6 +117,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [copilotContextVersion, setCopilotContextVersion] = useState(0);
   const appDataCache = useRef<AppDataCache>({});
   const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pageRefreshSecondsRef = useRef(60);
   const stockRef = useRef(stock);
 
   useEffect(() => { stockRef.current = stock; }, [stock]);
@@ -202,7 +203,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     if (tsk.status === "fulfilled") cache.tasks = tsk.value;
     if (rpt.status === "fulfilled") cache.reports = rpt.value;
     if (rptt.status === "fulfilled") cache.reportTemplates = rptt.value;
-    if (stg.status === "fulfilled") cache.settings = stg.value;
+    if (stg.status === "fulfilled") {
+      cache.settings = stg.value;
+      const pageSeconds = (stg.value as { market_refresh?: { page_refresh_seconds?: number } } | null)?.market_refresh?.page_refresh_seconds;
+      if (typeof pageSeconds === "number" && pageSeconds >= 30) {
+        pageRefreshSecondsRef.current = pageSeconds;
+      }
+    }
     if (sctx.status === "fulfilled") cache.stockContext = sctx.value;
     if (shist.status === "fulfilled") cache.stockHistory = shist.value;
     if (sint.status === "fulfilled") cache.stockIntel = sint.value;
@@ -223,18 +230,28 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("workspace-changed", onWorkspaceChanged);
   }, [refreshAll]);
 
-  // 全量数据后台自动刷新（首次加载完成后启动，每 60 秒一次）
-  // refreshAll is stable (useCallback with []) — safe to omit from deps
-   
+  // 页面轮询间隔来自设置「刷新频率」。只打本机接口，不打东财筹码/资金流。
   useEffect(() => {
     if (!isInitialized) return;
-    refreshIntervalRef.current = setInterval(() => {
-      void refreshAll();
-    }, 60_000);
+    const arm = (seconds: number) => {
+      if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
+      pageRefreshSecondsRef.current = seconds;
+      refreshIntervalRef.current = setInterval(() => {
+        void refreshAll();
+      }, seconds * 1000);
+    };
+    arm(pageRefreshSecondsRef.current);
+    const onChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ page_refresh_seconds?: number }>).detail;
+      const seconds = detail?.page_refresh_seconds;
+      if (typeof seconds === "number" && seconds >= 30) arm(seconds);
+    };
+    window.addEventListener("market-refresh-changed", onChanged);
     return () => {
+      window.removeEventListener("market-refresh-changed", onChanged);
       if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
     };
-  }, [isInitialized]);
+  }, [isInitialized, refreshAll]);
 
   const refreshCopilotContext = useCallback(() => {
     setCopilotContextVersion((v) => v + 1);

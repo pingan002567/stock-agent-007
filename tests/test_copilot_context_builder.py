@@ -76,6 +76,7 @@ def test_empty_page_falls_back_to_overview(tmp_path):
 def test_symbol_summary_includes_watchlist_and_holding_relation(tmp_path):
     services = _make_services(tmp_path)
     services.repo.upsert_watchlist_item(WatchlistItem(symbol="AAPL", name="Apple", group="核心持仓", monitored=True))
+    services.repo.upsert_holding(HoldingPosition(symbol="AAPL", name="Apple", quantity=1, market_value=100, weight_pct=10))
 
     ctx = services.copilot_context_builder.build(page="stock", symbol="AAPL")
     rel = ctx["symbol_summary"]["relation"]

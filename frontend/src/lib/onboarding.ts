@@ -3,7 +3,7 @@
 export const STARTER_PROMPTS = [
   {
     label: "你现在能做什么？",
-    prompt: "你现在能做什么？列出你会用到的工作台能力，没有的不要编，也不要给买卖点。",
+    prompt: "你现在能做什么？列出你会用到的工作台能力，没有的不要编。说明你可以给目标价与操作观点，但那不构成投资建议，也不会下单。",
   },
   {
     label: "帮我看看这三笔演示持仓",
@@ -17,7 +17,7 @@ export const STARTER_PROMPTS = [
 
 export const EMPTY_CHAT_COPY = {
   title: "从一句问题开始",
-  desc: "只做研究，不下单。结论是看法和风险，不是买卖指令。",
+  desc: "可给目标价与操作指令，不下单。结论仅供研究参考，不构成投资建议。",
 } as const;
 
 export const SETUP_WIZARD_COPY = {

@@ -86,27 +86,36 @@ def _seed_market_data(repo: WorkbenchRepository, provider_router) -> None:
     """First-run data seeding + background warmup.
 
     Side-effecting and network-dependent: starts the primary provider's background
-    refresh, auto-imports A-share/HK/US master lists when missing, and warms hot-stock
-    caches on a daemon thread. Safe to skip — the app functions without it (just with a
-    cold cache and empty master table until manually imported).
+    refresh, auto-imports A-share/HK/US master lists when missing/thin, and warms
+    hot-stock caches on a daemon thread. Safe to skip — the app functions without
+    it (just with a cold cache and empty master table until manually imported).
+
+    Important: demo holdings seed a few rows into ``stock_master``. Import must
+    gate on **CN market headcount**, not ``list_stock_master()`` emptiness —
+    otherwise 茅台/腾讯/Apple 会永久挡住 A 股全量主表，行业工具全部 degraded。
     """
     if hasattr(provider_router.primary, "start_background_refresh"):
-        provider_router.primary.start_background_refresh(interval_seconds=300)
+        from backend.config.market_refresh import load_market_refresh
+
+        provider_router.primary.start_background_refresh(
+            interval_getter=lambda: load_market_refresh(repo)["warmup_seconds"],
+        )
 
     primary_available = provider_router.primary.is_available()
     if not primary_available:
         return
 
-    # Auto-import A-share master when the table is empty.
-    if not repo.list_stock_master():
-        try:
-            from backend.stock_domain.catalog_tools import import_a_share_master
+    # A 股全量约 5000+；演示组合只有个位数 CN 行。阈值以下视为未导入。
+    _CN_MASTER_READY = 500
+    try:
+        from backend.stock_domain.catalog_tools import import_a_share_master
 
+        if repo.count_stock_master(market="CN") < _CN_MASTER_READY:
             result = import_a_share_master()
             if result.get("ok"):
                 _log.info("imported %d A-share stocks", result["imported"])
-        except Exception:
-            _log.exception("A-share master import failed")
+    except Exception:
+        _log.exception("A-share master import failed")
 
     def _warmup():
         try:
@@ -134,19 +143,18 @@ def _seed_market_data(repo: WorkbenchRepository, provider_router) -> None:
     threading.Thread(target=_sync_industry, name="industry-sync", daemon=True).start()
 
     # Auto-import HK/US master lists when those markets are missing.
-    existing_markets = {s.market for s in repo.list_stock_master(active_only=True)}
     try:
         from backend.stock_domain.catalog_tools import (
             import_hk_stock_master,
             import_us_stock_master,
         )
 
-        if "HK" not in existing_markets:
+        if repo.count_stock_master(market="HK") == 0:
             hk_result = import_hk_stock_master()
             if hk_result.get("ok"):
                 _log.info("imported %d HK stocks", hk_result["imported"])
 
-        if "US" not in existing_markets:
+        if repo.count_stock_master(market="US") == 0:
             us_result = import_us_stock_master()
             if us_result.get("ok"):
                 _log.info("imported %d US stocks", us_result["imported"])

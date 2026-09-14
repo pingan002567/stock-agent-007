@@ -24,6 +24,7 @@ class ExecutionPolicy:
         "get_daily_history",
         "search_stock_intel",
         "get_market_structure",
+        "refresh_market_data",
         "get_portfolio_snapshot",
         "get_active_risk_policy",
         "list_risk_policies",

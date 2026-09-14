@@ -29,10 +29,12 @@ def test_authority_tool_groups_never_include_blocked_and_scale_with_level():
     a4 = tool_groups_for_authority("A4")
 
     assert "a5-blocked" not in a2 + a3 + a4
-    assert "a2-research" in a2 and "a4-planner" not in a2 and "a3-risk" not in a2
-    assert "a3-risk" in a3 and "a4-planner" not in a3
-    assert "a4-planner" in a4
-    assert "files" in a2 and "search" in a2
+    # Full-open: every authority sees research + risk + planner groups.
+    for groups in (a2, a3, a4):
+        assert "a2-research" in groups
+        assert "a3-risk" in groups
+        assert "a4-planner" in groups
+        assert "files" in groups and "search" in groups
     assert agent_name_for_authority("A2") == "workbench-a2"
     assert agent_name_for_authority("A4") == "workbench-a4"
 
@@ -52,9 +54,51 @@ def test_generate_config_writes_deerflow_agent_configs_with_tool_groups(tmp_path
         assert agent is not None
         assert agent.tool_groups == tool_groups_for_authority(level)
 
+    from deerflow.config.paths import get_paths
+    from deerflow.runtime.user_context import DEFAULT_USER_ID
+
+    user_dir = get_paths().user_agent_dir(DEFAULT_USER_ID, "workbench-a2")
+    assert (user_dir / "config.yaml").is_file()
+    soul = (user_dir / "SOUL.md").read_text(encoding="utf-8")
+    assert "update_agent" in soul
+
+
+def test_product_skills_are_seeded_into_deerflow_user_custom_dir(tmp_path, monkeypatch):
+    import deerflow.config.paths as paths_mod
+    from deerflow.runtime.user_context import DEFAULT_USER_ID
+    from deerflow.skills.storage.user_scoped_skill_storage import UserScopedSkillStorage
+    from backend.agent_runtime.deerflow_config import ensure_user_custom_skills
+    from backend.agent_runtime.skill_specs import skill_md_path
+    from backend.paths import REPO_ROOT
+
+    monkeypatch.setenv("DEER_FLOW_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(paths_mod, "_paths", None)
+    ensure_user_custom_skills()
+
+    dest = paths_mod.get_paths().user_custom_skills_dir(DEFAULT_USER_ID)
+    assert (dest / "stock-researcher" / "SKILL.md").is_file()
+    assert skill_md_path("stock-researcher") == dest / "stock-researcher" / "SKILL.md"
+
+    edited = dest / "stock-researcher" / "SKILL.md"
+    edited.write_text(edited.read_text(encoding="utf-8") + "\n<!-- user edit -->\n", encoding="utf-8")
+    ensure_user_custom_skills()
+    assert "user edit" in edited.read_text(encoding="utf-8")
+
+    storage = UserScopedSkillStorage(DEFAULT_USER_ID, host_path=str(REPO_ROOT / "skills"))
+    storage.ensure_custom_skill_is_editable("stock-researcher")
+    (dest / "notes-only").mkdir()
+    (dest / "notes-only" / "SKILL.md").write_text(
+        "---\nname: notes-only\ndescription: scratch\n---\nbody\n",
+        encoding="utf-8",
+    )
+    names = {skill.name for skill in storage.load_skills()}
+    assert "stock-researcher" in names
+    assert "notes-only" in names
+    assert "sector-rotation-report" in names
+
 
 def test_get_available_tools_honors_authority_tool_groups(tmp_path):
-    """Native DeerFlow filter: A2 schema must not list generate_draft_order."""
+    """Native DeerFlow filter: full-open schema includes planner tools; A5 stays out."""
     from deerflow.config.app_config import reload_app_config
     from deerflow.tools import get_available_tools
     from backend.agent_runtime.deerflow_config import tool_groups_for_authority
@@ -64,15 +108,18 @@ def test_get_available_tools_honors_authority_tool_groups(tmp_path):
     a2 = {t.name for t in get_available_tools(groups=tool_groups_for_authority("A2"), app_config=app)}
     a4 = {t.name for t in get_available_tools(groups=tool_groups_for_authority("A4"), app_config=app)}
 
-    assert "generate_draft_order" not in a2
+    assert "generate_draft_order" in a2
     assert "generate_draft_order" in a4
     assert "place_real_order" not in a2
     assert "place_real_order" not in a4
     # Builtins stay outside group filter.
     assert "ask_clarification" in a2
     assert "get_daily_history" in a2
-    assert "analyze_portfolio_risk" not in a2
+    assert "analyze_portfolio_risk" in a2
     assert "analyze_portfolio_risk" in a4
+    assert "bash" in a2
+    assert "write_file" in a2
+    assert "skill_manage" in a2
 
 
 def test_context_window_is_env_overridable(tmp_path, monkeypatch):
@@ -120,3 +167,61 @@ def test_generated_config_is_accepted_by_the_deerflow_schema(tmp_path):
     assert config.summarization.trim_tokens_to_summarize == 16_000
     assert config.tool_output.externalize_min_chars == 4_000
     assert config.models[0].profile["max_input_tokens"] == 300_000
+
+
+def test_local_sandbox_defaults_to_host_bash_on(monkeypatch, tmp_path):
+    monkeypatch.delenv("WORKBENCH_SANDBOX_MODE", raising=False)
+    monkeypatch.delenv("WORKBENCH_SANDBOX_ALLOW_HOST_BASH", raising=False)
+    monkeypatch.delenv("WORKBENCH_SANDBOX_WRITE", raising=False)
+    monkeypatch.setattr(
+        "backend.agent_runtime.deerflow_config._sandbox_mode",
+        lambda: "host",
+    )
+    from backend.agent_runtime import deerflow_config as cfg
+
+    section = cfg._sandbox_section("host")
+    assert section["allow_host_bash"] is True
+    assert cfg._sandbox_bash_enabled() is True
+    assert cfg._sandbox_write_tools_enabled() is True
+    assert cfg._sandbox_exec_enabled() is True
+
+    monkeypatch.setenv("WORKBENCH_SANDBOX_ALLOW_HOST_BASH", "0")
+    assert cfg._sandbox_section("host")["allow_host_bash"] is False
+    assert cfg._sandbox_bash_enabled() is False
+
+
+def test_authority_tool_groups_include_sandbox_exec_when_write_on(monkeypatch):
+    monkeypatch.delenv("WORKBENCH_SANDBOX_ALLOW_HOST_BASH", raising=False)
+    monkeypatch.delenv("WORKBENCH_SANDBOX_WRITE", raising=False)
+    monkeypatch.setattr(
+        "backend.agent_runtime.deerflow_config._sandbox_mode",
+        lambda: "host",
+    )
+    from backend.agent_runtime.deerflow_config import tool_groups_for_authority
+
+    assert "sandbox-exec" in tool_groups_for_authority("A2")
+
+    monkeypatch.setenv("WORKBENCH_SANDBOX_WRITE", "0")
+    monkeypatch.setenv("WORKBENCH_SANDBOX_ALLOW_HOST_BASH", "0")
+    assert "sandbox-exec" not in tool_groups_for_authority("A2")
+
+
+def test_generated_config_enables_skill_evolution_and_write_file(tmp_path, monkeypatch):
+    monkeypatch.delenv("WORKBENCH_AI_SKILL_EVOLUTION", raising=False)
+    monkeypatch.delenv("WORKBENCH_SANDBOX_WRITE", raising=False)
+    monkeypatch.delenv("WORKBENCH_SANDBOX_ALLOW_HOST_BASH", raising=False)
+    monkeypatch.setattr(
+        "backend.agent_runtime.deerflow_config._sandbox_mode",
+        lambda: "host",
+    )
+    config = _generate(tmp_path)
+    assert config["skill_evolution"]["enabled"] is True
+    assert config["sandbox"]["allow_host_bash"] is True
+    tool_names = {t["name"] for t in config["tools"]}
+    assert "write_file" in tool_names
+    assert "str_replace" in tool_names
+    assert "bash" in tool_names
+
+    monkeypatch.setenv("WORKBENCH_AI_SKILL_EVOLUTION", "0")
+    config_off = _generate(tmp_path)
+    assert config_off["skill_evolution"]["enabled"] is False

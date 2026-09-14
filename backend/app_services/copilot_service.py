@@ -11,12 +11,14 @@ from typing import Any, AsyncIterator, Dict, Optional
 from uuid import uuid4
 
 from backend.agent_runtime import skill_specs
+from backend.agent_runtime.prompt_envelope import scheduled_task_session_title
 from backend.agent_runtime.deerflow_client import DeerFlowClientAdapter
 from backend.agent_runtime.human_input import (
     build_human_input_request,
     extract_human_input_from_tool_result,
     normalize_human_input_response,
 )
+from backend.agent_runtime.disclaimer import RESEARCH_DISCLAIMER
 from backend.agent_runtime.result_normalizer import ResultNormalizer
 from backend.agent_runtime.skill_registry import SkillRegistry
 from backend.app_services.audit_service import AuditService
@@ -47,6 +49,7 @@ from backend.app_services.copilot_errors import (
     categorize_error,
     classify_outcome,
     error_hint,
+    user_facing_error,
 )
 from backend.app_services.copilot_session_state import (
     MAX_SESSION_STATES,
@@ -578,7 +581,7 @@ class CopilotService:
                     "counter_reasons": ["检测到已有部分 SSE 事件但缺少 final_answer。"],
                     "evidence_refs": ["copilot_message", "stream_recovery_guard"],
                     "next_actions": ["重新发送消息以创建新的 run_id。"],
-                    "disclaimer": "仅供研究，不构成投资建议。",
+                    "disclaimer": RESEARCH_DISCLAIMER,
                 }
             )
             final_event = SSEEvent(
@@ -724,7 +727,6 @@ class CopilotService:
                                 payload["confidence"] = None
                                 payload["evidence_refs"] = []
                                 payload["disclaimer"] = None
-                                payload["suggested_actions"] = []
                             if last_report_result:
                                 self.copilot_context_builder._cache.invalidate(
                                     "reports_summary"
@@ -807,15 +809,6 @@ class CopilotService:
                                     payload.setdefault("next_actions", []).append(
                                         "在审查页显式发起 pre-trade review。"
                                     )
-                            payload["suggested_actions"] = self._suggest_actions(
-                                page=request.page,
-                                symbol=request.symbol,
-                                context=context,
-                                skill_trace=state.skill_trace,
-                                last_report_result=last_report_result,
-                                last_draft_result=last_draft_result,
-                                last_review_result=last_review_result,
-                            )
                             self._update_task_step(
                                 resolved_task_id, "final", 100, status="done"
                             )
@@ -902,7 +895,7 @@ class CopilotService:
                 type="error",
                 payload={
                     "stage": "stream_run",
-                    "error": f"stream crashed: {exc}",
+                    "error": user_facing_error(str(exc)),
                     "authority_level": request.authority_level.value,
                 },
             )
@@ -910,10 +903,10 @@ class CopilotService:
             yield error_sse
             fallback_payload = self.result_normalizer.normalize_final(
                 {
-                    "conclusion": f"AI 流处理异常中断：{exc}",
+                    "conclusion": f"AI 流处理异常中断：{user_facing_error(str(exc))}",
                     "confidence": "low",
                     "counter_reasons": [f"未预期异常：{type(exc).__name__}"],
-                    "disclaimer": "仅供研究，不构成投资建议。",
+                    "disclaimer": RESEARCH_DISCLAIMER,
                 }
             )
             final_sse = SSEEvent(
@@ -1210,8 +1203,6 @@ class CopilotService:
         }
         if payload.get("clarification"):
             data["clarification"] = payload.get("clarification")
-        if payload.get("suggested_actions"):
-            data["suggested_actions"] = payload.get("suggested_actions")
         return (
             "assistant",
             "final_answer",
@@ -1270,6 +1261,9 @@ class CopilotService:
         }.get(kind, "reasoning")
 
     def _derive_title(self, *, anchor_symbol: str | None, message: str | None) -> str:
+        scheduled = scheduled_task_session_title(message)
+        if scheduled:
+            return scheduled
         if message:
             trimmed = message.strip()
             if trimmed:
@@ -1458,122 +1452,6 @@ class CopilotService:
                 "note": "实际委派进度（由 task 工具事件推进）。",
             },
         )
-
-    def _suggest_actions(
-        self,
-        *,
-        page: str,
-        symbol: str | None,
-        context: dict[str, Any],
-        skill_trace: list[dict[str, Any]],
-        last_report_result: dict[str, Any] | None,
-        last_draft_result: dict[str, Any] | None,
-        last_review_result: dict[str, Any] | None,
-    ) -> list[dict[str, str]]:
-        actions: list[dict[str, str]] = []
-
-        if symbol:
-            summary = context.get("symbol_summary") or {}
-            relation = summary.get("relation") or {}
-            in_watchlist = relation.get("in_watchlist", False)
-            in_holdings = relation.get("in_holdings", False)
-
-            if not in_watchlist:
-                actions.append(
-                    {
-                        "label": "加入自选",
-                        "icon": "⭐",
-                        "action_type": "api",
-                        "endpoint": "watchlist",
-                        "symbol": symbol,
-                    }
-                )
-            else:
-                actions.append(
-                    {
-                        "label": "移除自选",
-                        "icon": "✕",
-                        "action_type": "api",
-                        "endpoint": "watchlist_remove",
-                        "symbol": symbol,
-                    }
-                )
-            if not in_holdings:
-                actions.append(
-                    {
-                        "label": "加仓",
-                        "icon": "💰",
-                        "action_type": "navigate",
-                        "screen": "research",
-                        "stock": symbol,
-                    }
-                )
-            actions.append(
-                {
-                    "label": "深度研究",
-                    "icon": "🔍",
-                    "action_type": "navigate",
-                    "screen": "research",
-                    "stock": symbol,
-                }
-            )
-
-        if page != "holdings":
-            actions.append(
-                {
-                    "label": "持仓",
-                    "icon": "💼",
-                    "action_type": "navigate",
-                    "screen": "holdings",
-                }
-            )
-        if page != "monitor":
-            actions.append(
-                {
-                    "label": "盯盘",
-                    "icon": "👁",
-                    "action_type": "navigate",
-                    "screen": "monitor",
-                }
-            )
-
-        if last_report_result:
-            actions.append(
-                {
-                    "label": "查看报告",
-                    "icon": "📄",
-                    "action_type": "navigate",
-                    "screen": "reports",
-                }
-            )
-        if last_draft_result:
-            actions.append(
-                {
-                    "label": "查看草案",
-                    "icon": "📝",
-                    "action_type": "navigate",
-                    "screen": "holdings",
-                }
-            )
-        if last_review_result:
-            actions.append(
-                {
-                    "label": "查看审查",
-                    "icon": "🛡",
-                    "action_type": "navigate",
-                    "screen": "holdings",
-                }
-            )
-
-        seen: set[tuple[str, str]] = set()
-        deduped = [
-            a
-            for a in actions
-            if (key := (a["label"], a.get("screen", "") or a.get("endpoint", "")))
-            not in seen
-            and not seen.add(key)
-        ]
-        return deduped[:5]
 
     def _skill_purpose(self, skill_name: str) -> str:
         purposes = {

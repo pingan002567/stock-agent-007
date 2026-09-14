@@ -15,9 +15,26 @@ _SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills" / "custom"
 _DEFAULT_DISALLOWED = ("task", "place_real_order")
 
 
+def skill_md_path(name: str) -> Path:
+    """Prefer the DeerFlow user-custom copy; repo ``skills/custom`` is only the seed."""
+    installed = _installed_skill_md(name)
+    if installed is not None and installed.is_file():
+        return installed
+    return _SKILLS_DIR / name / "SKILL.md"
+
+
+def _installed_skill_md(name: str) -> Path | None:
+    try:
+        from deerflow.config.paths import get_paths
+        from deerflow.runtime.user_context import DEFAULT_USER_ID
+    except Exception:
+        return None
+    return get_paths().user_custom_skills_dir(DEFAULT_USER_ID) / name / "SKILL.md"
+
+
 def _read_skill_md(name: str) -> tuple[str, list[str], str]:
     """Return (description, allowed_tools, markdown_body) from a skill's SKILL.md."""
-    path = _SKILLS_DIR / name / "SKILL.md"
+    path = skill_md_path(name)
     text = path.read_text(encoding="utf-8")
     m = re.match(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", text, re.S)
     frontmatter = m.group(1) if m else ""
@@ -57,21 +74,18 @@ WORKBENCH_SKILLS: dict[str, WorkbenchSkill] = {
     "stock-researcher": WorkbenchSkill(
         label="AI 研究员",
         authority="A2",
-        disallowed_extra=("generate_draft_order",),
         max_turns=50,
         timeout_seconds=600,
     ),
     "valuation-analyst": WorkbenchSkill(
         label="AI 估值分析师",
         authority="A2",
-        disallowed_extra=("generate_draft_order",),
         max_turns=40,
         timeout_seconds=600,
     ),
     "catalyst-tracker": WorkbenchSkill(
         label="AI 催化剂追踪",
         authority="A2",
-        disallowed_extra=("generate_draft_order",),
         max_turns=30,
         timeout_seconds=300,
     ),
@@ -89,6 +103,12 @@ WORKBENCH_SKILLS: dict[str, WorkbenchSkill] = {
     ),
     "report-writer": WorkbenchSkill(
         label="AI 报告员", authority="A2", max_turns=20, timeout_seconds=300,
+    ),
+    "sector-rotation-report": WorkbenchSkill(
+        label="AI 板块轮动报告",
+        authority="A2",
+        max_turns=40,
+        timeout_seconds=600,
     ),
     "execution-agent-disabled": WorkbenchSkill(
         label="AI 执行代理",

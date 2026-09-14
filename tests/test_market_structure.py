@@ -162,6 +162,113 @@ def test_technical_analysis_uses_real_support_not_percent_band():
     assert tech["support"] != pytest.approx(95.0)
 
 
+def test_tushare_rows_map_into_chip_and_flow():
+    from backend.stock_domain.multi_providers import _cyq_perf_row, _moneyflow_row, _tushare_snapshot
+
+    chip_row = _cyq_perf_row({
+        "trade_date": "20260911",
+        "winner_rate": 62.5,
+        "weight_avg": 18.2,
+        "cost_5pct": 16.1,
+        "cost_95pct": 20.4,
+        "cost_15pct": 17.0,
+        "cost_85pct": 19.5,
+    })
+    chip = _chip_from_row(chip_row, last=18.8, bars=_bars(80))
+    assert chip["degraded"] is False
+    assert chip["method"] == "tushare_cyq_perf"
+    assert chip["profit_ratio"] == pytest.approx(0.625)
+    assert chip["market_avg_cost"] == 18.2
+    assert chip["cost_90_low"] == 16.1
+    assert chip["as_of"] == "2026-09-11"
+
+    flow = _moneyflow_row({
+        "trade_date": "20260911",
+        "buy_elg_amount": 100.0,
+        "sell_elg_amount": 40.0,
+        "buy_lg_amount": 30.0,
+        "sell_lg_amount": 10.0,
+    })
+    assert flow["日期"] == "2026-09-11"
+    assert flow["超大单净流入-净额"] == 600000.0
+    assert flow["主力净流入-净额"] == 800000.0
+
+    snap = _tushare_snapshot(
+        {"trade_date": "20260911", "pe_ttm": 22.5, "pb": 3.1, "total_mv": 100000.0, "circ_mv": 80000.0, "turnover_rate": 1.2, "volume_ratio": 0.9, "close": 18.8},
+        {"high": 19.0, "low": 18.0, "pre_close": 18.5, "amount": 12.5},
+    )
+    assert snap["pe"] == 22.5
+    assert snap["total_market_cap"] == 1_000_000_000.0
+    assert snap["amount"] == 125000.0
+    assert snap["amplitude_pct"] == pytest.approx(5.4054, rel=1e-3)
+
+
+def test_cn_structure_uses_tushare_when_configured(monkeypatch):
+    class Paid:
+        name = "tushare"
+
+        def is_available(self):
+            return True
+
+        def fetch_chip_cyq(self, symbol):
+            return [{
+                "日期": "2026-09-11",
+                "获利比例": 50,
+                "平均成本": 10,
+                "method": "tushare_cyq_perf",
+            }]
+
+        def fetch_fund_flow_rows(self, symbol, limit=12):
+            return [{"日期": "2026-09-11", "主力净流入-净额": 1000, "source": "tushare.moneyflow"}]
+
+        def fetch_spot_snapshot(self, symbol):
+            raise AssertionError("chip/flow test should not need snapshot")
+
+    monkeypatch.setattr("backend.stock_domain.market_structure._tushare_structure_provider", lambda: Paid())
+    monkeypatch.setattr("backend.stock_domain.market_structure._akshare_primary", lambda: None)
+    monkeypatch.setattr(
+        "backend.stock_domain.market_structure.get_daily_history",
+        lambda *a, **k: {"items": _bars(80), "source": "tushare"},
+    )
+    monkeypatch.setattr(
+        "backend.stock_domain.market_structure._snapshot_block",
+        lambda *a, **k: {"degraded": False, "pe": 12},
+    )
+
+    payload = get_market_structure("600519")
+    assert payload["chip"]["method"] == "tushare_cyq_perf"
+    assert payload["chip"]["degraded"] is False
+    assert payload["flow"]["source"] == "tushare.moneyflow"
+    assert payload["flow"]["main_net_1d"] == 1000
+
+
+def test_tushare_refusal_falls_back_to_akshare(monkeypatch):
+    class Paid:
+        name = "tushare"
+
+        def is_available(self):
+            return True
+
+        def fetch_fund_flow_rows(self, symbol, limit=12):
+            raise RuntimeError("抱歉，您没有接口访问权限")
+
+    class Free:
+        name = "akshare"
+
+        def fetch_fund_flow_rows(self, symbol, limit=12):
+            return [{"日期": "2026-09-11", "主力净流入-净额": 20}]
+
+    monkeypatch.setattr("backend.stock_domain.market_structure._tushare_structure_provider", lambda: Paid())
+    monkeypatch.setattr("backend.stock_domain.market_structure._akshare_primary", lambda: Free())
+
+    from backend.stock_domain.market_structure import _flow_block
+
+    flow = _flow_block("CN", "600519")
+    assert flow["degraded"] is False
+    assert flow["source"] == "akshare"
+    assert flow["main_net_1d"] == 20
+
+
 def test_live_a_share_and_overseas_samples():
     if os.environ.get("MARKET_STRUCTURE_LIVE") != "1":
         pytest.skip("set MARKET_STRUCTURE_LIVE=1 to run live Eastmoney/yfinance checks")

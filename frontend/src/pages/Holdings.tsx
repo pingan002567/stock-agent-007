@@ -62,7 +62,6 @@ export default function Holdings() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
-  const [clearingDemo, setClearingDemo] = useState(false);
 
   // === loadAll: parallel fetch all data in one shot ===
   const loadAll = async () => {
@@ -108,16 +107,6 @@ export default function Holdings() {
   }, [globalLoading]);
 
   // === Action handlers ===
-
-  const handleClearDemo = async () => {
-    if (!window.confirm("清空示例持仓？这不会删除自选里的观察标的。")) return;
-    setClearingDemo(true);
-    try {
-      await apiPost("/api/holdings/clear-demo", {});
-      await loadAll();
-    } catch { /* ignore */ }
-    finally { setClearingDemo(false); }
-  };
 
   const handleRiskScan = async () => {
     setScanning(true);
@@ -169,11 +158,6 @@ export default function Holdings() {
               prompt: "解读当前持仓风险扫描结果,并给出应对建议" },
           ]}
           actions={<>
-            {holdings?.demo ? (
-              <button className="small" disabled={clearingDemo} onClick={() => void handleClearDemo()} type="button">
-                {clearingDemo ? "清空中…" : "清空示例持仓"}
-              </button>
-            ) : null}
             <button className="small" disabled={scanning} onClick={() => void handleRiskScan()} type="button">
               {scanning ? "扫描中…" : "风险扫描"}
             </button>
@@ -191,15 +175,9 @@ export default function Holdings() {
                 </svg>
                 持仓明细
                 <span className="panel-badge">{holdings?.items.length ?? 0} 只</span>
-                {holdings?.demo ? <span className="panel-badge">示例</span> : null}
               </div>
             </div>
             <div className="panel-body" style={{ padding: 0 }}>
-              {holdings?.demo ? (
-                <div className="muted" style={{ padding: "10px 16px", borderBottom: "1px solid var(--line)" }}>
-                  当前是首次种子示例仓（茅台 / 腾讯 / AAPL），权重仅供演示，不是你的真仓。
-                </div>
-              ) : null}
               {holdings && holdings.items.length > 0 ? (
                 <table className="data-table">
                   <thead>

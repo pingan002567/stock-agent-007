@@ -12,7 +12,7 @@ import {
   sortHistoryNewestFirst,
   sortIntelNewestFirst,
 } from "@/lib/sortStockSeries";
-import { FUNNEL_EXAMPLE_STOCKS, RESEARCH_FUNNEL } from "@/lib/researchFunnel";
+import { RESEARCH_FUNNEL } from "@/lib/researchFunnel";
 
 // --- types ---
 
@@ -30,6 +30,7 @@ interface StockPrice {
   change_pct?: number;
   updated_at?: string;
   source?: string;
+  coverage?: { stale?: boolean; from_cache?: boolean; age_seconds?: number | null };
 }
 
 interface StockRelation {
@@ -55,6 +56,7 @@ interface StockContext {
   relation?: StockRelation;
   holding?: StockHolding;
   ai_state?: { score?: number; risk_label?: string; stance?: string; confidence?: string };
+  research_status?: string;
   latest_report?: { report_id?: string; generated_at?: string };
 }
 
@@ -406,19 +408,7 @@ export default function Research() {
                 <div key={item.step}>{item.step} · {item.hint}</div>
               ))}
             </div>
-            <div style={{ fontSize: 11, color: "var(--faint, var(--muted))", marginTop: 10 }}>搜一只股票，或点示例开始</div>
-            <div className="funnel-chips" style={{ marginTop: 10, justifyContent: "center" }}>
-              {FUNNEL_EXAMPLE_STOCKS.map((item) => (
-                <button
-                  key={item.symbol}
-                  type="button"
-                  className="followup-chip"
-                  onClick={() => selectStock(item.symbol)}
-                >
-                  {item.name}
-                </button>
-              ))}
-            </div>
+            <div style={{ fontSize: 11, color: "var(--faint, var(--muted))", marginTop: 10 }}>搜索股票名称或代码开始</div>
           </div></div>
         ) : loading && !context ? (
           <section className="detail-grid">
@@ -489,7 +479,7 @@ export default function Research() {
                 <div className="stock-stat">
                   <span className="stock-stat-label">今日涨跌</span>
                   <span className={`stock-stat-value ${changeCls(context.price?.change_pct)}`}>{pct(context.price?.change_pct)}</span>
-                  <span className="stock-stat-change neutral">实时数据</span>
+                  <span className="stock-stat-change neutral">{context.price?.coverage?.stale ? "行情可能过期" : "行情"}</span>
                 </div>
               </div>
             </div>
@@ -509,12 +499,16 @@ export default function Research() {
                   <AskAiButton prompt={`复评 ${context.symbol} 的 AI 观点:当前评分与立场是否仍成立?`} symbol={context.symbol} label="复评" />
                 </div>
                 <div className="panel-body">
+                  {context.research_status === "未生成研报" ? (
+                    <div className="muted" style={{ fontSize: 13 }}>未生成研报。评分为 0、立场为空，不是研究结论。</div>
+                  ) : (
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
                     <div><div className="muted" style={{ fontSize: 11 }}>评分</div><div className="num" style={{ fontSize: 16, fontWeight: 700 }}>{context.ai_state.score ?? "-"}</div></div>
-                    <div><div className="muted" style={{ fontSize: 11 }}>立场</div><div style={{ fontSize: 13, fontWeight: 600 }}>{context.ai_state.stance ?? "-"}</div></div>
-                    <div><div className="muted" style={{ fontSize: 11 }}>置信</div><div style={{ fontSize: 13, fontWeight: 600 }}>{context.ai_state.confidence ?? "-"}</div></div>
-                    <div><div className="muted" style={{ fontSize: 11 }}>风险标签</div><div style={{ fontSize: 13, fontWeight: 600, color: context.ai_state.risk_label ? "var(--red)" : undefined }}>{context.ai_state.risk_label ?? "无"}</div></div>
+                    <div><div className="muted" style={{ fontSize: 11 }}>立场</div><div style={{ fontSize: 13, fontWeight: 600 }}>{context.ai_state.stance || "-"}</div></div>
+                    <div><div className="muted" style={{ fontSize: 11 }}>置信</div><div style={{ fontSize: 13, fontWeight: 600 }}>{context.ai_state.confidence || "-"}</div></div>
+                    <div><div className="muted" style={{ fontSize: 11 }}>风险标签</div><div style={{ fontSize: 13, fontWeight: 600, color: context.ai_state.risk_label ? "var(--red)" : undefined }}>{context.ai_state.risk_label || "无"}</div></div>
                   </div>
+                  )}
                 </div>
               </div>
             )}

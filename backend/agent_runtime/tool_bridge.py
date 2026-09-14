@@ -136,6 +136,7 @@ class WorkbenchToolBridge:
             "analyze_portfolio_risk": self._analyze_portfolio_risk,
             "get_industry_context": self._get_industry_context,
             "get_market_structure": self._get_market_structure,
+            "refresh_market_data": self._refresh_market_data,
             "get_monitor_events": self._get_monitor_events,
             "get_monitor_rules": self._get_monitor_rules,
             "evaluate_monitor_rules": self._evaluate_monitor_rules,
@@ -465,6 +466,15 @@ class WorkbenchToolBridge:
                 True,
                 {"symbol": "str"},
                 ["market_structure", "history", "chip"],
+            ),
+            "refresh_market_data": ToolSpec(
+                "refresh_market_data",
+                "market-data",
+                AuthorityLevel.A2,
+                "low",
+                True,
+                {"symbol": "str"},
+                ["quote", "history", "market_structure"],
             ),
             "get_monitor_events": ToolSpec(
                 "get_monitor_events",
@@ -810,6 +820,11 @@ class WorkbenchToolBridge:
         from backend.stock_domain.market_structure import get_market_structure
 
         return get_market_structure(str(arguments.get("symbol") or ""))
+
+    def _refresh_market_data(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from backend.stock_domain.quote_tools import refresh_market_data
+
+        return refresh_market_data(str(arguments.get("symbol") or ""))
 
     def _get_monitor_events(self, arguments: dict[str, Any]) -> dict[str, Any]:
         from backend.stock_domain.result_projection import (

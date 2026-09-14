@@ -20,6 +20,20 @@ from backend.agent_runtime.tool_bridge import WorkbenchToolBridge
 from backend.app_services.permission_guard import PermissionDenied
 from backend.schemas import AuthorityLevel
 
+
+def _lead_available_skills() -> set[str] | None:
+    """Skills projection for DeerFlowClient.
+
+    LocalSandbox + host bash cannot enforce per-Agent skill FS isolation. Passing a
+    restricted ``available_skills`` set then raises SandboxRuntimeError on every
+    turn. Use the shared unrestricted skill view when host bash is on.
+    """
+    from backend.agent_runtime.deerflow_config import _host_bash_explicitly_allowed, _sandbox_mode
+
+    if _sandbox_mode() == "host" and _host_bash_explicitly_allowed():
+        return None
+    return skill_specs.subagent_names()
+
 def _turn_upload_files(attachments: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     files: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -76,7 +90,9 @@ SYNC_STREAM_QUEUE_MAXSIZE = 64
 # default 100; subagent-enabled turns delegate to nested graphs and need more.
 # Both overridable via env for ops without a code change.
 _DEFAULT_RECURSION_LIMIT = 100
-_SUBAGENT_RECURSION_LIMIT = 160
+# Nested task()/skill graphs burn LangGraph super-steps quickly on multi-section
+# reports. sector-rotation-report keeps tool budgets low; 320 is the safety ceiling.
+_SUBAGENT_RECURSION_LIMIT = 320
 
 
 def _recursion_limit(subagent_enabled: bool) -> int:
@@ -538,7 +554,7 @@ class DeerFlowClientAdapter:
                     thinking_enabled=thinking_enabled,
                     subagent_enabled=subagent_supported,
                     plan_mode=plan_mode_supported,
-                    available_skills=skill_specs.subagent_names(),
+                    available_skills=_lead_available_skills(),
                 )
                 return cls(
                     mode="direct",
@@ -1233,6 +1249,12 @@ class DeerFlowClientAdapter:
             or ("sandbox" in lower and has("复盘", "绩效"))
         ):
             return "risk-officer"
+        if (
+            has("轮动", "板块深挖", "催化剂日历", "行业轮动", "板块轮动")
+            or ("组合报告" in message and has("板块", "轮动", "催化剂"))
+            or "轮动概览" in message
+        ):
+            return "sector-rotation-report"
         if has("报告", "复盘", "总结", "简报", "盘前") or "report" in lower:
             return "report-writer"
         if has("回测", "策略") or any(word in lower for word in ("backtest", "strategy")):

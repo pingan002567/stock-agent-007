@@ -91,7 +91,7 @@ def _build_model_config() -> dict[str, Any]:
 
 A2_TOOLS = [
     "get_stock_context", "get_daily_history", "search_stock_intel",
-    "get_industry_context", "get_market_structure",
+    "get_industry_context", "get_market_structure", "refresh_market_data",
     "add_watchlist_item", "list_watchlist", "remove_watchlist_item",
     "get_monitor_events", "get_monitor_rules", "evaluate_monitor_rules",
     "list_strategies", "get_backtest_result",
@@ -139,15 +139,16 @@ _AUTHORITY_AGENT_NAMES = {
 
 
 def tool_groups_for_authority(level: str | None) -> list[str]:
-    """Map request authority → DeerFlow tool_groups (native get_available_tools filter)."""
-    normalized = str(level or "A2").strip().upper() or "A2"
-    groups = ["a2-research", "files", "search"]
-    if _sandbox_mode() != "readonly":
+    """Map request authority → DeerFlow tool_groups (native get_available_tools filter).
+
+    Single-user local workbench: expose the full research/risk/planner surface on
+    every session. ``a5-blocked`` (``place_real_order``) stays out of the schema.
+    ``level`` is retained for agent_name / audit, not for tool clipping.
+    """
+    del level  # authority still selects agent_name; tools are intentionally full-open
+    groups = ["a2-research", "a3-risk", "a4-planner", "files", "search"]
+    if _sandbox_write_tools_enabled() or _sandbox_bash_enabled():
         groups.append("sandbox-exec")
-    if normalized in {"A3", "A4", "A5"}:
-        groups.append("a3-risk")
-    if normalized in {"A4", "A5"}:
-        groups.append("a4-planner")
     return groups
 
 
@@ -160,21 +161,78 @@ def agent_name_for_authority(level: str | None) -> str:
     return _AUTHORITY_AGENT_NAMES["A2"]
 
 
+def ensure_user_custom_skills() -> None:
+    """Copy repo skill packages into DeerFlow's per-user custom directory once.
+
+    ``skill_manage`` only writes ``users/<id>/skills/custom``. Repo
+    ``skills/custom`` is the seed. Once that user directory contains any
+    skill, DeerFlow stops loading the repo copies, so every product skill
+    must be seeded or it disappears. An existing ``SKILL.md`` is left alone
+    so later ``skill_manage`` edits survive restart.
+    """
+    import shutil
+
+    from deerflow.config.paths import get_paths
+    from deerflow.runtime.user_context import DEFAULT_USER_ID
+
+    from backend.paths import REPO_ROOT
+
+    seed_root = REPO_ROOT / "skills" / "custom"
+    if not seed_root.is_dir():
+        return
+    dest_root = get_paths().user_custom_skills_dir(DEFAULT_USER_ID)
+    dest_root.mkdir(parents=True, exist_ok=True)
+    for skill_dir in sorted(p for p in seed_root.iterdir() if p.is_dir()):
+        if skill_dir.name.startswith(".") or not (skill_dir / "SKILL.md").is_file():
+            continue
+        dest = dest_root / skill_dir.name
+        if (dest / "SKILL.md").is_file():
+            continue
+        for src in skill_dir.rglob("*"):
+            rel = src.relative_to(skill_dir)
+            if any(part.startswith(".") for part in rel.parts):
+                continue
+            target = dest / rel
+            if src.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            if target.exists():
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, target)
+
+
+def _repo_soul_text() -> str:
+    from backend.paths import REPO_ROOT
+
+    path = REPO_ROOT / "skills" / "SOUL.md"
+    if not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
 def ensure_authority_agents() -> None:
     """Write DeerFlow AgentConfig YAMLs so tool_groups are loadable by agent_name.
 
     DeerFlow 原生合同：``load_agent_config(name).tool_groups`` →
     ``get_available_tools(groups=...)``. Embedded ``DeerFlowClient`` 默认忽略
     该字段；适配层把它接到 ``_get_tools``，不另造 allowlist。
+
+    ``update_agent`` only persists SOUL for a per-user agent. A config that
+    exists only under the legacy shared ``agents/`` dir is rejected, so the
+    same YAML is also written to ``users/<id>/agents/<name>/``. SOUL.md is
+    seeded from ``skills/SOUL.md`` once and never overwritten, so later
+    ``update_agent`` edits survive restart.
     """
     import yaml
     from deerflow.config.paths import get_paths
+    from deerflow.runtime.user_context import DEFAULT_USER_ID
 
-    agents_dir = get_paths().agents_dir
+    paths = get_paths()
+    agents_dir = paths.agents_dir
     agents_dir.mkdir(parents=True, exist_ok=True)
+    seed_soul = _repo_soul_text()
     for level, name in _AUTHORITY_AGENT_NAMES.items():
-        agent_dir = agents_dir / name
-        agent_dir.mkdir(parents=True, exist_ok=True)
         payload = {
             "name": name,
             "description": f"Workbench lead agent (authority {level})",
@@ -182,20 +240,28 @@ def ensure_authority_agents() -> None:
             # skills 省略（None）：prompt 仍加载全部启用 skill；工具裁剪只靠 tool_groups。
             # 这样不会走 skill allowed-tools 并集把 task/bash/read_file 滤掉。
         }
-        config_path = agent_dir / "config.yaml"
-        config_path.write_text(
-            yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
-            encoding="utf-8",
-        )
+        text = yaml.safe_dump(payload, allow_unicode=True, sort_keys=False)
+        agent_dir = agents_dir / name
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        (agent_dir / "config.yaml").write_text(text, encoding="utf-8")
+        user_dir = paths.user_agent_dir(DEFAULT_USER_ID, name)
+        user_dir.mkdir(parents=True, exist_ok=True)
+        (user_dir / "config.yaml").write_text(text, encoding="utf-8")
+        soul_path = user_dir / "SOUL.md"
+        if seed_soul and not soul_path.is_file():
+            soul_path.write_text(seed_soul, encoding="utf-8")
 
 
 def _sandbox_mode() -> str:
-    """沙箱执行模式:docker(aio 容器隔离) / host(Local 受控 host bash) / readonly。
+    """沙箱执行模式:docker(aio 容器隔离) / host(Local 本机文件) / readonly。
 
-    默认自动:Docker 守护进程可达 → docker;否则 host——单用户本地工作台的信任
-    模型等同于用户自己在本机跑 agent 工具(SandboxAudit 审计 + 命令/路径安全层
-    仍然生效)。``WORKBENCH_SANDBOX_MODE`` 可强制三者之一;readonly 恢复旧行为
-    (仅只读文件工具,无 bash/写盘)。
+    默认自动:Docker 守护进程可达 → docker;否则 host。``WORKBENCH_SANDBOX_MODE``
+    可强制三者之一;readonly 仅只读文件工具。
+
+    注意:LocalSandboxProvider 在 ``allow_host_bash: true`` 时无法做 per-Agent
+    skill 文件系统隔离(DeerFlow 会抛 SandboxRuntimeError)。host 模式下默认
+    **关闭** host bash;需要真本机 bash 时显式设
+    ``WORKBENCH_SANDBOX_ALLOW_HOST_BASH=1``(并接受技能隔离不可用)。
     """
     forced = os.getenv("WORKBENCH_SANDBOX_MODE", "").strip().lower()
     if forced in {"docker", "host", "readonly"}:
@@ -214,13 +280,71 @@ def _sandbox_mode() -> str:
     return "host"
 
 
+def _host_bash_explicitly_allowed() -> bool:
+    """Host bash for LocalSandbox (default on for this single-user desktop app).
+
+    Set WORKBENCH_SANDBOX_ALLOW_HOST_BASH=0 to disable. Enabling host bash means
+    LocalSandboxProvider cannot enforce per-Agent skill filesystem isolation —
+    skill-scoped subagent sandboxes may fail; prefer skill_manage / shared skills.
+    """
+    return _env_flag("WORKBENCH_SANDBOX_ALLOW_HOST_BASH", default=True)
+
+
+def _env_flag(name: str, *, default: bool = False) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _skill_evolution_enabled() -> bool:
+    """Agent may create/patch SKILL.md via DeerFlow ``skill_manage`` (default on)."""
+    return _env_flag("WORKBENCH_AI_SKILL_EVOLUTION", default=True)
+
+
 def _sandbox_section(mode: str) -> dict[str, Any]:
     if mode == "docker":
         return {"use": "deerflow.community.aio_sandbox.aio_sandbox_provider:AioSandboxProvider"}
+    # Single-user local: host bash defaults on so bash/write_file work without Docker.
+    allow_bash = mode == "host" and _host_bash_explicitly_allowed()
     return {
         "use": "deerflow.sandbox.local:LocalSandboxProvider",
-        "allow_host_bash": mode == "host",
+        "allow_host_bash": allow_bash,
     }
+
+
+def _sandbox_write_tools_enabled() -> bool:
+    """Register write_file/str_replace (not bash).
+
+    Default on for docker + host so reports/artifacts can land in the sandbox.
+    Set WORKBENCH_SANDBOX_WRITE=0 to force read-only file tools.
+    """
+    mode = _sandbox_mode()
+    if mode == "readonly":
+        return False
+    if mode == "docker":
+        return _env_flag("WORKBENCH_SANDBOX_WRITE", default=True)
+    if mode == "host":
+        return _env_flag("WORKBENCH_SANDBOX_WRITE", default=True)
+    return False
+
+
+def _sandbox_bash_enabled() -> bool:
+    mode = _sandbox_mode()
+    if mode == "docker":
+        return True
+    if mode == "host":
+        return _host_bash_explicitly_allowed()
+    return False
+
+
+def _sandbox_exec_enabled() -> bool:
+    """Any sandbox-exec group tool (write and/or bash)."""
+    return _sandbox_write_tools_enabled() or _sandbox_bash_enabled()
 
 
 def _build_tool_configs() -> list[dict[str, Any]]:
@@ -234,27 +358,29 @@ def _build_tool_configs() -> list[dict[str, Any]]:
         })
     # Sandbox file tools (read-only set): let the agent read uploaded research
     # docs under /mnt/user-data/uploads (UploadsMiddleware injects the file list
-    # per turn; upload_files converts PDF/Word/Excel/PPT to Markdown). Write
-    # tools (write_file/str_replace/bash) are intentionally NOT registered.
+    # per turn; upload_files converts PDF/Word/Excel/PPT to Markdown).
     for _file_tool in ("ls", "glob", "grep", "read_file"):
         configs.append({
             "name": _file_tool, "group": "files",
             "use": f"deerflow.sandbox.tools:{_file_tool}_tool",
         })
-    # 沙箱代码执行(P0,doc/DEERFLOW_21_RESEARCH.md):bash/写盘让 AI 能"写代码算"
-    # ——自定义指标/归因/压力测试/画图;产物经 present_files 呈现。readonly 模式不注册。
-    if _sandbox_mode() != "readonly":
-        _exec_set = tuple(
-            t.strip() for t in os.getenv(
-                "WORKBENCH_SANDBOX_EXEC_TOOLS", "bash,write_file,str_replace"
-            ).split(",") if t.strip()
-        )
-        for _exec_tool in _exec_set:
-            configs.append({
-                "name": _exec_tool, "group": "sandbox-exec",
-                "use": f"deerflow.sandbox.tools:{_exec_tool}_tool",
-            })
-        # present_files 由 harness 内建自动注册,勿重复(会被去重告警跳过)
+    # Write tools: host defaults include bash when allow_host_bash is on.
+    # Note: host bash disables DeerFlow per-Agent skill FS isolation.
+    exec_tools: list[str] = []
+    if _sandbox_write_tools_enabled():
+        exec_tools.extend(["write_file", "str_replace"])
+    if _sandbox_bash_enabled():
+        exec_tools.append("bash")
+    # Optional override list, e.g. WORKBENCH_SANDBOX_EXEC_TOOLS=write_file
+    override = os.getenv("WORKBENCH_SANDBOX_EXEC_TOOLS", "").strip()
+    if override:
+        exec_tools = [t.strip() for t in override.split(",") if t.strip()]
+    for _exec_tool in exec_tools:
+        configs.append({
+            "name": _exec_tool, "group": "sandbox-exec",
+            "use": f"deerflow.sandbox.tools:{_exec_tool}_tool",
+        })
+    # present_files 由 harness 内建自动注册,勿重复(会被去重告警跳过)
     # Web search: a single "web_search" tool backed by the best-configured provider.
     # Tavily / Serper register the same tool name, so we pick one (not all). Tavily and
     # Serper need an API key; DuckDuckGo is the keyless default fallback.
@@ -356,6 +482,9 @@ def generate_config(target_dir: str | Path = "data") -> str:
         Absolute path to the generated config file.
     """
     _ensure_project_config()
+    # Seed before custom_agents are generated so task() prompts follow
+    # skill_manage edits, not the stale repo copy.
+    ensure_user_custom_skills()
 
     target = Path(target_dir)
     target.mkdir(parents=True, exist_ok=True)
@@ -379,6 +508,13 @@ def generate_config(target_dir: str | Path = "data") -> str:
         "skills": {
             "path": "skills",
             "container_path": "/mnt/skills",
+        },
+        # DeerFlow builtin ``skill_manage``: create/patch/edit custom SKILL.md.
+        # Off with WORKBENCH_AI_SKILL_EVOLUTION=0. New skills are progressive skills;
+        # task() subagents still need a skill_specs.WORKBENCH_SKILLS row.
+        "skill_evolution": {
+            "enabled": _skill_evolution_enabled(),
+            "security_fail_closed": True,
         },
         "title": {
             "enabled": True,
@@ -440,6 +576,7 @@ def generate_config(target_dir: str | Path = "data") -> str:
                 "search_stock_intel": 3000,
                 "list_rebalance_drafts": 3000,
                 "get_market_structure": 3000,
+                "refresh_market_data": 2000,
                 "analyze_portfolio_risk": 3000,
             },
         },

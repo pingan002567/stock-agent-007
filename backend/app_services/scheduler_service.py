@@ -26,7 +26,7 @@ CHECK_INTERVAL_SECONDS = 30
 RUN_TIMEOUT_SECONDS = 900
 
 DUTY_PREAMBLE = (
-    "你是值班研究员。只做研究，不出买卖指令，禁止自动交易。\n"
+    "你是值班研究员。可给目标价与操作观点，须声明不构成投资建议；禁止自动交易。\n"
     "必须调用：get_portfolio_snapshot、get_monitor_events、summarize_review_inbox。\n"
     "持仓+自选合计超过 15 只时，只深拉权重最高与今日异动 Top 8，其余一行涨跌，禁止逐只深研。\n"
     "A 股讨论抛压/套牢时必须 get_market_structure；港美股禁止写获利/套牢比例。\n"

@@ -15,9 +15,11 @@ from backend.schemas import (
 
 @pytest.fixture()
 def services(tmp_path):
-    return create_services(
+    created = create_services(
         db_path=tmp_path / "review-inbox.sqlite3", files_root=tmp_path / "files"
     )
+    created.repo.seed_demo_portfolio()
+    return created
 
 
 def _seed_confirmed_draft(services, symbol: str, target_weight_pct: float):

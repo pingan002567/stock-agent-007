@@ -60,6 +60,41 @@ def _cached_constituents(industry: str) -> list[dict[str, Any]]:
     return rows
 
 
+_INDUSTRY_SUFFIXES = ("行业", "板块", "概念", "指数")
+
+
+def resolve_industry_name(requested: str, board_names: list[str]) -> str | None:
+    """Map free-form industry labels onto Eastmoney board names.
+
+    Agents often pass「化学制药」while the board list may use a near-synonym or
+    a longer title. Exact match first; then suffix strip; then unique substring.
+    """
+    q = (requested or "").strip()
+    if not q:
+        return None
+    names = [n for n in board_names if n]
+    if q in names:
+        return q
+    candidates = [q]
+    for suffix in _INDUSTRY_SUFFIXES:
+        if q.endswith(suffix) and len(q) > len(suffix):
+            candidates.append(q[: -len(suffix)])
+        else:
+            candidates.append(q + suffix)
+    for cand in candidates:
+        if cand in names:
+            return cand
+    hits = [n for n in names if any(c and (c in n or n in c) for c in candidates)]
+    # Prefer unique tight matches; if multiple, shortest absolute length delta.
+    uniq = list(dict.fromkeys(hits))
+    if not uniq:
+        return None
+    if len(uniq) == 1:
+        return uniq[0]
+    uniq.sort(key=lambda n: (abs(len(n) - len(q)), len(n)))
+    return uniq[0]
+
+
 def sync_industry_mapping(*, force: bool = False) -> dict[str, Any]:
     """行业→成分股反向索引回填 stock_master.industry（仅 A 股）。
 
@@ -156,14 +191,23 @@ def get_industry_context(
     repo = provider_router.repo
     resolved_symbol = (symbol or "").strip().upper() or None
     resolved_industry = (industry or "").strip() or None
+    recovery_hint = (
+        "请先导入 A 股主表（设置/API：POST /api/stock/import-a-share）并等待行业映射同步；"
+        "或改用东财精确板块名调用 get_industry_context(industry=…)。"
+    )
 
     if resolved_symbol and not resolved_industry:
         master = repo.get_stock_master(resolved_symbol) if repo else None
         if master is None:
+            cn_count = repo.count_stock_master(market="CN") if repo else 0
             return {
                 "degraded": True,
-                "reason": f"{resolved_symbol} 不在股票主表中",
+                "reason": (
+                    f"{resolved_symbol} 不在股票主表中"
+                    + (f"（当前 A 股主表仅 {cn_count} 条，疑似未全量导入）" if cn_count < 500 else "")
+                ),
                 "symbol": resolved_symbol,
+                "recovery_hint": recovery_hint,
             }
         if master.market != "CN":
             return {
@@ -177,6 +221,7 @@ def get_industry_context(
                 "degraded": True,
                 "reason": "该股票行业映射尚未回填（首次同步在启动后后台执行，约需数分钟）",
                 "symbol": resolved_symbol,
+                "recovery_hint": "等待 industry mapping 同步完成，或显式传入 industry=东财板块名重试。",
             }
         resolved_industry = master.industry
 
@@ -184,14 +229,32 @@ def get_industry_context(
         return {"degraded": True, "reason": "需要提供 symbol 或 industry 之一"}
 
     boards = _cached_boards()
+    board_names = [b["industry"] for b in boards if b.get("industry")]
+    matched = resolve_industry_name(resolved_industry, board_names)
+    if matched and matched != resolved_industry:
+        _log.info("industry name resolved: %r → %r", resolved_industry, matched)
+        resolved_industry = matched
+
     board = next((b for b in boards if b["industry"] == resolved_industry), None)
-    constituents = _cached_constituents(resolved_industry)
+    constituents = _cached_constituents(resolved_industry) if resolved_industry else []
     if not constituents:
+        sample = board_names[:20]
+        # Prefer samples that share characters with the query for agent retry.
+        related = [n for n in board_names if any(ch in n for ch in resolved_industry[:2])][:10]
         return {
             "degraded": True,
-            "reason": f"行业「{resolved_industry}」成分股数据获取失败（数据源不可用或行业名不存在）",
+            "reason": (
+                f"行业「{resolved_industry}」成分股数据获取失败"
+                f"（数据源不可用或行业名不存在；已尝试模糊匹配）"
+                + ("；当前东财行业板块列表也为空，多为网络被掐" if not board_names else "")
+            ),
             "industry": resolved_industry,
-            "available_industries_sample": [b["industry"] for b in boards[:20]],
+            "available_industries_sample": related or sample,
+            "recovery_hint": (
+                "从 available_industries_sample 选精确东财板块名重试；"
+                "勿用口语别名硬猜。主表过薄时先导入 A 股主表。"
+                "若 sample 为空：东财行业接口暂不可用，可稍后重试或改用 web_search 并标精度有限。"
+            ),
         }
 
     result: dict[str, Any] = {
@@ -229,7 +292,6 @@ def get_industry_context(
                 "note": "该股票不在此行业成分股列表中（可能行业映射过期）",
             }
         else:
-            caps = [c["cap_est"] for c in constituents]
             ranked = sorted(
                 (c for c in constituents if c["cap_est"] is not None),
                 key=lambda c: c["cap_est"],

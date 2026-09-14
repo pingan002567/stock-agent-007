@@ -256,6 +256,22 @@ class CatalogRepoMixin:
             updated_at=row["updated_at"],
         )
 
+    def count_stock_master(self, *, market: str | None = None, active_only: bool = True) -> int:
+        """Fast headcount for seed/import gates (avoid loading full master rows)."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if active_only:
+            clauses.append("is_active = 1")
+        if market:
+            clauses.append("market = ?")
+            params.append(market)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._lock:
+            row = self.conn.execute(
+                f"SELECT COUNT(*) AS n FROM stock_master{where}", params
+            ).fetchone()
+        return int(row["n"] if row else 0)
+
     def search_stock_master(self, query: str) -> List[StockMaster]:
         q = query.strip().lower()
         if not q:
@@ -331,38 +347,44 @@ class CatalogRepoMixin:
         from backend.schemas import now_iso
 
         now_val = now_iso()
-        placeholders = ",".join("(?, ?, ?, ?, ?, ?, ?, ?, ?)" for _ in items)
-        flat_params: list[Any] = []
-        for item in items:
-            flat_params.extend(
-                (
-                    item.symbol.upper(),
-                    item.name,
-                    item.market,
-                    item.industry,
-                    item.sector,
-                    json.dumps(item.aliases, ensure_ascii=False),
-                    int(item.is_active),
-                    now_val,
-                    now_val,
-                )
-            )
-        sql = f"""
-            INSERT INTO stock_master(symbol, name, market, industry, sector, aliases, is_active, created_at, updated_at)
-            VALUES {placeholders}
-            ON CONFLICT(symbol) DO UPDATE SET
-              name=excluded.name,
-              market=excluded.market,
-              industry=excluded.industry,
-              sector=excluded.sector,
-              aliases=excluded.aliases,
-              is_active=excluded.is_active,
-              updated_at=excluded.updated_at
-        """
+        # SQLite caps bind variables (often 999 or 32766). 9 cols/row → keep chunks small.
+        _CHUNK = 80
+        total = 0
         with self._lock:
-            self.conn.execute(sql, flat_params)
+            for start in range(0, len(items), _CHUNK):
+                chunk = items[start : start + _CHUNK]
+                placeholders = ",".join("(?, ?, ?, ?, ?, ?, ?, ?, ?)" for _ in chunk)
+                flat_params: list[Any] = []
+                for item in chunk:
+                    flat_params.extend(
+                        (
+                            item.symbol.upper(),
+                            item.name,
+                            item.market,
+                            item.industry,
+                            item.sector,
+                            json.dumps(item.aliases, ensure_ascii=False),
+                            int(item.is_active),
+                            now_val,
+                            now_val,
+                        )
+                    )
+                sql = f"""
+                    INSERT INTO stock_master(symbol, name, market, industry, sector, aliases, is_active, created_at, updated_at)
+                    VALUES {placeholders}
+                    ON CONFLICT(symbol) DO UPDATE SET
+                      name=excluded.name,
+                      market=excluded.market,
+                      industry=excluded.industry,
+                      sector=excluded.sector,
+                      aliases=excluded.aliases,
+                      is_active=excluded.is_active,
+                      updated_at=excluded.updated_at
+                """
+                self.conn.execute(sql, flat_params)
+                total += len(chunk)
             self.conn.commit()
-        return len(items)
+        return total
 
     # ── Stock Daily ─────────────────────────────────────────────────
 

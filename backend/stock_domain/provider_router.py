@@ -17,7 +17,7 @@ from backend.schemas import PriceSnapshot, StockDaily, StockQuote, now_iso
 from backend.stock_domain.catalog import get_stock, normalize_symbol
 from backend.stock_domain.multi_providers import create_provider
 from backend.stock_domain.provider_cache import ProviderCache
-from backend.stock_domain.trading_calendar import prev_trading_day
+from backend.stock_domain.trading_calendar import expected_bar_date
 from backend.stock_domain.providers import (
     AkShareMarketDataProvider,
     DataCapabilityStatus,
@@ -46,6 +46,81 @@ _SQLITE_CACHE_TTL: dict[str, float] = {
     "history": 86400.0,  # K-line is immutable: trust SQLite for 24h
     "financial": 604800.0, # 7 days
 }
+
+
+def _parse_bar_date(raw: str | None) -> date | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    if " " in text:
+        text = text.split(" ", 1)[0]
+    if "T" in text:
+        text = text.split("T", 1)[0]
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _newest_bar_date(items: list[dict[str, Any]]) -> date | None:
+    newest: date | None = None
+    for item in items:
+        parsed = _parse_bar_date(str(item.get("date") or ""))
+        if parsed is not None and (newest is None or parsed > newest):
+            newest = parsed
+    return newest
+
+
+def _annotate_history(payload: dict[str, Any], market: str | None, now: datetime | None = None) -> dict[str, Any]:
+    """Stamp bar freshness. Cache hits must not pretend ``updated_at`` is now."""
+    items = payload.get("items") if isinstance(payload.get("items"), list) else []
+    as_of = _newest_bar_date(items)
+    expected = expected_bar_date(market, now)
+    stale = as_of is None or as_of < expected
+    payload["as_of"] = as_of.isoformat() if as_of else None
+    payload["expected_as_of"] = expected.isoformat()
+    payload["stale"] = stale
+    if stale:
+        payload["freshness_reason"] = (
+            f"最新日K {payload['as_of'] or '无'} 早于应有交易日 {expected.isoformat()}"
+        )
+    else:
+        payload.pop("freshness_reason", None)
+    if payload.get("source") == "cache":
+        payload["updated_at"] = payload["as_of"] or payload.get("updated_at")
+        coverage = dict(payload.get("coverage") or {})
+        coverage["from_cache"] = True
+        coverage["updated_at_kind"] = "bar_date"
+        payload["coverage"] = coverage
+    return payload
+
+
+def _quote_age_seconds(updated_at: str | None) -> int | None:
+    if not updated_at:
+        return None
+    try:
+        cache_time = datetime.fromisoformat(updated_at)
+    except ValueError:
+        return None
+    if cache_time.tzinfo is None:
+        age = (datetime.now() - cache_time).total_seconds()
+    else:
+        age = (datetime.now(timezone.utc) - cache_time).total_seconds()
+    return max(0, int(age))
+
+
+def _annotate_quote(snapshot: PriceSnapshot, market: str | None) -> PriceSnapshot:
+    coverage = dict(snapshot.coverage or {})
+    age = _quote_age_seconds(snapshot.updated_at)
+    from_cache = coverage.get("source") == "sqlite_cache" or coverage.get("mode") == "persisted"
+    trading = _is_trading_hours(market or "CN")
+    stale = bool(snapshot.degraded) or (trading and age is not None and age > 300)
+    coverage["age_seconds"] = age
+    coverage["from_cache"] = from_cache
+    coverage["stale"] = stale
+    coverage["session_open"] = trading
+    snapshot.coverage = coverage
+    return snapshot
 
 
 def _is_trading_hours(market: str) -> bool:
@@ -212,33 +287,42 @@ class ProviderRouter:
             capabilities=capabilities,
         )
 
-    def get_quote(self, symbol: str) -> PriceSnapshot:
+    def get_quote(self, symbol: str, *, force: bool = False) -> PriceSnapshot:
         normalized = normalize_symbol(symbol)
         ck = self._cache_key("quote", normalized)
-        cached = self._mem_cache.get(ck)
-        if cached is not None:
-            return cached
         market = self._market_of(normalized)
-        trading = _is_trading_hours(market)
-        sqlite_age_limit = _SQLITE_CACHE_TTL["quote"] if trading else _SQLITE_CACHE_TTL["history"]
-        if self.repo is not None:
-            try:
-                cached = self.repo.get_stock_quote(normalized)
-                if cached is not None and cached.updated_at and (cached.last or 0) > 0:
-                    cache_time = datetime.fromisoformat(cached.updated_at)
-                    age = (datetime.now(timezone.utc) - cache_time).total_seconds()
-                    if age < sqlite_age_limit:
-                        result = PriceSnapshot(
-                            last=cached.last, change_pct=cached.change_pct or 0.0,
-                            updated_at=cached.updated_at, source=cached.source,
-                            degraded=False,
-                            coverage={"source": "sqlite_cache", "mode": "persisted", "cached_at": cached.updated_at},
-                        )
-                        self._mem_cache.set(ck, result, ttl=_CACHE_TTL["quote"])
-                        return result
-            except Exception:
-                pass
-        # cache miss: fetch live (with provider fallback chain)
+        if not force:
+            cached = self._mem_cache.get(ck)
+            if isinstance(cached, PriceSnapshot):
+                return _annotate_quote(cached, market)
+            trading = _is_trading_hours(market)
+            sqlite_age_limit = _SQLITE_CACHE_TTL["quote"] if trading else _SQLITE_CACHE_TTL["history"]
+            if self.repo is not None:
+                try:
+                    persisted = self.repo.get_stock_quote(normalized)
+                    if persisted is not None and persisted.updated_at and (persisted.last or 0) > 0:
+                        cache_time = datetime.fromisoformat(persisted.updated_at)
+                        age = (datetime.now(timezone.utc) - cache_time).total_seconds()
+                        if age < sqlite_age_limit:
+                            result = PriceSnapshot(
+                                last=persisted.last, change_pct=persisted.change_pct or 0.0,
+                                updated_at=persisted.updated_at, source=persisted.source,
+                                degraded=False,
+                                coverage={
+                                    "source": "sqlite_cache",
+                                    "mode": "persisted",
+                                    "cached_at": persisted.updated_at,
+                                    "session": {
+                                        "volume": persisted.volume or None,
+                                        "amount": persisted.amount or None,
+                                    },
+                                },
+                            )
+                            result = _annotate_quote(result, market)
+                            self._mem_cache.set(ck, result, ttl=_CACHE_TTL["quote"])
+                            return result
+                except Exception:
+                    pass
         provider = self._provider_for_market(market)
         result = self._call_with_provider(
             "quote",
@@ -247,68 +331,31 @@ class ProviderRouter:
             lambda p: p.get_quote(normalized),
             symbol=normalized,
         )
-        if isinstance(result, PriceSnapshot) and not result.degraded:
-            self._mem_cache.set(ck, result, ttl=_CACHE_TTL["quote"])
+        if isinstance(result, PriceSnapshot):
+            result = _annotate_quote(result, market)
+            if not result.degraded:
+                self._mem_cache.set(ck, result, ttl=_CACHE_TTL["quote"])
         return result
 
-    def get_history(self, symbol: str, days: int = 30) -> dict:
+    def get_history(
+        self,
+        symbol: str,
+        days: int = 30,
+        *,
+        force: bool = False,
+        now: datetime | None = None,
+    ) -> dict:
         normalized = normalize_symbol(symbol)
         market = self._market_of(normalized)
         ck = self._cache_key("history", normalized, days=str(days))
-        cached = self._mem_cache.get(ck)
-        if cached is not None:
-            return cached
-        if self.repo is not None:
-            newest = self.repo.list_stock_daily(normalized, limit=1)
-            if newest:
-                raw_date = (newest[0].trade_date or "").strip()
-                if raw_date:
-                    if " " in raw_date:
-                        raw_date = raw_date.split(" ")[0]
-                    try:
-                        newest_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
-                        trading_day_diff = (date.today() - newest_date).days
-                        cached_count = self.repo.count_stock_daily(normalized)
-                        if cached_count >= days and trading_day_diff <= 3:
-                            items = []
-                            for r in self.repo.list_stock_daily(normalized, limit=days):
-                                volume = float(r.volume or 0)
-                                amount = float(r.amount or 0)
-                                close = float(r.close or 0)
-                                if volume <= 0 and amount > 0 and close > 0:
-                                    volume = round(amount / close, 0)
-                                items.append({
-                                    "day": 0,
-                                    "date": r.trade_date,
-                                    "open": r.open,
-                                    "high": r.high,
-                                    "low": r.low,
-                                    "close": close,
-                                    "volume": volume,
-                                    "amount": amount,
-                                })
-                            items.reverse()
-                            for idx, item in enumerate(items):
-                                item["day"] = idx + 1
-                            stale_volumes = (
-                                bool(items)
-                                and all(float(i.get("volume") or 0) <= 0 for i in items)
-                                and any(float(i.get("amount") or 0) > 0 for i in items)
-                            )
-                            if not stale_volumes:
-                                result = {
-                                    "symbol": normalized,
-                                    "source": "cache",
-                                    "updated_at": now_iso(),
-                                    "degraded": False,
-                                    "degraded_reason": None,
-                                    "coverage": {"source": "sqlite_cache", "mode": "persisted"},
-                                    "items": items,
-                                }
-                                self._mem_cache.set(ck, result, ttl=_CACHE_TTL["history"])
-                                return result
-                    except ValueError:
-                        pass
+        if not force:
+            cached = self._mem_cache.get(ck)
+            if isinstance(cached, dict):
+                return _annotate_history(dict(cached), market, now)
+            sqlite_hit = self._history_from_sqlite(normalized, days, market, now)
+            if sqlite_hit is not None:
+                self._mem_cache.set(ck, sqlite_hit, ttl=_CACHE_TTL["history"])
+                return sqlite_hit
         provider = self._provider_for_market(market)
         result = self._call_with_provider(
             "history",
@@ -317,9 +364,114 @@ class ProviderRouter:
             lambda p: p.get_history(normalized, days),
             symbol=normalized,
         )
-        if isinstance(result, dict) and not result.get("degraded"):
+        if not isinstance(result, dict):
+            return result
+        if result.get("degraded"):
+            stale_cache = self._history_from_sqlite(
+                normalized, days, market, now, allow_stale=True
+            )
+            if stale_cache is not None:
+                stale_cache["degraded"] = True
+                stale_cache["degraded_reason"] = result.get("degraded_reason")
+                stale_cache["stale"] = True
+                return _annotate_history(stale_cache, market, now)
+        result = _annotate_history(result, market, now)
+        if not result.get("degraded"):
+            # Lagging official bars are cached briefly so a failed catch-up is not
+            # retried on every context read. force=True bypasses this.
             self._mem_cache.set(ck, result, ttl=_CACHE_TTL["history"])
         return result
+
+    def _history_from_sqlite(
+        self,
+        symbol: str,
+        days: int,
+        market: str | None,
+        now: datetime | None,
+        *,
+        allow_stale: bool = False,
+    ) -> dict[str, Any] | None:
+        if self.repo is None:
+            return None
+        try:
+            newest = self.repo.list_stock_daily(symbol, limit=1)
+        except Exception:
+            return None
+        if not newest:
+            return None
+        newest_date = _parse_bar_date(newest[0].trade_date)
+        if newest_date is None:
+            return None
+        try:
+            cached_count = self.repo.count_stock_daily(symbol)
+        except Exception:
+            return None
+        expected = expected_bar_date(market, now)
+        fresh = cached_count >= days and newest_date >= expected
+        if not fresh and not allow_stale:
+            return None
+        if allow_stale and cached_count <= 0:
+            return None
+        try:
+            rows = self.repo.list_stock_daily(symbol, limit=days)
+        except Exception:
+            return None
+        items = []
+        for row in rows:
+            volume = float(row.volume or 0)
+            amount = float(row.amount or 0)
+            close = float(row.close or 0)
+            if volume <= 0 and amount > 0 and close > 0:
+                volume = round(amount / close, 0)
+            items.append({
+                "day": 0,
+                "date": row.trade_date,
+                "open": row.open,
+                "high": row.high,
+                "low": row.low,
+                "close": close,
+                "volume": volume,
+                "amount": amount,
+            })
+        items.reverse()
+        for idx, item in enumerate(items):
+            item["day"] = idx + 1
+        stale_volumes = (
+            bool(items)
+            and all(float(i.get("volume") or 0) <= 0 for i in items)
+            and any(float(i.get("amount") or 0) > 0 for i in items)
+        )
+        if stale_volumes and not allow_stale:
+            return None
+        payload = {
+            "symbol": symbol,
+            "source": "cache",
+            "updated_at": newest_date.isoformat(),
+            "degraded": False,
+            "degraded_reason": None,
+            "coverage": {"source": "sqlite_cache", "mode": "persisted"},
+            "items": items,
+        }
+        return _annotate_history(payload, market, now)
+
+    def invalidate_symbol_market(self, symbol: str) -> None:
+        """Drop quote/history memory and the per-symbol Eastmoney caches."""
+        normalized = normalize_symbol(symbol)
+        self._mem_cache.invalidate_prefix(f"quote:{normalized}")
+        self._mem_cache.invalidate_prefix(f"history:{normalized}")
+        primary = self.primary
+        cache = getattr(primary, "_cache", None)
+        if not isinstance(cache, dict):
+            return
+        for key in list(cache):
+            if not isinstance(key, tuple) or not key:
+                continue
+            kind = key[0]
+            if kind == "cn_spot":
+                cache.pop(key, None)
+                continue
+            if kind in {"chip_cyq", "fund_flow", "spot_info_em"} and len(key) > 1 and key[1] == normalized:
+                cache.pop(key, None)
 
     def search_intel(self, symbol: str, query: str = "") -> dict:
         normalized = normalize_symbol(symbol)
@@ -686,11 +838,18 @@ class ProviderRouter:
                 and isinstance(result, PriceSnapshot)
                 and not result.degraded
             ):
+                session = {}
+                if isinstance(result.coverage, dict):
+                    raw_session = result.coverage.get("session")
+                    if isinstance(raw_session, dict):
+                        session = raw_session
                 repo.upsert_stock_quote(
                     StockQuote(
                         symbol=symbol,
                         last=result.last,
                         change_pct=result.change_pct,
+                        volume=float(session.get("volume") or 0),
+                        amount=float(session.get("amount") or 0),
                         source=result.source,
                         provider=provider_name,
                         updated_at=result.updated_at or now_iso(),
@@ -711,11 +870,12 @@ class ProviderRouter:
                             high=float(item.get("high", 0)),
                             low=float(item.get("low", 0)),
                             close=float(item.get("close", 0)),
-                            volume=float(item.get("volume", 0)),
-                            amount=float(item.get("amount", 0)),
+                            volume=float(item.get("volume", 0) or 0),
+                            amount=float(item.get("amount", 0) or 0),
                             source=result.get("source", ""),
                         )
                         for item in items
+                        if not item.get("provisional")
                     ]
                     repo.batch_upsert_stock_daily(batch)
             elif (

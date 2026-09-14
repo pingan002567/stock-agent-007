@@ -107,11 +107,100 @@ interface SettingsData {
   trading_controls?: { paper_trading?: string; real_order?: string };
   skills?: SkillInfo[];
   llm_providers?: LlmProvidersSnapshot;
+  market_refresh?: MarketRefreshConfig;
 }
 
 interface SkillInfo {
   name: string; label: string; description: string;
   authority: string; enabled: boolean; locked: boolean;
+}
+
+interface MarketRefreshConfig {
+  page_refresh_seconds: number;
+  warmup_seconds: number;
+  manual_cooldown_seconds: number;
+}
+
+const REFRESH_PRESETS: Array<MarketRefreshConfig & { id: string; label: string }> = [
+  { id: "relaxed", label: "宽松", page_refresh_seconds: 180, warmup_seconds: 900, manual_cooldown_seconds: 300 },
+  { id: "standard", label: "标准", page_refresh_seconds: 60, warmup_seconds: 300, manual_cooldown_seconds: 120 },
+  { id: "active", label: "积极", page_refresh_seconds: 30, warmup_seconds: 120, manual_cooldown_seconds: 60 },
+];
+
+function MarketRefreshCard({
+  value, onSave, saving,
+}: {
+  value: MarketRefreshConfig;
+  onSave: (next: MarketRefreshConfig) => Promise<void>;
+  saving: boolean;
+}) {
+  const [local, setLocal] = useState<MarketRefreshConfig>(value);
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => {
+    setLocal(value);
+    setDirty(false);
+  }, [value]);
+
+  const setField = (key: keyof MarketRefreshConfig, raw: string) => {
+    const parsed = Number(raw);
+    setLocal((prev) => ({ ...prev, [key]: Number.isFinite(parsed) ? parsed : prev[key] }));
+    setDirty(true);
+  };
+
+  return (
+    <SectionCard
+      title="刷新频率"
+      description="页面刷新只打本机接口。行情预热会打上游全市场快照。同股补拉冷却限制手动和 AI 的 refresh_market_data。拉长间隔不会修好东财历史接口掐线。"
+    >
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        {REFRESH_PRESETS.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            className="ghost"
+            onClick={() => {
+              setLocal({
+                page_refresh_seconds: preset.page_refresh_seconds,
+                warmup_seconds: preset.warmup_seconds,
+                manual_cooldown_seconds: preset.manual_cooldown_seconds,
+              });
+              setDirty(true);
+            }}
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+        {([
+          ["页面刷新 (秒)", "page_refresh_seconds", "30–600，本机页面轮询"],
+          ["行情预热 (秒)", "warmup_seconds", "120–3600，全市场快照"],
+          ["同股补拉冷却 (秒)", "manual_cooldown_seconds", "30–1800，同一只股票"],
+        ] as const).map(([label, key, hint]) => (
+          <label key={key} className="page-stack" style={{ gap: 4 }}>
+            <span style={{ fontSize: 12 }}>{label}</span>
+            <input
+              type="number"
+              value={local[key]}
+              onChange={(e) => setField(key, e.target.value)}
+              style={{
+                width: "100%", height: 32, border: "1px solid var(--line)", borderRadius: 7,
+                background: "var(--panel)", color: "var(--ink)", padding: "0 10px", fontSize: 13,
+              }}
+            />
+            <span className="muted" style={{ fontSize: 11 }}>{hint}</span>
+          </label>
+        ))}
+      </div>
+      {dirty ? (
+        <div style={{ marginTop: 12 }}>
+          <button className="primary" type="button" disabled={saving} onClick={() => void onSave(local)}>
+            {saving ? "保存中…" : "保存刷新频率"}
+          </button>
+        </div>
+      ) : null}
+    </SectionCard>
+  );
 }
 
 type SettingTab =
@@ -659,6 +748,7 @@ function SkillsSection({ initial }: { initial: SkillInfo[] }) {
 
 function MarketDataTab({
   settings, dataSources, availableProviders, credentialSchema, onSaveDataSources, savingDataSources,
+  marketRefresh, onSaveMarketRefresh, savingMarketRefresh,
 }: {
   settings: SettingsData;
   dataSources: DataSourcesConfig;
@@ -666,6 +756,9 @@ function MarketDataTab({
   credentialSchema: Record<string, ProviderCredentialField[]>;
   onSaveDataSources: (config: DataSourcesConfig) => Promise<void>;
   savingDataSources: boolean;
+  marketRefresh: MarketRefreshConfig;
+  onSaveMarketRefresh: (next: MarketRefreshConfig) => Promise<void>;
+  savingMarketRefresh: boolean;
 }) {
   const [localConfig, setLocalConfig] = useState<DataSourcesConfig>(dataSources);
   const [dirty, setDirty] = useState(false);
@@ -724,6 +817,7 @@ function MarketDataTab({
 
   return (
     <div className="settings-stack">
+      <MarketRefreshCard value={marketRefresh} onSave={onSaveMarketRefresh} saving={savingMarketRefresh} />
       <SectionCard title="数据源目录" description="仅已激活且配置完整的数据源可用于行情；免费源只需开关，付费源需填写 API 凭证">
         <div className="page-stack" style={{ gap: 10 }}>
           {availableProviders.map((provider) => {
@@ -1450,6 +1544,7 @@ export default function Settings({ initialTab }: { initialTab?: string } = {}) {
   const [editPolicyId, setEditPolicyId] = useState<string | null>(null);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [savingDataSources, setSavingDataSources] = useState(false);
+  const [savingMarketRefresh, setSavingMarketRefresh] = useState(false);
   const [savingIntelSources, setSavingIntelSources] = useState(false);
 
   const loadPolicies = async () => {
@@ -1486,6 +1581,19 @@ export default function Settings({ initialTab }: { initialTab?: string } = {}) {
     } catch (err) {
       window.alert(err instanceof Error ? err.message : "保存数据源配置失败");
     } finally { setSavingDataSources(false); }
+  };
+
+  const submitMarketRefresh = async (config: MarketRefreshConfig) => {
+    setSavingMarketRefresh(true);
+    try {
+      const saved = await apiPut<MarketRefreshConfig>("/api/settings/market-refresh", config);
+      window.dispatchEvent(new CustomEvent("market-refresh-changed", { detail: saved }));
+      await loadAll();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "保存刷新频率失败");
+    } finally {
+      setSavingMarketRefresh(false);
+    }
   };
 
   const submitIntelSources = async (config: IntelSourcesConfig) => {
@@ -1556,6 +1664,9 @@ export default function Settings({ initialTab }: { initialTab?: string } = {}) {
           credentialSchema={settings.provider_credential_schema ?? {}}
           onSaveDataSources={submitDataSources}
           savingDataSources={savingDataSources}
+          marketRefresh={settings.market_refresh ?? { page_refresh_seconds: 60, warmup_seconds: 300, manual_cooldown_seconds: 120 }}
+          onSaveMarketRefresh={submitMarketRefresh}
+          savingMarketRefresh={savingMarketRefresh}
         />
       );
       case "intel": return (

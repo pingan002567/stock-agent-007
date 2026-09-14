@@ -10,6 +10,8 @@ from backend.config.providers import DEFAULT_PROVIDERS
 from backend.config.runtime import DEFAULT_RUNTIME_CONFIG
 from backend.config.tools import DEFAULT_TOOLS
 from backend.config.data_sources import AVAILABLE_PROVIDERS, DEFAULT_DATA_SOURCES, PROVIDER_CREDENTIAL_SCHEMA
+from backend.config.market_refresh import CONFIG_KEY as MARKET_REFRESH_KEY
+from backend.config.market_refresh import load_market_refresh, normalize_market_refresh
 from backend.config.data_source_sanitize import sanitize_data_sources, sanitize_intel_sources
 from backend.config.intel_sources import (
     AVAILABLE_INTEL_PROVIDERS,
@@ -64,6 +66,7 @@ def get_settings(request: Request, services: AppServices = Depends(get_services)
         "runtime_config": _public_runtime_config(services.repo),
         "agent_runtime": services.copilot_service.deerflow.status().to_dict(),
         "data_provider": provider_router.status().to_dict(),
+        "market_refresh": load_market_refresh(services.repo),
         "data_sources": sanitize_data_sources(
             services.repo.get_config("data_sources", DEFAULT_DATA_SOURCES)
         ),
@@ -133,6 +136,16 @@ def put_runtime(
     # Auto-reconnect so the new config takes effect immediately
     status = services.copilot_service.reconnect_runtime()
     return {**result, "agent_runtime": status}
+
+
+@router.put("/market-refresh")
+def put_market_refresh(
+    payload: dict, services: AppServices = Depends(get_services)
+):
+    cleaned = normalize_market_refresh(payload)
+    services.audit_service.record("settings market refresh updated", MARKET_REFRESH_KEY)
+    services.repo.set_config(MARKET_REFRESH_KEY, cleaned)
+    return cleaned
 
 
 @router.get("/llm/providers")

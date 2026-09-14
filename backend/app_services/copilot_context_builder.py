@@ -112,6 +112,7 @@ class CopilotContextBuilder:
                 "change_pct": context.price.change_pct,
                 "updated_at": context.price.updated_at,
                 "source": context.price.source,
+                "coverage": context.price.coverage,
             },
             "relation": model_to_dict(context.relation),
             "holding": {
@@ -119,6 +120,7 @@ class CopilotContextBuilder:
                 "market_value": context.holding.market_value,
             },
             "ai_state": model_to_dict(context.ai_state),
+            "research_status": context.research_status,
             "latest_report": model_to_dict(context.latest_report),
         }
 

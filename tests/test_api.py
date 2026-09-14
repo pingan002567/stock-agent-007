@@ -35,6 +35,7 @@ CANONICAL_EXECUTION_GUARD = {
 
 def make_client(tmp_path):
     app = create_app(db_path=tmp_path / "api.sqlite3", files_root=tmp_path / "files")
+    app.state.services.repo.seed_demo_portfolio()
     return TestClient(app)
 
 
@@ -116,6 +117,26 @@ def test_health_and_app_shell(tmp_path, monkeypatch):
 
     app_shell = client.get("/app")
     assert app_shell.status_code == 200
+
+
+def test_missing_js_asset_does_not_fall_back_to_html(tmp_path, monkeypatch):
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html><title>shell</title>", encoding="utf-8")
+    monkeypatch.setenv("WORKBENCH_FRONTEND_DIST", str(dist))
+    monkeypatch.delenv("WORKBENCH_AI_MODE", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("WORKBENCH_AI_API_KEY", raising=False)
+    monkeypatch.setenv("WORKBENCH_DEERFLOW_MODE", "stub")
+
+    client = make_client(tmp_path)
+    missing = client.get("/assets/Settings-stale.js")
+    assert missing.status_code == 404
+    assert "text/html" not in missing.headers.get("content-type", "")
+
+    shell = client.get("/research")
+    assert shell.status_code == 200
+    assert "text/html" in shell.headers.get("content-type", "")
 
 
 def test_health_reports_fallback_when_embedded_import_fails(tmp_path, monkeypatch):
@@ -627,7 +648,7 @@ def test_copilot_monitor_report_stream_includes_report_quality_and_disclaimer(
         events[-1]["payload"]["quality_status"]
         == events[2]["payload"]["result"]["quality_status"]
     )
-    assert events[-1]["payload"]["disclaimer"] == "仅供研究，不构成投资建议。"
+    assert events[-1]["payload"]["disclaimer"] == "可含目标价与操作指令，仅供研究参考，不构成投资建议。"
 
 
 def test_monitor_events_include_multiple_severities(tmp_path):
@@ -2683,6 +2704,7 @@ def test_settings_expose_tool_bridge_registry_without_enabling_real_orders(tmp_p
         "get_daily_history",
         "get_industry_context",
         "get_market_structure",
+        "refresh_market_data",
         "get_decision_journal_entry",
         "get_monitor_events",
         "get_monitor_rules",

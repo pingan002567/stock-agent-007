@@ -5,6 +5,7 @@ from enum import Enum
 import json
 from typing import Any, Dict, List, Optional
 
+from backend.agent_runtime.disclaimer import RESEARCH_DISCLAIMER
 from backend.execution_guard import canonical_execution_guard
 from pydantic import BaseModel, Field, model_validator
 
@@ -104,6 +105,7 @@ class StockContext(BaseModel):
     holding: HoldingInfo = Field(default_factory=HoldingInfo)
     ai_state: AIState
     latest_report: LatestReport = Field(default_factory=LatestReport)
+    research_status: str = ""
 
 
 class EventContext(BaseModel):
@@ -429,7 +431,7 @@ class Report(BaseModel):
     latest_quality_check_id: Optional[str] = None
     evidence_refs: List[str] = Field(default_factory=list)
     valid_until: Optional[str] = None
-    disclaimer: str = "仅供研究，不构成投资建议。"
+    disclaimer: str = RESEARCH_DISCLAIMER
     degraded: bool = False
     degraded_reason: Optional[str] = None
     candidate_actions: List[Dict[str, Any]] = Field(default_factory=list)

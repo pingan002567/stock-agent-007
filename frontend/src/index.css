@@ -3526,26 +3526,6 @@ html.resizing { cursor: col-resize; user-select: none; }
   box-shadow: var(--shadow-glow);
 }
 
-.next-actions {
-  display: flex; flex-wrap: wrap; gap: 8px;
-  padding: 8px 0 12px 32px;
-}
-.action-chip {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 6px 12px; border-radius: 20px;
-  background: var(--soft); border: 1px solid var(--line);
-  color: var(--ink); font-size: 12px; cursor: pointer;
-  transition: all 0.2s ease;
-  white-space: nowrap;
-}
-.action-chip:hover { 
-  background: var(--hover-row); 
-  border-color: var(--blue);
-  box-shadow: var(--shadow-glow);
-}
-.action-icon { font-size: 14px; line-height: 1; }
-.action-label { line-height: 1.4; }
-
 /* message markdown */
 .msg p { margin: 0 0 8px; }
 .msg p:last-child { margin-bottom: 0; }

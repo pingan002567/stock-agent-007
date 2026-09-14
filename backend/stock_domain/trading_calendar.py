@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from functools import lru_cache
+from zoneinfo import ZoneInfo
 
 
 # ── helpers ──────────────────────────────────────────────────────
@@ -227,6 +228,74 @@ def prev_trading_day(market: str | None, day: date | None = None) -> date:
     while not is_trading_day(market, candidate):
         candidate -= timedelta(days=1)
     return candidate
+
+
+_MARKET_TZ = {
+    "CN": "Asia/Shanghai",
+    "HK": "Asia/Hong_Kong",
+    "US": "America/New_York",
+}
+_SESSION_OPEN = {
+    "CN": time(9, 30),
+    "HK": time(9, 30),
+    "US": time(9, 30),
+}
+_SESSION_CLOSE = {
+    "CN": time(15, 0),
+    "HK": time(16, 0),
+    "US": time(16, 0),
+}
+
+
+def market_now(market: str | None, now: datetime | None = None) -> datetime:
+    """Market-local clock. Naive ``now`` is treated as already in that zone."""
+    tz = ZoneInfo(_MARKET_TZ.get(market or "CN", "Asia/Shanghai"))
+    if now is None:
+        return datetime.now(tz)
+    if now.tzinfo is None:
+        return now.replace(tzinfo=tz)
+    return now.astimezone(tz)
+
+
+def session_has_opened(market: str | None, now: datetime | None = None) -> bool:
+    local = market_now(market, now)
+    if not is_trading_day(market, local.date()):
+        return False
+    return local.time() >= _SESSION_OPEN.get(market or "CN", time(9, 30))
+
+
+def session_has_closed(market: str | None, now: datetime | None = None) -> bool:
+    local = market_now(market, now)
+    if not is_trading_day(market, local.date()):
+        return False
+    return local.time() >= _SESSION_CLOSE.get(market or "CN", time(15, 0))
+
+
+def expected_bar_date(market: str | None, now: datetime | None = None) -> date:
+    """Last official daily bar the cache is allowed to treat as current.
+
+    After the session close on a trading day the expected bar is today.
+    Before the open, on weekends, and on holidays it is the previous trading day.
+    A calendar gap of three days is not enough: Friday must not satisfy Monday
+    after the close.
+    """
+    local = market_now(market, now)
+    day = local.date()
+    if is_trading_day(market, day) and session_has_closed(market, local):
+        return day
+    return prev_trading_day(market, day)
+
+
+def session_bar_date(market: str | None, now: datetime | None = None) -> date | None:
+    """Today's session date once the market has opened, else None.
+
+    Used only to splice a provisional bar from the live quote. It is not an
+    official daily bar and must not be written to ``stock_daily``.
+    """
+    local = market_now(market, now)
+    if is_trading_day(market, local.date()) and session_has_opened(market, local):
+        return local.date()
+    return None
 
 
 def next_trading_day(market: str | None, day: date | None = None) -> date:
