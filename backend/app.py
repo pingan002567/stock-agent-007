@@ -23,6 +23,7 @@ from backend.api import (
     routes_channels,
     routes_copilot,
     routes_decision_journal,
+    routes_devices,
     routes_holdings,
     routes_market,
     routes_monitor,
@@ -239,6 +240,7 @@ def create_app(
         routes_setup.router,
         routes_copilot.router,
         routes_channels.router,
+        routes_devices.router,
         routes_workspace.router,
     ]:
         app.include_router(router)

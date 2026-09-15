@@ -1,4 +1,12 @@
 log_level: warning
+models:
+  - name: deepseek-chat
+    use: langchain_openai:ChatOpenAI
+    model: deepseek-chat
+    openai_api_key: $OPENAI_API_KEY
+    openai_api_base: $OPENAI_BASE_URL
+    supports_thinking: false
+    supports_vision: false
 sandbox:
   use: deerflow.sandbox.local:LocalSandboxProvider
   allow_host_bash: false

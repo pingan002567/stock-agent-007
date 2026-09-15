@@ -290,6 +290,16 @@ SCHEMA: Iterable[str] = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS apns_device (
+      device_token TEXT PRIMARY KEY,
+      environment TEXT NOT NULL DEFAULT 'sandbox',
+      platform TEXT NOT NULL DEFAULT 'ios',
+      bundle_id TEXT NOT NULL DEFAULT 'com.stockagent.app',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS review_inbox_state (
       item_key TEXT PRIMARY KEY,
       status TEXT NOT NULL,

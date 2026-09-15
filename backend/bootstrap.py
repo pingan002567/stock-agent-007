@@ -38,6 +38,7 @@ from backend.app_services.strategy_service import StrategyService
 from backend.app_services.task_service import TaskService
 from backend.app_services.tool_execution_service import ToolExecutionService
 from backend.app_services.llm_provider_service import LlmProviderService
+from backend.app_services.apns_push import APNsPushService
 from backend.config.data_sources import DEFAULT_DATA_SOURCES
 from backend.config.runtime import DEFAULT_RUNTIME_CONFIG
 from backend.stock_domain.multi_providers import create_provider
@@ -72,6 +73,7 @@ class AppServices:
     channel_service: "ChannelService"
     channel_binding_store: "BindingStore"
     llm_provider_service: "LlmProviderService"
+    apns_push_service: "APNsPushService | None" = None
 
 
 _log = logging.getLogger("bootstrap")
@@ -367,7 +369,11 @@ def create_services(
     channel_service, channel_binding_store, channel_notifier = build_channel_service(
         repo=repo, copilot_service=copilot_service
     )
-    monitor_service.alert_sink = channel_notifier.push
+    from backend.app_services.apns_push import APNsPushService, CompositeAlertSink
+
+    apns_push_service = APNsPushService(list_devices=repo.list_apns_devices)
+    alert_sink = CompositeAlertSink(channel_notifier.push, apns_push_service.push)
+    monitor_service.alert_sink = alert_sink
 
     # 定时任务:按日程自动发起 Copilot run(盘前简报/周度复盘)
     from backend.app_services.scheduler_service import SchedulerService
@@ -377,7 +383,7 @@ def create_services(
         copilot_service=copilot_service,
         audit_service=audit_service,
         report_service=report_service,
-        alert_sink=channel_notifier.push,
+        alert_sink=alert_sink,
     )
 
     llm_provider_service = LlmProviderService(
@@ -418,4 +424,5 @@ def create_services(
         runtime_observer=runtime_observer,
         channel_service=channel_service,
         channel_binding_store=channel_binding_store,
+        apns_push_service=apns_push_service,
     )

@@ -5,8 +5,8 @@
 ## 要求
 
 - Mac + Xcode 16+
-- Apple 账号（Personal Team 可真机调试；TestFlight 需付费 Developer Program）
-- 远端已开 HTTPS + `WORKBENCH_ACCESS_TOKEN`
+- Apple 账号（Personal Team 可真机调试；**远程推送需付费 Developer Program**）
+- 远端已开 **HTTPS** + 环境变量 `WORKBENCH_ACCESS_TOKEN`
 
 ## 打开工程
 
@@ -19,27 +19,42 @@ Xcode 里选 Team 签名 → 真机或模拟器 → Run。
 
 Bundle ID：`com.stockagent.app`
 
+## 对接当前 ECS 部署
+
+| 项 | 值 |
+| --- | --- |
+| 推荐地址 | `https://47.103.58.33`（443）或 `https://47.103.58.33:8686` |
+| 协议 | HTTPS（nginx 自签证书，客户端已放行 server trust） |
+| 鉴权 | Header `X-Workbench-Token`；SSE 可用 `?access_token=` |
+
+访问令牌在服务器 `/opt/stock-agent/.env` 的 `WORKBENCH_ACCESS_TOKEN`（勿提交到 Git）。
+
 ## 使用
 
-1. 启动后进入 **连接后端**（不会自动连接）
-2. 填地址（例：`https://47.103.58.33:8686`）和访问令牌
-3. 点 **连接**
-4. 底栏：对话 / 自选 / 持仓 / 盯盘 / 设置
+1. 启动后进入 **连接后端**（空地址会预填推荐 URL）
+2. 填地址 + 访问令牌 → **连接**（需 health 含 `agent_runtime`）
+3. 底栏：对话 / 自选 / 持仓 / 盯盘 / 设置  
+   - 对话：停止 / 重试、附件上传、长回复折叠进详情、会话搜索/重命名、回答复制与分享  
+   - 自选：搜索添加、左滑删除、点进标的详情（走势 / 资讯 / 财报 / 深研报告）  
+   - 持仓：组合摘要，点持仓进同一套标的详情  
+   - 盯盘：启停、立即评估、事件详情、跳转标的、规则启停/删除/新建涨跌幅规则、有用/无用反馈  
+   - 设置：健康探测、运行状态、AI 技能启停、用量费用、研究报告、策略回测、外观主题、推送状态、交易约束  
 
-自签证书：App 内 `URLSession` 对 server trust 放行（个人实机）。有正式证书后可收紧 [`TrustingURLSessionDelegate`](StockAgent/Networking/APIClient.swift)。
+标的详情里可点 **在对话中分析**（预填问题并切到对话 Tab）。
+设置 → **切换后端** 会回到连接页。
 
-设置 → **切换后端** 会回到连接页；凭据仍保留在输入框，需再点连接。
+## APNs 推送（可选）
 
-## 第一期范围
+当前 `StockAgent.entitlements` **未包含** `aps-environment`，以便个人/未开通 Push 的 App ID 也能真机安装。
 
-- 主动连接 + 健康检查（需 `agent_runtime`）
-- 会话列表、流式对话（SSE）
-- 自选 / 持仓 / 盯盘列表
-- 设置与切换后端
+要启用推送：
+1. Apple Developer → Identifiers → `com.stockagent.app` → 勾选 **Push Notifications**
+2. Xcode → Signing & Capabilities → **+ Capability → Push Notifications**（会写回 `aps-environment`）
+3. App 连接成功后会请求通知权限并上报 device token 到 `POST /api/devices/apns`
+4. 服务器配置 `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_KEY_PATH`（`.p8`）后才会真正下发
+5. 盯盘 `high`/`medium` 经 `alert_sink` 扇出到 IM + APNs
 
-未包含：附件上传、研究/策略/回测全页、推送。
-
-## 命令行编译（可选）
+## 命令行编译
 
 ```bash
 cd mobile-native

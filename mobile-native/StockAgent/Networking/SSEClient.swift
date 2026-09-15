@@ -6,7 +6,6 @@ struct SSEEvent: Sendable {
 }
 
 /// SSE over URLSessionDataDelegate so server-trust challenges hit TrustingURLSessionDelegate.
-/// (`URLSession.bytes` can skip custom trust handling on some iOS versions.)
 actor SSEClient {
     private let session: URLSession
 
@@ -38,7 +37,6 @@ actor SSEClient {
                     config.timeoutIntervalForRequest = 3600
                     config.timeoutIntervalForResource = 3600
                     config.requestCachePolicy = .reloadIgnoringLocalCacheData
-                    // Self as task delegate; trust challenges forwarded to TrustingURLSessionDelegate
                     let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
                     self.session = session
                     var request = URLRequest(url: url)
@@ -124,37 +122,10 @@ actor SSEClient {
                 }
             }
 
-            // Reuse APIClient's trust delegate via a fresh one (same logic).
             let trust = TrustingURLSessionDelegate()
             let box = StreamBox(continuation: continuation, trustDelegate: trust)
             continuation.onTermination = { _ in box.cancel() }
             box.start(url: url)
         }
-    }
-}
-
-enum CopilotStreamParser {
-    static func text(from event: SSEEvent) -> (kind: String, text: String)? {
-        guard let data = event.data.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
-
-        let type = event.type.isEmpty || event.type == "message"
-            ? ((obj["type"] as? String) ?? "message")
-            : event.type
-
-        if let payload = obj["payload"] as? [String: Any] {
-            if let text = payload["text"] as? String { return (type, text) }
-            if let text = payload["content"] as? String { return (type, text) }
-            if let message = payload["message"] as? String, type == "error" { return (type, message) }
-        }
-        if let text = obj["text"] as? String { return (type, text) }
-        if type == "error" {
-            let msg = (obj["payload"] as? [String: Any])?["message"] as? String
-                ?? obj["message"] as? String
-                ?? event.data
-            return ("error", msg)
-        }
-        return nil
     }
 }

@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		06C22758472D4060B546932E /* WatchlistView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D095BF49D55425292CDE5BF /* WatchlistView.swift */; };
 		23B95C67AB404BED97B0CFDD /* MonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489DBDC480C9415D80DBCF98 /* MonitorView.swift */; };
+		F4A5B6C7D8E9F0A1B2C3D4E5 /* MonitorEventDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5B6C7D8E9F0A1B2C3D4E5F6 /* MonitorEventDetailView.swift */; };
 		3655B123EBFD456DAF85D6BD /* SSEClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C497A9EC3F5648878B1D4190 /* SSEClient.swift */; };
 		378E51426C1049C2B473481A /* StockAgentApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D432607CB4422BB7A2090D /* StockAgentApp.swift */; };
 		43B214ADC63242BE9CBE88D4 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B5292BBDAAD4210BA624CDF /* APIClient.swift */; };
@@ -20,7 +21,19 @@
 		EEC0D761B83047B0A8308284 /* HoldingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D8EAE2AD4D34C9DAFBB449C /* HoldingsView.swift */; };
 		EFB8D94884E044D39AB30248 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73801602894A4BA0B82D555F /* ChatView.swift */; };
 		F0ADE1824D954ABB9E7C53AB /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C836DC0B9E4242179FC88CEC /* SettingsView.swift */; };
+		E8F1A2B3C4D5E6F708192A3B /* SettingsExtras.swift in Sources */ = {isa = PBXBuildFile; fileRef = D41A7B2C8E5F4A019B3C6D7E /* SettingsExtras.swift */; };
+		B0C1D2E3F4A5B6C7D8E9F0A1 /* ChatAppearanceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5C /* ChatAppearanceStore.swift */; };
+		C1D2E3F4A5B6C7D8E9F0A1B2 /* ChatAppearanceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1E2D3C4B5A69788796A5B4C /* ChatAppearanceSettingsView.swift */; };
+		D2E3F4A5B6C7D8E9F0A1B2C3 /* AppThemeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3F4A5B6C7D8E9F0A1B2C3D4 /* AppThemeStore.swift */; };
 		F3938D4FA0AB46B9ACB56DEA /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23A6C4EC28D347948C913C4D /* ChatViewModel.swift */; };
+		5A57E36C836849D095124536 /* StockDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53B20343BC6E46059927092B /* StockDetailView.swift */; };
+		6F793A6861B84C14B8F9669B /* StrategyListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35B67D1A439949A089211681 /* StrategyListView.swift */; };
+		97E96B237A8941B28A257024 /* PushNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62DB959757194004A4454639 /* PushNotificationManager.swift */; };
+		CE9A209D2AF6413095C6F834 /* ChatModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E890CBA8823468AAD23E49F /* ChatModels.swift */; };
+		D3CA4E34093A43EE90FFDBA7 /* MarkdownText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7750BEBBEAD34FA999C927C1 /* MarkdownText.swift */; };
+		6C4B4694D6514F4A8E3004A1 /* AssistantBubbleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8907E83ABE249449C5CE55C /* AssistantBubbleView.swift */; };
+		3B577208D1AC48EB9B7022F6 /* AssistantTurnDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41D87491E990496896AD7DE4 /* AssistantTurnDetailView.swift */; };
+		A81C2F0E9B4D4E6F8A1C3D5E /* AnswerFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B72E1A0C4D5F678901234ABC /* AnswerFormatter.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -29,6 +42,7 @@
 		289EB7273F274AF0BCA3950D /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		2D095BF49D55425292CDE5BF /* WatchlistView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchlistView.swift; sourceTree = "<group>"; };
 		489DBDC480C9415D80DBCF98 /* MonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorView.swift; sourceTree = "<group>"; };
+		A5B6C7D8E9F0A1B2C3D4E5F6 /* MonitorEventDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorEventDetailView.swift; sourceTree = "<group>"; };
 		4D8EAE2AD4D34C9DAFBB449C /* HoldingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoldingsView.swift; sourceTree = "<group>"; };
 		631C729891774CDAA52D2307 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		6B5292BBDAAD4210BA624CDF /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
@@ -39,7 +53,20 @@
 		C5BFCCC06F6143ECA00CBA4D /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
 		C5D432607CB4422BB7A2090D /* StockAgentApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockAgentApp.swift; sourceTree = "<group>"; };
 		C836DC0B9E4242179FC88CEC /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		D41A7B2C8E5F4A019B3C6D7E /* SettingsExtras.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsExtras.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B5C /* ChatAppearanceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatAppearanceStore.swift; sourceTree = "<group>"; };
+		E3F4A5B6C7D8E9F0A1B2C3D4 /* AppThemeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppThemeStore.swift; sourceTree = "<group>"; };
+		F1E2D3C4B5A69788796A5B4C /* ChatAppearanceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatAppearanceSettingsView.swift; sourceTree = "<group>"; };
 		D4A88E91CE71412A96D67AEB /* ConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectView.swift; sourceTree = "<group>"; };
+		53B20343BC6E46059927092B /* StockDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockDetailView.swift; sourceTree = "<group>"; };
+		35B67D1A439949A089211681 /* StrategyListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrategyListView.swift; sourceTree = "<group>"; };
+		62DB959757194004A4454639 /* PushNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationManager.swift; sourceTree = "<group>"; };
+		AF935FCB290446AA879C1363 /* StockAgent.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StockAgent.entitlements; sourceTree = "<group>"; };
+		1E890CBA8823468AAD23E49F /* ChatModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModels.swift; sourceTree = "<group>"; };
+		7750BEBBEAD34FA999C927C1 /* MarkdownText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownText.swift; sourceTree = "<group>"; };
+		B8907E83ABE249449C5CE55C /* AssistantBubbleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantBubbleView.swift; sourceTree = "<group>"; };
+		41D87491E990496896AD7DE4 /* AssistantTurnDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantTurnDetailView.swift; sourceTree = "<group>"; };
+		B72E1A0C4D5F678901234ABC /* AnswerFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnswerFormatter.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -69,6 +96,9 @@
 				087496C3EE08410081DF1257 /* AuthStore.swift */,
 				289EB7273F274AF0BCA3950D /* Models.swift */,
 				C497A9EC3F5648878B1D4190 /* SSEClient.swift */,
+				62DB959757194004A4454639 /* PushNotificationManager.swift */,
+				A1B2C3D4E5F60718293A4B5C /* ChatAppearanceStore.swift */,
+				E3F4A5B6C7D8E9F0A1B2C3D4 /* AppThemeStore.swift */,
 			);
 			path = Networking;
 			sourceTree = "<group>";
@@ -86,6 +116,11 @@
 			children = (
 				73801602894A4BA0B82D555F /* ChatView.swift */,
 				23A6C4EC28D347948C913C4D /* ChatViewModel.swift */,
+				1E890CBA8823468AAD23E49F /* ChatModels.swift */,
+				B72E1A0C4D5F678901234ABC /* AnswerFormatter.swift */,
+				7750BEBBEAD34FA999C927C1 /* MarkdownText.swift */,
+				B8907E83ABE249449C5CE55C /* AssistantBubbleView.swift */,
+				41D87491E990496896AD7DE4 /* AssistantTurnDetailView.swift */,
 			);
 			path = Chat;
 			sourceTree = "<group>";
@@ -111,6 +146,8 @@
 			isa = PBXGroup;
 			children = (
 				C836DC0B9E4242179FC88CEC /* SettingsView.swift */,
+				D41A7B2C8E5F4A019B3C6D7E /* SettingsExtras.swift */,
+				F1E2D3C4B5A69788796A5B4C /* ChatAppearanceSettingsView.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -119,6 +156,7 @@
 			isa = PBXGroup;
 			children = (
 				489DBDC480C9415D80DBCF98 /* MonitorView.swift */,
+				A5B6C7D8E9F0A1B2C3D4E5F6 /* MonitorEventDetailView.swift */,
 			);
 			path = Monitor;
 			sourceTree = "<group>";
@@ -131,6 +169,7 @@
 				12350E7DA9DE483FA6CB56E9 /* Networking */,
 				29AF740D2FB844B0B0AB8396 /* Resources */,
 				9EDA73FA104D4BAC855CF8E2 /* Info.plist */,
+				AF935FCB290446AA879C1363 /* StockAgent.entitlements */,
 			);
 			path = StockAgent;
 			sourceTree = "<group>";
@@ -144,6 +183,7 @@
 				E1B8B92F4191447FBB072B44 /* Holdings */,
 				AF314AC564D8430FA3221071 /* Monitor */,
 				9E39667E9A52445A83C2891F /* Settings */,
+				20752BEBB58B4398B9172A1E /* Strategy */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -160,6 +200,7 @@
 			isa = PBXGroup;
 			children = (
 				2D095BF49D55425292CDE5BF /* WatchlistView.swift */,
+				53B20343BC6E46059927092B /* StockDetailView.swift */,
 			);
 			path = Watchlist;
 			sourceTree = "<group>";
@@ -170,6 +211,14 @@
 				4D8EAE2AD4D34C9DAFBB449C /* HoldingsView.swift */,
 			);
 			path = Holdings;
+			sourceTree = "<group>";
+		};
+		20752BEBB58B4398B9172A1E /* Strategy */ = {
+			isa = PBXGroup;
+			children = (
+				35B67D1A439949A089211681 /* StrategyListView.swift */,
+			);
+			path = Strategy;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -245,15 +294,28 @@
 				378E51426C1049C2B473481A /* StockAgentApp.swift in Sources */,
 				EFB8D94884E044D39AB30248 /* ChatView.swift in Sources */,
 				F3938D4FA0AB46B9ACB56DEA /* ChatViewModel.swift in Sources */,
+				3B577208D1AC48EB9B7022F6 /* AssistantTurnDetailView.swift in Sources */,
+				CE9A209D2AF6413095C6F834 /* ChatModels.swift in Sources */,
+				D3CA4E34093A43EE90FFDBA7 /* MarkdownText.swift in Sources */,
+				A81C2F0E9B4D4E6F8A1C3D5E /* AnswerFormatter.swift in Sources */,
+				6C4B4694D6514F4A8E3004A1 /* AssistantBubbleView.swift in Sources */,
 				BC4823887EAB43E59EB493B4 /* ConnectView.swift in Sources */,
 				EEC0D761B83047B0A8308284 /* HoldingsView.swift in Sources */,
 				23B95C67AB404BED97B0CFDD /* MonitorView.swift in Sources */,
+				F4A5B6C7D8E9F0A1B2C3D4E5 /* MonitorEventDetailView.swift in Sources */,
 				F0ADE1824D954ABB9E7C53AB /* SettingsView.swift in Sources */,
+				E8F1A2B3C4D5E6F708192A3B /* SettingsExtras.swift in Sources */,
+				B0C1D2E3F4A5B6C7D8E9F0A1 /* ChatAppearanceStore.swift in Sources */,
+				D2E3F4A5B6C7D8E9F0A1B2C3 /* AppThemeStore.swift in Sources */,
+				C1D2E3F4A5B6C7D8E9F0A1B2 /* ChatAppearanceSettingsView.swift in Sources */,
 				06C22758472D4060B546932E /* WatchlistView.swift in Sources */,
 				43B214ADC63242BE9CBE88D4 /* APIClient.swift in Sources */,
 				CF88CC7F05C34C5287E8F6A6 /* AuthStore.swift in Sources */,
 				52B26063B03046088BA546D9 /* Models.swift in Sources */,
 				3655B123EBFD456DAF85D6BD /* SSEClient.swift in Sources */,
+				5A57E36C836849D095124536 /* StockDetailView.swift in Sources */,
+				6F793A6861B84C14B8F9669B /* StrategyListView.swift in Sources */,
+				97E96B237A8941B28A257024 /* PushNotificationManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -278,6 +340,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = StockAgent/StockAgent.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 5F4655U83P;
@@ -303,6 +366,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = StockAgent/StockAgent.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 5F4655U83P;
