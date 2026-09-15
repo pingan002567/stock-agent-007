@@ -23,6 +23,7 @@ export const EMPTY_CHAT_COPY = {
 export const SETUP_WIZARD_COPY = {
   step2Title: "接上一个对话模型",
   step2Lead: "助手要用模型才能回答。密钥只保存在这台电脑，不会上传到我们的服务器。",
+  step2LeadRemote: "助手要用模型才能回答。密钥保存在这台后端上。",
   step3Title: "准备你的工作台",
   step3Lead: "接下来会自动做好这三件事，不用再填表。",
   step3Items: [
@@ -86,6 +87,7 @@ export function collectSetupCopy(): string {
     EMPTY_CHAT_COPY.desc,
     SETUP_WIZARD_COPY.step2Title,
     SETUP_WIZARD_COPY.step2Lead,
+    SETUP_WIZARD_COPY.step2LeadRemote,
     SETUP_WIZARD_COPY.step3Title,
     SETUP_WIZARD_COPY.step3Lead,
     ...SETUP_WIZARD_COPY.step3Items,

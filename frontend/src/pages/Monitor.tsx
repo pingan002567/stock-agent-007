@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiGet, apiPost, apiDelete } from "@/api/client";
+import { apiGet, apiPost, apiDelete, apiUrl } from "@/api/client";
+import { withAccessToken } from "@/lib/connection";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { AskAiButton } from "@/components/ui/AskAiButton";
 import { PageHead } from "@/components/ui/PageHead";
@@ -95,7 +96,7 @@ export default function Monitor() {
   }, [loadAll]);
 
   useEffect(() => {
-    const es = new EventSource("/api/monitor/stream");
+    const es = new EventSource(withAccessToken(apiUrl("/api/monitor/stream")));
     // The SSE payload is the whole SSEEvent: { type, payload: {...} }.
     // "status" carries the status object directly; "events" signals that the
     // event set changed — silently refetch the current page so pagination and

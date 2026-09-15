@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { apiGet, apiPost, apiDelete } from "@/api/client";
+import { apiGet, apiPost, apiDelete, apiPut } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage } from "@/components/ui/Loading";
 import { PageHead } from "@/components/ui/PageHead";
@@ -65,9 +65,8 @@ export default function Watchlist() {
     const toDelete = groups.filter(g => !draftGroups.some(d => d.name === g.name));
     for (const g of toDelete) await apiDelete(`/api/watchlist/groups/${encodeURIComponent(g.name)}`);
     for (const g of draftGroups) {
-      await fetch(`/api/watchlist/groups/${encodeURIComponent(g.name)}`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ color: g.color, sort_order: draftGroups.indexOf(g) }),
+      await apiPut(`/api/watchlist/groups/${encodeURIComponent(g.name)}`, {
+        color: g.color, sort_order: draftGroups.indexOf(g),
       }).catch(() => {});
     }
     mgr.closePanel();

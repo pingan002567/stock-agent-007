@@ -11,6 +11,8 @@ import {
 import { ErrorMessage, PanelSkeleton, KpiSkeleton } from "@/components/ui/Loading";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { useAppState } from "@/hooks/useAppState";
+import { useAppActions } from "@/hooks/useAppActions";
+import { formatConnectionLabel, isRemoteMode, loadConnection } from "@/lib/connection";
 import ChannelsTab from "./Channels";
 import { ModelProvidersTab } from "@/components/settings/ai/ModelProvidersTab";
 import { ModelCatalogTab } from "@/components/settings/ai/ModelCatalogTab";
@@ -356,7 +358,11 @@ function AppearanceTab() {
 }
 
 function WorkspaceTab() {
+  const { switchBackend } = useAppActions();
   const [ws, setWs] = useState<{ name?: string; data_dir?: string } | null>(null);
+  const profile = loadConnection();
+  const connLabel = formatConnectionLabel(profile ?? { mode: "local" });
+  const remote = isRemoteMode(profile);
   useEffect(() => {
     let alive = true;
     const refresh = () => {
@@ -370,7 +376,15 @@ function WorkspaceTab() {
   }, []);
   return (
     <div className="settings-stack">
-      <SectionCard title="工作区" description="档案名称与 SQLite 数据目录；切换入口在左栏底部">
+      <SectionCard title="后端连接" description="本地模式使用本机服务；远端模式把请求发到已部署的后端。">
+        <SettingRow label="当前连接">
+          <span className="num" style={{ fontSize: 12 }}>{connLabel}</span>
+        </SettingRow>
+        <SettingRow label="切换">
+          <button type="button" className="small" onClick={switchBackend}>选择后端</button>
+        </SettingRow>
+      </SectionCard>
+      <SectionCard title="工作区" description={remote ? "远端后端上的档案名称与数据目录。" : "档案名称与 SQLite 数据目录；切换入口在左栏底部"}>
         <SettingRow label="当前工作区">
           <span className="num" style={{ fontSize: 12 }}>{ws?.name ?? "-"}</span>
         </SettingRow>

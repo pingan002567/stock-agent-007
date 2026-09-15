@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import { useCopilotChat } from "@/hooks/useCopilotChat";
+import { useAppState } from "@/hooks/useAppState";
+import { isMobileLayout } from "@/lib/connection";
 
 /** 功能页统一头部(设计规范 3.2):无框 KPI 行 + 右侧动作区。
  * 页名由 func-head 承担,页面内不再重复大标题/hero 横幅。
@@ -16,6 +18,7 @@ export interface KpiItem {
 
 export function PageHead({ kpis, actions }: { kpis: KpiItem[]; actions?: ReactNode }) {
   const { handleSend, sending } = useCopilotChat();
+  const { setCurrentScreen } = useAppState();
   return (
     <div className="page-head">
       <div className="page-kpis">
@@ -24,7 +27,10 @@ export function PageHead({ kpis, actions }: { kpis: KpiItem[]; actions?: ReactNo
             key={k.label}
             className={`kpi-item${k.prompt ? " clickable" : ""}`}
             title={k.prompt}
-            onClick={k.prompt && !sending ? () => void handleSend(k.prompt!) : undefined}
+            onClick={k.prompt && !sending ? () => {
+              if (isMobileLayout()) setCurrentScreen("chat");
+              void handleSend(k.prompt!);
+            } : undefined}
           >
             <div className="k">{k.label}</div>
             <div className={`v num${k.tone ? ` ${k.tone}` : ""}`}>{k.value}</div>

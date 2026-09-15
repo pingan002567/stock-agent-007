@@ -3,6 +3,8 @@ import { useCopilotChat } from "@/hooks/useCopilotChat";
 import type { CopilotSession } from "@/api/client";
 import { ResizeHandle } from "@/components/ui/ResizeHandle";
 import { displaySessionTitle } from "@/lib/sessionTitle";
+import { formatConnectionLabel, isRemoteMode, loadConnection } from "@/lib/connection";
+import { useAppActions } from "@/hooks/useAppActions";
 
 /** 三栏布局左栏：品牌 + 会话列表 + 底部工作区/设置（Cursor 式沉底）。 */
 
@@ -28,14 +30,24 @@ function sessTime(s: CopilotSession): string {
     : `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export function LeftSidebar({ onOpenSettings, onOpenWorkspace }: {
+export function LeftSidebar({
+  onOpenSettings,
+  onOpenWorkspace,
+  variant = "desktop",
+  onSessionPicked,
+}: {
   onOpenSettings: () => void;
   onOpenWorkspace: () => void;
+  variant?: "desktop" | "drawer";
+  onSessionPicked?: () => void;
 }) {
   const {
     sessions, currentSession, sessionActivity,
     switchSession, handleNewSession, handleRenameSession, handleDeleteSession,
   } = useCopilotChat();
+  const { switchBackend } = useAppActions();
+  const connLabel = formatConnectionLabel(loadConnection() ?? { mode: "local" });
+  const remote = isRemoteMode();
 
   const [workspaceName, setWorkspaceName] = useState("工作区");
   useEffect(() => {
@@ -72,8 +84,10 @@ export function LeftSidebar({ onOpenSettings, onOpenWorkspace }: {
   }, [sessions, query]);
 
   return (
-    <aside className="left-sidebar">
-      <ResizeHandle cssVar="--left-sidebar-w" storageKey="left-sidebar-w" min={200} max={480} edge="right" />
+    <aside className={`left-sidebar${variant === "drawer" ? " m-drawer-panel" : ""}`}>
+      {variant === "desktop" ? (
+        <ResizeHandle cssVar="--left-sidebar-w" storageKey="left-sidebar-w" min={200} max={480} edge="right" />
+      ) : null}
       <div className="brand" data-tauri-drag-region="">
         <div className="brand-logo" aria-hidden>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -82,12 +96,14 @@ export function LeftSidebar({ onOpenSettings, onOpenWorkspace }: {
         </div>
         <div>
           <div className="brand-name">Stock Agent</div>
-          <div className="brand-sub">local · 8686</div>
+          <button type="button" className="brand-sub" title="切换后端" onClick={switchBackend}>
+            {connLabel}
+          </button>
         </div>
       </div>
 
       <div className="left-actions">
-        <button className="new-chat" onClick={handleNewSession}>
+        <button className="new-chat" onClick={() => { void handleNewSession(); onSessionPicked?.(); }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 5v14M5 12h14"/></svg>
           新建对话
         </button>
@@ -152,7 +168,7 @@ export function LeftSidebar({ onOpenSettings, onOpenWorkspace }: {
                       s.session_id === currentSession?.session_id ? "active" : "",
                       liveKind ? `live live-${liveKind}` : "",
                     ].filter(Boolean).join(" ")}
-                    onClick={() => switchSession(s.session_id)}
+                    onClick={() => { switchSession(s.session_id); onSessionPicked?.(); }}
                   >
                     {/* 标题行右侧挂 mono 时间（TeamClaw 卡片解剖）,hover 时让位给操作按钮 */}
                     <div className="sess-head">
@@ -203,7 +219,12 @@ export function LeftSidebar({ onOpenSettings, onOpenWorkspace }: {
       </nav>
 
       <div className="left-foot">
-        <button className="left-foot-user" onClick={onOpenWorkspace} title={`工作区：${workspaceName}`} type="button">
+        <button
+          className="left-foot-user"
+          onClick={onOpenWorkspace}
+          title={remote ? `远端工作区：${workspaceName}` : `工作区：${workspaceName}`}
+          type="button"
+        >
           <span className="left-foot-avatar" aria-hidden>{workspaceName.charAt(0).toUpperCase()}</span>
           <span className="left-foot-name">{workspaceName}</span>
         </button>

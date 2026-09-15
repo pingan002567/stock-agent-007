@@ -8,6 +8,7 @@ import { useChatDetail } from "@/hooks/useChatDetail";
 import { CopilotMessageItem, type ToolInfo } from "@/components/features/CopilotMessageItem";
 import { CopilotStreamingMessage } from "@/components/features/CopilotStreamingMessage";
 import { ContextCard } from "@/components/features/ContextCard";
+import { useMobileLayout } from "@/hooks/useMobileLayout";
 import { EMPTY_CHAT_COPY, isModelReady, STARTER_PROMPTS } from "@/lib/onboarding";
 import type { HumanInputResponse } from "@/lib/humanInput";
 
@@ -193,6 +194,7 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
 
 /** 三栏布局的中栏常驻聊天(会话管理在 LeftSidebar; Composer 在 BottomBar) */
 export function CopilotPanel() {
+  const mobile = useMobileLayout();
   const {
     copilotContextVersion,
     appDataCache, globalLoading, lastRefreshTime,
@@ -353,7 +355,7 @@ export function CopilotPanel() {
 
           {messages.length === 0 && !sending && (
             <div className="empty-state">
-              <div className="empty-title">{EMPTY_CHAT_COPY.title}</div>
+              <div className="empty-title">{mobile ? "有什么可以帮你？" : EMPTY_CHAT_COPY.title}</div>
               <div className="empty-desc">{EMPTY_CHAT_COPY.desc}</div>
               <div className="starter-chips">
                 {STARTER_PROMPTS.map((item) => (

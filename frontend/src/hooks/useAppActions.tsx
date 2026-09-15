@@ -6,6 +6,7 @@ export type SettingsTabHint = "ai" | "ai-models" | "data";
 interface AppActionsValue {
   openSettings: (tab?: SettingsTabHint) => void;
   openWorkspace: () => void;
+  switchBackend: () => void;
 }
 
 const AppActionsContext = createContext<AppActionsValue | null>(null);
@@ -14,9 +15,10 @@ export function AppActionsProvider({
   children,
   openSettings,
   openWorkspace,
+  switchBackend,
 }: AppActionsValue & { children: ReactNode }) {
   return (
-    <AppActionsContext.Provider value={{ openSettings, openWorkspace }}>
+    <AppActionsContext.Provider value={{ openSettings, openWorkspace, switchBackend }}>
       {children}
     </AppActionsContext.Provider>
   );

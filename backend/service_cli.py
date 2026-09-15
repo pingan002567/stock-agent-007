@@ -136,9 +136,18 @@ def probe_health(port: int) -> dict[str, Any] | None:
 
 
 def _launchctl(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["launchctl", *args], capture_output=True, text=True, timeout=30
-    )
+    if sys.platform != "darwin":
+        return subprocess.CompletedProcess(
+            args=["launchctl", *args], returncode=1, stdout="", stderr="launchctl is macOS-only"
+        )
+    try:
+        return subprocess.run(
+            ["launchctl", *args], capture_output=True, text=True, timeout=30
+        )
+    except FileNotFoundError:
+        return subprocess.CompletedProcess(
+            args=["launchctl", *args], returncode=1, stdout="", stderr="launchctl not found"
+        )
 
 
 def _service_loaded() -> bool:

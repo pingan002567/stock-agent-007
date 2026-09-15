@@ -70,3 +70,14 @@ test_research_page.py
 
 # Local UI/reference clones (not vendored)
 _ref/
+
+# Capacitor iOS (legacy — removed; use mobile-native/)
+# mobile/ios/App/Pods/
+# mobile/ios/App/App/public/
+# mobile/ios/DerivedData/
+
+# Native SwiftUI
+mobile-native/**/DerivedData/
+mobile-native/**/build/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/

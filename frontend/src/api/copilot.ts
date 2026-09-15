@@ -1,4 +1,5 @@
-import { api } from "./client";
+import { api, apiUrl } from "./client";
+import { authHeaders, withAccessToken } from "@/lib/connection";
 import type { CopilotSession, CopilotMessage, CopilotRun } from "./client";
 import type { HumanInputResponse } from "@/lib/humanInput";
 
@@ -133,9 +134,10 @@ export async function uploadSessionFiles(
   const form = new FormData();
   for (const f of files) form.append("files", f);
   // multipart 不能走 api() 包装（它会强制 JSON Content-Type），直接 fetch
-  const res = await fetch(`/api/copilot/sessions/${encodeURIComponent(sessionId)}/uploads`, {
+  const res = await fetch(apiUrl(`/api/copilot/sessions/${encodeURIComponent(sessionId)}/uploads`), {
     method: "POST",
     body: form,
+    headers: authHeaders(),
   });
   if (!res.ok) await readUploadError(res, "上传失败");
   return res.json();
@@ -159,7 +161,9 @@ export function sessionUploadsFromHttp(
 
 export async function listSessionUploads(sessionId: string): Promise<SessionUploadsList> {
   // 不走 api()：stub 用 200 {supported:false} 表达能力，全局错误 toast 会误伤
-  const res = await fetch(`/api/copilot/sessions/${encodeURIComponent(sessionId)}/uploads`);
+  const res = await fetch(apiUrl(`/api/copilot/sessions/${encodeURIComponent(sessionId)}/uploads`), {
+    headers: authHeaders(),
+  });
   if (res.status === 404) return sessionUploadsFromHttp(404, null);
   if (!res.ok) await readUploadError(res, "读取附件失败");
   const body = await res.json() as SessionUploadsList;
@@ -168,14 +172,16 @@ export async function listSessionUploads(sessionId: string): Promise<SessionUplo
 
 export async function deleteSessionUpload(sessionId: string, filename: string): Promise<void> {
   const res = await fetch(
-    `/api/copilot/sessions/${encodeURIComponent(sessionId)}/uploads/${encodeURIComponent(filename)}`,
-    { method: "DELETE" },
+    apiUrl(`/api/copilot/sessions/${encodeURIComponent(sessionId)}/uploads/${encodeURIComponent(filename)}`),
+    { method: "DELETE", headers: authHeaders() },
   );
   if (!res.ok) await readUploadError(res, "删除附件失败");
 }
 
 export function createStreamUrl(sessionId: string, runId: string): string {
-  return `/api/copilot/sessions/${encodeURIComponent(sessionId)}/stream/${encodeURIComponent(runId)}`;
+  return withAccessToken(
+    apiUrl(`/api/copilot/sessions/${encodeURIComponent(sessionId)}/stream/${encodeURIComponent(runId)}`),
+  );
 }
 
 export function parseCopilotEvent(source: Record<string, unknown>) {

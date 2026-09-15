@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, apiPost } from "@/api/client";
+import { isRemoteMode, saveConnection } from "@/lib/connection";
 
 interface WorkspaceInfo {
   name: string;
@@ -121,20 +122,12 @@ export function WorkspaceModal({ open, onClose }: { open: boolean; onClose: () =
       } catch { /* ignore */ }
       return;
     }
-    try { localStorage.setItem("sa.lastGoodPort", String(result.port)); } catch { /* ignore */ }
+    try { saveConnection({ mode: "local", localPort: result.port }); } catch { /* ignore */ }
     notifyWorkspaceChanged();
-    const invoke = window.__TAURI__?.core?.invoke;
-    const url = `http://127.0.0.1:${result.port}/?_=${Date.now()}`;
-    if (invoke) {
-      try {
-        await invoke("navigate", { url });
-      } catch {
-        window.location.replace(url);
-      }
-      return;
-    }
-    window.location.replace(url);
-  }, [refreshInfo]);
+    setSwitching(false);
+    onClose();
+    window.location.reload();
+  }, [onClose, refreshInfo]);
 
   const doSwitch = useCallback(async (dir: string) => {
     setError("");
@@ -213,6 +206,7 @@ export function WorkspaceModal({ open, onClose }: { open: boolean; onClose: () =
 
   if (!open) return null;
   const hasNativePicker = !!window.__TAURI__?.dialog?.open;
+  const remote = isRemoteMode();
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !switching) onClose(); }}>
@@ -238,7 +232,11 @@ export function WorkspaceModal({ open, onClose }: { open: boolean; onClose: () =
                   <span className="ws-badge">当前</span>
                 </div>
                 <div className="ws-row-dir">{info?.data_dir ?? ""}</div>
-                {info?.service_mode === "dev" && info.configured_data_dir
+                {remote ? (
+                  <div className="ws-hint" style={{ marginTop: 8 }}>
+                    当前是远端模式，工作区在后端服务器上，不能在这台设备上切换文件夹。
+                  </div>
+                ) : info?.service_mode === "dev" && info.configured_data_dir
                   && normalizeDir(info.configured_data_dir) !== normalizeDir(info.data_dir ?? "") ? (
                   <div className="ws-hint" style={{ marginTop: 8 }}>
                     已注册工作区为 {info.configured_data_dir}，但当前 dev 后端仍指向 {info.data_dir}。
@@ -247,6 +245,10 @@ export function WorkspaceModal({ open, onClose }: { open: boolean; onClose: () =
                 ) : null}
               </div>
 
+              {remote ? (
+                error ? <div className="ws-error">{error}</div> : null
+              ) : (
+                <>
               {info && !canSwitch && (
                 <div className="ws-hint" style={{ marginBottom: 10 }}>
                   当前环境无法切换。请先运行
@@ -297,6 +299,8 @@ export function WorkspaceModal({ open, onClose }: { open: boolean; onClose: () =
                 </div>
               )}
               {error && <div className="ws-error">{error}</div>}
+                </>
+              )}
             </div>
           </>
         )}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { apiGet, apiPost } from "@/api/client";
+import { apiGet, apiPost, apiUrl } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage } from "@/components/ui/Loading";
 import { PageHead } from "@/components/ui/PageHead";
@@ -220,10 +220,10 @@ export default function Reports() {
                 </div>
                 <div className="panel-body">
                   <div style={{ display: "flex", gap: 12 }}>
-                    <a className="btn" style={{ flex: 1, textAlign: "center" }} href={`/api/reports/${selectedReport.report_id}/export?format=markdown`} download>
+                    <a className="btn" style={{ flex: 1, textAlign: "center" }} href={apiUrl(`/api/reports/${selectedReport.report_id}/export?format=markdown`)} download>
                       导出 Markdown
                     </a>
-                    <a className="btn" style={{ flex: 1, textAlign: "center" }} href={`/api/reports/${selectedReport.report_id}/export?format=pdf`} download>
+                    <a className="btn" style={{ flex: 1, textAlign: "center" }} href={apiUrl(`/api/reports/${selectedReport.report_id}/export?format=pdf`)} download>
                       导出 PDF
                     </a>
                   </div>

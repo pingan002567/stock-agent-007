@@ -12,4 +12,15 @@ export default defineConfig({
   build: {
     outDir: "dist",
   },
+  server: {
+    port: 5173,
+    proxy: process.env.VITE_API_BASE
+      ? undefined
+      : {
+          "/api": {
+            target: process.env.VITE_DEV_PROXY_TARGET || "http://127.0.0.1:8686",
+            changeOrigin: true,
+          },
+        },
+  },
 });

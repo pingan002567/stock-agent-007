@@ -4,7 +4,16 @@
   "version": "0.1.0",
   "identifier": "com.stockagent.app",
   "build": {
-    "frontendDist": "../ui"
+    "frontendDist": "../../frontend/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": {
+      "script": "npm run dev",
+      "cwd": "../../frontend"
+    },
+    "beforeBuildCommand": {
+      "script": "npm run build",
+      "cwd": "../../frontend"
+    }
   },
   "app": {
     "withGlobalTauri": true,

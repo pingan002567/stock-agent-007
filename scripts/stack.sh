@@ -136,6 +136,7 @@ start_desktop() {
   (
     cd desktop/src-tauri
     export STOCKAGENT_REPO_ROOT="$ROOT"
+    export TAURI_FRONTEND_PATH="$ROOT/frontend"
     cargo tauri dev
   ) &
   TAURI_PID=$!

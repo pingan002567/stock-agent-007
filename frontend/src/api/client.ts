@@ -1,4 +1,23 @@
-const BASE = "";
+import { loadConnection, resolveApiBase, DEFAULT_LOCAL_PORT, canUseLocalMode, authHeaders } from "@/lib/connection";
+
+/** 当前后端 API 根。SPA 自托管后不再走同源空字符串。 */
+export function getApiBase(): string {
+  const profile = loadConnection();
+  if (profile) {
+    try {
+      return resolveApiBase(profile);
+    } catch {
+      /* 配置损坏 */
+    }
+  }
+  if (!canUseLocalMode()) return "";
+  return `http://127.0.0.1:${DEFAULT_LOCAL_PORT}`;
+}
+
+export function apiUrl(path: string): string {
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return `${getApiBase()}${p}`;
+}
 
 export class ApiError extends Error {
   status: number;
@@ -23,10 +42,15 @@ export async function api<T = unknown>(
   options: RequestInit = {},
 ): Promise<T> {
   let res: Response;
+  const { headers: extraHeaders, ...rest } = options;
   try {
-    res = await fetch(`${BASE}${path}`, {
-      headers: { "Content-Type": "application/json", ...options.headers },
-      ...options,
+    res = await fetch(apiUrl(path), {
+      ...rest,
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(),
+        ...(extraHeaders as Record<string, string> | undefined),
+      },
     });
   } catch (err) {
     const msg = err instanceof TypeError ? "网络连接失败，请检查后端服务是否已启动" : `请求失败: ${err}`;

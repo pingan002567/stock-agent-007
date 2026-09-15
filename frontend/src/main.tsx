@@ -3,6 +3,10 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 
+if (window.Capacitor?.isNativePlatform?.() || window.location.protocol === "capacitor:" || window.location.protocol === "ionic:") {
+  window.__STOCKAGENT_FORCE_REMOTE__ = true
+}
+
 const CHUNK_RELOAD_KEY = "workbench:chunk-reload"
 
 window.addEventListener("vite:preloadError", (event) => {

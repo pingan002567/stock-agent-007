@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { interceptAnchorClick, isAppLocalHref } from "@/lib/openExternalUrl";
+
+afterEach(() => {
+  localStorage.clear();
+});
 
 describe("isAppLocalHref", () => {
   const base = "http://127.0.0.1:8686/app";
@@ -10,6 +14,14 @@ describe("isAppLocalHref", () => {
     expect(isAppLocalHref("http://127.0.0.1:8686/reports", base)).toBe(true);
     expect(isAppLocalHref("http://localhost:8686/", base)).toBe(true);
     expect(isAppLocalHref("tauri://localhost", base)).toBe(true);
+  });
+
+  it("treats the configured API host as in-app", () => {
+    localStorage.setItem(
+      "STOCKAGENT_CONNECTION",
+      JSON.stringify({ mode: "remote", remoteUrl: "http://47.103.58.33:8686" }),
+    );
+    expect(isAppLocalHref("http://47.103.58.33:8686/api/reports/x", "http://localhost:5173/")).toBe(true);
   });
 
   it("sends news and mailto links outside", () => {

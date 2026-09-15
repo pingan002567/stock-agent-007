@@ -35,6 +35,7 @@ def _force_stub_ai_mode(request, monkeypatch, tmp_path):
     monkeypatch.delenv("WORKBENCH_AI_MODEL", raising=False)
     monkeypatch.setenv("WORKBENCH_DEERFLOW_MODE", "stub")
     monkeypatch.setenv("WORKBENCH_SKIP_SEED", "1")
+    monkeypatch.delenv("WORKBENCH_ACCESS_TOKEN", raising=False)
     # 用户级凭证隔离：指向测试临时路径，避免开发机上的真实
     # credentials.json 经分层合成注入 env（embedded 会因此升格 direct）
     monkeypatch.setenv("WORKBENCH_CREDENTIALS_PATH", str(tmp_path / "credentials.json"))

@@ -85,6 +85,7 @@ def test_health_and_app_shell(tmp_path, monkeypatch):
     assert health.status_code == 200
     payload = health.json()
     assert payload["status"] == "ok"
+    assert payload["server_role"] == "workbench"
     assert payload["runtime"] == "deerflow-adapter-stub"
     agent_runtime = payload["agent_runtime"]
     assert agent_runtime["mode"] == "embedded"

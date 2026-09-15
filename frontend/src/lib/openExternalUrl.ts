@@ -1,12 +1,6 @@
-/** 本机工作台地址：相对路径、回环、Tauri 自定义协议。其余 http(s)/mailto 走系统浏览器。 */
+import { loadConnection, resolveApiBase } from "@/lib/connection";
 
-declare global {
-  interface Window {
-    __TAURI__?: {
-      core?: { invoke?: (cmd: string, payload?: Record<string, unknown>) => Promise<unknown> };
-    };
-  }
-}
+/** 本机工作台地址：相对路径、回环、Tauri 自定义协议、当前 API host。其余 http(s)/mailto 走系统浏览器。 */
 
 export function isAppLocalHref(href: string, base: string = typeof window === "undefined" ? "http://127.0.0.1:8686/" : window.location.href): boolean {
   const raw = href.trim();
@@ -16,7 +10,16 @@ export function isAppLocalHref(href: string, base: string = typeof window === "u
     if (url.protocol === "mailto:" || url.protocol === "tel:") return false;
     if (url.protocol === "tauri:") return true;
     const host = url.hostname;
-    return host === "127.0.0.1" || host === "localhost" || host === "tauri.localhost";
+    if (host === "127.0.0.1" || host === "localhost" || host === "tauri.localhost") return true;
+    try {
+      const api = new URL(resolveApiBase(loadConnection() ?? { mode: "local" }));
+      if (url.hostname === api.hostname && url.port === api.port && url.protocol === api.protocol) {
+        return true;
+      }
+    } catch {
+      /* ignore */
+    }
+    return false;
   } catch {
     return true;
   }
@@ -27,6 +30,11 @@ export async function openExternalUrl(href: string, base?: string): Promise<void
   const invoke = typeof window === "undefined" ? undefined : window.__TAURI__?.core?.invoke;
   if (invoke) {
     await invoke("open_external", { url });
+    return;
+  }
+  const browser = window.Capacitor?.Plugins?.Browser;
+  if (browser?.open) {
+    await browser.open({ url });
     return;
   }
   window.open(url, "_blank", "noopener,noreferrer");

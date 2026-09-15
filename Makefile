@@ -19,7 +19,7 @@ help: ## 显示可用命令
 	@echo ""
 	@echo "常用（与正式版一致）:"
 	@echo "  make install        安装依赖"
-	@echo "  make run            打开 Tauri 桌面（后端由引导页 / launchd 启动）"
+	@echo "  make run            打开 Tauri 桌面（SPA 自托管；启动时选本地或远端后端）"
 	@echo "  make build          构建 frontend/dist"
 	@echo "  make pack           打包 Tauri 安装包"
 	@echo "  注意: 不要 make build & make run 并行——vite 清空 dist 时会白屏 Not Found"
@@ -54,15 +54,15 @@ build-web: check-node ## 构建 SPA 到 frontend/dist
 
 build-desktop: build-web check-venv ## 构建 Tauri 桌面 release
 	@echo "[build] Tauri desktop ..."
-	@cd "$(ROOT)/desktop/src-tauri" && STOCKAGENT_REPO_ROOT="$(ROOT)" $(CARGO) tauri build
+	@cd "$(ROOT)/desktop/src-tauri" && STOCKAGENT_REPO_ROOT="$(ROOT)" TAURI_FRONTEND_PATH="$(ROOT)/frontend" $(CARGO) tauri build
 	@echo "[ok] 见 desktop/src-tauri/target/release/bundle/"
 
 pack: build-desktop ## 打包桌面客户端（同 build-desktop）
 
-run: ensure-web tauri-dev ## 打开桌面客户端（后端由引导页 / launchd 管理，与正式版一致）
+run: ensure-web tauri-dev ## 打开桌面客户端（SPA 自托管，启动时选择本地或远端后端）
 
-tauri-dev: check-venv check-node ## Tauri 开发壳（首启在引导页 install 注册 launchd 后端）
-	@cd "$(ROOT)/desktop/src-tauri" && STOCKAGENT_REPO_ROOT="$(ROOT)" $(CARGO) tauri dev
+tauri-dev: check-venv check-node ## Tauri 开发壳（ConnectionGate 选本地 launchd 或远端 API）
+	@cd "$(ROOT)/desktop/src-tauri" && STOCKAGENT_REPO_ROOT="$(ROOT)" TAURI_FRONTEND_PATH="$(ROOT)/frontend" $(CARGO) tauri dev
 
 dev-stack: check-venv ## 开发栈：脚本直连 uvicorn + Tauri（临时停用 launchd）
 	@bash "$(ROOT)/scripts/stack.sh" --port $(PORT)

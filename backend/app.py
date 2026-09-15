@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 
 try:
     from fastapi import FastAPI, HTTPException
+    from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse
     from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.requests import Request
@@ -16,6 +17,7 @@ except ImportError as exc:  # pragma: no cover
         "FastAPI is required. Install project dependencies from pyproject.toml."
     ) from exc
 
+from backend.access_auth import AccessAuthMiddleware, cors_origin_list
 from backend.api import (
     routes_audit,
     routes_channels,
@@ -168,15 +170,30 @@ def create_app(
     app = FastAPI(title="AI Stock Workbench", version="0.1.0", lifespan=lifespan)
     app.state.services = services
     app.add_middleware(_SpaCacheControlMiddleware)
+    app.add_middleware(AccessAuthMiddleware)
+    cors_origins = cors_origin_list()
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=cors_origins != ["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.get("/api/health", tags=["health"])
-    def health():
+    def health(request: Request):
+        public = {"status": "ok", "server_role": "workbench"}
+        from backend.access_auth import configured_token
+
+        if configured_token() and not getattr(request.state, "workbench_authorized", False):
+            return public
         agent_runtime = app.state.services.copilot_service.deerflow.status().to_dict()
         from backend import service_cli
 
         return {
             "status": "ok",
             "mode": "single-user-local",
+            "server_role": "workbench",
             "runtime": f"deerflow-adapter-{agent_runtime['active_client']}",
             "agent_runtime": agent_runtime,
             "stock_domain": "provider-router",

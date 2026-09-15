@@ -11,8 +11,11 @@ import { CopilotPanel } from "@/components/features/CopilotPanel";
 import { SettingsModal } from "@/components/features/SettingsModal";
 import { WorkspaceModal } from "@/components/features/WorkspaceModal";
 import { SetupWizard } from "@/components/features/SetupWizard";
+import { ConnectionGate } from "@/components/features/ConnectionGate";
+import { MobileShell } from "@/components/layout/MobileShell";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ToastProvider, useToast } from "@/hooks/useToast";
+import { useMobileLayout } from "@/hooks/useMobileLayout";
 import { ApiError, setOnApiError } from "@/api/client";
 import { fetchSetupStatus, type SetupStatus } from "@/api/setup";
 import { interceptAnchorClick, isAppLocalHref, openExternalUrl } from "@/lib/openExternalUrl";
@@ -22,7 +25,7 @@ import { shouldShowSetupWizard } from "@/lib/onboarding";
  * 左栏会话+设置 │ 中栏常驻聊天 │ 右侧功能坞（图标条 + 可展开业务面板）。
  * currentScreen 语义 = 右栏面板内容，"chat" 表示面板收起。
  * 系统设置走独立悬浮模态（TeamClaw 式），不占功能坞。 */
-function AppShell() {
+function AppShell({ onSwitchBackend }: { onSwitchBackend: () => void }) {
   const { showToast } = useToast();
   const { currentScreen, setCurrentScreen } = useAppState();
   const { open: detailOpen, closeDetail } = useChatDetail();
@@ -78,7 +81,11 @@ function AppShell() {
   ].filter(Boolean).join(" ");
 
   return (
-    <AppActionsProvider openSettings={openSettings} openWorkspace={openWorkspace}>
+    <AppActionsProvider
+      openSettings={openSettings}
+      openWorkspace={openWorkspace}
+      switchBackend={onSwitchBackend}
+    >
       <div className={appCls}>
         <TopBar
           leftCollapsed={leftCollapsed}
@@ -151,6 +158,27 @@ function SetupGate({ children }: { children: ReactNode }) {
 
 function AppContent() {
   const { showToast } = useToast();
+  const mobile = useMobileLayout();
+  const [bootEpoch, setBootEpoch] = useState(0);
+  const [forceSelect, setForceSelect] = useState(false);
+  const [ready, setReady] = useState(false);
+
+  const handleConnected = useCallback(() => {
+    setForceSelect(false);
+    setBootEpoch((n) => n + 1);
+    setReady(true);
+  }, []);
+
+  const switchBackend = useCallback(() => {
+    setForceSelect(true);
+    setReady(false);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("mobile", mobile);
+    return () => document.documentElement.classList.remove("mobile");
+  }, [mobile]);
+
   useEffect(() => {
     setOnApiError((err) => {
       // 404 错误不显示提醒
@@ -180,12 +208,17 @@ function AppContent() {
       window.open = origOpen;
     };
   }, []);
+
+  if (!ready) {
+    return <ConnectionGate forceSelect={forceSelect} onConnected={handleConnected} />;
+  }
+
   return (
-    <AppStateProvider>
+    <AppStateProvider key={bootEpoch}>
       <CopilotChatProvider>
         <ChatDetailProvider>
           <SetupGate>
-            <AppShell />
+            {mobile ? <MobileShell onSwitchBackend={switchBackend} /> : <AppShell onSwitchBackend={switchBackend} />}
           </SetupGate>
         </ChatDetailProvider>
       </CopilotChatProvider>

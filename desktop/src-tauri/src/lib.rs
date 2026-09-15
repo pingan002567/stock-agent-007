@@ -4,13 +4,8 @@ use tauri::{
     Manager, WebviewWindowBuilder,
 };
 
-/// 引导 UI 与后端服务管理 CLI 之间的唯一桥：跑 `python -m backend.service_cli <args>`
-/// 并解析其单 JSON 出口（doc/DESKTOP_APP_PLAN.md §3.1.1：探测判定全在 doctor，
-/// 壳只做转发与渲染）。阶段 1 开发形态直接用仓库 .venv；阶段 2 打包后换 portable runtime。
-
-/// 引导 UI 与后端服务管理 CLI 之间的唯一桥：跑 `python -m backend.service_cli <args>`
-/// 并解析其单 JSON 出口（doc/DESKTOP_APP_PLAN.md §3.1.1：探测判定全在 doctor，
-/// 壳只做转发与渲染）。阶段 1 开发形态直接用仓库 .venv；阶段 2 打包后换 portable runtime。
+/// 本机后端管理 CLI：跑 `python -m backend.service_cli <args>` 并解析其单 JSON 出口。
+/// 仅本地模式由 React ConnectionGate 调用；远端模式不会走这条启动链。
 #[tauri::command]
 fn service_cli(args: Vec<String>) -> Result<serde_json::Value, String> {
     let repo = repo_root();
@@ -47,11 +42,14 @@ fn service_cli(args: Vec<String>) -> Result<serde_json::Value, String> {
     Ok(parsed)
 }
 
-/// 引导页 → 后端主界面的跳转。WKWebView 对 `tauri://` 页面发起的 `http://`
-/// 顶层跳转会静默拦截（location.replace 无效也无报错），必须走 Rust 侧原生导航。
+/// 引导页曾把 WebView 跳到本机后端首页；现在 SPA 自托管，主界面留在
+/// tauri:// 或 Vite origin，只通过 fetch 访问 API。
 #[tauri::command]
 fn navigate(webview_window: tauri::WebviewWindow, url: String) -> Result<(), String> {
     let parsed: tauri::Url = url.parse().map_err(|e| format!("bad url: {e}"))?;
+    if !is_app_webview_url(url.as_str()) {
+        return Err("refusing to navigate WebView off the bundled UI".into());
+    }
     webview_window.navigate(parsed).map_err(|e| e.to_string())
 }
 
@@ -70,10 +68,13 @@ fn is_app_webview_url(url: &str) -> bool {
     };
     match parsed.scheme() {
         "tauri" => true,
-        "http" | "https" => matches!(
-            parsed.host_str(),
-            Some("127.0.0.1" | "localhost" | "tauri.localhost")
-        ),
+        "http" | "https" => {
+            let host = parsed.host_str();
+            let port = parsed.port_or_known_default();
+            // 壳自身（Vite 开发 / 回环 UI）。不要把后端 8686 当 WebView 文档。
+            matches!(host, Some("127.0.0.1" | "localhost" | "tauri.localhost"))
+                && matches!(port, None | Some(80) | Some(443) | Some(5173) | Some(1420))
+        }
         _ => false,
     }
 }
@@ -143,9 +144,7 @@ pub fn run() {
                 })
                 .build()?;
 
-            // 空白页自愈：实测两种情况会让 webview 停在 about:blank——
-            // (1) wry 初始导航偶发不触发（启动竞态）；(2) navigate 到不可达端口
-            // 加载失败。轮询检测到 blank 就拉回引导页，引导页自会重新决策。
+            // 空白页自愈：webview 停在 about:blank 时拉回壳首页（bundled SPA / Vite）。
             {
                 let handle = app.handle().clone();
                 let home_url = app
@@ -217,4 +216,18 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_app_webview_url;
+
+    #[test]
+    fn keeps_webview_on_bundled_ui() {
+        assert!(is_app_webview_url("tauri://localhost"));
+        assert!(is_app_webview_url("http://localhost:5173/"));
+        assert!(is_app_webview_url("http://127.0.0.1:5173/"));
+        assert!(!is_app_webview_url("http://127.0.0.1:8686/"));
+        assert!(!is_app_webview_url("http://47.103.58.33:8686/"));
+    }
 }

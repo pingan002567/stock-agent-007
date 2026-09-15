@@ -9,6 +9,7 @@ import {
 import { ConnectProviderModal } from "@/components/settings/ai/ConnectProviderModal";
 import { useCopilotChat } from "@/hooks/useCopilotChat";
 import { isSetupModelReady, SETUP_WIZARD_COPY } from "@/lib/onboarding";
+import { isRemoteMode } from "@/lib/connection";
 
 function collectModels(snapshot: LlmProvidersSnapshot): { value: string; label: string }[] {
   const rows: { value: string; label: string }[] = [];
@@ -105,7 +106,9 @@ export function SetupWizard({
         {step === 2 ? (
           <>
             <h1 className="setup-title">{SETUP_WIZARD_COPY.step2Title}</h1>
-            <p className="setup-lead">{SETUP_WIZARD_COPY.step2Lead}</p>
+            <p className="setup-lead">
+              {isRemoteMode() ? SETUP_WIZARD_COPY.step2LeadRemote : SETUP_WIZARD_COPY.step2Lead}
+            </p>
 
             {snapshot?.connected.length ? (
               <div className="setup-block">

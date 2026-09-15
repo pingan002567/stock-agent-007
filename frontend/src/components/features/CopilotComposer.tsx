@@ -16,6 +16,7 @@ import {
   isImageUploadFilename,
   modelSupportsVision,
 } from "@/lib/sessionUploads";
+import { isMobileLayout } from "@/lib/connection";
 
 /** 中栏底部 Composer（Cursor 式浮动输入卡）。 */
 export function CopilotComposer() {
@@ -249,7 +250,7 @@ export function CopilotComposer() {
         )}
         <textarea
           ref={inputRef}
-          placeholder="输入追问，或描述你想做的事…"
+          placeholder={isMobileLayout() ? "问 Stock Agent…" : "输入追问，或描述你想做的事…"}
           value={input}
           onChange={(e) => { setInput(e.target.value); autoResize(); }}
           onKeyDown={handleKeyDown}
