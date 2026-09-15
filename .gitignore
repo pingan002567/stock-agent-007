@@ -79,5 +79,6 @@ _ref/
 # Native SwiftUI
 mobile-native/**/DerivedData/
 mobile-native/**/build/
+**/xcuserdata/
 *.xcworkspace/xcuserdata/
 *.xcodeproj/xcuserdata/
