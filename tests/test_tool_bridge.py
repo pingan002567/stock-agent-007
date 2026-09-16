@@ -12,7 +12,7 @@ from backend.schemas import AuthorityLevel, PriceSnapshot, RebalanceDraftDecisio
 def bridge(tmp_path):
     services = create_services(db_path=tmp_path / "bridge.sqlite3", files_root=tmp_path / "files")
     services.repo.seed_demo_portfolio()
-    return WorkbenchToolBridge(
+    bridge = WorkbenchToolBridge(
         context_builder=services.context_builder,
         repo=services.repo,
         monitor_service=services.monitor_service,
@@ -21,6 +21,8 @@ def bridge(tmp_path):
         permission_guard=services.permission_guard,
         tool_execution_service=services.tool_execution_service,
     )
+    bridge.bind_deerflow(lambda: services.copilot_service.deerflow)
+    return bridge
 
 
 def test_tool_bridge_registry_includes_default_tools_and_blocks_real_orders(bridge):
@@ -78,6 +80,11 @@ def test_tool_bridge_registry_includes_default_tools_and_blocks_real_orders(brid
         "summarize_review_inbox",
         "upsert_holding",
         "upsert_monitor_rule",
+        "list_skills",
+        "update_skill",
+        "list_mcp_servers",
+        "upsert_mcp_server",
+        "remove_mcp_server",
     }
     assert tools["get_stock_context"]["required_authority"] == "A2"
     assert tools["analyze_portfolio_risk"]["required_authority"] == "A3"
@@ -919,3 +926,29 @@ def test_tool_bridge_market_structure_hk_has_no_chip_ratios(bridge, monkeypatch)
     assert result["chip"]["degraded"] is True
     assert "profit_ratio" not in result["chip"]
     assert result["technical"]["ma5"] is not None
+
+
+def test_tool_bridge_sanitizes_mcp_env_secrets():
+    cleaned = WorkbenchToolBridge._sanitize_mcp_servers(
+        {"demo": {"enabled": True, "command": "npx", "env": {"API_KEY": "secret-value"}}}
+    )
+    assert cleaned["demo"]["env"]["API_KEY"] == "***"
+    assert cleaned["demo"]["command"] == "npx"
+
+
+def test_tool_bridge_list_skills_and_mcp_via_deerflow(bridge):
+    skills = bridge.execute("list_skills", {}, AuthorityLevel.A2)["result"]
+    assert "supported" in skills
+    # stub mode: unsupported; embedded/direct: skills list
+    if skills.get("supported"):
+        assert "skills" in skills
+    else:
+        assert "error" in skills
+
+    mcp = bridge.execute("list_mcp_servers", {}, AuthorityLevel.A2)["result"]
+    assert "supported" in mcp
+    if mcp.get("supported"):
+        assert "mcp_servers" in mcp
+        for server in (mcp["mcp_servers"] or {}).values():
+            if isinstance(server, dict) and isinstance(server.get("env"), dict):
+                assert all(v == "***" for v in server["env"].values())

@@ -23,10 +23,12 @@ struct StockAgentApp: App {
                     let eventId = note.userInfo?["event_id"] as? String
                     let symbol = note.userInfo?["symbol"] as? String
                     tabs.openMonitor(eventId: eventId, symbol: symbol)
+                    Task { await MonitorUnreadStore.shared.refreshFromServer() }
                 }
                 .onChange(of: auth.isConnected) { _, connected in
                     if connected {
                         PushNotificationManager.shared.requestAuthorizationAndRegister()
+                        Task { await MonitorUnreadStore.shared.refreshFromServer() }
                         if let token = PushNotificationManager.shared.deviceTokenHex {
                             Task {
                                 #if DEBUG
@@ -37,6 +39,8 @@ struct StockAgentApp: App {
                                 try? await api.registerAPNsDevice(token: token, environment: env)
                             }
                         }
+                    } else {
+                        MonitorUnreadStore.shared.setUnreadCount(0)
                     }
                 }
         }

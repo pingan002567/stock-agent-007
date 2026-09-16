@@ -454,6 +454,61 @@ final class APIClient: ObservableObject {
         return try JSONDecoder().decode([SkillInfo].self, from: skillsData)
     }
 
+    @discardableResult
+    func updateMarketRefresh(_ config: MarketRefreshConfig) async throws -> MarketRefreshConfig {
+        let body: [String: Any] = [
+            "page_refresh_seconds": config.pageRefreshSeconds,
+            "warmup_seconds": config.warmupSeconds,
+            "manual_cooldown_seconds": config.manualCooldownSeconds,
+        ]
+        let data = try await request(path: "/api/settings/market-refresh", method: "PUT", json: body)
+        return try JSONDecoder().decode(MarketRefreshConfig.self, from: data)
+    }
+
+    @discardableResult
+    func updateDataSources(_ config: DataSourcesConfig) async throws -> DataSourcesConfig {
+        let encoded = try JSONEncoder().encode(config)
+        guard let json = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] else {
+            throw APIError(message: "数据源配置编码失败")
+        }
+        let data = try await request(path: "/api/settings/data-provider", method: "PUT", json: json)
+        return try JSONDecoder().decode(DataSourcesConfig.self, from: data)
+    }
+
+    func fetchLlmProviders() async throws -> LlmProvidersSnapshot {
+        let data = try await getData(path: "/api/settings/llm/providers")
+        return try JSONDecoder().decode(LlmProvidersSnapshot.self, from: data)
+    }
+
+    @discardableResult
+    func setDefaultLlmModel(_ modelRef: String) async throws -> LlmProvidersSnapshot {
+        let data = try await request(
+            path: "/api/settings/llm/default-model",
+            method: "PUT",
+            json: ["default_model": modelRef]
+        )
+        return try JSONDecoder().decode(LlmProvidersSnapshot.self, from: data)
+    }
+
+    @discardableResult
+    func connectLlmProvider(providerId: String, apiKey: String?) async throws -> LlmProvidersSnapshot {
+        var body: [String: Any] = ["provider_id": providerId]
+        if let apiKey, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            body["api_key"] = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let data = try await request(path: "/api/settings/llm/connect", method: "POST", json: body)
+        return try JSONDecoder().decode(LlmProvidersSnapshot.self, from: data)
+    }
+
+    @discardableResult
+    func disconnectLlmProvider(providerId: String) async throws -> LlmProvidersSnapshot {
+        let data = try await request(
+            path: "/api/settings/llm/providers/\(enc(providerId))",
+            method: "DELETE"
+        )
+        return try JSONDecoder().decode(LlmProvidersSnapshot.self, from: data)
+    }
+
     func fetchCostSummary() async throws -> [CostDay] {
         let data = try await getData(path: "/api/runtime/cost-summary")
         return try JSONDecoder().decode(CostSummaryResponse.self, from: data).days ?? []

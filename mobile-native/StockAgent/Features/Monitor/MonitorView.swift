@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MonitorView: View {
     @EnvironmentObject private var tabs: TabRouter
+    @ObservedObject private var unread = MonitorUnreadStore.shared
 
     @State private var items: [MonitorEvent] = []
     @State private var status: MonitorStatus?
@@ -61,7 +62,7 @@ struct MonitorView: View {
                                 } label: {
                                     HStack(alignment: .top, spacing: 10) {
                                         Circle()
-                                            .fill(seenIds.contains(event.stableId) ? Color.clear : Color.accentColor)
+                                            .fill(seenIds.contains(event.stableId) ? Color.clear : Color.red)
                                             .frame(width: 8, height: 8)
                                             .padding(.top, 6)
                                         VStack(alignment: .leading, spacing: 6) {
@@ -116,7 +117,7 @@ struct MonitorView: View {
                                 if unreadCount > 0 {
                                     Text("\(unreadCount) 未读")
                                         .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(Color.accentColor)
+                                        .foregroundStyle(.red)
                                 }
                             }
                         }
@@ -189,11 +190,17 @@ struct MonitorView: View {
     private func markSeen(_ event: MonitorEvent) {
         MonitorSeenStore.markSeen(event.stableId)
         seenIds = MonitorSeenStore.load()
+        syncTabBadge()
     }
 
     private func markAllRead() {
         MonitorSeenStore.markAllSeen(items.map(\.stableId))
         seenIds = MonitorSeenStore.load()
+        syncTabBadge()
+    }
+
+    private func syncTabBadge() {
+        unread.refreshFromEventIds(items.map(\.stableId))
     }
 
     private func applyDeepLinkIfNeeded() {
@@ -240,6 +247,7 @@ struct MonitorView: View {
             status = try? await statusTask
             rules = (try? await rulesTask) ?? []
             seenIds = MonitorSeenStore.load()
+            syncTabBadge()
             applyDeepLinkIfNeeded()
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
@@ -257,6 +265,7 @@ struct MonitorView: View {
             items.append(contentsOf: events.items)
             page = next
             totalPages = max(events.totalPages ?? totalPages, totalPages)
+            syncTabBadge()
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }

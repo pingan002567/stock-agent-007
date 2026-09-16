@@ -362,6 +362,10 @@ def create_services(
         result_normalizer=ResultNormalizer(),
         runtime_observer=runtime_observer,
     )
+    # Agent mid-chat skill/MCP tools need the live adapter (reconnect replaces it).
+    # Do not auto-reconnect here: DeerFlow update_skill/update_mcp_config already
+    # invalidate the in-process agent; reconnect mid-stream would drop the run.
+    tool_bridge.bind_deerflow(lambda: copilot_service.deerflow)
     # IM channel layer (Telegram/Slack): bridges inbound IM → CopilotService and
     # pushes monitor alerts back out. Idle unless channels are configured.
     from backend.channels.service import build_channel_service

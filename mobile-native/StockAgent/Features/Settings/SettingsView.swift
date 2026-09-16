@@ -15,8 +15,12 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                if isDegraded {
+                    degradedBanner
+                }
                 connectionSection
-                runtimeSection
+                backendSection
+                marketSection
                 featuresSection
                 pushSection
                 tradingSection
@@ -30,6 +34,14 @@ struct SettingsView: View {
     }
 
     // MARK: - Sections
+
+    private var degradedBanner: some View {
+        Section {
+            Label(degradedFooter, systemImage: "exclamationmark.triangle.fill")
+                .font(.footnote)
+                .foregroundStyle(.orange)
+        }
+    }
 
     private var connectionSection: some View {
         Section("当前连接") {
@@ -59,7 +71,7 @@ struct SettingsView: View {
         }
     }
 
-    private var runtimeSection: some View {
+    private var backendSection: some View {
         Section {
             NavigationLink {
                 RuntimeSettingsView(initial: settings)
@@ -69,6 +81,17 @@ struct SettingsView: View {
                     Text(runtimeSubtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+            }
+            NavigationLink {
+                LlmModelSettingsView(initial: settings?.llmProviders)
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("模型服务")
+                    Text(settings?.llmProviders?.defaultModel ?? settings?.runtimeConfig?.defaultModel ?? "未连接")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
             NavigationLink {
@@ -88,14 +111,38 @@ struct SettingsView: View {
                 Text("用量与费用")
             }
         } header: {
-            Text("后端能力")
-        } footer: {
-            if settings?.agentRuntime?.degraded == true
-                || settings?.dataProvider?.degraded == true
-                || api.lastDegraded == true {
-                Text(degradedFooter)
-                    .foregroundStyle(.orange)
+            Text("后端与模型")
+        }
+    }
+
+    private var marketSection: some View {
+        Section {
+            NavigationLink {
+                MarketRefreshSettingsView(initial: settings?.marketRefresh)
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("刷新频率")
+                    Text(refreshSubtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
+            NavigationLink {
+                DataSourcesSettingsView(
+                    initialSources: settings?.dataSources,
+                    initialAvailable: settings?.availableDataProviders ?? [],
+                    initialSchema: settings?.providerCredentialSchema ?? [:]
+                )
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("行情数据源")
+                    Text(dataSourceSubtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text("行情")
         }
     }
 
@@ -118,6 +165,8 @@ struct SettingsView: View {
             Button("请求推送授权并注册") {
                 push.requestAuthorizationAndRegister()
                 Task {
+                    // Wait briefly for token callback.
+                    try? await Task.sleep(nanoseconds: 800_000_000)
                     if let token = push.deviceTokenHex {
                         #if DEBUG
                         let env = "sandbox"
@@ -187,6 +236,12 @@ struct SettingsView: View {
 
     // MARK: - Labels
 
+    private var isDegraded: Bool {
+        settings?.agentRuntime?.degraded == true
+            || settings?.dataProvider?.degraded == true
+            || api.lastDegraded == true
+    }
+
     private var displayHost: String {
         let raw = auth.remoteURL
         guard let url = URL(string: raw), let host = url.host else { return raw.isEmpty ? "—" : raw }
@@ -203,6 +258,23 @@ struct SettingsView: View {
             return "\(client) · \(model)"
         }
         return client
+    }
+
+    private var refreshSubtitle: String {
+        guard let cfg = settings?.marketRefresh else { return "—" }
+        return "页面 \(cfg.pageRefreshSeconds)s · 预热 \(cfg.warmupSeconds)s"
+    }
+
+    private var dataSourceSubtitle: String {
+        let available = settings?.availableDataProviders ?? []
+        guard !available.isEmpty else {
+            return settings?.dataProvider?.activeProvider ?? "—"
+        }
+        let sources = settings?.dataSources
+        let on = available.filter {
+            sources?.isEnabled(providerId: $0.id, fallback: $0.defaultEnabled) ?? $0.defaultEnabled
+        }.count
+        return "\(on)/\(available.count) 启用"
     }
 
     private var skillsCountLabel: String {
@@ -244,11 +316,6 @@ struct SettingsView: View {
         defer { loading = false }
         do {
             settings = try await api.fetchSettings()
-            if let runtime = settings?.agentRuntime {
-                // Keep APIClient cache in sync for other screens.
-                _ = runtime
-            }
-            // Soft health refresh without blocking UI on failure.
             _ = try? await api.probeHealth()
         } catch {
             loadError = (error as? APIError)?.message ?? error.localizedDescription

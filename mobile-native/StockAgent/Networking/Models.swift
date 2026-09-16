@@ -58,6 +58,11 @@ struct WorkbenchSettings: Decodable {
     let dataProvider: DataProviderStatus?
     let runtimeConfig: RuntimeConfigPublic?
     let tradingControls: TradingControls?
+    let marketRefresh: MarketRefreshConfig?
+    let dataSources: DataSourcesConfig?
+    let availableDataProviders: [AvailableDataProvider]?
+    let providerCredentialSchema: [String: [ProviderCredentialField]]?
+    let llmProviders: LlmProvidersSnapshot?
 
     enum CodingKeys: String, CodingKey {
         case skills
@@ -65,6 +70,11 @@ struct WorkbenchSettings: Decodable {
         case dataProvider = "data_provider"
         case runtimeConfig = "runtime_config"
         case tradingControls = "trading_controls"
+        case marketRefresh = "market_refresh"
+        case dataSources = "data_sources"
+        case availableDataProviders = "available_data_providers"
+        case providerCredentialSchema = "provider_credential_schema"
+        case llmProviders = "llm_providers"
     }
 }
 
@@ -104,6 +114,184 @@ struct TradingControls: Decodable, Hashable {
         case paperTrading = "paper_trading"
         case realOrder = "real_order"
     }
+}
+
+struct MarketRefreshConfig: Codable, Hashable {
+    var pageRefreshSeconds: Int
+    var warmupSeconds: Int
+    var manualCooldownSeconds: Int
+
+    enum CodingKeys: String, CodingKey {
+        case pageRefreshSeconds = "page_refresh_seconds"
+        case warmupSeconds = "warmup_seconds"
+        case manualCooldownSeconds = "manual_cooldown_seconds"
+    }
+
+    static let standard = MarketRefreshConfig(
+        pageRefreshSeconds: 60,
+        warmupSeconds: 300,
+        manualCooldownSeconds: 120
+    )
+}
+
+struct MarketRefreshPreset: Identifiable, Hashable {
+    let id: String
+    let label: String
+    let config: MarketRefreshConfig
+
+    static let all: [MarketRefreshPreset] = [
+        .init(
+            id: "relaxed",
+            label: "宽松",
+            config: .init(pageRefreshSeconds: 180, warmupSeconds: 900, manualCooldownSeconds: 300)
+        ),
+        .init(
+            id: "standard",
+            label: "标准",
+            config: .init(pageRefreshSeconds: 60, warmupSeconds: 300, manualCooldownSeconds: 120)
+        ),
+        .init(
+            id: "active",
+            label: "积极",
+            config: .init(pageRefreshSeconds: 30, warmupSeconds: 120, manualCooldownSeconds: 60)
+        ),
+    ]
+}
+
+struct DataSourcesConfig: Codable, Hashable {
+    var providers: [String: MarketProviderBinding]?
+    var providerStates: [String: ProviderEnabledState]?
+    var providerCredentials: [String: [String: String?]]?
+
+    enum CodingKeys: String, CodingKey {
+        case providers
+        case providerStates = "provider_states"
+        case providerCredentials = "provider_credentials"
+    }
+
+    init(
+        providers: [String: MarketProviderBinding]? = nil,
+        providerStates: [String: ProviderEnabledState]? = nil,
+        providerCredentials: [String: [String: String?]]? = nil
+    ) {
+        self.providers = providers
+        self.providerStates = providerStates
+        self.providerCredentials = providerCredentials
+    }
+
+    func isEnabled(providerId: String, fallback: Bool) -> Bool {
+        if let state = providerStates?[providerId]?.enabled {
+            return state
+        }
+        return fallback
+    }
+
+    mutating func setEnabled(providerId: String, enabled: Bool) {
+        var states = providerStates ?? [:]
+        states[providerId] = ProviderEnabledState(enabled: enabled)
+        providerStates = states
+    }
+
+    func credential(_ providerId: String, key: String) -> String {
+        guard let raw = providerCredentials?[providerId]?[key] else { return "" }
+        return raw ?? ""
+    }
+
+    mutating func setCredential(providerId: String, key: String, value: String) {
+        var all = providerCredentials ?? [:]
+        var entry = all[providerId] ?? [:]
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        entry[key] = trimmed.isEmpty ? nil : trimmed
+        all[providerId] = entry
+        providerCredentials = all
+    }
+
+    func credentialsComplete(providerId: String, fields: [ProviderCredentialField]) -> Bool {
+        guard !fields.isEmpty else { return true }
+        return fields.allSatisfy { field in
+            !credential(providerId, key: field.key).isEmpty
+        }
+    }
+}
+
+struct MarketProviderBinding: Codable, Hashable {
+    var provider: String?
+    var label: String?
+    var description: String?
+}
+
+struct ProviderEnabledState: Codable, Hashable {
+    var enabled: Bool?
+}
+
+struct AvailableDataProvider: Identifiable, Decodable, Hashable {
+    let id: String
+    let name: String?
+    let markets: [String]?
+    let description: String?
+    let free: Bool?
+    let enabledByDefault: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, markets, description, free
+        case enabledByDefault = "enabled_by_default"
+    }
+
+    var displayName: String { name ?? id }
+    var defaultEnabled: Bool { enabledByDefault ?? free ?? false }
+}
+
+struct LlmProvidersSnapshot: Decodable, Hashable {
+    let connected: [LlmProviderItem]?
+    let popular: [LlmProviderItem]?
+    let catalog: [LlmProviderItem]?
+    let defaultModel: String?
+
+    enum CodingKeys: String, CodingKey {
+        case connected, popular, catalog
+        case defaultModel = "default_model"
+    }
+}
+
+struct LlmProviderItem: Identifiable, Decodable, Hashable {
+    let id: String
+    let name: String?
+    let baseUrl: String?
+    let connected: Bool?
+    let requiresKey: Bool?
+    let canDisconnect: Bool?
+    let hasKey: Bool?
+    let custom: Bool?
+    let models: [LlmModelItem]?
+    let note: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, connected, models, note, custom
+        case baseUrl = "base_url"
+        case requiresKey = "requires_key"
+        case canDisconnect = "can_disconnect"
+        case hasKey = "has_key"
+    }
+
+    var displayName: String { name ?? id }
+    var needsKey: Bool { requiresKey ?? true }
+}
+
+struct LlmModelItem: Identifiable, Decodable, Hashable {
+    let id: String
+    let name: String?
+
+    var displayName: String { name ?? id }
+}
+
+struct ProviderCredentialField: Identifiable, Decodable, Hashable {
+    let key: String
+    let label: String?
+    let env: String?
+    let secret: Bool?
+
+    var id: String { key }
+    var displayLabel: String { label ?? key }
 }
 
 struct CostDay: Identifiable, Decodable, Hashable {

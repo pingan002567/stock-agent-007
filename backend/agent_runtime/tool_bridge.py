@@ -124,6 +124,9 @@ class WorkbenchToolBridge:
         self.permission_guard = permission_guard
         self.tool_execution_service = tool_execution_service
         self.execution_policy = execution_policy or ExecutionPolicy()
+        # DeerFlow native skill/MCP APIs — bound after CopilotService exists (circular init).
+        self._get_deerflow: Callable[[], Any] | None = None
+        self._on_extensions_changed: Callable[[], Any] | None = None
         self._handlers: dict[str, Callable[[dict[str, Any]], Any]] = {
             "get_stock_context": self._get_stock_context,
             "get_stock_financial": self._get_stock_financial,
@@ -173,6 +176,11 @@ class WorkbenchToolBridge:
             "upsert_holding": self._upsert_holding,
             "remove_holding": self._remove_holding,
             "place_real_order": self._place_real_order,
+            "list_skills": self._list_skills,
+            "update_skill": self._update_skill,
+            "list_mcp_servers": self._list_mcp_servers,
+            "upsert_mcp_server": self._upsert_mcp_server,
+            "remove_mcp_server": self._remove_mcp_server,
         }
         self._specs = {
             "get_stock_context": ToolSpec(
@@ -633,7 +641,97 @@ class WorkbenchToolBridge:
                 {"symbol": "str", "quantity": "float"},
                 ["permission_guard:real_order_disabled"],
             ),
+            "list_skills": ToolSpec(
+                "list_skills",
+                "runtime",
+                AuthorityLevel.A2,
+                "low",
+                True,
+                {"enabled_only": "bool"},
+                ["deerflow:list_skills"],
+            ),
+            "update_skill": ToolSpec(
+                "update_skill",
+                "runtime",
+                AuthorityLevel.A3,
+                "medium",
+                True,
+                {"name": "str", "enabled": "bool"},
+                ["deerflow:update_skill", "extensions_config"],
+            ),
+            "list_mcp_servers": ToolSpec(
+                "list_mcp_servers",
+                "runtime",
+                AuthorityLevel.A2,
+                "low",
+                True,
+                {},
+                ["deerflow:get_mcp_config"],
+            ),
+            "upsert_mcp_server": ToolSpec(
+                "upsert_mcp_server",
+                "runtime",
+                AuthorityLevel.A3,
+                "medium",
+                True,
+                {
+                    "name": "str",
+                    "enabled": "bool?",
+                    "type": "str?",
+                    "command": "str?",
+                    "args": "list?",
+                    "url": "str?",
+                    "env": "dict?",
+                    "description": "str?",
+                },
+                ["deerflow:update_mcp_config", "extensions_config"],
+            ),
+            "remove_mcp_server": ToolSpec(
+                "remove_mcp_server",
+                "runtime",
+                AuthorityLevel.A3,
+                "medium",
+                True,
+                {"name": "str"},
+                ["deerflow:update_mcp_config", "extensions_config"],
+            ),
         }
+
+    def bind_deerflow(
+        self,
+        get_deerflow: Callable[[], Any],
+        *,
+        on_extensions_changed: Callable[[], Any] | None = None,
+    ) -> None:
+        """Inject DeerFlow adapter accessor after CopilotService construction."""
+        self._get_deerflow = get_deerflow
+        self._on_extensions_changed = on_extensions_changed
+
+    def _deerflow(self) -> Any:
+        if self._get_deerflow is None:
+            raise RuntimeError("DeerFlow runtime not bound — call bind_deerflow() after bootstrap")
+        return self._get_deerflow()
+
+    def _notify_extensions_changed(self) -> dict[str, Any] | None:
+        if self._on_extensions_changed is None:
+            return None
+        status = self._on_extensions_changed()
+        return status if isinstance(status, dict) else {"ok": True}
+
+    @staticmethod
+    def _sanitize_mcp_servers(servers: dict[str, Any]) -> dict[str, Any]:
+        """Redact env secret values before returning MCP config to the agent."""
+        out: dict[str, Any] = {}
+        for name, cfg in servers.items():
+            if not isinstance(cfg, dict):
+                out[name] = cfg
+                continue
+            cleaned = {k: v for k, v in cfg.items() if k != "env"}
+            env = cfg.get("env")
+            if isinstance(env, dict) and env:
+                cleaned["env"] = {str(k): "***" for k in env}
+            out[str(name)] = cleaned
+        return out
 
     def list_tools(self) -> list[dict[str, Any]]:
         return [self._specs[name].to_dict() for name in self._handlers]
@@ -1247,3 +1345,123 @@ class WorkbenchToolBridge:
     def _place_real_order(self, arguments: dict[str, Any]) -> dict[str, Any]:
         self.permission_guard.block_real_order()
         return {}
+
+    def _list_skills(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        enabled_only = bool(arguments.get("enabled_only") or False)
+        result = self._deerflow().list_skills(enabled_only=enabled_only)
+        if result.get("supported") is False:
+            return result
+        if result.get("error") and "skills" not in result:
+            raise RuntimeError(str(result["error"]))
+        skills: list[dict[str, Any]] = []
+        for raw in result.get("skills") or []:
+            if not isinstance(raw, dict):
+                continue
+            item = dict(raw)
+            cat = item.get("category")
+            if cat is not None and not isinstance(cat, (str, int, float, bool)):
+                item["category"] = getattr(cat, "value", str(cat))
+            skills.append(item)
+        return {"skills": skills, "count": len(skills), "supported": True}
+
+    def _update_skill(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from backend.agent_runtime import skill_specs
+
+        name = str(arguments.get("name") or "").strip()
+        if not name:
+            raise ValueError("name is required")
+        if "enabled" not in arguments:
+            raise ValueError("enabled is required")
+        enabled = bool(arguments.get("enabled"))
+        spec = skill_specs.WORKBENCH_SKILLS.get(name)
+        if spec is not None and (spec.locked or not spec.is_subagent):
+            raise ValueError(f"skill is locked: {name}")
+        result = self._deerflow().update_skill(name, enabled=enabled)
+        if result.get("supported") is False:
+            return result
+        if result.get("error"):
+            raise RuntimeError(str(result["error"]))
+        runtime = self._notify_extensions_changed()
+        out = {k: v for k, v in result.items() if k != "supported"}
+        out["supported"] = True
+        if runtime is not None:
+            out["agent_runtime"] = runtime
+        return out
+
+    def _list_mcp_servers(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        del arguments
+        result = self._deerflow().mcp_config()
+        if result.get("supported") is False:
+            return result
+        if result.get("error") and "mcp_servers" not in result:
+            raise RuntimeError(str(result["error"]))
+        servers = result.get("mcp_servers") or {}
+        if not isinstance(servers, dict):
+            servers = {}
+        sanitized = self._sanitize_mcp_servers(servers)
+        return {
+            "mcp_servers": sanitized,
+            "count": len(sanitized),
+            "supported": True,
+        }
+
+    def _upsert_mcp_server(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        name = str(arguments.get("name") or "").strip()
+        if not name:
+            raise ValueError("name is required")
+        current = self._deerflow().mcp_config()
+        if current.get("supported") is False:
+            return current
+        if current.get("error") and "mcp_servers" not in current:
+            raise RuntimeError(str(current["error"]))
+        servers = dict(current.get("mcp_servers") or {})
+        existing = servers.get(name) if isinstance(servers.get(name), dict) else {}
+        entry = dict(existing)
+        for key in ("enabled", "type", "command", "args", "url", "env", "description", "headers", "cwd"):
+            if key in arguments and arguments[key] is not None:
+                entry[key] = arguments[key]
+        if "enabled" not in entry:
+            entry["enabled"] = True
+        if "type" not in entry:
+            entry["type"] = "stdio" if entry.get("command") else "sse"
+        servers[name] = entry
+        result = self._deerflow().update_mcp_config(servers)
+        if result.get("supported") is False:
+            return result
+        if result.get("error") and "mcp_servers" not in result:
+            raise RuntimeError(str(result["error"]))
+        runtime = self._notify_extensions_changed()
+        updated = (result.get("mcp_servers") or {}).get(name) or entry
+        sanitized = self._sanitize_mcp_servers({name: updated if isinstance(updated, dict) else entry})
+        out: dict[str, Any] = {
+            "name": name,
+            "server": sanitized.get(name, updated),
+            "supported": True,
+        }
+        if runtime is not None:
+            out["agent_runtime"] = runtime
+        return out
+
+    def _remove_mcp_server(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        name = str(arguments.get("name") or "").strip()
+        if not name:
+            raise ValueError("name is required")
+        current = self._deerflow().mcp_config()
+        if current.get("supported") is False:
+            return current
+        if current.get("error") and "mcp_servers" not in current:
+            raise RuntimeError(str(current["error"]))
+        servers = dict(current.get("mcp_servers") or {})
+        if name not in servers:
+            raise ValueError(f"mcp server not found: {name}")
+        del servers[name]
+        result = self._deerflow().update_mcp_config(servers)
+        if result.get("supported") is False:
+            return result
+        if result.get("error") and "mcp_servers" not in result:
+            raise RuntimeError(str(result["error"]))
+        runtime = self._notify_extensions_changed()
+        out: dict[str, Any] = {"name": name, "removed": True, "supported": True}
+        if runtime is not None:
+            out["agent_runtime"] = runtime
+        return out

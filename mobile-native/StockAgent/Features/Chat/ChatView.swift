@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import PhotosUI
 import UniformTypeIdentifiers
 
@@ -6,16 +7,53 @@ struct ChatView: View {
     @EnvironmentObject private var chat: ChatViewModel
     @Environment(\.scenePhase) private var scenePhase
     @State private var appeared = false
+    /// Distance to lift the composer above the software keyboard.
+    @State private var keyboardLift: CGFloat = 0
+    @State private var keyboardAnimationDuration: Double = 0.25
+    /// Host view used to measure composer-bottom ↔ keyboard-top overlap.
+    @StateObject private var keyboardHost = ChatKeyboardHost()
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 ConnectivityBanner(reachability: NetworkReachability.shared)
-                MessageListView()
-                if !chat.uploads.isEmpty || chat.uploadsBusy {
-                    UploadStripView()
+                MessageListView(keyboardLift: keyboardLift)
+                VStack(spacing: 0) {
+                    if !chat.uploads.isEmpty || chat.uploadsBusy {
+                        UploadStripView()
+                    }
+                    ComposerView()
+                        .background {
+                            ChatKeyboardHostAnchor(host: keyboardHost)
+                        }
                 }
-                ComposerView()
+                // Animate only the composer chrome; list layout updates without animation.
+                .offset(y: -keyboardLift)
+                .animation(.easeOut(duration: keyboardAnimationDuration), value: keyboardLift)
+            }
+            .ignoresSafeArea(.keyboard)
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { note in
+                applyKeyboardShow(note)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+                // Only track size changes while already lifted (e.g. emoji keyboard).
+                guard keyboardLift > 1 else { return }
+                applyKeyboardShow(note)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { note in
+                let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+                keyboardAnimationDuration = duration
+                // No withAnimation — list spacer snaps; chrome eases via its own animation.
+                keyboardLift = 0
+                DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.05) {
+                    keyboardHost.clearRestingBaseline()
+                }
+            }
+            .onChange(of: chat.currentSession?.sessionId) { _, _ in
+                dismissKeyboard()
+            }
+            .onChange(of: chat.drawerOpen) { _, open in
+                if open { dismissKeyboard() }
             }
             .navigationTitle(chat.title)
             .navigationBarTitleDisplayMode(.inline)
@@ -87,11 +125,48 @@ struct ChatView: View {
             }
         }
     }
+
+    private func applyKeyboardShow(_ note: Notification) {
+        guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+        let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+
+        let lift = keyboardHost.lift(forKeyboardFrame: frame, currentLift: keyboardLift)
+        guard lift > 0.5 || keyboardLift > 0.5 else { return }
+        guard abs(lift - keyboardLift) > 0.5 else { return }
+
+        keyboardAnimationDuration = duration
+        // Update lift without withAnimation so the message list doesn't scrub layout.
+        keyboardLift = lift
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+        if keyboardLift > 0 {
+            keyboardAnimationDuration = 0.2
+            keyboardLift = 0
+            keyboardHost.clearRestingBaseline()
+        }
+    }
 }
 
 struct MessageListView: View {
     @EnvironmentObject private var chat: ChatViewModel
     @ObservedObject private var appearance = ChatAppearanceStore.shared
+    var keyboardLift: CGFloat = 0
+    /// True while the bottom (latest) region is off-screen.
+    @State private var showJumpToLatest = false
+    /// Avoid loading older history until the initial scroll-to-latest settles.
+    @State private var allowOlderLoad = false
+    @State private var pendingRevealLatest = false
+    /// Ignore bottom-sentinel appear while prepending history (LazyVStack remount flicker).
+    @State private var ignoreBottomAppear = false
+    /// Cancels in-flight jump retries when a newer jump/session starts.
+    @State private var jumpGeneration = 0
 
     var body: some View {
         ZStack {
@@ -160,32 +235,197 @@ struct MessageListView: View {
                             }
                             .id(row.id)
                             .onAppear {
-                                // Only near top of a non-trivial list — pager also debounces.
-                                if index == 0, chat.rows.count >= 8 {
-                                    Task { await chat.loadOlderHistoryIfNeeded() }
-                                }
+                                guard allowOlderLoad, index == 0, chat.rows.count >= 8 else { return }
+                                Task { await chat.loadOlderHistoryIfNeeded() }
                             }
                         }
+
+                        Color.clear
+                            .frame(height: 24)
+                            .id("chat-bottom-sentinel")
+                            .onAppear {
+                                markArrivedAtLatest()
+                            }
+                            .onDisappear {
+                                guard !chat.rows.isEmpty else { return }
+                                // Don't resurface the button while a jump is in flight.
+                                guard !pendingRevealLatest else { return }
+                                if !showJumpToLatest { showJumpToLatest = true }
+                            }
+
+                        // Reserves space under the upward-offset composer; height snaps (no animation).
+                        Color.clear
+                            .frame(height: keyboardLift)
+                            .id("keyboard-lift-spacer")
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
+                    .transaction { $0.animation = nil }
                 }
                 .scrollContentBackground(.hidden)
+                .scrollDismissesKeyboard(.interactively)
+                .simultaneousGesture(
+                    TapGesture().onEnded {
+                        UIApplication.shared.sendAction(
+                            #selector(UIResponder.resignFirstResponder),
+                            to: nil,
+                            from: nil,
+                            for: nil
+                        )
+                    }
+                )
+                .background {
+                    ChatScrollKeyboardAnchor(lift: keyboardLift, stickToBottom: !showJumpToLatest)
+                }
+                .onChange(of: keyboardLift) { _, lift in
+                    guard lift > 0, !showJumpToLatest, let id = chat.rows.last?.id else { return }
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        proxy.scrollTo(id, anchor: .bottom)
+                        proxy.scrollTo("chat-bottom-sentinel", anchor: .bottom)
+                    }
+                }
+                .onAppear {
+                    if let id = chat.rows.last?.id {
+                        revealLatest(proxy: proxy, id: id, fromUser: false)
+                    } else {
+                        allowOlderLoad = true
+                    }
+                }
                 .onChange(of: chat.rows.last?.scrollText) { _, _ in
-                    // Stick to bottom only while the visible session is generating.
-                    guard chat.sending, let id = chat.rows.last?.id else { return }
+                    guard chat.sending, !showJumpToLatest, let id = chat.rows.last?.id else { return }
                     withAnimation { proxy.scrollTo(id, anchor: .bottom) }
                 }
                 .onChange(of: chat.scrollTarget) { _, target in
                     guard let target else { return }
                     switch target {
                     case .bottom(let id):
-                        withAnimation { proxy.scrollTo(id, anchor: .bottom) }
+                        revealLatest(proxy: proxy, id: id, fromUser: false)
                     case .pin(let id):
-                        proxy.scrollTo(id, anchor: .top)
+                        beginHistoryPin(proxy: proxy, id: id)
                     }
                     chat.consumeScrollTarget()
                 }
+                .onChange(of: chat.isLoadingOlder) { _, loading in
+                    if loading {
+                        ignoreBottomAppear = true
+                        showJumpToLatest = true
+                    }
+                }
+                .onChange(of: chat.currentSession?.sessionId) { _, _ in
+                    showJumpToLatest = false
+                    allowOlderLoad = false
+                    pendingRevealLatest = true
+                    ignoreBottomAppear = false
+                    jumpGeneration += 1
+                }
+                .onChange(of: chat.rows.last?.id) { _, lastId in
+                    guard pendingRevealLatest, let lastId else { return }
+                    revealLatest(proxy: proxy, id: lastId, fromUser: false)
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if showJumpToLatest, !chat.rows.isEmpty {
+                        Button {
+                            guard let id = chat.rows.last?.id else { return }
+                            revealLatest(proxy: proxy, id: id, fromUser: true)
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.down")
+                                    .font(.caption.weight(.bold))
+                                Text("最新")
+                                    .font(.caption.weight(.semibold))
+                            }
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 9)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                            )
+                            .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("回到最新消息")
+                        .padding(.trailing, 14)
+                        .padding(.bottom, 10)
+                    }
+                }
+            }
+        }
+    }
+
+    private func markArrivedAtLatest() {
+        if pendingRevealLatest {
+            pendingRevealLatest = false
+            allowOlderLoad = true
+            showJumpToLatest = false
+            return
+        }
+        guard !ignoreBottomAppear else { return }
+        if showJumpToLatest { showJumpToLatest = false }
+    }
+
+    private func beginHistoryPin(proxy: ScrollViewProxy, id: String) {
+        ignoreBottomAppear = true
+        pendingRevealLatest = false
+        showJumpToLatest = true
+        proxy.scrollTo(id, anchor: .top)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            ignoreBottomAppear = false
+            if !pendingRevealLatest {
+                showJumpToLatest = true
+            }
+        }
+    }
+
+    /// - Parameter fromUser: user tapped「最新」. Keep the button until bottom is confirmed,
+    ///   because an in-flight scroll gesture often cancels the first `scrollTo`.
+    private func revealLatest(proxy: ScrollViewProxy, id: String, fromUser: Bool) {
+        jumpGeneration += 1
+        let generation = jumpGeneration
+        pendingRevealLatest = true
+        ignoreBottomAppear = false
+        if !fromUser {
+            showJumpToLatest = false
+        }
+
+        scrollToLatestNow(proxy: proxy, id: id, animated: false)
+
+        Task { @MainActor in
+            for step in 0..<14 {
+                guard generation == jumpGeneration, pendingRevealLatest else { return }
+                try? await Task.sleep(nanoseconds: 70_000_000)
+                let animated = step >= 2 && step <= 5
+                scrollToLatestNow(proxy: proxy, id: id, animated: animated)
+            }
+            guard generation == jumpGeneration else { return }
+            // Bottom never confirmed: keep button so user can tap again.
+            if pendingRevealLatest, fromUser {
+                pendingRevealLatest = false
+                showJumpToLatest = true
+            } else if pendingRevealLatest {
+                pendingRevealLatest = false
+                allowOlderLoad = true
+                showJumpToLatest = false
+            }
+        }
+    }
+
+    private func scrollToLatestNow(proxy: ScrollViewProxy, id: String, animated: Bool) {
+        if animated {
+            withAnimation(.easeOut(duration: 0.22)) {
+                proxy.scrollTo(id, anchor: .bottom)
+                proxy.scrollTo("chat-bottom-sentinel", anchor: .bottom)
+            }
+        } else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                proxy.scrollTo(id, anchor: .bottom)
+                proxy.scrollTo("chat-bottom-sentinel", anchor: .bottom)
             }
         }
     }
@@ -234,6 +474,161 @@ struct MessageListView: View {
             Color(.systemBackground)
         }
     }
+}
+
+
+
+/// Holds a real UIView in the chat layout so keyboard overlap can be measured precisely.
+@MainActor
+private final class ChatKeyboardHost: ObservableObject {
+    weak var view: UIView?
+    /// Tab-bar / home-indicator inset captured while the keyboard is hidden.
+    private var restingBottomInset: CGFloat?
+
+    /// Padding needed so the composer bottom sits flush on the keyboard top.
+    func lift(forKeyboardFrame keyboardFrame: CGRect, currentLift: CGFloat) -> CGFloat {
+        let window = view?.window
+            ?? UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .flatMap(\.windows)
+                .first(where: \.isKeyWindow)
+
+        guard let window else {
+            let screenHeight = UIScreen.main.bounds.height
+            return max(0, screenHeight - keyboardFrame.minY)
+        }
+
+        let keyboardInScreen = window.convert(keyboardFrame, from: nil)
+        let covered = max(0, window.bounds.height - keyboardInScreen.minY)
+        guard covered > 1, keyboardInScreen.minY < window.bounds.height - 1 else { return 0 }
+
+        if currentLift < 1 || restingBottomInset == nil {
+            restingBottomInset = resolveBottomInset(window: window)
+        }
+
+        // Composer already sits above the tab-bar safe area; subtract that once so we
+        // don't leave a safe-area-sized gap above the keyboard.
+        return max(0, covered - (restingBottomInset ?? 0))
+    }
+
+    func clearRestingBaseline() {
+        restingBottomInset = nil
+    }
+
+    private func resolveBottomInset(window: UIWindow) -> CGFloat {
+        // 1) Prefer safe-area from an ancestor of the composer anchor.
+        var node: UIView? = view
+        while let current = node {
+            if current.safeAreaInsets.bottom > 1 {
+                return current.safeAreaInsets.bottom
+            }
+            node = current.superview
+        }
+
+        // 2) SwiftUI TabView still hosts a UITabBar — use its visible height.
+        if let tabBar = findTabBar(in: window) {
+            let frame = tabBar.convert(tabBar.bounds, to: nil)
+            let height = max(0, window.bounds.maxY - frame.minY)
+            if height > 1 { return height }
+        }
+
+        // 3) Home indicator only (better than overshooting by a full tab bar).
+        return window.safeAreaInsets.bottom
+    }
+
+    private func findTabBar(in root: UIView) -> UITabBar? {
+        if let tabBar = root as? UITabBar { return tabBar }
+        for child in root.subviews {
+            if let tabBar = findTabBar(in: child) { return tabBar }
+        }
+        return nil
+    }
+}
+
+private struct ChatKeyboardHostAnchor: UIViewRepresentable {
+    let host: ChatKeyboardHost
+
+    func makeUIView(context: Context) -> UIView {
+        let view = PassThroughView()
+        DispatchQueue.main.async {
+            host.view = view
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        if host.view !== uiView {
+            host.view = uiView
+        }
+    }
+}
+
+/// Shifts the UIScrollView content offset when the composer lifts with the keyboard.
+private struct ChatScrollKeyboardAnchor: UIViewRepresentable {
+    var lift: CGFloat
+    var stickToBottom: Bool
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = PassThroughView()
+        context.coordinator.view = view
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.apply(lift: lift, stickToBottom: stickToBottom)
+    }
+
+    final class Coordinator {
+        weak var view: UIView?
+        private var lastLift: CGFloat = 0
+
+        func apply(lift: CGFloat, stickToBottom: Bool) {
+            let delta = lift - lastLift
+            lastLift = lift
+            guard abs(delta) > 0.5 else { return }
+
+            // Layout may not have finished; adjust on next run loop.
+            DispatchQueue.main.async { [weak self] in
+                self?.adjust(delta: delta, stickToBottom: stickToBottom)
+            }
+        }
+
+        private func adjust(delta: CGFloat, stickToBottom: Bool) {
+            guard let scroll = enclosingScrollView() else { return }
+            let inset = scroll.adjustedContentInset
+            let maxOffset = max(
+                0,
+                scroll.contentSize.height - scroll.bounds.height + inset.bottom
+            )
+            var target = scroll.contentOffset.y + delta
+            if stickToBottom {
+                target = maxOffset
+            } else {
+                target = min(max(0, target), maxOffset)
+            }
+            // Instant adjust — animated offset races the composer and shakes the transcript.
+            UIView.performWithoutAnimation {
+                scroll.contentOffset = CGPoint(x: scroll.contentOffset.x, y: target)
+            }
+        }
+
+        private func enclosingScrollView() -> UIScrollView? {
+            var node = view?.superview
+            while let current = node {
+                if let scroll = current as? UIScrollView {
+                    return scroll
+                }
+                node = current.superview
+            }
+            return nil
+        }
+    }
+}
+
+private final class PassThroughView: UIView {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? { nil }
 }
 
 struct UploadStripView: View {

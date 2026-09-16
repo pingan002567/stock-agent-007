@@ -639,6 +639,59 @@ mark_inbox_item_done = _tool(
     InboxDoneInput, AuthorityLevel.A3,
 )
 
+# DeerFlow-native skill / MCP (enable/disable & server config; mid-chat)
+class SkillListInput(BaseModel):
+    enabled_only: bool = Field(default=False, description="为 True 时只返回已启用技能")
+
+
+class SkillUpdateInput(BaseModel):
+    name: str = Field(description="技能名称（DeerFlow skill name）")
+    enabled: bool = Field(description="是否启用该技能")
+
+
+class McpUpsertInput(BaseModel):
+    name: str = Field(description="MCP 服务器名称")
+    enabled: bool | None = Field(default=None, description="是否启用")
+    type: str | None = Field(default=None, description="stdio / sse / http 等")
+    command: str | None = Field(default=None, description="stdio 启动命令")
+    args: list[str] | None = Field(default=None, description="stdio 参数")
+    url: str | None = Field(default=None, description="sse/http 服务地址")
+    env: dict[str, str] | None = Field(default=None, description="环境变量（勿在回复中回显明文）")
+    description: str | None = Field(default=None, description="可选说明")
+
+
+class McpRemoveInput(BaseModel):
+    name: str = Field(description="要删除的 MCP 服务器名称")
+
+
+list_skills = _tool(
+    "list_skills",
+    "列出 DeerFlow 技能目录及启用状态（原生 list_skills）。用户要求查看/调整技能时先调用。",
+    SkillListInput, AuthorityLevel.A2,
+)
+update_skill = _tool(
+    "update_skill",
+    "启用或禁用指定技能（DeerFlow 原生 update_skill，写入 extensions / 用户技能状态，随后重建 runtime）。"
+    "不要用 update_agent 改 skills。",
+    SkillUpdateInput, AuthorityLevel.A3,
+)
+list_mcp_servers = _tool(
+    "list_mcp_servers",
+    "列出已配置的 MCP 服务器（原生 get_mcp_config；env 密钥已脱敏为 ***）。",
+    EmptyInput, AuthorityLevel.A2,
+)
+upsert_mcp_server = _tool(
+    "upsert_mcp_server",
+    "新增或更新一个 MCP 服务器配置（读现有配置后合并写回，原生 update_mcp_config）。"
+    "勿在对话中回显 env 明文。",
+    McpUpsertInput, AuthorityLevel.A3,
+)
+remove_mcp_server = _tool(
+    "remove_mcp_server",
+    "从 extensions 配置中删除指定 MCP 服务器（原生 update_mcp_config）。",
+    McpRemoveInput, AuthorityLevel.A3,
+)
+
 # A4: Planner tools
 generate_draft_order = _tool(
     "generate_draft_order",

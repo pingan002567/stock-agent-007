@@ -96,6 +96,7 @@ A2_TOOLS = [
     "get_monitor_events", "get_monitor_rules", "evaluate_monitor_rules",
     "list_strategies", "get_backtest_result",
     "list_report_templates", "generate_report", "get_report_quality",
+    "list_skills", "list_mcp_servers",
 ]
 
 A3_TOOLS = [
@@ -108,6 +109,7 @@ A3_TOOLS = [
     "list_decision_journal", "get_decision_journal_entry", "summarize_decision_outcomes",
     "list_review_inbox", "summarize_review_inbox",
     "dismiss_inbox_item", "snooze_inbox_item", "mark_inbox_item_done",
+    "update_skill", "upsert_mcp_server", "remove_mcp_server",
 ]
 
 A4_TOOLS = [

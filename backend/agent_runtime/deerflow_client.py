@@ -781,6 +781,23 @@ class DeerFlowClientAdapter:
         缓存重载；MCP 工具缓存按配置文件 mtime 自动失效，下一轮对话即生效。"""
         return self._memory_call("update_mcp_config", mcp_servers)
 
+    def list_skills(self, *, enabled_only: bool = False) -> dict[str, Any]:
+        """Native DeerFlow skill catalog (enabled flags from extensions / user state)."""
+        return self._memory_call("list_skills", enabled_only=enabled_only)
+
+    def update_skill(self, name: str, *, enabled: bool) -> dict[str, Any]:
+        """Native DeerFlow skill enable/disable (writes extensions / user skill state)."""
+        fn = getattr(self.client, "update_skill", None) if self.client is not None else None
+        if not callable(fn):
+            return {"supported": False, "error": f"update_skill unavailable in {self.mode} mode"}
+        try:
+            result = fn(name, enabled=enabled)
+            if isinstance(result, dict):
+                return {"supported": True, **result}
+            return {"supported": True, "result": result}
+        except Exception as exc:
+            return {"supported": True, "error": str(exc)}
+
     # ── file uploads (RAG：研报/年报 PDF 等直接给 AI 读) ──
 
     def upload_files(self, thread_id: str, files: list[str]) -> dict[str, Any]:
