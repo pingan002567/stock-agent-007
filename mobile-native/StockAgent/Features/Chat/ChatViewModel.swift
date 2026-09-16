@@ -749,6 +749,8 @@ final class ChatViewModel: ObservableObject {
         failedTextBySession[sessionId] = lastUserText(in: sessionId)
         clearPending(sessionId: sessionId)
     }
+
+    private func cancelStream(sessionId: String, finalizeTurn: Bool) {
         idleWatchdogs[sessionId]?.cancel()
         idleWatchdogs[sessionId] = nil
         streamTasks[sessionId]?.cancel()
