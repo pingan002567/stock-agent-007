@@ -62,7 +62,7 @@ class PriceSnapshot(BaseModel):
     last: float
     change_pct: float
     updated_at: str
-    source: str = "mock_adapter"
+    source: str = "unavailable"
     degraded: bool = False
     degraded_reason: Optional[str] = None
     coverage: Optional[Dict[str, Any]] = None

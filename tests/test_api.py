@@ -23,7 +23,7 @@ from backend.schemas import (
     model_to_dict,
 )
 from backend.stock_domain.provider_router import ProviderRouter
-from backend.stock_domain.providers import MockMarketDataProvider, ProviderError
+from backend.stock_domain.providers import ProviderError
 
 CANONICAL_EXECUTION_GUARD = {
     "auto_trade": False,
@@ -100,8 +100,8 @@ def test_health_and_app_shell(tmp_path, monkeypatch):
     assert payload["stock_domain"] == "provider-router"
     assert "TeamRun" not in json.dumps(payload)
     assert payload["data_provider"]["akshare_available"] is False
-    assert payload["data_provider"]["active_provider"] == "mock_adapter"
-    assert payload["data_provider"]["fallback_provider"] == "mock_adapter"
+    assert payload["data_provider"]["active_provider"] == "akshare"
+    assert payload["data_provider"]["fallback_provider"] == "unavailable"
     assert payload["data_provider"]["degraded"] is True
     assert (
         payload["data_provider"]["degraded_reason"]
@@ -109,11 +109,11 @@ def test_health_and_app_shell(tmp_path, monkeypatch):
     )
     assert (
         payload["data_provider"]["capabilities"]["quote"]["active_provider"]
-        == "mock_adapter"
+        == "unavailable"
     )
     assert (
         payload["data_provider"]["capabilities"]["market"]["active_provider"]
-        == "mock_adapter"
+        == "unavailable"
     )
 
     app_shell = client.get("/app")
@@ -739,7 +739,7 @@ def test_monitor_status_rules_evaluate_once_and_stream(tmp_path):
     assert paused.json()["status"] == "paused"
 
 
-def test_v04_stock_provider_endpoints_return_200_with_offline_mock_router(
+def test_v04_stock_provider_endpoints_return_200_with_offline_unavailable_router(
     tmp_path, monkeypatch
 ):
     from backend.stock_domain.provider_router import ProviderRouter as _PR
@@ -750,7 +750,6 @@ def test_v04_stock_provider_endpoints_return_200_with_offline_mock_router(
             (),
             {"name": "akshare", "is_available": lambda self: True},
         )(),
-        fallback=MockMarketDataProvider(),
     )
     router._provider_for_market = lambda market: router.primary
     router.repo = None
@@ -805,9 +804,7 @@ class RaisingApiPrimaryProvider:
 def test_v04_health_and_monitor_report_fallback_after_primary_runtime_failure(
     tmp_path, monkeypatch
 ):
-    router = ProviderRouter(
-        primary=RaisingApiPrimaryProvider(), fallback=MockMarketDataProvider()
-    )
+    router = ProviderRouter(primary=RaisingApiPrimaryProvider())
     # Make _provider_for_market return the test primary so raises are
     # exercised regardless of which provider is configured for the market.
     router._provider_for_market = lambda market: router.primary
@@ -833,8 +830,8 @@ def test_v04_health_and_monitor_report_fallback_after_primary_runtime_failure(
 
     health = client.get("/api/health").json()
     assert health["data_provider"]["akshare_available"] is True
-    assert health["data_provider"]["active_provider"] == "mock_adapter"
-    assert health["data_provider"]["fallback_provider"] == "mock_adapter"
+    assert health["data_provider"]["active_provider"] == "akshare"
+    assert health["data_provider"]["fallback_provider"] == "unavailable"
     assert health["data_provider"]["degraded"] is True
     assert (
         health["data_provider"]["degraded_reason"] == "akshare: quote failed for 600519"
@@ -845,34 +842,44 @@ def test_v04_health_and_monitor_report_fallback_after_primary_runtime_failure(
     )
 
     monitor = client.get("/api/monitor/events").json()
+    # API list uses allow_fallback=False — synthetic demo events stay out of the UI.
+    assert all(item["event_id"] != "event_data_source_fallback" for item in monitor["items"])
+
+    from backend.stock_domain.monitor_tools import get_monitor_events
+
+    demo_events = get_monitor_events()
     data_event = next(
-        item
-        for item in monitor["items"]
-        if item["event_id"] == "event_data_source_fallback"
+        item for item in demo_events if item.event_id == "event_data_source_fallback"
     )
-    assert data_event["trigger_rule"] == "primary_provider_unavailable"
+    assert data_event.trigger_rule == "primary_provider_unavailable"
     assert any(
-        item["type"] == "active_provider" and item["ref"] == "mock_adapter"
-        for item in data_event["evidence"]
+        item["type"] == "fallback_provider" and item["ref"] == "unavailable"
+        for item in data_event.evidence
     )
 
 
-def test_v04_market_review_and_sectors_keep_truthful_mock_source(tmp_path):
+def test_v04_market_review_and_sectors_return_unavailable_when_providers_fail(tmp_path, monkeypatch):
+    router = ProviderRouter(primary=RaisingApiPrimaryProvider())
+    router._provider_for_market = lambda market: router.primary
+    monkeypatch.setattr("backend.stock_domain.provider_router.provider_router", router)
+    monkeypatch.setattr("backend.api.routes_market.provider_router", router)
+    monkeypatch.setattr("backend.app.provider_router", router)
+    _force_stub_runtime(monkeypatch)
     client = make_client(tmp_path)
 
     review = client.get("/api/market/review")
     assert review.status_code == 200
-    assert review.json()["source"] == "mock_adapter"
+    assert review.json()["source"] == "unavailable"
     assert review.json()["degraded"] is True
     assert review.json()["degraded_reason"] is not None
+    assert review.json()["indices"] == []
 
     sectors = client.get("/api/market/sectors")
     assert sectors.status_code == 200
-    assert sectors.json()["source"] == "mock_adapter"
+    assert sectors.json()["source"] == "unavailable"
     assert sectors.json()["degraded"] is True
     assert sectors.json()["degraded_reason"] is not None
-    assert sectors.json()["items"]
-
+    assert sectors.json()["items"] == []
 
 def test_parallel_demo_bootstrap_requests_share_sqlite_safely(tmp_path):
     client = make_client(tmp_path)

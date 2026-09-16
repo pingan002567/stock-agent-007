@@ -22,13 +22,10 @@ from backend.stock_domain.providers import (
     AkShareMarketDataProvider,
     DataCapabilityStatus,
     MarketDataProvider,
-    MockMarketDataProvider,
     ProviderStatus,
 )
 
 T = TypeVar("T")
-
-_NO_MOCK_CAPABILITIES = frozenset({"quote", "history", "intel", "financial", "chip", "fund_flow", "snapshot"})
 
 # Layer 1 memory cache TTL per capability (seconds)
 _CACHE_TTL: dict[str, float] = {
@@ -148,10 +145,12 @@ class ProviderRouter:
     def __init__(
         self,
         primary: MarketDataProvider | None = None,
-        fallback: MockMarketDataProvider | None = None,
+        fallback: MarketDataProvider | None = None,
     ) -> None:
+        # ``fallback`` is accepted for call-site compatibility but ignored:
+        # failures always surface as honest ``unavailable`` payloads, never mock data.
+        del fallback
         self.primary = primary or AkShareMarketDataProvider()
-        self.fallback = fallback or MockMarketDataProvider()
         self.repo: Any = None
         self._last_degraded_reason: str | None = None
         self._last_capability_reasons: dict[str, str | None] = {
@@ -239,10 +238,10 @@ class ProviderRouter:
     def _secondary_providers(
         self, market: str | None, primary: MarketDataProvider
     ) -> list[MarketDataProvider]:
-        """Get additional providers to try before falling back to Mock.
+        """Get additional real providers to try before returning unavailable.
 
         Returns an ordered list of providers to attempt after the primary fails.
-        These serve as cross-provider fallbacks — e.g. for US: yfinance → akshare → mock.
+        Cross-provider fallbacks only — e.g. for US: yfinance → akshare.
         """
         config = self._data_sources_config()
         chain: list[MarketDataProvider] = []
@@ -280,8 +279,8 @@ class ProviderRouter:
         )
         return ProviderStatus(
             akshare_available=primary_available,
-            active_provider=self.fallback.name if degraded else self.primary.name,
-            fallback_provider=self.fallback.name,
+            active_provider=self.primary.name,
+            fallback_provider="unavailable",
             degraded=degraded,
             degraded_reason=degraded_reason,
             capabilities=capabilities,
@@ -486,6 +485,7 @@ class ProviderRouter:
             provider,
             market,
             lambda p: p.search_intel(normalized, query),
+            symbol=normalized,
         )
         if isinstance(result, dict) and not result.get("degraded"):
             self._mem_cache.set(ck, result, ttl=_CACHE_TTL["intel"])
@@ -525,12 +525,13 @@ class ProviderRouter:
 
     def get_market_timeline(self) -> list[dict]:
         provider = self._provider_for_market("CN")
-        return self._call_with_provider(
+        result = self._call_with_provider(
             "market",
             provider,
             "CN",
             lambda p: p.get_market_timeline(),
         )
+        return result if isinstance(result, list) else []
 
     def get_financial(self, symbol: str) -> dict:
         normalized = normalize_symbol(symbol)
@@ -622,40 +623,22 @@ class ProviderRouter:
         call_fn: Callable[[MarketDataProvider], T],
         symbol: str = "",
     ) -> T:
-        """Execute a capability call with the given provider, falling back on failure."""
+        """Execute a capability call with the given provider; never synthesize mock data."""
         started = time.perf_counter()
 
-        # If the configured provider is mock, go straight to fallback
-        if provider is self.fallback:
-            result = call_fn(provider)
-            self._record_call(
-                capability=capability,
-                market=market,
-                provider=provider.name,
-                status="configured",
-                degraded_reason=f"market {market} configured to use {provider.name}",
-                duration_ms=(time.perf_counter() - started) * 1000,
-            )
-            return result
-
-        # Circuit breaker: skip primary if circuit is open, go directly to fallback
+        # Circuit breaker: skip primary if circuit is open, return unavailable
         if self._is_circuit_open(capability):
             reason = (
                 f"circuit breaker open for {capability} "
                 f"after {self._circuit_breakers[capability].failures} consecutive failures"
             )
-            fallback_result = self._fallback_payload(
-                capability, symbol, reason, call_fn
-            )
-            payload = fallback_result
+            payload = self._fallback_payload(capability, symbol, reason)
             self._last_capability_reasons[capability] = reason
             self._refresh_last_degraded_reason()
             self._record_call(
                 capability=capability,
                 market=market,
-                provider="unavailable"
-                if capability in _NO_MOCK_CAPABILITIES
-                else self.fallback.name,
+                provider="unavailable",
                 status="circuit_open",
                 degraded_reason=reason,
                 duration_ms=(time.perf_counter() - started) * 1000,
@@ -705,7 +688,7 @@ class ProviderRouter:
                 except Exception as retry_exc:
                     last_exc = retry_exc
             self._record_failure(capability)
-            # Try secondary providers before falling back to Mock
+            # Try secondary real providers before returning unavailable
             secondary_providers = self._secondary_providers(market, provider)
             for secondary in secondary_providers:
                 try:
@@ -735,13 +718,11 @@ class ProviderRouter:
             reason = f"{provider.name}: {last_exc}"
             self._last_capability_reasons[capability] = reason
             self._refresh_last_degraded_reason()
-            payload = self._fallback_payload(capability, symbol, reason, call_fn)
+            payload = self._fallback_payload(capability, symbol, reason)
             self._record_call(
                 capability=capability,
                 market=market,
-                provider="unavailable"
-                if capability in _NO_MOCK_CAPABILITIES
-                else self.fallback.name,
+                provider="unavailable",
                 status="fallback",
                 degraded_reason=reason,
                 duration_ms=(time.perf_counter() - started) * 1000,
@@ -761,6 +742,28 @@ class ProviderRouter:
                 degraded_reason=reason,
                 coverage={"mode": "unavailable"},
             )
+        if capability == "market":
+            return {
+                "status": "数据不可用",
+                "summary": reason,
+                "source": "unavailable",
+                "updated_at": now_iso(),
+                "degraded": True,
+                "degraded_reason": reason,
+                "coverage": {"mode": "unavailable"},
+                "indices": [],
+                "breadth": {},
+                "turnover": {},
+            }
+        if capability == "sectors":
+            return {
+                "source": "unavailable",
+                "updated_at": now_iso(),
+                "degraded": True,
+                "degraded_reason": reason,
+                "coverage": {"mode": "unavailable"},
+                "items": [],
+            }
         payload: dict[str, Any] = {
             "symbol": symbol.upper() if symbol else "",
             "source": "unavailable",
@@ -774,13 +777,8 @@ class ProviderRouter:
             payload["query"] = ""
         return payload
 
-    def _fallback_payload(
-        self, capability: str, symbol: str, reason: str, call_fn: Callable[[MarketDataProvider], T]
-    ) -> T:
-        if capability in _NO_MOCK_CAPABILITIES:
-            return self._unavailable_payload(capability, symbol, reason)
-        fallback_result = call_fn(self.fallback)
-        return self._degraded(fallback_result, reason)
+    def _fallback_payload(self, capability: str, symbol: str, reason: str) -> Any:
+        return self._unavailable_payload(capability, symbol, reason)
 
     def _degraded(self, payload: T, reason: str) -> T:
         if isinstance(payload, PriceSnapshot):
@@ -803,7 +801,7 @@ class ProviderRouter:
         degraded = reason is not None or not primary_available
         return DataCapabilityStatus(
             capability=capability,
-            active_provider=self.fallback.name if degraded else self.primary.name,
+            active_provider="unavailable" if degraded else self.primary.name,
             degraded=degraded,
             degraded_reason=reason
             or (self._fallback_reason() if not primary_available else None),
@@ -930,7 +928,7 @@ class ProviderRouter:
             market=market,
             symbol=None,
             provider=provider,
-            fallback_provider=self.fallback.name,
+            fallback_provider="unavailable",
             status=status,
             degraded_reason=degraded_reason,
             duration_ms=round(duration_ms, 2),

@@ -31,7 +31,7 @@ from backend.schemas import (
 )
 from backend.stock_domain.catalog import search_stocks
 from backend.stock_domain.provider_router import ProviderRouter
-from backend.stock_domain.providers import AkShareMarketDataProvider, MockMarketDataProvider, ProviderError
+from backend.stock_domain.providers import AkShareMarketDataProvider, ProviderError
 from backend.stock_domain.risk_tools import analyze_portfolio_risk
 
 CANONICAL_EXECUTION_GUARD = {
@@ -1353,27 +1353,26 @@ def test_akshare_provider_is_unavailable_without_optional_dependency(monkeypatch
 
 
 @pytest.mark.parametrize("symbol", ["AAPL", "HK00700", "600519"])
-def test_mock_market_data_provider_returns_quote_history_and_intel(symbol):
-    provider = MockMarketDataProvider()
+def test_unavailable_payload_shape_for_common_symbols(symbol):
+    router = ProviderRouter(primary=UnavailablePrimaryProvider())
+    router._provider_for_market = lambda market: router.primary
 
-    quote = provider.get_quote(symbol)
-    assert quote.source == provider.name
-    assert quote.degraded is False
-    assert quote.last > 0
+    quote = router.get_quote(symbol)
+    assert quote.source == "unavailable"
+    assert quote.degraded is True
+    assert quote.last == 0
 
-    history = provider.get_history(symbol, days=5)
+    history = router.get_history(symbol, days=5)
     assert history["symbol"] == symbol
-    assert history["source"] == provider.name
-    assert history["degraded"] is False
-    assert history["degraded_reason"] is None
-    assert len(history["items"]) == 5
+    assert history["source"] == "unavailable"
+    assert history["degraded"] is True
+    assert history["items"] == []
 
-    intel = provider.search_intel(symbol)
+    intel = router.search_intel(symbol)
     assert intel["symbol"] == symbol
-    assert intel["source"] == provider.name
-    assert intel["degraded"] is False
-    assert intel["degraded_reason"] is None
-    assert intel["items"]
+    assert intel["source"] == "unavailable"
+    assert intel["degraded"] is True
+    assert intel["items"] == []
 
 
 class UnavailablePrimaryProvider:
@@ -1421,7 +1420,7 @@ class RaisingPrimaryProvider:
 
 
 def test_provider_router_falls_back_to_unavailable_when_primary_is_unavailable():
-    router = ProviderRouter(primary=UnavailablePrimaryProvider(), fallback=MockMarketDataProvider())
+    router = ProviderRouter(primary=UnavailablePrimaryProvider())
     router._provider_for_market = lambda market: router.primary
 
     quote = router.get_quote("600519")
@@ -1431,7 +1430,7 @@ def test_provider_router_falls_back_to_unavailable_when_primary_is_unavailable()
     assert "primary_stub" in quote.degraded_reason
     status = router.status().to_dict()
     assert status["akshare_available"] is False
-    assert status["fallback_provider"] == "mock_adapter"
+    assert status["fallback_provider"] == "unavailable"
     assert status["degraded"] is True
     assert status["degraded_reason"] is not None
 
@@ -1449,7 +1448,7 @@ def test_provider_router_falls_back_to_unavailable_when_primary_is_unavailable()
 
 
 def test_provider_router_falls_back_to_unavailable_when_primary_raises():
-    router = ProviderRouter(primary=RaisingPrimaryProvider(), fallback=MockMarketDataProvider())
+    router = ProviderRouter(primary=RaisingPrimaryProvider())
     router._provider_for_market = lambda market: router.primary
 
     quote = router.get_quote("600519")
@@ -1458,7 +1457,7 @@ def test_provider_router_falls_back_to_unavailable_when_primary_raises():
     assert quote.degraded_reason == "primary_stub: quote failed for 600519"
     status = router.status().to_dict()
     assert status["akshare_available"] is True
-    assert status["fallback_provider"] == "mock_adapter"
+    assert status["fallback_provider"] == "unavailable"
     assert status["degraded"] is True
     assert status["degraded_reason"] == "primary_stub: quote failed for 600519"
     assert status["capabilities"]["quote"]["degraded_reason"] == "primary_stub: quote failed for 600519"
@@ -1532,7 +1531,8 @@ class HealthyCnOnlyPrimaryProvider:
 
 
 def test_provider_router_keeps_hk_us_request_degraded_without_polluting_global_status():
-    router = ProviderRouter(primary=HealthyCnOnlyPrimaryProvider(), fallback=MockMarketDataProvider())
+    router = ProviderRouter(primary=HealthyCnOnlyPrimaryProvider())
+    router._provider_for_market = lambda market: router.primary
 
     us_history = router.get_history("AAPL", days=3)
     assert us_history["source"] == "akshare"
@@ -1545,7 +1545,8 @@ def test_provider_router_keeps_hk_us_request_degraded_without_polluting_global_s
 
 
 def test_provider_router_reports_capability_status_for_cn_primary():
-    router = ProviderRouter(primary=HealthyCnOnlyPrimaryProvider(), fallback=MockMarketDataProvider())
+    router = ProviderRouter(primary=HealthyCnOnlyPrimaryProvider())
+    router._provider_for_market = lambda market: router.primary
 
     assert router.get_quote("600519").source == "akshare"
     assert router.get_market_review()["source"] == "akshare"

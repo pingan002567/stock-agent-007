@@ -647,8 +647,6 @@ def get_market_structure(symbol: str) -> dict[str, Any]:
             gap_reasons.append(f"{name}: {block['reason']}")
     overall_degraded = any(block.get("degraded") for block in (technical, snapshot, chip, flow))
     history_source = history.get("source") if isinstance(history, dict) else "unavailable"
-    if history_source == "mock_adapter":
-        history_source = "unavailable"
     freshness = {
         "as_of": official_as_of or None,
         "expected_as_of": expected.isoformat(),

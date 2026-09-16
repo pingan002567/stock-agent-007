@@ -6,8 +6,14 @@ from backend.stock_domain.provider_router import provider_router
 
 def get_monitor_events() -> list[EventContext]:
     status = provider_router.status()
-    provider_title = "provider-router 已回退到 mock_adapter" if status.active_provider == status.fallback_provider else "provider-router 已启用 optional AKShare"
-    provider_rule = "primary_provider_unavailable" if status.active_provider == status.fallback_provider else "primary_provider_available"
+    provider_title = (
+        "provider-router 数据源降级为 unavailable"
+        if status.degraded
+        else "provider-router 已启用真实数据源"
+    )
+    provider_rule = (
+        "primary_provider_unavailable" if status.degraded else "primary_provider_available"
+    )
     return [
         EventContext(
             event_id="event_aapl_concentration",

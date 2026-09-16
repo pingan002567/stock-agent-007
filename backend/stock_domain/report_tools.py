@@ -8,7 +8,7 @@ from backend.stock_domain.market_structure import get_market_structure
 def generate_stock_dashboard(context: StockContext, mode: str = "research") -> dict:
     risk_level = context.ai_state.risk_label
     weight = context.holding.weight_pct
-    counter_reasons = ["provider-router 可能回退到 mock_adapter，涉及实时性判断时需要复核。"]
+    counter_reasons = ["provider-router 失败时返回 unavailable，不会注入模拟行情；涉及实时性判断时需要复核。"]
     if context.price.degraded_reason:
         counter_reasons.append(f"当前数据降级原因：{context.price.degraded_reason}")
     else:

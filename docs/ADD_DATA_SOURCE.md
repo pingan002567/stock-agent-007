@@ -87,7 +87,6 @@ PROVIDER_CLASSES: dict[str, type] = {
     "yfinance": YFinanceMarketDataProvider,
     "longbridge": LongbridgeMarketDataProvider,
     "new_provider": NewDataProvider,  # 添加新数据源
-    "mock": MockMarketDataProvider,
 }
 ```
 

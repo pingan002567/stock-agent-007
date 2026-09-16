@@ -12,7 +12,6 @@ from backend.stock_domain.catalog import get_stock, normalize_symbol
 from backend.stock_domain.provider_credentials import resolve as provider_credential
 from backend.stock_domain.providers import (
     MarketDataProvider,
-    MockMarketDataProvider,
     ProviderError,
     _bounded_days,
     _coerce_float,
@@ -1255,7 +1254,6 @@ PROVIDER_CLASSES: dict[str, type] = {
     "baostock": BaostockMarketDataProvider,
     "yfinance": YFinanceMarketDataProvider,
     "longbridge": LongbridgeMarketDataProvider,
-    "mock": MockMarketDataProvider,
 }
 
 
@@ -1265,11 +1263,11 @@ def _get_provider_class(provider_id: str) -> type:
         from backend.stock_domain.providers import AkShareMarketDataProvider
 
         return AkShareMarketDataProvider
+    if provider_id in ("mock", "none"):
+        raise ValueError(f"provider {provider_id!r} is disabled; use a real data source")
     cls = PROVIDER_CLASSES.get(provider_id)
     if cls is None:
-        from backend.stock_domain.providers import MockMarketDataProvider
-
-        return MockMarketDataProvider
+        raise ValueError(f"unknown provider: {provider_id}")
     return cls
 
 

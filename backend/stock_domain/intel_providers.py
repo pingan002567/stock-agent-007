@@ -28,28 +28,6 @@ class IntelProvider(Protocol):
         ...
 
 
-class MockIntelProvider:
-    name = "mock"
-
-    def search_news(self, symbol: str, query: str = "") -> dict:
-        normalized = normalize_symbol(symbol)
-        stock = get_stock(normalized)
-        name = stock["name"] if stock else symbol
-        items: list[dict[str, Any]] = [
-            {"type": "news", "title": f"{name} 近期股价波动，市场关注度提升", "source": "mock_news", "confidence": "medium", "published_at": now_iso()},
-            {"type": "news", "title": f"{name} 所在板块获机构增持评级", "source": "mock_news", "confidence": "medium", "published_at": now_iso()},
-            {"type": "news", "title": f"{name} 发布最新经营数据公告", "source": "mock_filing", "confidence": "medium", "published_at": now_iso()},
-        ]
-        return {
-            "symbol": normalized,
-            "query": query,
-            "source": self.name,
-            "updated_at": now_iso(),
-            "items": items,
-            "coverage": {"mode": "mock"},
-        }
-
-
 class _EmptyIntelProvider:
     name = "none"
 
@@ -152,7 +130,7 @@ class AkShareIntelProvider:
             except Exception:
                 pass
         elif market == "US":
-            # Real US-equity news via Yahoo Finance (falls back to mock internally).
+            # Real US-equity news via Yahoo Finance.
             return YFinanceIntelProvider().search_news(normalized, query)
 
         # 未知市场或 CN/HK 调用失败：返回空结果，不再注入模拟新闻
