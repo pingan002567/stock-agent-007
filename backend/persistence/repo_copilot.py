@@ -446,6 +446,80 @@ class CopilotRepoMixin:
             rows = self.conn.execute(query, tuple(params)).fetchall()
         return [self._row_to_copilot_message(row) for row in rows]
 
+    def list_copilot_messages_page(
+        self,
+        *,
+        session_id: str,
+        limit_turns: int,
+        before_message_id: str | None = None,
+    ) -> tuple[List[CopilotMessage], bool, str | None]:
+        """Return an ascending message window covering the latest ``limit_turns`` user turns.
+
+        ``before_message_id`` is the oldest user ``message_id`` from the previously
+        loaded page; the next page loads turns strictly older than that cursor.
+        Returns ``(items, has_more, next_before)``.
+        """
+        limit_turns = max(1, min(int(limit_turns), 200))
+        all_messages = self.list_copilot_messages(session_id=session_id)
+        if not all_messages:
+            return [], False, None
+
+        def _is_user_turn(msg: CopilotMessage) -> bool:
+            return msg.role == "user" or msg.kind == "user_message"
+
+        def _key(msg: CopilotMessage) -> tuple[str, str]:
+            return (msg.created_at or "", msg.message_id)
+
+        user_turns = [m for m in all_messages if _is_user_turn(m)]
+        if not user_turns:
+            if before_message_id:
+                return [], False, None
+            tail = all_messages[-limit_turns:]
+            has_more = len(all_messages) > len(tail)
+            next_before = tail[0].message_id if has_more and tail else None
+            return tail, has_more, next_before
+
+        if before_message_id:
+            before_idx = next(
+                (i for i, m in enumerate(user_turns) if m.message_id == before_message_id),
+                None,
+            )
+            if before_idx is None:
+                return [], False, None
+            eligible = user_turns[:before_idx]
+            end_exclusive = user_turns[before_idx]
+        else:
+            eligible = user_turns
+            end_exclusive = None
+
+        if not eligible:
+            return [], False, None
+
+        included = eligible[-limit_turns:]
+        start_key = _key(included[0])
+        end_key = _key(end_exclusive) if end_exclusive is not None else None
+        run_ids = {m.run_id for m in included if m.run_id}
+
+        items: list[CopilotMessage] = []
+        seen: set[str] = set()
+        for msg in all_messages:
+            key = _key(msg)
+            if end_key is not None and key >= end_key:
+                continue
+            in_window = key >= start_key
+            in_run = bool(msg.run_id and msg.run_id in run_ids)
+            if not (in_window or in_run):
+                continue
+            if msg.message_id in seen:
+                continue
+            seen.add(msg.message_id)
+            items.append(msg)
+
+        items.sort(key=_key)
+        has_more = len(eligible) > len(included)
+        next_before = included[0].message_id if has_more else None
+        return items, has_more, next_before
+
     def get_copilot_user_message_by_run_id(
         self, run_id: str
     ) -> Optional[CopilotMessage]:

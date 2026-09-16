@@ -1,5 +1,44 @@
 import Foundation
 
+/// Survives process death so re-entry can offer retry after an interrupted reply.
+struct PendingStream: Codable, Equatable {
+    var sessionId: String
+    var runId: String?
+    var userText: String
+    var updatedAt: TimeInterval
+}
+
+enum PendingStreamStore {
+    private static let key = "stockagent.pendingStreams"
+
+    static func load() -> [PendingStream] {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let items = try? JSONDecoder().decode([PendingStream].self, from: data)
+        else { return [] }
+        return items
+    }
+
+    static func save(_ items: [PendingStream]) {
+        if items.isEmpty {
+            UserDefaults.standard.removeObject(forKey: key)
+            return
+        }
+        if let data = try? JSONEncoder().encode(items) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    static func upsert(_ item: PendingStream) {
+        var items = load().filter { $0.sessionId != item.sessionId }
+        items.append(item)
+        save(items)
+    }
+
+    static func remove(sessionId: String) {
+        save(load().filter { $0.sessionId != sessionId })
+    }
+}
+
 @MainActor
 final class ChatViewModel: ObservableObject {
     @Published var sessions: [CopilotSession] = []
@@ -14,11 +53,38 @@ final class ChatViewModel: ObservableObject {
     @Published var uploadsBusy = false
     /// Session IDs that currently have an in-flight SSE reply.
     @Published private(set) var streamingSessionIds: Set<String> = []
+    @Published private(set) var isLoadingOlder = false
+    @Published private(set) var hasMoreHistory = false
+    /// UI scroll instruction after prepend / open.
+    @Published var scrollTarget: ScrollTarget?
+
+    enum ScrollTarget: Equatable {
+        case bottom(id: String)
+        case pin(id: String)
+    }
 
     private var streamTasks: [String: Task<Void, Never>] = [:]
+    private var idleWatchdogs: [String: Task<Void, Never>] = [:]
     private var rowsBySession: [String: [ChatRow]] = [:]
     private var failedTextBySession: [String: String] = [:]
+    private var historyCursorBySession: [String: HistoryCursor] = [:]
     private let api = APIClient.shared
+    private let pageTurnLimit = 20
+
+    private struct HistoryCursor {
+        var hasMore: Bool
+        var nextBefore: String?
+        var isLoadingOlder: Bool = false
+    }
+
+    /// No meaningful SSE progress for this long → treat as stalled and unlock retry.
+    private let streamIdleTimeoutSeconds: TimeInterval = 120
+    private let emptyAnswerFallback =
+        "回答未生成完整（工具可能已执行）。请点重试，或换个问法再试。"
+    private let idleTimeoutFallback =
+        "回答超时：长时间没有新内容。请点重试。"
+    private let interruptedExitFallback =
+        "上次回答在退出后中断（服务端已停止该轮，避免重复执行工具）。请点重试。"
 
     /// True only when the *visible* session is generating.
     var sending: Bool {
@@ -61,9 +127,15 @@ final class ChatViewModel: ObservableObject {
                 rows = []
                 uploads = []
             }
+            await recoverInterruptedStreamsAfterRelaunch()
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
+    }
+
+    /// Call when app returns to foreground (or after cold launch bootstrap).
+    func handleAppBecameActive() async {
+        await recoverInterruptedStreamsAfterRelaunch()
     }
 
     func openSession(_ session: CopilotSession) async {
@@ -92,6 +164,9 @@ final class ChatViewModel: ObservableObject {
             currentSession = session
             rows = []
             rowsBySession[session.sessionId] = []
+            historyCursorBySession[session.sessionId] = HistoryCursor(hasMore: false, nextBefore: nil)
+            hasMoreHistory = false
+            isLoadingOlder = false
             uploads = []
             uploadsSupported = true
             drawerOpen = false
@@ -103,7 +178,11 @@ final class ChatViewModel: ObservableObject {
     func deleteSession(_ session: CopilotSession) async {
         let sid = session.sessionId
         cancelStream(sessionId: sid, finalizeTurn: false)
+        idleWatchdogs[sid]?.cancel()
+        idleWatchdogs[sid] = nil
+        clearPending(sessionId: sid)
         rowsBySession.removeValue(forKey: sid)
+        historyCursorBySession.removeValue(forKey: sid)
         failedTextBySession.removeValue(forKey: sid)
         do {
             try await api.deleteSession(id: sid)
@@ -199,6 +278,12 @@ final class ChatViewModel: ObservableObject {
                 attachments: pendingUploads
             )
             mutateAssistant(sessionId: sessionId, turnId: streamId) { $0.runId = run.runId }
+            PendingStreamStore.upsert(PendingStream(
+                sessionId: sessionId,
+                runId: run.runId,
+                userText: text,
+                updatedAt: Date().timeIntervalSince1970
+            ))
             let url = try api.streamURL(sessionId: sessionId, runId: run.runId)
             startStream(url: url, turnId: streamId, sessionId: sessionId)
         } catch {
@@ -209,6 +294,7 @@ final class ChatViewModel: ObservableObject {
             if let sid = currentSession?.sessionId {
                 failedTextBySession[sid] = text
                 streamingSessionIds.remove(sid)
+                PendingStreamStore.remove(sessionId: sid)
             }
             self.error = (error as? APIError)?.message ?? error.localizedDescription
             if let sid = currentSession?.sessionId,
@@ -285,51 +371,250 @@ final class ChatViewModel: ObservableObject {
            streamingSessionIds.contains(sessionId),
            let cached = rowsBySession[sessionId] {
             rows = cached
+            syncHistoryFlags(for: sessionId)
             return
         }
         if let cached = rowsBySession[sessionId], streamingSessionIds.contains(sessionId) {
             rows = cached
+            syncHistoryFlags(for: sessionId)
             return
         }
-        let messages = try await api.fetchMessages(sessionId: sessionId)
-        let built = ChatHistoryBuilder.rows(from: messages)
-        // Keep live streaming cache if still active (server may lag behind tokens).
+        // Keep already-paginated cache when switching back (unless streaming forced refresh).
+        if let cached = rowsBySession[sessionId],
+           historyCursorBySession[sessionId] != nil,
+           !streamingSessionIds.contains(sessionId) {
+            rows = cached
+            syncHistoryFlags(for: sessionId)
+            if let lastId = cached.last?.id {
+                scrollTarget = .bottom(id: lastId)
+            }
+            return
+        }
+
+        let page = try await api.fetchMessagePage(
+            sessionId: sessionId,
+            limitTurns: pageTurnLimit,
+            before: nil
+        )
+        let built = ChatHistoryBuilder.rows(from: page.items)
+        historyCursorBySession[sessionId] = HistoryCursor(
+            hasMore: page.hasMore,
+            nextBefore: page.nextBefore
+        )
         if streamingSessionIds.contains(sessionId), let live = rowsBySession[sessionId] {
             rows = live
         } else {
             rowsBySession[sessionId] = built
             rows = built
+            if let lastId = built.last?.id {
+                scrollTarget = .bottom(id: lastId)
+            }
         }
+        syncHistoryFlags(for: sessionId)
+    }
+
+    /// Load older turns when user scrolls near the top. Returns pin id for scroll restore.
+    func loadOlderHistoryIfNeeded() async {
+        guard let sessionId = currentSession?.sessionId else { return }
+        guard !streamingSessionIds.contains(sessionId) else { return }
+        var cursor = historyCursorBySession[sessionId] ?? HistoryCursor(hasMore: false, nextBefore: nil)
+        guard cursor.hasMore, !cursor.isLoadingOlder, let before = cursor.nextBefore else {
+            syncHistoryFlags(for: sessionId)
+            return
+        }
+
+        cursor.isLoadingOlder = true
+        historyCursorBySession[sessionId] = cursor
+        isLoadingOlder = true
+
+        let anchorId = rows.first?.id
+        do {
+            let page = try await api.fetchMessagePage(
+                sessionId: sessionId,
+                limitTurns: pageTurnLimit,
+                before: before
+            )
+            let olderRows = ChatHistoryBuilder.rows(from: page.items)
+            var existing = rowsBySession[sessionId] ?? rows
+            let existingIds = Set(existing.map(\.id))
+            let uniqueOlder = olderRows.filter { !existingIds.contains($0.id) }
+            existing = uniqueOlder + existing
+            rowsBySession[sessionId] = existing
+            if currentSession?.sessionId == sessionId {
+                rows = existing
+            }
+            cursor.hasMore = page.hasMore
+            cursor.nextBefore = page.nextBefore
+            cursor.isLoadingOlder = false
+            historyCursorBySession[sessionId] = cursor
+            if let anchorId {
+                scrollTarget = .pin(id: anchorId)
+            }
+        } catch {
+            cursor.isLoadingOlder = false
+            historyCursorBySession[sessionId] = cursor
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+        syncHistoryFlags(for: sessionId)
+    }
+
+    func consumeScrollTarget() {
+        scrollTarget = nil
+    }
+
+    private func syncHistoryFlags(for sessionId: String) {
+        let cursor = historyCursorBySession[sessionId]
+        if currentSession?.sessionId == sessionId {
+            hasMoreHistory = cursor?.hasMore ?? false
+            isLoadingOlder = cursor?.isLoadingOlder ?? false
+        }
+    }
+
+    /// Refresh the latest turn window while keeping any already-loaded older prefix.
+
+    // MARK: - Interrupt / relaunch recovery
+
+    /// After kill/relaunch (or stream died in background): settle server run, reload history, unlock retry.
+    /// Does **not** resume live generation — backend refuses to re-run tools on the same run_id.
+    private func recoverInterruptedStreamsAfterRelaunch() async {
+        let pending = PendingStreamStore.load()
+        guard !pending.isEmpty else { return }
+
+        var keep: [PendingStream] = []
+        for item in pending {
+            if streamingSessionIds.contains(item.sessionId) {
+                keep.append(item)
+                continue
+            }
+            await settleInterruptedPending(item)
+        }
+        PendingStreamStore.save(keep)
+    }
+
+    private func settleInterruptedPending(_ item: PendingStream) async {
+        defer { PendingStreamStore.remove(sessionId: item.sessionId) }
+
+        if let runId = item.runId, let url = try? api.streamURL(sessionId: item.sessionId, runId: runId) {
+            // Trigger server stream_recovery guard so a final/error is persisted.
+            await drainStreamQuietly(url: url)
+        }
+
+        if currentSession?.sessionId == item.sessionId {
+            if let built = try? await reloadRows(sessionId: item.sessionId) {
+                rowsBySession[item.sessionId] = built
+                rows = built
+            }
+            markLastAssistantInterrupted(sessionId: item.sessionId)
+            failedTextBySession[item.sessionId] = item.userText
+            error = interruptedExitFallback
+            notice = interruptedExitFallback
+        } else {
+            failedTextBySession[item.sessionId] = item.userText
+            if notice.isEmpty {
+                let title = sessions.first(where: { $0.sessionId == item.sessionId })?.displayTitle ?? "另一会话"
+                notice = "「\(title)」上次回答在退出后中断，打开该会话后可重试。"
+            }
+        }
+    }
+
+    private func drainStreamQuietly(url: URL) async {
+        let client = SSEClient(session: api.makeSSESession())
+        let stream = await client.stream(url: url)
+        do {
+            for try await _ in stream {
+                if Task.isCancelled { break }
+            }
+        } catch {
+            // Expected when run already finished or network blips; history reload follows.
+        }
+    }
+
+    private func reloadRows(sessionId: String) async throws -> [ChatRow] {
+        let page = try await api.fetchMessagePage(
+            sessionId: sessionId,
+            limitTurns: pageTurnLimit,
+            before: nil
+        )
+        let latest = ChatHistoryBuilder.rows(from: page.items)
+        let previous = rowsBySession[sessionId] ?? []
+        let prior = historyCursorBySession[sessionId]
+        // Keep older-page cursor if user already scrolled up; otherwise adopt latest page cursor.
+        if let prior, prior.nextBefore != nil, prior.hasMore {
+            historyCursorBySession[sessionId] = HistoryCursor(
+                hasMore: true,
+                nextBefore: prior.nextBefore
+            )
+        } else {
+            historyCursorBySession[sessionId] = HistoryCursor(
+                hasMore: page.hasMore,
+                nextBefore: page.nextBefore
+            )
+        }
+        syncHistoryFlags(for: sessionId)
+
+        guard !previous.isEmpty, let firstLatest = latest.first else {
+            return latest
+        }
+        if let idx = previous.firstIndex(where: { $0.id == firstLatest.id }) {
+            return Array(previous.prefix(idx)) + latest
+        }
+        if case .user(let user) = firstLatest,
+           let idx = previous.lastIndex(where: {
+               if case .user(let priorUser) = $0 { return priorUser.text == user.text }
+               return false
+           }) {
+            return Array(previous.prefix(idx)) + latest
+        }
+        var merged = previous
+        let ids = Set(merged.map(\.id))
+        for row in latest where !ids.contains(row.id) {
+            merged.append(row)
+        }
+        return merged
+    }
+
+    private func markLastAssistantInterrupted(sessionId: String) {
+        mutateLastAssistant(sessionId: sessionId) { turn in
+            guard turn.displayAnswer.isEmpty || turn.failed else { return }
+            turn.isStreaming = false
+            turn.failed = true
+            turn.phase = .error
+            if turn.displayAnswer.isEmpty {
+                turn.answerText = interruptedExitFallback
+            }
+        }
+    }
+
+    private func clearPending(sessionId: String) {
+        PendingStreamStore.remove(sessionId: sessionId)
     }
 
     // MARK: - Streaming
 
     private func startStream(url: URL, turnId: String, sessionId: String) {
         streamTasks[sessionId]?.cancel()
+        idleWatchdogs[sessionId]?.cancel()
         streamingSessionIds.insert(sessionId)
+        armIdleWatchdog(sessionId: sessionId, turnId: turnId)
 
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             let client = SSEClient(session: self.api.makeSSESession())
             let stream = await client.stream(url: url)
+            var endedWithTransportError = false
             do {
                 for try await event in stream {
                     if Task.isCancelled { break }
-                    self.apply(
-                        update: CopilotStreamParser.parse(event),
-                        sessionId: sessionId,
-                        turnId: turnId
-                    )
-                }
-                if !Task.isCancelled {
-                    self.mutateAssistant(sessionId: sessionId, turnId: turnId) { turn in
-                        turn.isStreaming = false
-                        if turn.phase != .error {
-                            turn.phase = .final
-                        }
+                    let update = CopilotStreamParser.parse(event)
+                    if case .ignore = update {
+                        // Keepalive / unknown frames: do not reset idle clock.
+                    } else {
+                        self.armIdleWatchdog(sessionId: sessionId, turnId: turnId)
                     }
+                    self.apply(update: update, sessionId: sessionId, turnId: turnId)
                 }
             } catch {
+                endedWithTransportError = true
                 if !Task.isCancelled {
                     let message: String
                     if let apiErr = error as? APIError {
@@ -337,23 +622,23 @@ final class ChatViewModel: ObservableObject {
                     } else {
                         message = TransportErrorMapper.map(error).message
                     }
-                    if self.currentSession?.sessionId == sessionId {
-                        self.error = message
-                    }
-                    self.mutateAssistant(sessionId: sessionId, turnId: turnId) { turn in
-                        turn.isStreaming = false
-                        turn.failed = true
-                        turn.phase = .error
-                        if turn.displayAnswer.isEmpty {
-                            turn.answerText = message
-                        }
-                    }
-                    self.failedTextBySession[sessionId] = self.lastUserText(in: sessionId)
+                    self.failTurn(
+                        sessionId: sessionId,
+                        turnId: turnId,
+                        message: message,
+                        surfaceError: true
+                    )
                 }
             }
 
+            self.idleWatchdogs[sessionId]?.cancel()
+            self.idleWatchdogs[sessionId] = nil
             self.streamTasks[sessionId] = nil
             self.streamingSessionIds.remove(sessionId)
+
+            if !Task.isCancelled, !endedWithTransportError {
+                await self.settleStreamCompletion(sessionId: sessionId, turnId: turnId)
+            }
 
             if !Task.isCancelled {
                 if self.currentSession?.sessionId != sessionId {
@@ -372,7 +657,100 @@ final class ChatViewModel: ObservableObject {
         streamTasks[sessionId] = task
     }
 
-    private func cancelStream(sessionId: String, finalizeTurn: Bool) {
+    /// Restart idle timer: meaningful SSE progress must arrive within ``streamIdleTimeoutSeconds``.
+    private func armIdleWatchdog(sessionId: String, turnId: String) {
+        idleWatchdogs[sessionId]?.cancel()
+        let timeout = streamIdleTimeoutSeconds
+        idleWatchdogs[sessionId] = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            guard self.streamingSessionIds.contains(sessionId) else { return }
+            self.failTurn(
+                sessionId: sessionId,
+                turnId: turnId,
+                message: self.idleTimeoutFallback,
+                surfaceError: true
+            )
+            self.streamTasks[sessionId]?.cancel()
+            self.streamTasks[sessionId] = nil
+            self.streamingSessionIds.remove(sessionId)
+            self.idleWatchdogs[sessionId] = nil
+        }
+    }
+
+    /// After SSE closes: hydrate from history if possible; otherwise mark failed + enable retry.
+    private func settleStreamCompletion(sessionId: String, turnId: String) async {
+        guard var turn = assistantTurn(sessionId: sessionId, turnId: turnId) else { return }
+        if turn.failed || turn.phase == .error {
+            turn.isStreaming = false
+            replaceAssistant(sessionId: sessionId, turnId: turnId, turn)
+            clearPending(sessionId: sessionId)
+            return
+        }
+
+        if !turn.displayAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            turn.isStreaming = false
+            turn.phase = .final
+            replaceAssistant(sessionId: sessionId, turnId: turnId, turn)
+            clearPending(sessionId: sessionId)
+            return
+        }
+
+        // Stream ended with tools/reasoning only — try server-persisted final answer.
+        if let recovered = await recoverAnswerFromHistory(sessionId: sessionId, runId: turn.runId),
+           !recovered.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            turn.answerText = recovered
+            turn.isStreaming = false
+            turn.phase = .final
+            turn.failed = false
+            replaceAssistant(sessionId: sessionId, turnId: turnId, turn)
+            clearPending(sessionId: sessionId)
+            return
+        }
+
+        failTurn(
+            sessionId: sessionId,
+            turnId: turnId,
+            message: emptyAnswerFallback,
+            surfaceError: true
+        )
+    }
+
+    private func recoverAnswerFromHistory(sessionId: String, runId: String?) async -> String? {
+        guard let page = try? await api.fetchMessagePage(
+            sessionId: sessionId,
+            limitTurns: pageTurnLimit,
+            before: nil
+        ) else { return nil }
+        let built = ChatHistoryBuilder.rows(from: page.items)
+        for row in built.reversed() {
+            guard case .assistant(let hist) = row else { continue }
+            if let runId, let histRun = hist.runId, histRun != runId { continue }
+            let text = hist.displayAnswer.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty { return hist.answerText }
+            if runId != nil { break }
+        }
+        return nil
+    }
+
+    private func failTurn(sessionId: String, turnId: String, message: String, surfaceError: Bool) {
+        if surfaceError, currentSession?.sessionId == sessionId {
+            error = message
+        }
+        mutateAssistant(sessionId: sessionId, turnId: turnId) { turn in
+            turn.isStreaming = false
+            turn.failed = true
+            turn.phase = .error
+            if turn.displayAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                turn.answerText = message
+            }
+        }
+        failedTextBySession[sessionId] = lastUserText(in: sessionId)
+        clearPending(sessionId: sessionId)
+    }
+        idleWatchdogs[sessionId]?.cancel()
+        idleWatchdogs[sessionId] = nil
         streamTasks[sessionId]?.cancel()
         streamTasks[sessionId] = nil
         streamingSessionIds.remove(sessionId)
@@ -380,10 +758,18 @@ final class ChatViewModel: ObservableObject {
         mutateLastAssistant(sessionId: sessionId) { turn in
             guard turn.isStreaming else { return }
             turn.isStreaming = false
-            if turn.phase != .final && turn.phase != .error {
-                turn.phase = turn.displayAnswer.isEmpty ? .error : .final
+            if turn.displayAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                turn.failed = true
+                turn.phase = .error
+                if turn.answerText.isEmpty {
+                    turn.answerText = "已停止生成。可点重试继续。"
+                }
+                self.failedTextBySession[sessionId] = self.lastUserText(in: sessionId)
+            } else if turn.phase != .final && turn.phase != .error {
+                turn.phase = .final
             }
         }
+        clearPending(sessionId: sessionId)
     }
 
     private func apply(update: StreamUpdate, sessionId: String, turnId: String) {
@@ -418,6 +804,7 @@ final class ChatViewModel: ObservableObject {
                 if !text.isEmpty {
                     turn.answerText = text
                 }
+                self.clearPending(sessionId: sessionId)
             case .error(let message):
                 turn.phase = .error
                 turn.failed = true
@@ -429,9 +816,27 @@ final class ChatViewModel: ObservableObject {
                     self.error = message
                 }
                 self.failedTextBySession[sessionId] = self.lastUserText(in: sessionId)
+                self.clearPending(sessionId: sessionId)
             case .ignore:
                 break
             }
+        }
+    }
+
+    private func assistantTurn(sessionId: String, turnId: String) -> AssistantTurn? {
+        let list = rowsBySession[sessionId] ?? []
+        guard let idx = list.firstIndex(where: { $0.id == turnId }),
+              case .assistant(let turn) = list[idx] else { return nil }
+        return turn
+    }
+
+    private func replaceAssistant(sessionId: String, turnId: String, _ turn: AssistantTurn) {
+        var list = rowsBySession[sessionId] ?? []
+        guard let idx = list.firstIndex(where: { $0.id == turnId }) else { return }
+        list[idx] = .assistant(turn)
+        rowsBySession[sessionId] = list
+        if currentSession?.sessionId == sessionId {
+            rows = list
         }
     }
 

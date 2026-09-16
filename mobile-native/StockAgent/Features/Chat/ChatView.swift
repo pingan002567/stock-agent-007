@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct ChatView: View {
     @EnvironmentObject private var chat: ChatViewModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var appeared = false
 
     var body: some View {
@@ -78,6 +79,11 @@ struct ChatView: View {
                     await chat.bootstrap()
                 }
             }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active {
+                    Task { await chat.handleAppBecameActive() }
+                }
+            }
         }
     }
 }
@@ -92,6 +98,8 @@ struct MessageListView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
+                        historyHeader
+
                         if chat.rows.isEmpty && !chat.sending {
                             VStack(spacing: 12) {
                                 Text("有什么可以帮你？")
@@ -106,7 +114,7 @@ struct MessageListView: View {
                             .padding(.horizontal, 24)
                         }
 
-                        ForEach(chat.rows) { row in
+                        ForEach(Array(chat.rows.enumerated()), id: \.element.id) { index, row in
                             Group {
                                 switch row {
                                 case .user(let bubble):
@@ -116,6 +124,11 @@ struct MessageListView: View {
                                 }
                             }
                             .id(row.id)
+                            .onAppear {
+                                if index == 0 {
+                                    Task { await chat.loadOlderHistoryIfNeeded() }
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal, 16)
@@ -123,11 +136,49 @@ struct MessageListView: View {
                 }
                 .scrollContentBackground(.hidden)
                 .onChange(of: chat.rows.last?.scrollText) { _, _ in
-                    if let id = chat.rows.last?.id {
+                    // Stick to bottom only while the visible session is generating.
+                    guard chat.sending, let id = chat.rows.last?.id else { return }
+                    withAnimation { proxy.scrollTo(id, anchor: .bottom) }
+                }
+                .onChange(of: chat.scrollTarget) { _, target in
+                    guard let target else { return }
+                    switch target {
+                    case .bottom(let id):
                         withAnimation { proxy.scrollTo(id, anchor: .bottom) }
+                    case .pin(let id):
+                        proxy.scrollTo(id, anchor: .top)
                     }
+                    chat.consumeScrollTarget()
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var historyHeader: some View {
+        if chat.isLoadingOlder {
+            HStack(spacing: 8) {
+                ProgressView()
+                Text("加载更早消息…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .id("history-loading")
+        } else if chat.hasMoreHistory && !chat.rows.isEmpty {
+            Text("上滑加载更早消息")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
+                .id("history-hint")
+        } else if !chat.hasMoreHistory && chat.rows.count > 8 {
+            Text("没有更多消息了")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
         }
     }
 

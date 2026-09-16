@@ -154,8 +154,32 @@ final class APIClient: ObservableObject {
     }
 
     func fetchMessages(sessionId: String) async throws -> [CopilotMessage] {
-        let data = try await getData(path: "/api/copilot/sessions/\(enc(sessionId))/messages")
-        return try JSONDecoder().decode(CopilotMessageList.self, from: data).items
+        let page = try await fetchMessagePage(sessionId: sessionId, limitTurns: nil, before: nil)
+        return page.items
+    }
+
+    /// When ``limitTurns`` is set, returns a turn-paginated window; otherwise full history.
+    func fetchMessagePage(
+        sessionId: String,
+        limitTurns: Int? = 20,
+        before: String? = nil
+    ) async throws -> CopilotMessagePage {
+        var items: [URLQueryItem] = []
+        if let limitTurns {
+            items.append(URLQueryItem(name: "limit_turns", value: String(limitTurns)))
+        }
+        if let before, !before.isEmpty {
+            items.append(URLQueryItem(name: "before", value: before))
+        }
+        let data = try await getData(
+            path: "/api/copilot/sessions/\(enc(sessionId))/messages",
+            query: items
+        )
+        if limitTurns == nil {
+            let list = try JSONDecoder().decode(CopilotMessageList.self, from: data)
+            return CopilotMessagePage(items: list.items, hasMore: false, nextBefore: nil)
+        }
+        return try JSONDecoder().decode(CopilotMessagePage.self, from: data)
     }
 
     func sendMessage(
@@ -457,8 +481,8 @@ final class APIClient: ObservableObject {
         value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
     }
 
-    private func getData(path: String) async throws -> Data {
-        try await request(path: path, method: "GET")
+    private func getData(path: String, query: [URLQueryItem] = []) async throws -> Data {
+        try await request(path: path, method: "GET", query: query)
     }
 
     @discardableResult
@@ -467,9 +491,18 @@ final class APIClient: ObservableObject {
         method: String,
         json: [String: Any]? = nil,
         rawBody: Data? = nil,
-        contentType: String? = nil
+        contentType: String? = nil,
+        query: [URLQueryItem] = []
     ) async throws -> Data {
-        let finalURL = try makeURL(path: path)
+        var finalURL = try makeURL(path: path)
+        if !query.isEmpty {
+            guard var components = URLComponents(url: finalURL, resolvingAgainstBaseURL: false) else {
+                throw APIError(message: "请求地址无效")
+            }
+            components.queryItems = (components.queryItems ?? []) + query
+            guard let url = components.url else { throw APIError(message: "请求地址无效") }
+            finalURL = url
+        }
         var req = URLRequest(url: finalURL)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Accept")

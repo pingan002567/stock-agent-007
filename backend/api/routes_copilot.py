@@ -3,7 +3,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from backend.agent_runtime.stream_adapter import SSE_HEADERS, to_sse
@@ -238,12 +238,23 @@ def list_session_messages(
     request: Request,
     services: AppServices = Depends(get_services),
     run_id: str | None = None,
+    limit_turns: int | None = Query(default=None, ge=1, le=200),
+    before: str | None = None,
 ):
     try:
+        if limit_turns is not None and run_id is None:
+            page = services.copilot_service.list_messages_page(
+                session_id, limit_turns=limit_turns, before=before
+            )
+            return {
+                "items": [model_to_dict(item) for item in page["items"]],
+                "has_more": page["has_more"],
+                "next_before": page["next_before"],
+            }
         items = services.copilot_service.list_messages(session_id, run_id=run_id)
+        return {"items": [model_to_dict(item) for item in items]}
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
-    return {"items": [model_to_dict(item) for item in items]}
 
 
 @router.post("/sessions/{session_id}/messages")

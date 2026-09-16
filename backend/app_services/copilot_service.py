@@ -420,6 +420,25 @@ class CopilotService:
         self.get_session(session_id)
         return self.repo.list_copilot_messages(session_id=session_id, run_id=run_id)
 
+    def list_messages_page(
+        self,
+        session_id: str,
+        *,
+        limit_turns: int,
+        before: str | None = None,
+    ) -> dict[str, Any]:
+        self.get_session(session_id)
+        items, has_more, next_before = self.repo.list_copilot_messages_page(
+            session_id=session_id,
+            limit_turns=limit_turns,
+            before_message_id=before,
+        )
+        return {
+            "items": items,
+            "has_more": has_more,
+            "next_before": next_before,
+        }
+
     def has_run(self, run_id: str, session_id: str | None = None) -> bool:
         if run_id in self._runs:
             state = self._runs[run_id]

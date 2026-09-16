@@ -208,6 +208,39 @@ struct CopilotMessage: Identifiable, Decodable, Hashable {
 
 struct CopilotMessageList: Decodable {
     let items: [CopilotMessage]
+    let hasMore: Bool?
+    let nextBefore: String?
+
+    enum CodingKeys: String, CodingKey {
+        case items
+        case hasMore = "has_more"
+        case nextBefore = "next_before"
+    }
+}
+
+struct CopilotMessagePage: Decodable {
+    let items: [CopilotMessage]
+    let hasMore: Bool
+    let nextBefore: String?
+
+    enum CodingKeys: String, CodingKey {
+        case items
+        case hasMore = "has_more"
+        case nextBefore = "next_before"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        items = try c.decode([CopilotMessage].self, forKey: .items)
+        hasMore = try c.decodeIfPresent(Bool.self, forKey: .hasMore) ?? false
+        nextBefore = try c.decodeIfPresent(String.self, forKey: .nextBefore)
+    }
+
+    init(items: [CopilotMessage], hasMore: Bool, nextBefore: String?) {
+        self.items = items
+        self.hasMore = hasMore
+        self.nextBefore = nextBefore
+    }
 }
 
 struct CopilotRun: Decodable {
