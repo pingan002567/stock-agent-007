@@ -19,7 +19,7 @@ LEAD_RUNTIME_CONSTRAINTS = [
     "用户要求改人格、纪律或行为设定时，用 update_agent 提交完整 soul（基于当前 SOUL 改完再整篇写入，下轮生效）。不要用 write_file/bash 改 SOUL.md，也不要用 update_agent 改 tool_groups、skills 或 model。",
     "不要请求或泄露 secret、环境变量、配置原文或本机敏感路径。MCP env 仅在工具参数中传入，勿在回复中回显明文。",
     "不要要求完整持仓、完整自选、完整历史、完整报告或工具台账明细。",
-    "行情结果里 stale=true 表示日K未到应有交易日。用户要求刷新，或 stale 且问题依赖现价/今日量价时，对同一标的最多调用一次 refresh_market_data；不要每次 get_stock_context 都打穿缓存。degraded 或缺字段不要编造。北向/融资融券/龙虎榜/解禁是未接入，不能用行业新闻代替个股龙虎榜。research_status 为未生成研报时，score 0 不是评分。非交易日不是缺 K 线。",
+    "行情结果里 stale=true 表示日K未到应有交易日。用户要求刷新，或 stale 且问题依赖现价/今日量价时，对同一标的最多调用一次 refresh_market_data；不要每次 get_stock_context 都打穿缓存。degraded 或缺字段不要编造。北向/融资融券/龙虎榜/解禁看 get_market_structure.extra；某块 degraded 或在 missing 里时写 reason，不能用行业新闻代替个股龙虎榜。research_status 为未生成研报时，score 0 不是评分。非交易日不是缺 K 线。",
     "收口免责固定句：可含目标价与操作指令，仅供研究参考，不构成投资建议。",
 ]
 

@@ -1,4 +1,4 @@
-"""个股市场结构：技术量价 + 快照估值/流动性 + A 股筹码 / 资金流。
+"""个股市场结构：技术量价 + 快照估值/流动性 + A 股筹码 / 资金流 / 北向·两融·龙虎榜·解禁。
 
 硬约束：禁止 mock；港美股不得输出获利/套牢比例；缺数据用 degraded + missing。
 """
@@ -371,8 +371,8 @@ def _akshare_primary() -> AkShareMarketDataProvider | None:
 def _tushare_structure_provider() -> Any:
     """Paid research fields follow an enabled Tushare account, not the quote provider.
 
-    A-share live quotes can stay on Eastmoney/Tencent. Chip, fund flow, and missing
-    valuation still use Tushare when the token is on and the package is installed.
+    A-share live quotes can stay on Eastmoney/Tencent. Chip, fund flow, valuation,
+    northbound hold, margin, LHB, and share-float still use Tushare when enabled.
     """
     try:
         from backend.config.provider_policy import is_provider_usable
@@ -488,6 +488,63 @@ def _flow_block(market: str, symbol: str) -> dict[str, Any]:
         "main_net_1d": latest.get("main_net"),
         "main_net_5d": _sum_net(5),
         "main_net_10d": _sum_net(10),
+    }
+
+
+def _extra_block_load(method: str, symbol: str, **kwargs: Any) -> dict[str, Any]:
+    """Load one Tushare-backed extra block; failures become degraded, not invented."""
+    try:
+        payload, source = _load_cn_structure(method, symbol, **kwargs)
+    except Exception as exc:
+        return {"degraded": True, "reason": _short_reason(f"{method} 失败", exc)}
+    if not isinstance(payload, dict):
+        return {"degraded": True, "reason": f"{method} 返回异常"}
+    out = dict(payload)
+    out.setdefault("source", source)
+    if out.get("degraded") is None:
+        out["degraded"] = False
+    return out
+
+
+def _extra_block(market: str, symbol: str) -> dict[str, Any]:
+    """北向持股 / 两融 / 龙虎榜 / 解禁。A 股走 Tushare；非 CN 标明不适用。"""
+    keys = ("northbound", "margin", "lhb", "unlock")
+    if market != "CN":
+        return {
+            "applicable": False,
+            "degraded": False,
+            "reason": "北向/融资融券/龙虎榜/解禁仅覆盖 A 股",
+            "missing": list(keys),
+            "northbound": {"degraded": True, "reason": "仅 A 股"},
+            "margin": {"degraded": True, "reason": "仅 A 股"},
+            "lhb": {"degraded": True, "reason": "仅 A 股"},
+            "unlock": {"degraded": True, "reason": "仅 A 股"},
+        }
+
+    northbound = _extra_block_load("fetch_northbound_hold", symbol)
+    margin = _extra_block_load("fetch_margin_detail", symbol)
+    lhb = _extra_block_load("fetch_lhb", symbol, lookback_days=20, limit=5)
+    unlock = _extra_block_load("fetch_share_float", symbol, limit=10)
+
+    blocks = {
+        "northbound": northbound,
+        "margin": margin,
+        "lhb": lhb,
+        "unlock": unlock,
+    }
+    missing = [name for name, block in blocks.items() if block.get("degraded")]
+    any_degraded = bool(missing)
+    reason = None
+    if missing:
+        reason = "；".join(
+            f"{name}: {blocks[name].get('reason') or '降级'}" for name in missing
+        )
+    return {
+        "applicable": True,
+        "degraded": any_degraded,
+        "reason": reason,
+        "missing": missing,
+        **blocks,
     }
 
 
@@ -634,18 +691,17 @@ def get_market_structure(symbol: str) -> dict[str, Any]:
         chip = _chip_block(market, normalized, last if isinstance(last, (int, float)) else None, bars)
         flow = _flow_block(market, normalized)
 
-    extra = {
-        "degraded": True,
-        "coverage": "not_wired",
-        "reason": "北向/融资融券/龙虎榜/解禁未接入，不是本次拉取失败；行业新闻不能代替个股龙虎榜",
-        "missing": ["northbound", "margin", "lhb", "unlock"],
-    }
+    extra = _extra_block(market, normalized)
 
     gap_reasons = []
     for name, block in (("technical", technical), ("snapshot", snapshot), ("chip", chip), ("flow", flow)):
         if block.get("degraded") and block.get("reason"):
             gap_reasons.append(f"{name}: {block['reason']}")
-    overall_degraded = any(block.get("degraded") for block in (technical, snapshot, chip, flow))
+    if isinstance(extra, dict) and extra.get("degraded") and extra.get("reason"):
+        gap_reasons.append(f"extra: {extra['reason']}")
+    overall_degraded = any(block.get("degraded") for block in (technical, snapshot, chip, flow)) or bool(
+        isinstance(extra, dict) and extra.get("degraded")
+    )
     history_source = history.get("source") if isinstance(history, dict) else "unavailable"
     freshness = {
         "as_of": official_as_of or None,

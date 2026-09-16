@@ -24,7 +24,7 @@ allowed-tools:
    - 先看 `freshness`：`stale=true` 或 `as_of` 早于 `expected_as_of` 时，不要把旧日K当今日量价。用户要求刷新，或问题依赖现价/今日量价时，对该股最多调用一次 `refresh_market_data`，仍失败就写 reason，不要编造。
    - `provisional=true` 的今日开高低量来自行情拼接，不是正式日K。非交易日（周末/假期）不是缺 K 线。
    - `chip.degraded` / `flow.degraded` / `snapshot.degraded`：写工具 `reason`。`chip.proxy` 是代理（标了 as_of），不是真实筹码。
-   - `extra.missing`（北向/融资融券/龙虎榜/解禁）是未接入，不要用行业新闻推断该股是否上榜。
+   - `extra.northbound` / `extra.margin` / `extra.lhb` / `extra.unlock`：A 股走 Tushare；某块 `degraded` 或出现在 `extra.missing` 时写 `reason`，**禁止**用行业新闻推断该股是否上榜/解禁。北向为持股快照（`as_of` 可能滞后，非日度资金流）。
    - `research_status=未生成研报` 时 score 0 不是评分。
 4. `get_industry_context`：行业格局（行业行情快照、该股行业内市值排名与 PE/PB/涨幅分位、Top10 成分股对比）
    - **优先用 symbol=代码**；若返回「不在股票主表」或主表过薄，在降级说明里写明，并改用 `industry=` 东财精确板块名（看 `available_industries_sample` / `recovery_hint`）重试一次

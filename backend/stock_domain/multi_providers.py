@@ -380,6 +380,199 @@ class TushareMarketDataProvider:
             return {}
         return _tushare_snapshot(basic[0] if basic else {}, daily[0] if daily else {})
 
+    def fetch_northbound_hold(self, symbol: str) -> dict[str, Any]:
+        """沪深股通持股快照（hk_hold）。日度北向自 2024-08-20 起改季度披露。"""
+        normalized, stock = self._cn_stock(symbol)
+        ts_code = _ts_code(normalized, stock)
+        try:
+            frame = self._api().hk_hold(ts_code=ts_code)
+        except Exception as exc:
+            raise ProviderError(f"tushare hk_hold failed: {exc}") from exc
+        rows = _frame_tail(frame, 40) if frame is not None else []
+        rows = sorted(
+            [r for r in rows if r.get("trade_date")],
+            key=lambda r: str(r.get("trade_date")),
+        )
+        note = (
+            "交易所自2024-08-20起停发日度北向资金数据、改为季度披露；"
+            "本字段为沪深股通持股快照，as_of 可能滞后"
+        )
+        if not rows:
+            return {
+                "degraded": False,
+                "on_list": False,
+                "as_of": None,
+                "vol": None,
+                "ratio": None,
+                "exchange": None,
+                "source": "tushare.hk_hold",
+                "note": note,
+            }
+        latest = rows[-1]
+        return {
+            "degraded": False,
+            "on_list": True,
+            "as_of": _ts_date(latest.get("trade_date")),
+            "vol": _coerce_float(latest.get("vol")),
+            "ratio": _coerce_float(latest.get("ratio")),
+            "exchange": str(latest.get("exchange") or "") or None,
+            "name": str(latest.get("name") or "") or None,
+            "source": "tushare.hk_hold",
+            "note": note,
+        }
+
+    def fetch_margin_detail(self, symbol: str) -> dict[str, Any]:
+        """个股融资融券明细最新一行（margin_detail）。"""
+        normalized, stock = self._cn_stock(symbol)
+        ts_code = _ts_code(normalized, stock)
+        end = datetime.now().strftime("%Y%m%d")
+        start = (datetime.now() - timedelta(days=40)).strftime("%Y%m%d")
+        try:
+            frame = self._api().margin_detail(
+                ts_code=ts_code, start_date=start, end_date=end
+            )
+        except Exception as exc:
+            raise ProviderError(f"tushare margin_detail failed: {exc}") from exc
+        rows = _frame_tail(frame, 40) if frame is not None else []
+        rows = sorted(
+            [r for r in rows if r.get("trade_date")],
+            key=lambda r: str(r.get("trade_date")),
+        )
+        if not rows:
+            return {
+                "degraded": False,
+                "available": False,
+                "as_of": None,
+                "source": "tushare.margin_detail",
+            }
+        latest = rows[-1]
+        return {
+            "degraded": False,
+            "available": True,
+            "as_of": _ts_date(latest.get("trade_date")),
+            "rzye": _coerce_float(latest.get("rzye")),
+            "rqye": _coerce_float(latest.get("rqye")),
+            "rzmre": _coerce_float(latest.get("rzmre")),
+            "rzche": _coerce_float(latest.get("rzche")),
+            "rqyl": _coerce_float(latest.get("rqyl")),
+            "rzrqye": _coerce_float(latest.get("rzrqye")),
+            "source": "tushare.margin_detail",
+        }
+
+    def fetch_lhb(self, symbol: str, *, lookback_days: int = 20, limit: int = 5) -> dict[str, Any]:
+        """龙虎榜 top_list；有上榜日时附带 top_inst 机构摘要。"""
+        normalized, stock = self._cn_stock(symbol)
+        ts_code = _ts_code(normalized, stock)
+        pro = self._api()
+        collected: list[dict[str, Any]] = []
+        day = datetime.now()
+        checked = 0
+        max_checks = max(int(lookback_days), 5)
+        while checked < max_checks and len(collected) < max(int(limit), 1):
+            if day.weekday() < 5:
+                trade_date = day.strftime("%Y%m%d")
+                try:
+                    frame = pro.top_list(trade_date=trade_date, ts_code=ts_code)
+                except Exception as exc:
+                    if checked == 0 and not collected:
+                        raise ProviderError(f"tushare top_list failed: {exc}") from exc
+                    checked += 1
+                    day -= timedelta(days=1)
+                    continue
+                for row in _frame_tail(frame, 20) if frame is not None else []:
+                    item = {
+                        "trade_date": _ts_date(row.get("trade_date") or trade_date),
+                        "reason": str(row.get("reason") or "") or None,
+                        "close": _coerce_float(row.get("close")),
+                        "pct_change": _coerce_float(row.get("pct_change")),
+                        "net_amount": _coerce_float(row.get("net_amount")),
+                        "l_buy": _coerce_float(row.get("l_buy")),
+                        "l_sell": _coerce_float(row.get("l_sell")),
+                        "l_amount": _coerce_float(row.get("l_amount")),
+                        "net_rate": _coerce_float(row.get("net_rate")),
+                    }
+                    try:
+                        inst_frame = pro.top_inst(trade_date=trade_date, ts_code=ts_code)
+                        inst_rows = _frame_tail(inst_frame, 8) if inst_frame is not None else []
+                        institutions: list[str] = []
+                        for inst in inst_rows:
+                            name = str(
+                                inst.get("exalter")
+                                or inst.get("broker")
+                                or inst.get("buy_member")
+                                or inst.get("sell_member")
+                                or ""
+                            ).strip()
+                            if name and name not in institutions:
+                                institutions.append(name[:40])
+                            if len(institutions) >= 4:
+                                break
+                        if institutions:
+                            item["institutions"] = institutions
+                    except Exception:
+                        pass
+                    collected.append(item)
+                    if len(collected) >= max(int(limit), 1):
+                        break
+                checked += 1
+            day -= timedelta(days=1)
+        collected.sort(key=lambda r: str(r.get("trade_date") or ""), reverse=True)
+        return {
+            "degraded": False,
+            "on_list": bool(collected),
+            "as_of": collected[0].get("trade_date") if collected else None,
+            "items": collected[: max(int(limit), 1)],
+            "count": len(collected),
+            "source": "tushare.top_list",
+            "lookback_trading_days": checked,
+        }
+
+    def fetch_share_float(self, symbol: str, *, limit: int = 10) -> dict[str, Any]:
+        """限售解禁：过去 90 天～未来 180 天。"""
+        normalized, stock = self._cn_stock(symbol)
+        ts_code = _ts_code(normalized, stock)
+        today = datetime.now().date()
+        start = (today - timedelta(days=90)).strftime("%Y%m%d")
+        end = (today + timedelta(days=180)).strftime("%Y%m%d")
+        try:
+            frame = self._api().share_float(
+                ts_code=ts_code, start_date=start, end_date=end
+            )
+        except Exception as exc:
+            raise ProviderError(f"tushare share_float failed: {exc}") from exc
+        rows = _frame_tail(frame, 200) if frame is not None else []
+        upcoming: list[dict[str, Any]] = []
+        recent: list[dict[str, Any]] = []
+        today_s = today.isoformat()
+        for row in rows:
+            float_date = _ts_date(row.get("float_date"))
+            if not float_date:
+                continue
+            entry = {
+                "float_date": float_date,
+                "ann_date": _ts_date(row.get("ann_date")) or None,
+                "float_share": _coerce_float(row.get("float_share")),
+                "float_ratio": _coerce_float(row.get("float_ratio")),
+                "holder_name": (str(row.get("holder_name") or "")[:40] or None),
+                "share_type": str(row.get("share_type") or "") or None,
+            }
+            if float_date >= today_s:
+                upcoming.append(entry)
+            else:
+                recent.append(entry)
+        upcoming.sort(key=lambda r: str(r.get("float_date") or ""))
+        recent.sort(key=lambda r: str(r.get("float_date") or ""), reverse=True)
+        cap = max(int(limit), 1)
+        return {
+            "degraded": False,
+            "upcoming": upcoming[:cap],
+            "recent": recent[:cap],
+            "upcoming_count": len(upcoming),
+            "recent_count": len(recent),
+            "source": "tushare.share_float",
+            "window": {"start": _ts_date(start), "end": _ts_date(end)},
+        }
+
     def _cn_stock(self, symbol: str) -> tuple[str, dict]:
         normalized = normalize_symbol(symbol)
         stock = get_stock(normalized)

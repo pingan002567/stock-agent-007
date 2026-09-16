@@ -305,3 +305,182 @@ def test_live_a_share_and_overseas_samples():
     assert "profit_ratio" not in hk["chip"]
     assert hk["chip"].get("degraded") is True
     assert hk["technical"].get("ma5") is not None or hk["technical"].get("bar_count", 0) >= 5
+
+
+def test_cn_extra_blocks_from_tushare(monkeypatch):
+    class Paid:
+        name = "tushare"
+
+        def is_available(self):
+            return True
+
+        def fetch_chip_cyq(self, symbol):
+            return [{
+                "日期": "2026-09-11",
+                "获利比例": 50,
+                "平均成本": 10,
+                "method": "tushare_cyq_perf",
+            }]
+
+        def fetch_fund_flow_rows(self, symbol, limit=12):
+            return [{"日期": "2026-09-11", "主力净流入-净额": 1000, "source": "tushare.moneyflow"}]
+
+        def fetch_spot_snapshot(self, symbol):
+            return {"pe": 12, "source": "tushare.daily_basic"}
+
+        def fetch_northbound_hold(self, symbol):
+            return {
+                "degraded": False,
+                "on_list": True,
+                "as_of": "2024-08-19",
+                "vol": 1e8,
+                "ratio": 3.2,
+                "exchange": "SH",
+                "source": "tushare.hk_hold",
+                "note": "test",
+            }
+
+        def fetch_margin_detail(self, symbol):
+            return {
+                "degraded": False,
+                "available": True,
+                "as_of": "2026-09-11",
+                "rzye": 1e9,
+                "rqye": 1e7,
+                "rzmre": 1e8,
+                "rzrqye": 1.01e9,
+                "source": "tushare.margin_detail",
+            }
+
+        def fetch_lhb(self, symbol, lookback_days=20, limit=5):
+            return {
+                "degraded": False,
+                "on_list": True,
+                "as_of": "2026-09-10",
+                "items": [{
+                    "trade_date": "2026-09-10",
+                    "reason": "日涨幅偏离值达到7%的前五只证券",
+                    "net_amount": 1e7,
+                    "l_buy": 2e7,
+                    "l_sell": 1e7,
+                }],
+                "count": 1,
+                "source": "tushare.top_list",
+            }
+
+        def fetch_share_float(self, symbol, limit=10):
+            return {
+                "degraded": False,
+                "upcoming": [{
+                    "float_date": "2026-12-01",
+                    "float_share": 1e6,
+                    "float_ratio": 0.5,
+                    "holder_name": "某某",
+                    "share_type": "定增股份",
+                }],
+                "recent": [],
+                "upcoming_count": 1,
+                "recent_count": 0,
+                "source": "tushare.share_float",
+            }
+
+    monkeypatch.setattr("backend.stock_domain.market_structure._tushare_structure_provider", lambda: Paid())
+    monkeypatch.setattr("backend.stock_domain.market_structure._akshare_primary", lambda: None)
+    monkeypatch.setattr(
+        "backend.stock_domain.market_structure.get_daily_history",
+        lambda *a, **k: {"items": _bars(80), "source": "tushare"},
+    )
+    monkeypatch.setattr(
+        "backend.stock_domain.market_structure._snapshot_block",
+        lambda *a, **k: {"degraded": False, "pe": 12},
+    )
+
+    payload = get_market_structure("600519")
+    extra = payload["extra"]
+    assert extra.get("coverage") != "not_wired"
+    assert extra["applicable"] is True
+    assert extra["missing"] == []
+    assert extra["northbound"]["vol"] == 1e8
+    assert extra["margin"]["rzye"] == 1e9
+    assert extra["lhb"]["on_list"] is True
+    assert extra["unlock"]["upcoming"][0]["float_date"] == "2026-12-01"
+
+
+def test_cn_extra_partial_permission_failure(monkeypatch):
+    class Paid:
+        name = "tushare"
+
+        def is_available(self):
+            return True
+
+        def fetch_chip_cyq(self, symbol):
+            return [{"日期": "2026-09-11", "获利比例": 40, "平均成本": 11, "method": "tushare_cyq_perf"}]
+
+        def fetch_fund_flow_rows(self, symbol, limit=12):
+            return [{"日期": "2026-09-11", "主力净流入-净额": 100}]
+
+        def fetch_northbound_hold(self, symbol):
+            raise RuntimeError("抱歉，您没有接口访问权限")
+
+        def fetch_margin_detail(self, symbol):
+            return {
+                "degraded": False,
+                "available": True,
+                "as_of": "2026-09-11",
+                "rzye": 2e9,
+                "source": "tushare.margin_detail",
+            }
+
+        def fetch_lhb(self, symbol, lookback_days=20, limit=5):
+            return {"degraded": False, "on_list": False, "items": [], "count": 0, "source": "tushare.top_list"}
+
+        def fetch_share_float(self, symbol, limit=10):
+            return {"degraded": False, "upcoming": [], "recent": [], "upcoming_count": 0, "recent_count": 0, "source": "tushare.share_float"}
+
+    monkeypatch.setattr("backend.stock_domain.market_structure._tushare_structure_provider", lambda: Paid())
+    monkeypatch.setattr("backend.stock_domain.market_structure._akshare_primary", lambda: None)
+    monkeypatch.setattr(
+        "backend.stock_domain.market_structure.get_daily_history",
+        lambda *a, **k: {"items": _bars(80), "source": "tushare"},
+    )
+    monkeypatch.setattr(
+        "backend.stock_domain.market_structure._snapshot_block",
+        lambda *a, **k: {"degraded": False, "pe": 12},
+    )
+
+    payload = get_market_structure("600519")
+    extra = payload["extra"]
+    assert "northbound" in extra["missing"]
+    assert extra["northbound"]["degraded"] is True
+    assert extra["margin"]["degraded"] is False
+    assert extra["margin"]["rzye"] == 2e9
+    assert extra["lhb"]["on_list"] is False
+    assert "not_wired" not in str(extra.get("coverage"))
+
+
+def test_hk_extra_not_applicable(monkeypatch):
+    monkeypatch.setattr("backend.stock_domain.market_structure._tushare_structure_provider", lambda: None)
+    monkeypatch.setattr("backend.stock_domain.market_structure._akshare_primary", lambda: None)
+    monkeypatch.setattr(
+        "backend.stock_domain.market_structure.get_daily_history",
+        lambda *a, **k: {"items": _bars(20), "source": "akshare"},
+    )
+    monkeypatch.setattr(
+        "backend.stock_domain.market_structure._snapshot_block",
+        lambda *a, **k: {"degraded": True, "reason": "test"},
+    )
+    monkeypatch.setattr(
+        "backend.stock_domain.market_structure.get_stock",
+        lambda symbol: {"symbol": symbol, "name": "Tencent", "market": "HK", "price": 300},
+    )
+    monkeypatch.setattr(
+        "backend.stock_domain.market_structure.normalize_symbol",
+        lambda symbol: symbol if symbol.startswith("HK") else f"HK{symbol}",
+    )
+
+    payload = get_market_structure("HK00700")
+    extra = payload["extra"]
+    assert extra["applicable"] is False
+    assert set(extra["missing"]) == {"northbound", "margin", "lhb", "unlock"}
+    assert "A 股" in (extra["reason"] or "")
+    assert extra["northbound"].get("degraded") is True
