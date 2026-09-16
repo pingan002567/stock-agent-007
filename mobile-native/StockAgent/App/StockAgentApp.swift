@@ -19,8 +19,10 @@ struct StockAgentApp: App {
                 .environmentObject(theme)
                 .tint(theme.accentColor)
                 .preferredColorScheme(theme.scheme.preferred)
-                .onReceive(NotificationCenter.default.publisher(for: .stockAgentOpenMonitor)) { _ in
-                    tabs.selected = .monitor
+                .onReceive(NotificationCenter.default.publisher(for: .stockAgentOpenMonitor)) { note in
+                    let eventId = note.userInfo?["event_id"] as? String
+                    let symbol = note.userInfo?["symbol"] as? String
+                    tabs.openMonitor(eventId: eventId, symbol: symbol)
                 }
                 .onChange(of: auth.isConnected) { _, connected in
                     if connected {
@@ -48,6 +50,27 @@ final class TabRouter: ObservableObject {
     }
 
     @Published var selected: Tab = .chat
+    /// Deep-link target from APNs / local notification.
+    @Published var pendingMonitorEventId: String?
+    @Published var pendingMonitorSymbol: String?
+
+    func openMonitor(eventId: String? = nil, symbol: String? = nil) {
+        pendingMonitorEventId = eventId
+        pendingMonitorSymbol = symbol
+        selected = .monitor
+    }
+
+    var hasMonitorDeepLink: Bool {
+        pendingMonitorEventId != nil || pendingMonitorSymbol != nil
+    }
+
+    func consumeMonitorDeepLink() -> (eventId: String?, symbol: String?) {
+        defer {
+            pendingMonitorEventId = nil
+            pendingMonitorSymbol = nil
+        }
+        return (pendingMonitorEventId, pendingMonitorSymbol)
+    }
 }
 
 struct RootView: View {

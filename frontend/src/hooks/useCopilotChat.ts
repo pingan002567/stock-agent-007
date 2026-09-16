@@ -211,6 +211,8 @@ function useCopilotChatState() {
   const [reasoningText, setReasoningText] = useState<string>("");
   const [streamMessage, setStreamMessage] = useState<StreamMessage | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  /** 消息动作「填入输入框」：Composer 消费后清掉 */
+  const [composerPrefill, setComposerPrefill] = useState<string | null>(null);
   const [toolOpen, setToolOpen] = useState<Set<string>>(new Set());
 
   // 按会话保活 SSE：切会话/新建对话不断开在途流，只切换视图；Stop/删除才关连接
@@ -847,6 +849,26 @@ function useCopilotChatState() {
     } catch { /* empty */ }
   }, []);
 
+  const handlePrefillComposer = useCallback((text: string) => {
+    const t = text.trim();
+    if (!t) return;
+    setComposerPrefill(t);
+  }, []);
+
+  const clearComposerPrefill = useCallback(() => {
+    setComposerPrefill(null);
+  }, []);
+
+  /** 按 run 或最近一条用户消息重试发送 */
+  const handleRetry = useCallback(async (runId?: string | null) => {
+    const users = messages.filter((m) => m.role === "user" && (m.text || "").trim());
+    const target = runId
+      ? [...users].reverse().find((m) => m.run_id === runId)
+      : users[users.length - 1];
+    if (!target?.text?.trim()) return;
+    await handleSend(target.text);
+  }, [messages, handleSend]);
+
   const toggleToolOpen = useCallback((id: string) => {
     setToolOpen((prev) => {
       const next = new Set(prev);
@@ -867,6 +889,7 @@ function useCopilotChatState() {
     streamMessage,
     sessionActivity,
     copiedId,
+    composerPrefill,
     toolOpen,
     loadSessions,
     loadMessages,
@@ -878,6 +901,9 @@ function useCopilotChatState() {
     handleSend,
     handleStop,
     handleCopy,
+    handlePrefillComposer,
+    clearComposerPrefill,
+    handleRetry,
     toggleToolOpen,
     sessionModelRef,
     modelOptions,

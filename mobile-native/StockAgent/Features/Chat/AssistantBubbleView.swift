@@ -32,7 +32,11 @@ enum BubbleCollapsePolicy {
 
 struct AssistantBubbleView: View {
     let turn: AssistantTurn
+    var onRetry: (() -> Void)?
+    var onClarificationSubmit: (([String: Any], String) -> Void)?
+
     @State private var toolsExpanded = false
+    @State private var skillTraceExpanded = false
 
     private var answerCollapsed: Bool {
         !turn.isStreaming && BubbleCollapsePolicy.shouldCollapseAnswer(turn.answerText)
@@ -45,8 +49,12 @@ struct AssistantBubbleView: View {
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
-                if turn.isStreaming, turn.phase != .final {
+                if turn.isStreaming, turn.phase != .final, turn.phase != .clarification {
                     phaseBar
+                }
+
+                if !turn.skillTrace.isEmpty {
+                    skillTraceSection
                 }
 
                 if !turn.reasoningText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -66,12 +74,14 @@ struct AssistantBubbleView: View {
                     toolsCollapsedSection
                 }
 
+                if turn.awaitingClarification || turn.clarificationAnswered {
+                    clarificationSection
+                }
+
                 answerSection
 
-                if turn.failed {
-                    Text("生成失败")
-                        .font(.caption2)
-                        .foregroundStyle(.red)
+                if turn.hasRetryableFailure {
+                    failureFooter
                 }
             }
             .padding(14)
@@ -112,6 +122,120 @@ struct AssistantBubbleView: View {
         }
     }
 
+    private var failureFooter: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("生成失败")
+                    .font(.caption.weight(.semibold))
+                Text("可一键重试上一问")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            if let onRetry {
+                Button("重试") { onRetry() }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+            }
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var clarificationSection: some View {
+        if let request = turn.clarificationRequest {
+            HumanInputCardView(
+                request: request,
+                answered: turn.clarificationAnswered,
+                disabled: turn.isStreaming,
+                onSubmit: turn.clarificationAnswered ? nil : onClarificationSubmit
+            )
+        } else if let text = turn.clarificationText, !text.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("AI 需要你的补充信息")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(text)
+                    .font(.subheadline)
+                Text(turn.clarificationAnswered ? "已回答" : "直接在下方输入框回答即可继续")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.accentColor.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
+    private var skillTraceSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    skillTraceExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                        .font(.caption)
+                    Text("技能链路 · \(turn.skillTrace.count)")
+                        .font(.caption.weight(.semibold))
+                    Spacer(minLength: 4)
+                    Image(systemName: skillTraceExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(Color(.tertiarySystemFill))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .buttonStyle(.plain)
+
+            if skillTraceExpanded {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(turn.skillTrace) { step in
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(skillStatusColor(step.status))
+                                .frame(width: 8, height: 8)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(step.displayTitle)
+                                    .font(.caption.weight(.medium))
+                                if let purpose = step.purpose, !purpose.isEmpty {
+                                    Text(purpose)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                            Spacer()
+                            Text(step.status)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(.horizontal, 4)
+            }
+        }
+    }
+
+    private func skillStatusColor(_ status: String) -> Color {
+        switch status.lowercased() {
+        case "done", "completed", "success": return .green
+        case "running", "active", "in_progress": return .blue
+        case "blocked", "failed", "error": return .red
+        default: return .secondary
+        }
+    }
+
     private var fullTurnText: String {
         var parts: [String] = []
         let reasoning = turn.reasoningText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -119,6 +243,7 @@ struct AssistantBubbleView: View {
         if !turn.tools.isEmpty {
             parts.append(turn.tools.map(\.name).joined(separator: ", "))
         }
+        if let q = turn.clarificationText, !q.isEmpty { parts.append(q) }
         let answer = turn.displayAnswer
         if !answer.isEmpty { parts.append(answer) }
         return parts.joined(separator: "\n\n")
@@ -168,7 +293,7 @@ struct AssistantBubbleView: View {
                         } label: {
                             HStack(spacing: 8) {
                                 toolStatusIcon(tool.status)
-                                Text(tool.name)
+                                Text(ToolLabels.displayName(for: tool.name))
                                     .font(.caption)
                                     .lineLimit(1)
                                 Spacer()
@@ -209,7 +334,7 @@ struct AssistantBubbleView: View {
 
     @ViewBuilder
     private var answerSection: some View {
-        if turn.displayAnswer.isEmpty && turn.isStreaming && turn.tools.isEmpty && turn.reasoningText.isEmpty {
+        if turn.displayAnswer.isEmpty && turn.isStreaming && turn.tools.isEmpty && turn.reasoningText.isEmpty && !turn.awaitingClarification {
             Text("…")
                 .foregroundStyle(.secondary)
         } else if turn.displayAnswer.isEmpty && !turn.isStreaming {
@@ -237,7 +362,7 @@ struct AssistantBubbleView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-        } else {
+        } else if !turn.displayAnswer.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 MarkdownText(
                     source: turn.answerText,

@@ -786,4 +786,5 @@ enum TransportErrorMapper {
 enum RemoteDefaults {
     /// Prefer default HTTPS once SG opens 443; :8686 remains compatible.
     static let recommendedBaseURL = "https://47.103.58.33"
+    static let alternateBaseURL = "https://47.103.58.33:8686"
 }

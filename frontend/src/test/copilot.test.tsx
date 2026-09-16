@@ -225,10 +225,16 @@ describe("pairMessages", () => {
     ];
     const paired = pairMessages(msgs);
     expect(paired.some((item) => item.t === "msg" && item.aborted)).toBe(false);
-    expect(paired.some((item) => item.t === "ai" && item.incomplete)).toBe(true);
+    const user = paired.find((item) => item.t === "msg" && item.msg.message_id === "u1");
+    expect(user?.t).toBe("msg");
+    if (user && user.t === "msg") {
+      expect(user.incomplete).toBe(true);
+      expect(user.tools?.some((t) => t.name === "get_stock_context")).toBe(true);
+    }
+    expect(paired.some((item) => item.t === "ai")).toBe(false);
   });
 
-  it("places incomplete runs before the next user turn", () => {
+  it("places incomplete process on the prior user turn, not an empty AI bubble", () => {
     const msgs = [
       makeMsg({ message_id: "u1", role: "user", kind: "user_message", text: "第一次", run_id: "run_1" }),
       makeMsg({
@@ -242,10 +248,28 @@ describe("pairMessages", () => {
       }),
     ];
     const paired = pairMessages(msgs);
+    const u1 = paired.find((item) => item.t === "msg" && item.msg.message_id === "u1");
+    expect(u1?.t).toBe("msg");
+    if (u1 && u1.t === "msg") {
+      expect(u1.incomplete).toBe(true);
+      expect(u1.tools?.length).toBe(1);
+    }
+    expect(paired.some((item) => item.t === "ai" && item.msg.kind === "partial_answer")).toBe(false);
     const u2Index = paired.findIndex((item) => item.t === "msg" && item.msg.message_id === "u2");
-    const incompleteIndex = paired.findIndex((item) => item.t === "ai" && item.incomplete);
-    expect(incompleteIndex).toBeGreaterThan(-1);
-    expect(incompleteIndex).toBeLessThan(u2Index);
+    const u1Index = paired.findIndex((item) => item.t === "msg" && item.msg.message_id === "u1");
+    expect(u1Index).toBeLessThan(u2Index);
+  });
+
+  it("skips empty partial_answer shells", () => {
+    const msgs = [
+      makeMsg({ message_id: "u1", role: "user", kind: "user_message", text: "hi", run_id: "run_p" }),
+      makeMsg({
+        message_id: "p1", role: "assistant", kind: "partial_answer", text: "   ",
+        run_id: "run_p",
+      }),
+    ];
+    const paired = pairMessages(msgs);
+    expect(paired.every((item) => item.t !== "msg" || item.msg.message_id !== "p1")).toBe(true);
   });
 
   it("merges clarification + final into one card with tools", () => {

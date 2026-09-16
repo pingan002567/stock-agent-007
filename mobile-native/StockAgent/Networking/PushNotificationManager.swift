@@ -9,6 +9,7 @@ final class PushNotificationManager: NSObject, ObservableObject {
     @Published private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
     @Published private(set) var deviceTokenHex: String?
 
+    private var pendingDeepLinkEventId: String?
     private var pendingDeepLinkSymbol: String?
 
     func configure() {
@@ -51,26 +52,31 @@ final class PushNotificationManager: NSObject, ObservableObject {
     }
 
     func didFailToRegister(error: Error) {
-        // Keep silent; Settings can show status later.
         _ = error
     }
 
     func handleNotificationUserInfo(_ userInfo: [AnyHashable: Any]) {
-        if let symbol = userInfo["symbol"] as? String {
-            pendingDeepLinkSymbol = symbol
-            NotificationCenter.default.post(
-                name: .stockAgentOpenMonitor,
-                object: nil,
-                userInfo: ["symbol": symbol]
-            )
-        } else {
-            NotificationCenter.default.post(name: .stockAgentOpenMonitor, object: nil)
-        }
+        let eventId = (userInfo["event_id"] as? String)
+            ?? (userInfo["eventId"] as? String)
+        let symbol = userInfo["symbol"] as? String
+        pendingDeepLinkEventId = eventId
+        pendingDeepLinkSymbol = symbol
+        var info: [AnyHashable: Any] = [:]
+        if let eventId { info["event_id"] = eventId }
+        if let symbol { info["symbol"] = symbol }
+        NotificationCenter.default.post(
+            name: .stockAgentOpenMonitor,
+            object: nil,
+            userInfo: info.isEmpty ? nil : info
+        )
     }
 
-    func consumePendingSymbol() -> String? {
-        defer { pendingDeepLinkSymbol = nil }
-        return pendingDeepLinkSymbol
+    func consumePendingDeepLink() -> (eventId: String?, symbol: String?) {
+        defer {
+            pendingDeepLinkEventId = nil
+            pendingDeepLinkSymbol = nil
+        }
+        return (pendingDeepLinkEventId, pendingDeepLinkSymbol)
     }
 }
 

@@ -8,6 +8,21 @@ struct ConnectView: View {
     @State private var tokenText = ""
     @State private var busy = false
     @State private var error = ""
+    @State private var copied = false
+
+    private var quickURLs: [(label: String, url: String)] {
+        var items: [(String, String)] = [
+            ("推荐 443", RemoteDefaults.recommendedBaseURL),
+            ("备用 8686", RemoteDefaults.alternateBaseURL),
+        ]
+        let last = auth.lastSuccessfulURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !last.isEmpty,
+           last != RemoteDefaults.recommendedBaseURL,
+           last != RemoteDefaults.alternateBaseURL {
+            items.insert(("上次成功", last), at: 0)
+        }
+        return items
+    }
 
     var body: some View {
         NavigationStack {
@@ -27,10 +42,25 @@ struct ConnectView: View {
                     SecureField("访问令牌（WORKBENCH_ACCESS_TOKEN）", text: $tokenText)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+
+                    if !quickURLs.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(quickURLs, id: \.url) { item in
+                                    Button(item.label) {
+                                        urlText = item.url
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                }
+                            }
+                        }
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    }
                 } header: {
                     Text("远端服务")
                 } footer: {
-                    Text("推荐 \(RemoteDefaults.recommendedBaseURL)（HTTPS 443）。若连不上可改用 https://IP:8686。自签证书已在客户端放行。")
+                    Text("推荐 \(RemoteDefaults.recommendedBaseURL)（HTTPS 443）。若连不上可改用 \(RemoteDefaults.alternateBaseURL)。自签证书已在客户端放行。")
                 }
 
                 if !error.isEmpty {
@@ -38,6 +68,19 @@ struct ConnectView: View {
                         Text(error)
                             .foregroundStyle(.red)
                             .font(.footnote)
+                            .textSelection(.enabled)
+                        Button {
+                            ChatClipboard.copy(diagnosticsText)
+                            copied = true
+                            Task {
+                                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                                copied = false
+                            }
+                        } label: {
+                            Label(copied ? "已复制" : "复制诊断信息", systemImage: copied ? "checkmark" : "doc.on.doc")
+                        }
+                    } header: {
+                        Text("连接失败")
                     }
                 }
 
@@ -70,6 +113,15 @@ struct ConnectView: View {
         }
     }
 
+    private var diagnosticsText: String {
+        """
+        URL: \(urlText)
+        上次成功: \(auth.lastSuccessfulURL.isEmpty ? "—" : auth.lastSuccessfulURL)
+        错误: \(error)
+        时间: \(ISO8601DateFormatter().string(from: Date()))
+        """
+    }
+
     private func connect() async {
         error = ""
         busy = true
@@ -82,7 +134,9 @@ struct ConnectView: View {
             try api.configure(baseURLString: urlText, token: tokenText)
             _ = try await api.probeHealth()
             auth.saveDraft(url: urlText, token: tokenText)
+            auth.recordSuccessfulURL(urlText)
             auth.markConnected()
+            NetworkReachability.shared.clearAuthFailure()
         } catch {
             self.error = Self.mapConnectError(error, url: urlText)
         }

@@ -185,22 +185,35 @@ final class APIClient: ObservableObject {
     func sendMessage(
         sessionId: String,
         message: String,
-        attachments: [SessionUpload] = []
+        page: String = "chat",
+        symbol: String = "",
+        attachments: [SessionUpload] = [],
+        humanInputResponse: [String: Any]? = nil
     ) async throws -> CopilotRun {
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "message": message,
-            "page": "chat",
-            "symbol": "",
+            "page": page,
+            "symbol": symbol,
             "authority_level": "A4",
             "client_message_id": "ios-\(Int(Date().timeIntervalSince1970 * 1000))",
             "attachments": attachments.map { $0.asAttachmentPayload() },
         ]
+        if let humanInputResponse {
+            body["human_input_response"] = humanInputResponse
+        }
         let data = try await request(
             path: "/api/copilot/sessions/\(enc(sessionId))/messages",
             method: "POST",
             json: body
         )
         return try JSONDecoder().decode(CopilotRun.self, from: data)
+    }
+
+    func cancelRun(sessionId: String, runId: String) async throws {
+        _ = try await request(
+            path: "/api/copilot/sessions/\(enc(sessionId))/runs/\(enc(runId))/cancel",
+            method: "POST"
+        )
     }
 
     func streamURL(sessionId: String, runId: String) throws -> URL {

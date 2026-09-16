@@ -13,11 +13,15 @@ export const STARTER_PROMPTS = [
     label: "帮我找几只值得先了解的股票",
     prompt: "帮我从当前自选和常见热门股里找出 3 只值得先了解的股票，说明为什么。没有拉到的数字不要编造。",
   },
+  {
+    label: "今日盯盘有什么异常？",
+    prompt: "根据当前盯盘与告警，总结今天需要关注的异常或提醒。没有数据就直说，不要编造。",
+  },
 ] as const;
 
 export const EMPTY_CHAT_COPY = {
   title: "从一句问题开始",
-  desc: "可给目标价与操作指令，不下单。结论仅供研究参考，不构成投资建议。",
+  desc: "可给目标价与操作观点，不下单。结论仅供研究参考，不构成投资建议。点下面一句话即可开聊。",
 } as const;
 
 export const SETUP_WIZARD_COPY = {

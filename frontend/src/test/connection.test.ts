@@ -25,9 +25,13 @@ afterEach(() => {
 
 describe("normalizeRemoteUrl", () => {
   it("requires http(s) and strips trailing slash", () => {
-    expect(normalizeRemoteUrl("http://47.103.58.33:8686/")).toBe("http://47.103.58.33:8686");
+    expect(normalizeRemoteUrl("http://47.103.58.33:8686/")).toBe("https://47.103.58.33:8686");
     expect(normalizeRemoteUrl("https://example.com/api/")).toBe("https://example.com/api");
     expect(normalizeRemoteUrl("127.0.0.1:8686")).toBe("http://127.0.0.1:8686");
+  });
+
+  it("upgrades non-loopback http to https", () => {
+    expect(normalizeRemoteUrl("http://10.0.0.2:8686")).toBe("https://10.0.0.2:8686");
   });
 
   it("rejects empty or non-http schemes", () => {
@@ -45,7 +49,7 @@ describe("resolveApiBase", () => {
 
   it("uses remote URL for remote mode", () => {
     expect(resolveApiBase({ mode: "remote", remoteUrl: "http://10.0.0.2:8686/" })).toBe(
-      "http://10.0.0.2:8686",
+      "https://10.0.0.2:8686",
     );
     expect(() => resolveApiBase({ mode: "remote" })).toThrow("未配置远端地址");
   });
@@ -56,12 +60,12 @@ describe("connection persistence", () => {
     saveConnection({ mode: "remote", remoteUrl: "http://example.com:8686/", accessToken: "tok" });
     expect(loadConnection()).toEqual({
       mode: "remote",
-      remoteUrl: "http://example.com:8686",
+      remoteUrl: "https://example.com:8686",
       localPort: undefined,
       accessToken: "tok",
     });
     expect(JSON.parse(localStorage.getItem(CONNECTION_STORAGE_KEY) || "{}").mode).toBe("remote");
-    expect(getApiBase()).toBe("http://example.com:8686");
+    expect(getApiBase()).toBe("https://example.com:8686");
   });
 });
 
@@ -125,7 +129,7 @@ describe("probeHealth", () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.data.server_role).toBe("workbench");
     expect(fetch).toHaveBeenCalledWith(
-      "http://47.103.58.33:8686/api/health",
+      "https://47.103.58.33:8686/api/health",
       expect.objectContaining({ cache: "no-store" }),
     );
   });
@@ -134,7 +138,7 @@ describe("probeHealth", () => {
     expect((await probeHealth("ftp://x")).ok).toBe(false);
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
     const r = await probeHealth("http://127.0.0.1:8686");
-    expect(r).toEqual({ ok: false, error: "无法连上后端，请确认服务已启动、地址正确，且手机能访问该主机" });
+    expect(r).toEqual({ ok: false, error: "无法连上后端，请确认服务已启动、地址正确，且本机能访问该主机" });
   });
 
   it("treats health without agent_runtime as missing token", async () => {

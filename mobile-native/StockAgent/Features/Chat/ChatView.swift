@@ -10,6 +10,7 @@ struct ChatView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                ConnectivityBanner(reachability: NetworkReachability.shared)
                 MessageListView()
                 if !chat.uploads.isEmpty || chat.uploadsBusy {
                     UploadStripView()
@@ -108,6 +109,24 @@ struct MessageListView: View {
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                                     .multilineTextAlignment(.center)
+                                VStack(spacing: 8) {
+                                    ForEach(ChatStarterPrompts.all) { item in
+                                        Button {
+                                            chat.draft = item.prompt
+                                        } label: {
+                                            Text(item.label)
+                                                .font(.subheadline.weight(.medium))
+                                                .frame(maxWidth: .infinity)
+                                                .padding(.vertical, 10)
+                                                .padding(.horizontal, 12)
+                                                .background(Color(.secondarySystemBackground))
+                                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                        }
+                                        .buttonStyle(.plain)
+                                        .disabled(!chat.canSend)
+                                    }
+                                }
+                                .padding(.top, 8)
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.top, 80)
@@ -120,12 +139,29 @@ struct MessageListView: View {
                                 case .user(let bubble):
                                     UserBubbleView(bubble: bubble)
                                 case .assistant(let turn):
-                                    AssistantBubbleView(turn: turn)
+                                    AssistantBubbleView(
+                                        turn: turn,
+                                        onRetry: turn.hasRetryableFailure && chat.canRetry
+                                            ? { Task { await chat.retryLastFailed() } }
+                                            : nil,
+                                        onClarificationSubmit: turn.awaitingClarification
+                                            ? { response, text in
+                                                Task {
+                                                    await chat.submitClarification(
+                                                        response: response,
+                                                        displayText: text,
+                                                        for: turn.id
+                                                    )
+                                                }
+                                            }
+                                            : nil
+                                    )
                                 }
                             }
                             .id(row.id)
                             .onAppear {
-                                if index == 0 {
+                                // Only near top of a non-trivial list — pager also debounces.
+                                if index == 0, chat.rows.count >= 8 {
                                     Task { await chat.loadOlderHistoryIfNeeded() }
                                 }
                             }
@@ -263,7 +299,11 @@ struct ComposerView: View {
                 }
                 .disabled(!chat.uploadsSupported || chat.sending)
 
-                TextField("问 Stock Agent…", text: $chat.draft, axis: .vertical)
+                TextField(
+                    chat.canSend ? "问 Stock Agent…" : "网络不可用，暂不可发送",
+                    text: $chat.draft,
+                    axis: .vertical
+                )
                     .lineLimit(1...6)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
@@ -271,6 +311,7 @@ struct ComposerView: View {
                     .background(Color(.secondarySystemBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .focused($focused)
+                    .disabled(!chat.canSend && !chat.sending)
 
                 Group {
                     if chat.sending {
@@ -290,7 +331,10 @@ struct ComposerView: View {
                                 .frame(width: 34, height: 34)
                                 .contentShape(Rectangle())
                         }
-                        .disabled(chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(
+                            !chat.canSend
+                                || chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        )
                     }
                 }
             }

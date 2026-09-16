@@ -123,6 +123,7 @@ class CopilotService:
         self.runtime_observer = runtime_observer
         self._runs: Dict[str, CopilotRunState] = {}
         self._session_states: dict[str, SessionStateData] = {}
+        self._cancelled_runs: set[str] = set()
         self.llm_provider_service = None
 
     def reconnect_runtime(self) -> dict[str, Any]:
@@ -452,6 +453,71 @@ class CopilotService:
             return bool(message and message.session_id == session_id)
         return False
 
+    def cancel_run(self, run_id: str, session_id: str | None = None) -> dict[str, Any]:
+        """Request cooperative cancellation of an in-flight stream_run.
+
+        Idempotent: finished / unknown runs return ``not_running`` without error
+        so clients can always call stop safely.
+        """
+        if session_id is not None:
+            self.get_session(session_id)
+        active = run_id in self._runs and (
+            session_id is None or self._runs[run_id].session_id == session_id
+        )
+        if not active:
+            return {"status": "not_running", "run_id": run_id}
+        self._cancelled_runs.add(run_id)
+        return {"status": "cancelling", "run_id": run_id}
+
+    def _is_run_cancelled(self, run_id: str) -> bool:
+        return run_id in self._cancelled_runs
+
+    def _emit_cancelled_events(
+        self,
+        *,
+        run_id: str,
+        task_id: str,
+        state: CopilotRunState,
+        start_time: float,
+    ) -> list[SSEEvent]:
+        error_event = SSEEvent(
+            run_id=run_id,
+            task_id=task_id,
+            type="error",
+            payload={
+                "stage": "user_cancel",
+                "error": "用户已停止生成本轮回答",
+                "authority_level": state.request.authority_level.value,
+            },
+        )
+        final_payload = self.result_normalizer.normalize_final(
+            {
+                "conclusion": "已停止生成。",
+                "confidence": "low",
+                "counter_reasons": ["用户主动停止"],
+                "evidence_refs": ["user_cancel"],
+                "next_actions": ["如需继续请重新发送或点重试。"],
+                "disclaimer": RESEARCH_DISCLAIMER,
+            }
+        )
+        final_event = SSEEvent(
+            run_id=run_id,
+            task_id=task_id,
+            type="final",
+            payload=final_payload,
+        )
+        self._persist_stream_event(state, error_event)
+        self._persist_stream_event(state, final_event)
+        self._update_task_step(task_id, "user_cancelled", 100, status="cancelled")
+        self._upsert_run_log(
+            run_id,
+            status="cancelled",
+            error_category="user_cancel",
+            runtime_error="user cancelled",
+            latency_ms=(time.monotonic() - start_time) * 1000,
+        )
+        return [error_event, final_event]
+
     def create_session_run(
         self, session_id: str, payload: CopilotSessionMessageRequest
     ) -> CopilotRun:
@@ -684,6 +750,15 @@ class CopilotService:
                         getattr(request, "human_input_response", None)
                     ),
                     ):
+                    if self._is_run_cancelled(run_id):
+                        for cancelled in self._emit_cancelled_events(
+                            run_id=run_id,
+                            task_id=resolved_task_id,
+                            state=state,
+                            start_time=_start_time,
+                        ):
+                            yield cancelled
+                        break
                     payload = event["payload"]
                     self._capture_tool_result(event, captured)
                     # 实际委派观测：task 工具调用/回执 → skill_trace 行状态推进 + 增量 SSE
@@ -946,6 +1021,7 @@ class CopilotService:
                 runtime_error=str(exc),
                 latency_ms=(time.monotonic() - _start_time) * 1000,
             )
+        self._cancelled_runs.discard(run_id)
         self._runs.pop(run_id, None)
 
     @staticmethod

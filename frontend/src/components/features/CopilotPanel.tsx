@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useEffect, useMemo } from "react";
+import React, { useRef, useCallback, useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/hooks/useAppState";
 import { parseCopilotEvent, EVENT_FINAL, EVENT_ERROR, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, EVENT_PARTIAL_ANSWER, EVENT_CLARIFICATION } from "@/api/copilot";
 import { parseTaskToolPayload } from "@/components/features/taskToolMeta";
@@ -8,8 +8,10 @@ import { useChatDetail } from "@/hooks/useChatDetail";
 import { CopilotMessageItem, type ToolInfo } from "@/components/features/CopilotMessageItem";
 import { CopilotStreamingMessage } from "@/components/features/CopilotStreamingMessage";
 import { ContextCard } from "@/components/features/ContextCard";
+import { TurnFailureStatus } from "@/components/features/TurnFailureStatus";
 import { useMobileLayout } from "@/hooks/useMobileLayout";
 import { EMPTY_CHAT_COPY, isModelReady, STARTER_PROMPTS } from "@/lib/onboarding";
+import { NEAR_BOTTOM_THRESHOLD, SAFE_BOTTOM_SPACING } from "@/lib/chatShell";
 import type { HumanInputResponse } from "@/lib/humanInput";
 
 function dateHeader(dateStr: string): string {
@@ -40,32 +42,36 @@ type ToolItem = {
 };
 
 type GroupedItem =
-  | { t: "msg"; msg: CopilotMessage; aborted?: boolean; tools?: ToolItem[] }
-  | { t: "ai"; msg: CopilotMessage; tools: ToolItem[]; incomplete?: boolean };
+  | {
+      t: "msg";
+      msg: CopilotMessage;
+      /** 零输出中断：挂在用户消息下 */
+      aborted?: boolean;
+      /** 有工具过程但无 final：过程挂在对应用户轮次下 */
+      incomplete?: boolean;
+      tools?: ToolItem[];
+    }
+  | { t: "ai"; msg: CopilotMessage; tools: ToolItem[] };
 
-function pushIncompleteRun(
+/** 把未完成 run 的工具过程挂到对应用户消息上，禁止合成空 AI 气泡。 */
+function attachIncompleteToUser(
   out: GroupedItem[],
   rid: string,
   tools: ToolItem[],
-  msgs: CopilotMessage[],
 ) {
-  const anchor = msgs.find((m) => m.run_id === rid && m.role === "user");
-  if (!anchor || !tools.length) return;
-  out.push({
-    t: "ai",
-    incomplete: true,
-    tools,
-    msg: {
-      message_id: `incomplete-${rid}`,
-      session_id: anchor.session_id,
-      role: "assistant",
-      kind: "partial_answer",
-      text: "",
-      payload: { incomplete: true },
-      created_at: anchor.created_at,
-      run_id: rid,
-    },
-  });
+  if (!rid || !tools.length) return;
+  for (let j = out.length - 1; j >= 0; j--) {
+    const item = out[j];
+    if (item.t === "msg" && item.msg.role === "user" && item.msg.run_id === rid) {
+      out[j] = {
+        ...item,
+        aborted: false,
+        incomplete: true,
+        tools: [...(item.tools || []), ...tools],
+      };
+      return;
+    }
+  }
 }
 
 export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null): GroupedItem[] {
@@ -139,6 +145,8 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
       if (msg.run_id && completedRuns.has(msg.run_id)) continue;
       // 澄清轮的开场白/半截正文也不单独成泡，正文在 Human Input Card
       if (rid && clarificationRuns.has(rid)) continue;
+      // 空 partial 不占位（避免空气泡）
+      if (!(msg.text || "").trim()) continue;
       out.push({ t: "msg", msg });
     } else if (ev.type === EVENT_CLARIFICATION || msg.kind === "clarification") {
       out.push({ t: "msg", msg, tools: [] });
@@ -171,11 +179,11 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
       if (msg.run_id) {
         for (const [pendingRid, tools] of [...pendingTools.entries()]) {
           if (pendingRid === msg.run_id || completedRuns.has(pendingRid)) continue;
-          pushIncompleteRun(out, pendingRid, tools, msgs);
+          attachIncompleteToUser(out, pendingRid, tools);
           pendingTools.delete(pendingRid);
         }
       }
-      // 仅当 run 完全没有任何助手/工具输出时才视为「中断」；已有工具链路的 run 由 incomplete 展示。
+      // 仅当 run 完全没有任何助手/工具输出时才视为「空失败」；有工具过程挂 incomplete。
       const aborted = !!msg.run_id
         && !completedRuns.has(msg.run_id)
         && msg.run_id !== activeRunId
@@ -186,7 +194,8 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
 
   for (const [rid, tools] of pendingTools) {
     if (!tools.length || completedRuns.has(rid)) continue;
-    pushIncompleteRun(out, rid, tools, msgs);
+    if (rid === activeRunId) continue;
+    attachIncompleteToUser(out, rid, tools);
   }
 
   return out;
@@ -202,8 +211,8 @@ export function CopilotPanel() {
 
   const {
     messages,
-    sending, streamMessage, copiedId,
-    handleCopy, handleSend,
+    sending, streamMessage,
+    handleSend, handleRetry,
   } = useCopilotChat();
 
   const answeredByRequestId = useMemo(() => {
@@ -232,7 +241,6 @@ export function CopilotPanel() {
   }, [appDataCache, globalLoading, lastRefreshTime]);
 
   const { openDetail } = useChatDetail();
-  // 工具卡 → 右栏详情联动
   const handleToolClick = useMemo(() => {
     return (t: ToolInfo) => openDetail({
       id: t.id,
@@ -257,16 +265,51 @@ export function CopilotPanel() {
   }, [openDetail]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+  const [showJumpBottom, setShowJumpBottom] = useState(false);
 
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  const scrollToBottom = useCallback((smooth = true) => {
+    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? "smooth" : "auto" });
   }, []);
 
-  useEffect(() => { scrollToBottom(); }, [messages, streamMessage, scrollToBottom]);
+  const onBodyScroll = useCallback(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const near = dist <= NEAR_BOTTOM_THRESHOLD;
+    stickToBottomRef.current = near;
+    setShowJumpBottom(!near && (messages.length > 0 || Boolean(streamMessage)));
+  }, [messages.length, streamMessage]);
+
+  useEffect(() => {
+    if (!stickToBottomRef.current) return;
+    scrollToBottom();
+  }, [messages, streamMessage, scrollToBottom]);
+
+  const renderActions = useCallback((opts: {
+    msg: CopilotMessage;
+    showRetry?: boolean;
+  }) => {
+    const { msg, showRetry } = opts;
+    if (!showRetry) return null;
+    return (
+      <div className="msg-actions">
+        <button
+          type="button"
+          className="msg-action"
+          disabled={sending}
+          onClick={() => void handleRetry(msg.run_id)}
+          title="用同一条用户消息重试"
+        >
+          重试
+        </button>
+      </div>
+    );
+  }, [handleRetry, sending]);
 
   const messageElements = useMemo(() => {
     const paired = pairMessages(messages, streamMessage?.runId);
-    /** Compute date-header flags by index — avoids let-reassignment in render */
     const dateFlags = new Array<boolean>(paired.length);
     let prevDate = "";
     for (let i = 0; i < paired.length; i++) {
@@ -277,45 +320,72 @@ export function CopilotPanel() {
       if (msgDate) prevDate = msgDate;
     }
 
+    // 仅最新一条失败轮可重试：后面已有新对话/更新失败时，旧失败降噪且不可重试
+    const lastFailureIdx = (() => {
+      for (let i = paired.length - 1; i >= 0; i--) {
+        const p = paired[i];
+        if (p.t === "msg" && (p.aborted || p.incomplete)) return i;
+        if (p.t === "msg" && (
+          p.msg.kind === "error"
+          || parseCopilotEvent(p.msg as unknown as Record<string, unknown>).type === EVENT_ERROR
+        )) return i;
+        if (p.t === "ai" && (
+          p.msg.kind === "error"
+          || parseCopilotEvent(p.msg as unknown as Record<string, unknown>).type === EVENT_ERROR
+        )) return i;
+      }
+      return -1;
+    })();
+
     return paired.map((item, idx) => {
       const showHeader = dateFlags[idx];
       const ts = item.t === "ai" ? item.msg.created_at : item.msg.created_at;
       const msgDate = (ts || "").slice(0, 10);
+      const isError = item.t === "msg" && (
+        item.msg.kind === "error" || parseCopilotEvent(item.msg as unknown as Record<string, unknown>).type === EVENT_ERROR
+      );
+      const isAiError = item.t === "ai" && (
+        item.msg.kind === "error" || parseCopilotEvent(item.msg as unknown as Record<string, unknown>).type === EVENT_ERROR
+      );
+      const isFailureTurn = item.t === "msg"
+        && (Boolean(item.aborted) || Boolean(item.incomplete) || isError);
+      const canRetryFailure = idx === lastFailureIdx && (isFailureTurn || isAiError);
+      const failureStale = isFailureTurn && idx !== lastFailureIdx;
 
       if (item.t === "ai") {
         return (
           <React.Fragment key={item.msg.message_id}>
             {showHeader && <div className="date-divider">{dateHeader(msgDate)}</div>}
-            <div style={{ position: "relative" }}>
+            <div className="msg-block">
               <CopilotMessageItem msg={item.msg} tools={item.tools} onToolClick={handleToolClick} />
-              <button className="msg-copy" onClick={() => handleCopy(item.msg)} title="复制">
-                {copiedId === item.msg.message_id ? "已复制" : "复制"}
-              </button>
+              {renderActions({
+                msg: item.msg,
+                showRetry: canRetryFailure && isAiError,
+              })}
             </div>
-            {item.incomplete && (
-              <div className="msg-aborted">— 本轮未完成，未生成最终回答 —</div>
-            )}
           </React.Fragment>
         );
       }
 
+      const toolInfos = item.tools?.map((t) => ({
+        name: t.name,
+        done: t.done,
+        failed: t.failed,
+        id: t.id,
+        resultText: t.resultText,
+        subagentType: t.subagentType,
+        taskDescription: t.taskDescription,
+        taskPrompt: t.taskPrompt,
+      }));
+
       return (
         <React.Fragment key={item.msg.message_id}>
           {showHeader && <div className="date-divider">{dateHeader(msgDate)}</div>}
-          <div style={{ position: "relative" }}>
+          <div className="msg-block">
             <CopilotMessageItem
               msg={item.msg}
-              tools={item.tools?.map((t) => ({
-                name: t.name,
-                done: t.done,
-                failed: t.failed,
-                id: t.id,
-                resultText: t.resultText,
-                subagentType: t.subagentType,
-                taskDescription: t.taskDescription,
-                taskPrompt: t.taskPrompt,
-              }))}
-              onToolClick={item.tools?.length ? handleToolClick : undefined}
+              tools={item.incomplete ? undefined : toolInfos}
+              onToolClick={!item.incomplete && item.tools?.length ? handleToolClick : undefined}
               clarifiedResponse={
                 item.msg.kind === "clarification"
                   ? answeredByRequestId.get(String(
@@ -335,26 +405,45 @@ export function CopilotPanel() {
               }
               clarifyPending={item.msg.kind === "clarification" ? sending : undefined}
             />
-            <button className="msg-copy" onClick={() => handleCopy(item.msg)} title="复制">
-              {copiedId === item.msg.message_id ? "已复制" : "复制"}
-            </button>
+            {renderActions({
+              msg: item.msg,
+              // incomplete/aborted 由 TurnFailureStatus 内重试，避免双按钮
+              showRetry: canRetryFailure && !item.aborted && !item.incomplete,
+            })}
           </div>
-          {item.t === "msg" && item.aborted && (
-            <div className="msg-aborted">— 本轮已中断,未生成回答 —</div>
+          {(item.aborted || item.incomplete) && (
+            <TurnFailureStatus
+              runId={item.msg.run_id}
+              empty={Boolean(item.aborted) && !item.incomplete}
+              tools={item.incomplete ? toolInfos : undefined}
+              stale={failureStale}
+              retryDisabled={sending || !canRetryFailure}
+              onRetry={canRetryFailure ? () => void handleRetry(item.msg.run_id) : undefined}
+              onToolClick={handleToolClick}
+            />
           )}
         </React.Fragment>
       );
     });
-  }, [messages, streamMessage?.runId, copiedId, handleCopy, handleToolClick, answeredByRequestId, handleClarifySubmit, sending]);
+  }, [
+    messages, streamMessage?.runId, handleToolClick, answeredByRequestId,
+    handleClarifySubmit, sending, renderActions, handleRetry,
+  ]);
 
   return (
     <aside className="copilot-panel copilot-panel-main">
-      <div className="copilot-body">
+      <div
+        className="copilot-body"
+        ref={bodyRef}
+        onScroll={onBodyScroll}
+        style={{ paddingBottom: SAFE_BOTTOM_SPACING }}
+      >
         <div className="messages">
           <ContextCard key={`ctx-${copilotContextVersion}`} />
 
           {messages.length === 0 && !sending && (
             <div className="empty-state">
+              <div className="empty-kicker">Stock Agent</div>
               <div className="empty-title">{mobile ? "有什么可以帮你？" : EMPTY_CHAT_COPY.title}</div>
               <div className="empty-desc">{EMPTY_CHAT_COPY.desc}</div>
               <div className="starter-chips">
@@ -388,6 +477,19 @@ export function CopilotPanel() {
           <div ref={messagesEndRef} />
         </div>
       </div>
+      {showJumpBottom ? (
+        <button
+          type="button"
+          className="jump-bottom"
+          onClick={() => {
+            stickToBottomRef.current = true;
+            setShowJumpBottom(false);
+            scrollToBottom();
+          }}
+        >
+          回到底部
+        </button>
+      ) : null}
     </aside>
   );
 }

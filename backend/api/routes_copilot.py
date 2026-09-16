@@ -289,6 +289,18 @@ def stream_session_run(session_id: str, run_id: str, request: Request, services:
     )
 
 
+@router.post("/sessions/{session_id}/runs/{run_id}/cancel")
+def cancel_session_run(
+    session_id: str,
+    run_id: str,
+    services: AppServices = Depends(get_services),
+):
+    try:
+        return services.copilot_service.cancel_run(run_id, session_id=session_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="session not found") from exc
+
+
 @router.post("/chat")
 def chat(payload: CopilotRequest, request: Request, services: AppServices = Depends(get_services)):
     try:

@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct MonitorView: View {
+    @EnvironmentObject private var tabs: TabRouter
+
     @State private var items: [MonitorEvent] = []
     @State private var status: MonitorStatus?
     @State private var rules: [MonitorRule] = []
@@ -12,6 +14,11 @@ struct MonitorView: View {
     @State private var evaluating = false
     @State private var showRules = false
     @State private var selected: MonitorEvent?
+    @State private var seenIds: Set<String> = MonitorSeenStore.load()
+
+    private var unreadCount: Int {
+        MonitorSeenStore.unreadCount(in: items.map(\.stableId))
+    }
 
     var body: some View {
         NavigationStack {
@@ -47,38 +54,45 @@ struct MonitorView: View {
                                 }
                             }
                         }
-                        Section("事件") {
+                        Section {
                             ForEach(items) { event in
                                 Button {
-                                    selected = event
+                                    openEvent(event)
                                 } label: {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        HStack {
-                                            Text(event.title ?? event.symbol ?? "事件")
-                                                .font(.headline)
-                                                .foregroundStyle(.primary)
-                                            Spacer()
-                                            if let severity = event.severity {
-                                                Text(severity.uppercased())
-                                                    .font(.caption2.bold())
-                                                    .padding(.horizontal, 6)
-                                                    .padding(.vertical, 2)
-                                                    .background(severityColor(severity).opacity(0.15))
-                                                    .foregroundStyle(severityColor(severity))
-                                                    .clipShape(Capsule())
+                                    HStack(alignment: .top, spacing: 10) {
+                                        Circle()
+                                            .fill(seenIds.contains(event.stableId) ? Color.clear : Color.accentColor)
+                                            .frame(width: 8, height: 8)
+                                            .padding(.top, 6)
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            HStack {
+                                                Text(event.title ?? event.symbol ?? "事件")
+                                                    .font(.headline)
+                                                    .foregroundStyle(.primary)
+                                                    .fontWeight(seenIds.contains(event.stableId) ? .regular : .semibold)
+                                                Spacer()
+                                                if let severity = event.severity {
+                                                    Text(severity.uppercased())
+                                                        .font(.caption2.bold())
+                                                        .padding(.horizontal, 6)
+                                                        .padding(.vertical, 2)
+                                                        .background(severityColor(severity).opacity(0.15))
+                                                        .foregroundStyle(severityColor(severity))
+                                                        .clipShape(Capsule())
+                                                }
                                             }
-                                        }
-                                        if let message = event.message, !message.isEmpty {
-                                            Text(message).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                                        } else if let rule = event.triggerRule, !rule.isEmpty {
-                                            Text(rule).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                        }
-                                        HStack {
-                                            if let symbol = event.symbol, !symbol.isEmpty {
-                                                Text(symbol).font(.caption2).foregroundStyle(.tertiary)
+                                            if let message = event.message, !message.isEmpty {
+                                                Text(message).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                                            } else if let rule = event.triggerRule, !rule.isEmpty {
+                                                Text(rule).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                             }
-                                            if let triggered = event.triggeredAt {
-                                                Text(triggered).font(.caption2).foregroundStyle(.tertiary)
+                                            HStack {
+                                                if let symbol = event.symbol, !symbol.isEmpty {
+                                                    Text(symbol).font(.caption2).foregroundStyle(.tertiary)
+                                                }
+                                                if let triggered = event.triggeredAt {
+                                                    Text(triggered).font(.caption2).foregroundStyle(.tertiary)
+                                                }
                                             }
                                         }
                                     }
@@ -94,6 +108,15 @@ struct MonitorView: View {
                                     } else {
                                         Text("加载更多")
                                     }
+                                }
+                            }
+                        } header: {
+                            HStack {
+                                Text("事件")
+                                if unreadCount > 0 {
+                                    Text("\(unreadCount) 未读")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(Color.accentColor)
                                 }
                             }
                         }
@@ -116,7 +139,15 @@ struct MonitorView: View {
                     .disabled(evaluating)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("规则") { showRules = true }
+                    HStack(spacing: 12) {
+                        if unreadCount > 0 {
+                            Button("全部已读") {
+                                markAllRead()
+                            }
+                            .font(.caption)
+                        }
+                        Button("规则") { showRules = true }
+                    }
                 }
             }
             .sheet(isPresented: $showRules) {
@@ -124,9 +155,19 @@ struct MonitorView: View {
             }
             .navigationDestination(item: $selected) { event in
                 MonitorEventDetailView(event: event)
+                    .onAppear { markSeen(event) }
             }
             .refreshable { await reload() }
             .task { await reload() }
+            .onChange(of: tabs.pendingMonitorEventId) { _, _ in
+                applyDeepLinkIfNeeded()
+            }
+            .onChange(of: tabs.pendingMonitorSymbol) { _, _ in
+                applyDeepLinkIfNeeded()
+            }
+            .onChange(of: items.count) { _, _ in
+                applyDeepLinkIfNeeded()
+            }
             .overlay(alignment: .top) {
                 if !error.isEmpty, !items.isEmpty {
                     Text(error)
@@ -137,6 +178,43 @@ struct MonitorView: View {
                         .background(.ultraThinMaterial)
                 }
             }
+        }
+    }
+
+    private func openEvent(_ event: MonitorEvent) {
+        markSeen(event)
+        selected = event
+    }
+
+    private func markSeen(_ event: MonitorEvent) {
+        MonitorSeenStore.markSeen(event.stableId)
+        seenIds = MonitorSeenStore.load()
+    }
+
+    private func markAllRead() {
+        MonitorSeenStore.markAllSeen(items.map(\.stableId))
+        seenIds = MonitorSeenStore.load()
+    }
+
+    private func applyDeepLinkIfNeeded() {
+        guard tabs.hasMonitorDeepLink else { return }
+        let eventId = tabs.pendingMonitorEventId
+        let symbol = tabs.pendingMonitorSymbol
+        if let eventId,
+           let match = items.first(where: { $0.eventId == eventId || $0.stableId == eventId }) {
+            _ = tabs.consumeMonitorDeepLink()
+            openEvent(match)
+            return
+        }
+        if let symbol,
+           let match = items.first(where: { $0.symbol == symbol }) {
+            _ = tabs.consumeMonitorDeepLink()
+            openEvent(match)
+            return
+        }
+        // Keep pending until events are loaded; only clear if list is ready and no match.
+        if !loading, !items.isEmpty {
+            _ = tabs.consumeMonitorDeepLink()
         }
     }
 
@@ -161,6 +239,8 @@ struct MonitorView: View {
             totalPages = max(events.totalPages ?? 1, 1)
             status = try? await statusTask
             rules = (try? await rulesTask) ?? []
+            seenIds = MonitorSeenStore.load()
+            applyDeepLinkIfNeeded()
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }

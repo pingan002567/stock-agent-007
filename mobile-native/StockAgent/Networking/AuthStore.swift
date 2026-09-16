@@ -8,15 +8,18 @@ final class AuthStore: ObservableObject {
     static let shared = AuthStore()
 
     private let urlKey = "stockagent.remoteUrl"
+    private let lastSuccessURLKey = "stockagent.lastSuccessfulUrl"
     private let keychainService = "com.stockagent.app"
     private let keychainAccount = "accessToken"
 
     @Published private(set) var remoteURL: String
+    @Published private(set) var lastSuccessfulURL: String
     @Published private(set) var accessToken: String
     @Published var isConnected: Bool = false
 
     private init() {
         remoteURL = UserDefaults.standard.string(forKey: urlKey) ?? ""
+        lastSuccessfulURL = UserDefaults.standard.string(forKey: lastSuccessURLKey) ?? ""
         accessToken = Self.loadToken(service: keychainService, account: keychainAccount) ?? ""
     }
 
@@ -31,6 +34,13 @@ final class AuthStore: ObservableObject {
         accessToken = trimmedToken
         UserDefaults.standard.set(trimmedURL, forKey: urlKey)
         Self.saveToken(trimmedToken, service: keychainService, account: keychainAccount)
+    }
+
+    func recordSuccessfulURL(_ url: String) {
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        lastSuccessfulURL = trimmed
+        UserDefaults.standard.set(trimmed, forKey: lastSuccessURLKey)
     }
 
     func markConnected() {

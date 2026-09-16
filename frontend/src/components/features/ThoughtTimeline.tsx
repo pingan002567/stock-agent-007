@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { toolLabel, type StreamStep, type StreamToolCall } from "@/hooks/useCopilotChat";
 import { skillLabelOf } from "@/components/features/skillLabels";
+import { ThinkingBlock } from "@/components/features/ThinkingBlock";
 import { truncateText } from "@/components/features/taskToolMeta";
+import { summarizeToolResult } from "@/lib/toolResultSummary";
 
 /** 思维链时间线(借鉴 deer-flow ChainOfThought/SubtaskCard):
  * 推理与工具步按到达顺序交错,垂直连接线 + 图标;早期步骤折叠为
@@ -41,9 +43,18 @@ function taskEngLabel(tool: StreamToolCall): string {
   return "task";
 }
 
+function toolResultLine(tool: StreamToolCall): string | null {
+  if (tool.status !== "done" || !tool.resultText) return null;
+  const summary = summarizeToolResult(tool.name, tool.resultText);
+  if (summary) return summary;
+  const raw = tool.resultText.replace(/\s+/g, " ").trim();
+  return raw ? truncateText(raw, 72) : null;
+}
+
 function ToolStepRow({ tool, onClick }: { tool: StreamToolCall; onClick?: (t: StreamToolCall) => void }) {
   const running = tool.status === "running";
   const failed = tool.status === "failed";
+  const resultLine = toolResultLine(tool);
 
   if (tool.name === "task") {
     const skillLabel = skillLabelOf(tool.subagentType) ?? toolLabel(tool.name);
@@ -54,11 +65,16 @@ function ToolStepRow({ tool, onClick }: { tool: StreamToolCall; onClick?: (t: St
         role={onClick ? "button" : undefined}
       >
         <span className="tl-step-icon subagent"><SubagentIcon /></span>
-        <span className={`tl-step-label${running ? " shimmer" : ""}`}>{skillLabel}</span>
-        <span className="tl-step-eng">{taskEngLabel(tool)}</span>
-        <span className={`tl-step-state ${failed ? "bad" : running ? "busy" : "ok"}`}>
-          {failed ? "失败" : running ? "…" : "✓"}
-        </span>
+        <div className="tl-step-main">
+          <div className="tl-step-row">
+            <span className={`tl-step-label${running ? " shimmer" : ""}`}>{skillLabel}</span>
+            <span className="tl-step-eng">{taskEngLabel(tool)}</span>
+            <span className={`tl-step-state ${failed ? "bad" : running ? "busy" : "ok"}`}>
+              {failed ? "失败" : running ? "…" : "✓"}
+            </span>
+          </div>
+          {resultLine ? <div className="tl-step-result">→ {resultLine}</div> : null}
+        </div>
       </div>
     );
   }
@@ -66,11 +82,16 @@ function ToolStepRow({ tool, onClick }: { tool: StreamToolCall; onClick?: (t: St
   return (
     <div className="tl-step" onClick={onClick ? () => onClick(tool) : undefined} role={onClick ? "button" : undefined}>
       <span className="tl-step-icon"><ToolIcon /></span>
-      <span className={`tl-step-label${running ? " shimmer" : ""}`}>{toolLabel(tool.name)}</span>
-      <span className="tl-step-eng">{tool.name}</span>
-      <span className={`tl-step-state ${failed ? "bad" : running ? "busy" : "ok"}`}>
-        {failed ? "失败" : running ? "…" : "✓"}
-      </span>
+      <div className="tl-step-main">
+        <div className="tl-step-row">
+          <span className={`tl-step-label${running ? " shimmer" : ""}`}>{toolLabel(tool.name)}</span>
+          <span className="tl-step-eng">{tool.name}</span>
+          <span className={`tl-step-state ${failed ? "bad" : running ? "busy" : "ok"}`}>
+            {failed ? "失败" : running ? "…" : "✓"}
+          </span>
+        </div>
+        {resultLine ? <div className="tl-step-result">→ {resultLine}</div> : null}
+      </div>
     </div>
   );
 }
@@ -105,9 +126,12 @@ export function ThoughtTimeline({ steps, active, onToolClick }: {
             return (
               <div key={step.id} className="tl-step reasoning">
                 <span className="tl-step-icon reasoning"><ReasoningIcon /></span>
-                <span className={`tl-reasoning-text${active && isLast ? " shimmer" : ""}`}>
-                  {step.text}
-                </span>
+                <div className="tl-step-main">
+                  <ThinkingBlock
+                    content={step.text}
+                    streaming={active && isLast}
+                  />
+                </div>
               </div>
             );
           }

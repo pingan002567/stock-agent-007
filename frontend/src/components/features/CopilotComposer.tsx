@@ -6,11 +6,17 @@ import {
   type UploadedFileInfo,
 } from "@/api/copilot";
 import type { HealthCheck } from "@/api/client";
+import { ComposerStack } from "@/components/features/ComposerStack";
 import { SessionModelPicker } from "@/components/features/SessionModelPicker";
 import { useAppState } from "@/hooks/useAppState";
 import { useCopilotChat } from "@/hooks/useCopilotChat";
 import { useToast } from "@/hooks/useToast";
 import { adoptNewSessionDraft, composerDraftKey } from "@/lib/composerDraft";
+import {
+  CHAT_COMPOSER_HEIGHT_VAR,
+  STUCK_IDLE_MS,
+  streamProgressKey,
+} from "@/lib/chatShell";
 import {
   UPLOADS_UNSUPPORTED_COPY,
   isImageUploadFilename,
@@ -18,29 +24,54 @@ import {
 } from "@/lib/sessionUploads";
 import { isMobileLayout } from "@/lib/connection";
 
-/** 中栏底部 Composer（Cursor 式浮动输入卡）。 */
+function useOnline(): boolean {
+  const [online, setOnline] = useState(
+    () => (typeof navigator === "undefined" ? true : navigator.onLine),
+  );
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
+  return online;
+}
+
+/** 中栏底部 Composer（Cursor 式浮动输入卡）+ 叠层 dock。 */
 export function CopilotComposer() {
   const {
     currentSession,
     sending,
+    streamMessage,
     handleSend: sendMessage,
     handleStop,
     ensureSession,
     sessionModelRef,
     modelOptions,
     setSessionModel,
+    composerPrefill,
+    clearComposerPrefill,
   } = useCopilotChat();
   const { appDataCache, globalLoading, lastRefreshTime } = useAppState();
   const { showToast } = useToast();
+  const online = useOnline();
 
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [uploading, setUploading] = useState(false);
   const [sessionFiles, setSessionFiles] = useState<UploadedFileInfo[]>([]);
   const [uploadsSupported, setUploadsSupported] = useState(true);
   const [dragOver, setDragOver] = useState(false);
+  const [stuck, setStuck] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const stackRef = useRef<HTMLDivElement>(null);
   const dragCountRef = useRef(0);
+  const progressKeyRef = useRef("");
+  const progressAtRef = useRef(0);
 
   const runtimeStub = useMemo(() => {
     void globalLoading;
@@ -73,7 +104,6 @@ export function CopilotComposer() {
     sessionIdRef.current = sid;
     if (!sid) {
       setUploadsSupported(!runtimeStub);
-      // 离开已有会话（点「新对话」）才清未发送芯片；空态上传建会话时 prev=null，要保留。
       if (prev) setSessionFiles([]);
       return;
     }
@@ -104,9 +134,104 @@ export function CopilotComposer() {
     autoResize();
   }, [draftKey, input, autoResize]);
 
+  useEffect(() => {
+    if (!composerPrefill) return;
+    setDrafts((prev) => ({ ...prev, [draftKey]: composerPrefill }));
+    clearComposerPrefill();
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      autoResize();
+    });
+  }, [composerPrefill, clearComposerPrefill, draftKey, autoResize]);
+
+  // 测量整块 composer（含 dock）高度，写入 CSS 变量供消息列表留底
+  useEffect(() => {
+    const el = stackRef.current;
+    if (!el) return;
+    const publish = () => {
+      const h = Math.ceil(el.getBoundingClientRect().height);
+      document.documentElement.style.setProperty(CHAT_COMPOSER_HEIGHT_VAR, `${h}px`);
+    };
+    publish();
+    const ro = new ResizeObserver(publish);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      document.documentElement.style.removeProperty(CHAT_COMPOSER_HEIGHT_VAR);
+    };
+  }, []);
+
+  // 流式卡住检测：指纹长时间不变
+  useEffect(() => {
+    if (!sending || !streamMessage) {
+      setStuck(false);
+      progressKeyRef.current = "";
+      return;
+    }
+    const key = streamProgressKey({
+      phase: streamMessage.phase,
+      answerText: streamMessage.answerText,
+      toolCount: streamMessage.tools.length + streamMessage.steps.length,
+      clarification: Boolean(streamMessage.clarificationRequest || streamMessage.clarificationText),
+      errorText: streamMessage.errorText,
+    });
+    const now = Date.now();
+    if (key !== progressKeyRef.current) {
+      progressKeyRef.current = key;
+      progressAtRef.current = now;
+      setStuck(false);
+    }
+    const tick = window.setInterval(() => {
+      if (Date.now() - progressAtRef.current >= STUCK_IDLE_MS) setStuck(true);
+    }, 2000);
+    return () => clearInterval(tick);
+  }, [sending, streamMessage]);
+
+  const waitingClarify = Boolean(
+    streamMessage?.clarificationRequest || streamMessage?.clarificationText,
+  );
+
+  const docks = useMemo(() => {
+    const list: {
+      kind: "clarify" | "offline" | "stuck";
+      title: string;
+      detail?: string;
+      actionLabel?: string;
+      onAction?: () => void;
+    }[] = [];
+    if (!online) {
+      list.push({
+        kind: "offline",
+        title: "网络已断开",
+        detail: "恢复后再发送；已发送的请求可能卡住。",
+      });
+    }
+    if (stuck && sending) {
+      list.push({
+        kind: "stuck",
+        title: "响应似乎卡住了",
+        detail: "可停止本轮后重试，或检查远端连接。",
+        actionLabel: "停止",
+        onAction: handleStop,
+      });
+    }
+    if (waitingClarify && !stuck) {
+      list.push({
+        kind: "clarify",
+        title: "AI 在等你回复",
+        detail: "点上方选项，或在下方直接输入。",
+      });
+    }
+    return list;
+  }, [online, stuck, sending, waitingClarify, handleStop]);
+
   const handleSend = () => {
     const text = input;
     if (!text.trim()) return;
+    if (!online) {
+      showToast("当前离线，请恢复网络后再发送", "error");
+      return;
+    }
     const pending = sessionFiles;
     setInput("");
     setSessionFiles([]);
@@ -116,7 +241,6 @@ export function CopilotComposer() {
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key !== "Enter" || e.shiftKey) return;
-    // 输入法组字确认也会触发 Enter；组字中回车只上屏，不发送
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     e.preventDefault();
     handleSend();
@@ -207,97 +331,105 @@ export function CopilotComposer() {
   };
 
   return (
-    <div className="copilot-composer">
-      <div
-        className={`composer-card${dragOver ? " drag-over" : ""}`}
-        onDragEnter={onDragEnter}
-        onDragLeave={onDragLeave}
-        onDragOver={onDragOver}
-        onDrop={onDrop}
-      >
-        {(sessionFiles.length > 0 || uploading) && (
-          <div className="upload-chips">
-            {sessionFiles.map((f) => {
-              const imageNoVision = isImageUploadFilename(f.filename) && !visionOk;
-              return (
-                <span
-                  key={f.filename}
-                  className="upload-chip"
-                  title={
-                    imageNoVision
-                      ? "当前会话模型不能看图"
-                      : f.markdown_file
-                        ? `已转 Markdown：${f.markdown_file}`
-                        : f.filename
-                  }
-                >
-                  <span className="upload-chip-name">{f.filename}</span>
-                  {f.markdown_file && <span className="upload-chip-ok">✓</span>}
-                  {imageNoVision && <span className="upload-chip-warn">模型不能看图</span>}
-                  <button
-                    type="button"
-                    className="upload-chip-del"
-                    aria-label={`移除 ${f.filename}`}
-                    onClick={() => void handleRemove(f.filename)}
+    <div className="copilot-composer" ref={stackRef}>
+      <ComposerStack docks={docks}>
+        <div
+          className={`composer-card${dragOver ? " drag-over" : ""}`}
+          onDragEnter={onDragEnter}
+          onDragLeave={onDragLeave}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+        >
+          {(sessionFiles.length > 0 || uploading) && (
+            <div className="upload-chips">
+              {sessionFiles.map((f) => {
+                const imageNoVision = isImageUploadFilename(f.filename) && !visionOk;
+                return (
+                  <span
+                    key={f.filename}
+                    className="upload-chip"
+                    title={
+                      imageNoVision
+                        ? "当前会话模型不能看图"
+                        : f.markdown_file
+                          ? `已转 Markdown：${f.markdown_file}`
+                          : f.filename
+                    }
                   >
-                    ×
-                  </button>
-                </span>
-              );
-            })}
-            {uploading && <span className="upload-chip">上传中…</span>}
-          </div>
-        )}
-        <textarea
-          ref={inputRef}
-          placeholder={isMobileLayout() ? "问 Stock Agent…" : "输入追问，或描述你想做的事…"}
-          value={input}
-          onChange={(e) => { setInput(e.target.value); autoResize(); }}
-          onKeyDown={handleKeyDown}
-          onPaste={onPaste}
-          rows={1}
-        />
-        <div className="composer-bar">
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            style={{ display: "none" }}
-            onChange={(e) => void handleUploadFiles(e.target.files)}
+                    <span className="upload-chip-name">{f.filename}</span>
+                    {f.markdown_file && <span className="upload-chip-ok">✓</span>}
+                    {imageNoVision && <span className="upload-chip-warn">模型不能看图</span>}
+                    <button
+                      type="button"
+                      className="upload-chip-del"
+                      aria-label={`移除 ${f.filename}`}
+                      onClick={() => void handleRemove(f.filename)}
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
+              {uploading && <span className="upload-chip">上传中…</span>}
+            </div>
+          )}
+          <textarea
+            ref={inputRef}
+            placeholder={
+              waitingClarify
+                ? "回答 AI 的问题…"
+                : isMobileLayout()
+                  ? "问 Stock Agent…"
+                  : "输入追问，或描述你想做的事…"
+            }
+            value={input}
+            onChange={(e) => { setInput(e.target.value); autoResize(); }}
+            onKeyDown={handleKeyDown}
+            onPaste={onPaste}
+            rows={1}
           />
-          <button
-            className="composer-add-btn"
-            title={canUpload ? "添加附件（PDF/Word/Excel/图片等，会话内可读）" : UPLOADS_UNSUPPORTED_COPY}
-            disabled={uploading || sending || !canUpload}
-            onClick={openFilePicker}
-            type="button"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
-          <SessionModelPicker
-            value={sessionModelRef}
-            options={modelOptions}
-            disabled={sending}
-            onChange={setSessionModel}
-          />
-          <span className="composer-bar-spacer" />
-          {sending ? (
-            <button className="composer-send stop" onClick={handleStop} title="停止生成" type="button" aria-label="停止生成">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
-            </button>
-          ) : (
-            <button className="composer-send" onClick={handleSend} disabled={!input.trim()} title="发送 (Enter)" type="button">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                <line x1="12" y1="19" x2="12" y2="5" />
-                <polyline points="5,12 12,5 19,12" />
+          <div className="composer-bar">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              style={{ display: "none" }}
+              onChange={(e) => void handleUploadFiles(e.target.files)}
+            />
+            <button
+              className="composer-add-btn"
+              title={canUpload ? "添加附件（PDF/Word/Excel/图片等，会话内可读）" : UPLOADS_UNSUPPORTED_COPY}
+              disabled={uploading || sending || !canUpload}
+              onClick={openFilePicker}
+              type="button"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
               </svg>
             </button>
-          )}
+            <SessionModelPicker
+              value={sessionModelRef}
+              options={modelOptions}
+              disabled={sending}
+              onChange={setSessionModel}
+            />
+            <span className="composer-bar-spacer" />
+            {sending ? (
+              <button className="composer-send stop" onClick={handleStop} title="停止生成" type="button" aria-label="停止生成">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+              </button>
+            ) : (
+              <button className="composer-send" onClick={handleSend} disabled={!input.trim() || !online} title="发送 (Enter)" type="button">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                  <line x1="12" y1="19" x2="12" y2="5" />
+                  <polyline points="5,12 12,5 19,12" />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      </ComposerStack>
     </div>
   );
 }

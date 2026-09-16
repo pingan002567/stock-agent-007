@@ -34,6 +34,14 @@
 		6C4B4694D6514F4A8E3004A1 /* AssistantBubbleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8907E83ABE249449C5CE55C /* AssistantBubbleView.swift */; };
 		3B577208D1AC48EB9B7022F6 /* AssistantTurnDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41D87491E990496896AD7DE4 /* AssistantTurnDetailView.swift */; };
 		A81C2F0E9B4D4E6F8A1C3D5E /* AnswerFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B72E1A0C4D5F678901234ABC /* AnswerFormatter.swift */; };
+		AA11BB22CC33DD44EE550001 /* ChatHistoryPager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB11CC22DD33EE44FF660001 /* ChatHistoryPager.swift */; };
+		AA11BB22CC33DD44EE550002 /* ChatStreamingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB11CC22DD33EE44FF660002 /* ChatStreamingService.swift */; };
+		AA11BB22CC33DD44EE550003 /* HumanInputCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB11CC22DD33EE44FF660003 /* HumanInputCardView.swift */; };
+		AA11BB22CC33DD44EE550004 /* NetworkReachability.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB11CC22DD33EE44FF660004 /* NetworkReachability.swift */; };
+		AA11BB22CC33DD44EE550005 /* ConnectivityBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB11CC22DD33EE44FF660005 /* ConnectivityBanner.swift */; };
+		AA11BB22CC33DD44EE550006 /* ChatParserSmoke.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB11CC22DD33EE44FF660006 /* ChatParserSmoke.swift */; };
+		CC11DD22EE33FF4400110001 /* MonitorSeenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD11EE22FF33AA4400110001 /* MonitorSeenStore.swift */; };
+		CC11DD22EE33FF4400110002 /* ChatCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD11EE22FF33AA4400110002 /* ChatCopy.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -67,6 +75,14 @@
 		B8907E83ABE249449C5CE55C /* AssistantBubbleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantBubbleView.swift; sourceTree = "<group>"; };
 		41D87491E990496896AD7DE4 /* AssistantTurnDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantTurnDetailView.swift; sourceTree = "<group>"; };
 		B72E1A0C4D5F678901234ABC /* AnswerFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnswerFormatter.swift; sourceTree = "<group>"; };
+		BB11CC22DD33EE44FF660001 /* ChatHistoryPager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHistoryPager.swift; sourceTree = "<group>"; };
+		BB11CC22DD33EE44FF660002 /* ChatStreamingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStreamingService.swift; sourceTree = "<group>"; };
+		BB11CC22DD33EE44FF660003 /* HumanInputCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HumanInputCardView.swift; sourceTree = "<group>"; };
+		BB11CC22DD33EE44FF660004 /* NetworkReachability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkReachability.swift; sourceTree = "<group>"; };
+		BB11CC22DD33EE44FF660005 /* ConnectivityBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectivityBanner.swift; sourceTree = "<group>"; };
+		BB11CC22DD33EE44FF660006 /* ChatParserSmoke.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatParserSmoke.swift; sourceTree = "<group>"; };
+		DD11EE22FF33AA4400110001 /* MonitorSeenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorSeenStore.swift; sourceTree = "<group>"; };
+		DD11EE22FF33AA4400110002 /* ChatCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatCopy.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -93,6 +109,7 @@
 			isa = PBXGroup;
 			children = (
 				6B5292BBDAAD4210BA624CDF /* APIClient.swift */,
+				BB11CC22DD33EE44FF660004 /* NetworkReachability.swift */,
 				087496C3EE08410081DF1257 /* AuthStore.swift */,
 				289EB7273F274AF0BCA3950D /* Models.swift */,
 				C497A9EC3F5648878B1D4190 /* SSEClient.swift */,
@@ -116,7 +133,12 @@
 			children = (
 				73801602894A4BA0B82D555F /* ChatView.swift */,
 				23A6C4EC28D347948C913C4D /* ChatViewModel.swift */,
+				BB11CC22DD33EE44FF660001 /* ChatHistoryPager.swift */,
+				BB11CC22DD33EE44FF660002 /* ChatStreamingService.swift */,
+				BB11CC22DD33EE44FF660003 /* HumanInputCardView.swift */,
 				1E890CBA8823468AAD23E49F /* ChatModels.swift */,
+				DD11EE22FF33AA4400110002 /* ChatCopy.swift */,
+				BB11CC22DD33EE44FF660006 /* ChatParserSmoke.swift */,
 				B72E1A0C4D5F678901234ABC /* AnswerFormatter.swift */,
 				7750BEBBEAD34FA999C927C1 /* MarkdownText.swift */,
 				B8907E83ABE249449C5CE55C /* AssistantBubbleView.swift */,
@@ -130,6 +152,7 @@
 			children = (
 				C5BFCCC06F6143ECA00CBA4D /* MainTabView.swift */,
 				C5D432607CB4422BB7A2090D /* StockAgentApp.swift */,
+				BB11CC22DD33EE44FF660005 /* ConnectivityBanner.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -157,6 +180,7 @@
 			children = (
 				489DBDC480C9415D80DBCF98 /* MonitorView.swift */,
 				A5B6C7D8E9F0A1B2C3D4E5F6 /* MonitorEventDetailView.swift */,
+				DD11EE22FF33AA4400110001 /* MonitorSeenStore.swift */,
 			);
 			path = Monitor;
 			sourceTree = "<group>";
@@ -294,8 +318,16 @@
 				378E51426C1049C2B473481A /* StockAgentApp.swift in Sources */,
 				EFB8D94884E044D39AB30248 /* ChatView.swift in Sources */,
 				F3938D4FA0AB46B9ACB56DEA /* ChatViewModel.swift in Sources */,
+				AA11BB22CC33DD44EE550001 /* ChatHistoryPager.swift in Sources */,
+				AA11BB22CC33DD44EE550002 /* ChatStreamingService.swift in Sources */,
+				AA11BB22CC33DD44EE550003 /* HumanInputCardView.swift in Sources */,
+				AA11BB22CC33DD44EE550004 /* NetworkReachability.swift in Sources */,
+				AA11BB22CC33DD44EE550005 /* ConnectivityBanner.swift in Sources */,
 				3B577208D1AC48EB9B7022F6 /* AssistantTurnDetailView.swift in Sources */,
 				CE9A209D2AF6413095C6F834 /* ChatModels.swift in Sources */,
+				CC11DD22EE33FF4400110002 /* ChatCopy.swift in Sources */,
+				CC11DD22EE33FF4400110001 /* MonitorSeenStore.swift in Sources */,
+				AA11BB22CC33DD44EE550006 /* ChatParserSmoke.swift in Sources */,
 				D3CA4E34093A43EE90FFDBA7 /* MarkdownText.swift in Sources */,
 				A81C2F0E9B4D4E6F8A1C3D5E /* AnswerFormatter.swift in Sources */,
 				6C4B4694D6514F4A8E3004A1 /* AssistantBubbleView.swift in Sources */,

@@ -37,6 +37,7 @@ describe("first-run copy", () => {
       "你现在能做什么？",
       "帮我看看这三笔演示持仓",
       "帮我找几只值得先了解的股票",
+      "今日盯盘有什么异常？",
     ]);
     expect(copyAvoidsJargon(collectSetupCopy())).toBe(true);
   });

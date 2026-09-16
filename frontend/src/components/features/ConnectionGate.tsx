@@ -319,12 +319,39 @@ export function ConnectionGate({
               <input
                 value={remoteUrl}
                 onChange={(e) => setRemoteUrl(e.target.value)}
-                placeholder="https://你的后端地址"
+                placeholder="https://47.103.58.33"
                 autoCapitalize="off"
                 autoCorrect="off"
                 spellCheck={false}
               />
             </label>
+            <p className="setup-lead" style={{ marginTop: 4, marginBottom: 0 }}>
+              须用 <code>https://</code>（不要 http）。推荐{" "}
+              <button
+                type="button"
+                className="linkish"
+                onClick={() => setRemoteUrl("https://47.103.58.33")}
+              >
+                https://47.103.58.33
+              </button>
+              {" "}或{" "}
+              <button
+                type="button"
+                className="linkish"
+                onClick={() => setRemoteUrl("https://47.103.58.33:8686")}
+              >
+                :8686
+              </button>
+              。自签证书需在本机钥匙串信任：
+              <a
+                href="https://47.103.58.33:8686/ota/stock-agent.crt"
+                target="_blank"
+                rel="noreferrer"
+              >
+                下载证书
+              </a>
+              ，双击导入「系统」钥匙串后设为「始终信任」。
+            </p>
             <label className="setup-default">
               <span>访问令牌</span>
               <input

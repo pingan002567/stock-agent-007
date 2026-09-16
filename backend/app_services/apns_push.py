@@ -50,7 +50,15 @@ class APNsPushService:
             "key_path_exists": self._key_path.is_file(),
         }
 
-    def push(self, title: str, body: str = "", *, symbol: str | None = None) -> None:
+    def push(
+        self,
+        title: str,
+        body: str = "",
+        *,
+        symbol: str | None = None,
+        event_id: str | None = None,
+        **_: Any,
+    ) -> None:
         devices = self._list_devices()
         if not devices:
             return
@@ -69,6 +77,7 @@ class APNsPushService:
                     title=title,
                     body=body,
                     symbol=symbol,
+                    event_id=event_id,
                 )
             except Exception:
                 logger.exception("APNs send failed for %s…", device["device_token"][:8])
@@ -81,6 +90,7 @@ class APNsPushService:
         title: str,
         body: str,
         symbol: str | None,
+        event_id: str | None = None,
     ) -> None:
         import httpx
 
@@ -98,6 +108,8 @@ class APNsPushService:
         }
         if symbol:
             payload["symbol"] = symbol
+        if event_id:
+            payload["event_id"] = event_id
         url = f"https://{host}/3/device/{device_token}"
         headers = {
             "authorization": f"bearer {token}",
@@ -143,12 +155,23 @@ class APNsPushService:
 class CompositeAlertSink:
     """Fan-out monitor alerts to IM channel sink and APNs."""
 
-    def __init__(self, *sinks: Callable[[str, str], None] | None) -> None:
+    def __init__(self, *sinks: Callable[..., None] | None) -> None:
         self._sinks = [s for s in sinks if s is not None]
 
-    def __call__(self, title: str, body: str = "") -> None:
+    def __call__(
+        self,
+        title: str,
+        body: str = "",
+        *,
+        symbol: str | None = None,
+        event_id: str | None = None,
+    ) -> None:
         for sink in self._sinks:
             try:
-                sink(title, body)
+                # Prefer keyword form for APNs; positional-only callables still work.
+                try:
+                    sink(title, body, symbol=symbol, event_id=event_id)
+                except TypeError:
+                    sink(title, body)
             except Exception:
                 logger.exception("alert sink failed")

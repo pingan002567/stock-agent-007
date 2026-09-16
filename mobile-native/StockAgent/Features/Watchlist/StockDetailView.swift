@@ -223,6 +223,13 @@ struct StockDetailView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+            if let status = context?.researchStatus, !status.isEmpty {
+                Button {
+                    askInChat()
+                } label: {
+                    Label("在对话中跟进研究（\(status)）", systemImage: "arrow.up.right.circle")
+                }
+            }
         }
     }
 
@@ -246,7 +253,7 @@ struct StockDetailView: View {
     private func askInChat() {
         let name = context?.name ?? fallbackName ?? symbol
         let prompt = "请分析 \(symbol)（\(name)）：结合近期行情、资讯与风险，给出简要观点与观察位。不下单，仅供研究参考。"
-        chat.draft = prompt
+        chat.prepareCompose(page: "stock_detail", symbol: symbol, draft: prompt)
         tabs.selected = .chat
     }
 

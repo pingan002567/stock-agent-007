@@ -1,7 +1,12 @@
+import { useMemo } from "react";
 import { type StreamMessage, type StreamToolCall } from "@/hooks/useCopilotChat";
 import { CopilotFinalMeta, SkillTraceChain } from "@/components/features/CopilotFinalMeta";
 import { ThoughtTimeline } from "@/components/features/ThoughtTimeline";
 import { HumanInputCard } from "@/components/features/HumanInputCard";
+import { StreamMarkdown } from "@/components/features/StreamMarkdown";
+import { StreamAwaitingDots } from "@/components/features/StreamAwaitingDots";
+import { useStreamAwaitingNextEvent } from "@/hooks/useStreamAwaitingNextEvent";
+import { streamProgressKey } from "@/lib/chatShell";
 import type { HumanInputResponse } from "@/lib/humanInput";
 
 interface Props {
@@ -41,6 +46,24 @@ export function CopilotStreamingMessage({
   const streamingActive = streamMessage.phase !== "final" && streamMessage.phase !== "error";
   const clarificationRequest = streamMessage.clarificationRequest;
 
+  const progressRevision = useMemo(
+    () => streamProgressKey({
+      phase: streamMessage.phase,
+      answerText: streamMessage.answerText,
+      toolCount: streamMessage.tools.length + streamMessage.steps.length,
+      clarification: Boolean(streamMessage.clarificationRequest || streamMessage.clarificationText),
+      errorText: streamMessage.errorText,
+    }),
+    [streamMessage],
+  );
+
+  const awaitingNext = useStreamAwaitingNextEvent(streamingActive, progressRevision);
+  // 推理阶段顶部已有「推理中」，不再叠一层「思考中」
+  const showAwaitingDots = awaitingNext
+    && streamMessage.phase !== "reasoning"
+    && !clarificationRequest
+    && !streamMessage.clarificationText;
+
   return (
     <div className={`msg ai${hasContent ? "" : " streaming"}`}>
       <div className="msg-label">
@@ -57,7 +80,7 @@ export function CopilotStreamingMessage({
             borderRadius: "50%",
             background: phaseColor,
             boxShadow: `0 0 8px ${phaseColor}`,
-            animation: streamMessage.phase !== "final" && streamMessage.phase !== "error" ? "pulse 1s infinite" : "none"
+            animation: streamingActive ? "pulse 1s infinite" : "none"
           }} />
           {phaseLabel}
         </span>
@@ -76,7 +99,6 @@ export function CopilotStreamingMessage({
           ))}
         </div>
       )}
-      {/* 思维链时间线(deer-flow 借鉴):推理/工具按序交错,早期步骤折叠 */}
       <ThoughtTimeline steps={streamMessage.steps} active={streamingActive} onToolClick={onToolClick} />
       {clarificationRequest && (
         <HumanInputCard
@@ -96,11 +118,18 @@ export function CopilotStreamingMessage({
           <div className="clarification-hint">直接在下方输入框回答即可继续</div>
         </div>
       )}
-      {/* 澄清卡已承载问题正文：不再把 conclusion / partial 当回答贴一遍 */}
       {!clarificationRequest && !streamMessage.clarificationText && streamMessage.answerText && (
         <div className={streamMessage.phase === "final" ? "" : "cursor-blink"}>
-          {streamMessage.answerText}
+          <StreamMarkdown
+            text={streamMessage.answerText}
+            streaming={streamingActive}
+          />
         </div>
+      )}
+      {showAwaitingDots && (
+        <StreamAwaitingDots
+          label={streamMessage.phase === "tools" ? "工具执行中" : "继续生成中"}
+        />
       )}
       {streamMessage.phase === "final"
         && streamMessage.finalPayload
@@ -111,7 +140,6 @@ export function CopilotStreamingMessage({
       {streamMessage.errorText && (
         <div style={{ color: "var(--red)" }}>⚠️ {streamMessage.errorText}</div>
       )}
-      <div className="msg-time">now</div>
     </div>
   );
 }

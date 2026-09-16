@@ -148,7 +148,7 @@ struct AssistantTurnDetailView: View {
                     } label: {
                         HStack {
                             statusBadge(tool.status)
-                            Text(tool.name)
+                            Text(ToolLabels.displayName(for: tool.name))
                                 .font(.subheadline.weight(.semibold))
                             Spacer()
                         }

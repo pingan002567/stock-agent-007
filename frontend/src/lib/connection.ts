@@ -81,6 +81,13 @@ export function normalizeRemoteUrl(raw: string): string {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("只支持 http 或 https 地址");
   }
+  // 远端公网后端现均为 HTTPS（8686/443）；http 会触发 SSL 握手失败或混合内容拦截。
+  // 本机回环仍允许 http（本地 uvicorn / 开发栈）。
+  const host = (parsed.hostname || "").toLowerCase();
+  const isLoopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
+  if (parsed.protocol === "http:" && !isLoopback) {
+    parsed = new URL(parsed.toString().replace(/^http:/i, "https:"));
+  }
   const path = parsed.pathname === "/" ? "" : parsed.pathname.replace(/\/$/, "");
   return `${parsed.origin}${path}`;
 }
@@ -206,6 +213,12 @@ export async function probeHealth(
     });
     if (!res.ok) {
       if (res.status === 401) return { ok: false, error: "访问令牌无效" };
+      if (res.status === 400 && normalized.startsWith("http://")) {
+        return {
+          ok: false,
+          error: "该端口已启用 HTTPS，请把地址改成 https://…（不要用 http://）",
+        };
+      }
       return { ok: false, error: `健康检查失败（HTTP ${res.status}）` };
     }
     const data = (await res.json()) as Record<string, unknown>;
@@ -221,10 +234,40 @@ export async function probeHealth(
       return { ok: false, error: "连接超时，请确认地址与网络" };
     }
     const msg = err instanceof Error ? err.message : String(err);
-    if (/certificate|SSL|TLS|secure connection|NSURLError/i.test(msg)) {
-      return { ok: false, error: "证书不被信任：请用最新 iOS 壳（已放行自签），或在系统里信任该证书" };
+    const host = (() => {
+      try {
+        return new URL(normalized).hostname.toLowerCase();
+      } catch {
+        return "";
+      }
+    })();
+    const isLoopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
+    if (/certificate|SSL|TLS|secure connection|NSURLError|CERT|self[- ]signed/i.test(msg)) {
+      return {
+        ok: false,
+        error:
+          "证书不被信任：请下载连接页中的自签证书，双击导入「系统」钥匙串并设为「始终信任」后重试",
+      };
     }
-    return { ok: false, error: "无法连上后端，请确认服务已启动、地址正确，且手机能访问该主机" };
+    // WKWebView / Safari 对自签证书常只报 Failed to fetch，无 CERT 字样
+    if (
+      /Failed to fetch|NetworkError|Load failed|CORS/i.test(msg) &&
+      normalized.startsWith("https://") &&
+      !isLoopback
+    ) {
+      return {
+        ok: false,
+        error:
+          "无法连上 HTTPS 后端：多半是自签证书未信任。请下载证书并导入钥匙串设为「始终信任」，或确认地址/令牌正确",
+      };
+    }
+    if (/Failed to fetch|NetworkError|Load failed|CORS/i.test(msg) && base.includes("http://") && !isLoopback) {
+      return {
+        ok: false,
+        error: "无法用 http 连接远端（请改成 https://47.103.58.33 或 https://47.103.58.33:8686）",
+      };
+    }
+    return { ok: false, error: "无法连上后端，请确认服务已启动、地址正确，且本机能访问该主机" };
   } finally {
     clearTimeout(timer);
   }

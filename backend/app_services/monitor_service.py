@@ -140,7 +140,12 @@ class MonitorService:
                 if self.alert_sink is not None:
                     try:
                         sev = {"high": "🔴", "medium": "🟠"}.get(event.severity, "•")
-                        self.alert_sink(f"{sev} 盯盘告警 · {event.title}", event.trigger_rule or "")
+                        self.alert_sink(
+                            f"{sev} 盯盘告警 · {event.title}",
+                            event.trigger_rule or "",
+                            symbol=event.symbol,
+                            event_id=event.event_id,
+                        )
                     except Exception:
                         pass
         return result
