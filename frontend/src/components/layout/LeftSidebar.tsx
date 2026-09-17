@@ -88,7 +88,7 @@ export function LeftSidebar({
       {variant === "desktop" ? (
         <ResizeHandle cssVar="--left-sidebar-w" storageKey="left-sidebar-w" min={200} max={480} edge="right" />
       ) : null}
-      <div className="brand" data-tauri-drag-region="">
+      <div className="brand" data-tauri-drag-region="deep">
         <div className="brand-logo" aria-hidden>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
             <path d="M4 19V5M9 19v-6M14 19V9M19 19v-9" />
@@ -96,7 +96,7 @@ export function LeftSidebar({
         </div>
         <div>
           <div className="brand-name">Stock Agent</div>
-          <button type="button" className="brand-sub" title="切换后端" onClick={switchBackend}>
+          <button type="button" className="brand-sub" title="切换后端" onClick={switchBackend} data-tauri-drag-region="false">
             {connLabel}
           </button>
         </div>

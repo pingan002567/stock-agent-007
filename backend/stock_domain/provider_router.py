@@ -27,6 +27,19 @@ from backend.stock_domain.providers import (
 
 T = TypeVar("T")
 
+# Primary raised a capability gap (not a flaky network/token failure). Falling back
+# to another provider is expected routing, not soft degradation.
+_UNSUPPORTED_CAPABILITY_MARKERS = (
+    "not supported",
+    "does not support",
+    "unsupported",
+)
+
+
+def _is_unsupported_capability_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return any(marker in text for marker in _UNSUPPORTED_CAPABILITY_MARKERS)
+
 # Layer 1 memory cache TTL per capability (seconds)
 _CACHE_TTL: dict[str, float] = {
     "quote": 60.0,      # 60s during trading hours
@@ -663,38 +676,66 @@ class ProviderRouter:
             )
             return result
         except Exception as exc:
-            retry_delays = [0.5, 1.0]
-            last_exc = exc
-            for idx, delay in enumerate(retry_delays):
-                time.sleep(delay)
-                try:
-                    started = time.perf_counter()
-                    result = call_fn(provider)
-                    self._record_success(capability)
-                    self._last_capability_reasons[capability] = None
-                    self._refresh_last_degraded_reason()
-                    self._record_call(
-                        capability=capability,
-                        market=market,
-                        provider=provider.name,
-                        status="succeeded-after-retry",
-                        degraded_reason=None,
-                        duration_ms=(time.perf_counter() - started) * 1000,
-                    )
-                    self._persist_result(
-                        capability, result, symbol, provider_name=provider.name
-                    )
-                    return result
-                except Exception as retry_exc:
-                    last_exc = retry_exc
-            self._record_failure(capability)
+            # Capability gaps (e.g. tushare has no market/sectors/intel) should not
+            # burn retry budget — jump straight to secondaries.
+            if not _is_unsupported_capability_error(exc):
+                retry_delays = [0.5, 1.0]
+                last_exc = exc
+                for idx, delay in enumerate(retry_delays):
+                    time.sleep(delay)
+                    try:
+                        started = time.perf_counter()
+                        result = call_fn(provider)
+                        self._record_success(capability)
+                        self._last_capability_reasons[capability] = None
+                        self._refresh_last_degraded_reason()
+                        self._record_call(
+                            capability=capability,
+                            market=market,
+                            provider=provider.name,
+                            status="succeeded-after-retry",
+                            degraded_reason=None,
+                            duration_ms=(time.perf_counter() - started) * 1000,
+                        )
+                        self._persist_result(
+                            capability, result, symbol, provider_name=provider.name
+                        )
+                        return result
+                    except Exception as retry_exc:
+                        last_exc = retry_exc
+                        if _is_unsupported_capability_error(retry_exc):
+                            break
+            else:
+                last_exc = exc
+            # Don't trip the circuit breaker on intentional capability gaps —
+            # those are permanent for this provider and should always route.
+            if not _is_unsupported_capability_error(last_exc):
+                self._record_failure(capability)
             # Try secondary real providers before returning unavailable
             secondary_providers = self._secondary_providers(market, provider)
+            unsupported_primary = _is_unsupported_capability_error(last_exc)
             for secondary in secondary_providers:
                 try:
                     secondary_started = time.perf_counter()
                     result = call_fn(secondary)
                     self._record_success(capability)
+                    if unsupported_primary:
+                        # Expected routing off a provider that never implements this
+                        # capability — do not sticky-flag global/capability degraded.
+                        self._last_capability_reasons[capability] = None
+                        self._refresh_last_degraded_reason()
+                        self._record_call(
+                            capability=capability,
+                            market=market,
+                            provider=secondary.name,
+                            status="routed",
+                            degraded_reason=None,
+                            duration_ms=(time.perf_counter() - secondary_started) * 1000,
+                        )
+                        self._persist_result(
+                            capability, result, symbol, provider_name=secondary.name
+                        )
+                        return result
                     secondary_reason = (
                         f"{provider.name} failed ({last_exc}), "
                         f"resolved by {secondary.name}"

@@ -20,7 +20,7 @@ final class ChatStreamingService {
         idleTimeoutSeconds: TimeInterval = 120,
         fallbacks: Fallbacks = Fallbacks(
             emptyAnswer: "回答未生成完整（工具可能已执行）。请点重试，或换个问法再试。",
-            idleTimeout: "回答超时：长时间没有新内容。请点重试。",
+            idleTimeout: "回答超时：长时间没有服务端心跳。请点重试，或检查远端连接。",
             interruptedExit: "上次回答在退出后中断（服务端已停止该轮，避免重复执行工具）。请点重试。",
             stopped: "已停止生成。可点重试继续。"
         )
@@ -83,16 +83,14 @@ final class ChatStreamingService {
             do {
                 for try await event in stream {
                     if Task.isCancelled { break }
-                    let update = CopilotStreamParser.parse(event)
-                    if case .ignore = update {
-                        // keepalive
-                    } else {
-                        self.armIdleWatchdog(sessionId: sessionId, turnId: turnId) { sid, tid in
-                            onTransportError(self.fallbacks.idleTimeout)
-                            self.cancelLocal(sessionId: sid)
-                            _ = tid
-                        }
+                    // Any SSE frame (incl. ping/progress keepalive) proves liveness —
+                    // long-running tools must not trip the idle watchdog.
+                    self.armIdleWatchdog(sessionId: sessionId, turnId: turnId) { sid, tid in
+                        onTransportError(self.fallbacks.idleTimeout)
+                        self.cancelLocal(sessionId: sid)
+                        _ = tid
                     }
+                    let update = CopilotStreamParser.parse(event)
                     onEvent(update)
                 }
             } catch {

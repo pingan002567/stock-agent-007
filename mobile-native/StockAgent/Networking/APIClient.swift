@@ -216,6 +216,28 @@ final class APIClient: ObservableObject {
         )
     }
 
+    struct CopilotRunStatus: Decodable {
+        let runId: String
+        let status: String
+        let phase: String?
+        let currentTool: String?
+        let alive: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case runId = "run_id"
+            case status, phase
+            case currentTool = "current_tool"
+            case alive
+        }
+    }
+
+    func fetchRunStatus(sessionId: String, runId: String) async throws -> CopilotRunStatus {
+        let data = try await getData(
+            path: "/api/copilot/sessions/\(enc(sessionId))/runs/\(enc(runId))/status"
+        )
+        return try JSONDecoder().decode(CopilotRunStatus.self, from: data)
+    }
+
     func streamURL(sessionId: String, runId: String) throws -> URL {
         let path = "/api/copilot/sessions/\(sessionId)/stream/\(runId)"
         var components = URLComponents(url: try makeURL(path: path), resolvingAgainstBaseURL: false)

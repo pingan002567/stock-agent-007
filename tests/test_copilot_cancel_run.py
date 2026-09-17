@@ -35,12 +35,94 @@ def test_cancel_run_sets_flag_for_active_run(services):
 
     status = services.copilot_service.cancel_run(run.run_id, session_id=session.session_id)
     assert status["status"] == "cancelling"
+    assert status.get("alive") is True
     assert services.copilot_service._is_run_cancelled(run.run_id)
+
+    live = services.copilot_service.get_run_status(run.run_id, session_id=session.session_id)
+    assert live["status"] == "cancelling"
+    assert live["alive"] is True
 
     services.copilot_service._runs.pop(run.run_id, None)
     services.copilot_service._cancelled_runs.discard(run.run_id)
     again = services.copilot_service.cancel_run(run.run_id, session_id=session.session_id)
     assert again["status"] == "not_running"
+
+
+def test_get_run_status_tracks_tool_phase(services, monkeypatch):
+    session = services.copilot_service.create_session(
+        CopilotSessionCreateRequest(title="status-phase", current_page="chat")
+    )
+    run = services.copilot_service.create_session_run(
+        session.session_id,
+        CopilotSessionMessageRequest(message="hello", page="chat", symbol=""),
+    )
+
+    async def toolish_stream(**kwargs):
+        yield {
+            "type": "tool_call",
+            "payload": {"tool": "web_search", "call_id": "c1", "arguments": {}},
+        }
+        yield {
+            "type": "tool_result",
+            "payload": {"tool": "web_search", "call_id": "c1", "result": "ok"},
+        }
+        yield {
+            "type": "final",
+            "payload": {"conclusion": "done"},
+        }
+
+    monkeypatch.setattr(services.copilot_service.deerflow, "stream", toolish_stream)
+
+    async def collect():
+        events = []
+        async for event in services.copilot_service.stream_run(
+            run.run_id, session_id=session.session_id
+        ):
+            events.append(event)
+            if event.type == "tool_call":
+                snap = services.copilot_service.get_run_status(
+                    run.run_id, session_id=session.session_id
+                )
+                assert snap["phase"] == "tool"
+                assert snap["current_tool"] == "web_search"
+                assert snap["alive"] is True
+            if event.type == "progress":
+                assert event.payload.get("run_id") == run.run_id
+        return events
+
+    events = asyncio.run(collect())
+    types = [e.type for e in events]
+    assert "progress" in types
+    assert "tool_call" in types
+    assert "final" in types
+
+    after = services.copilot_service.get_run_status(run.run_id, session_id=session.session_id)
+    assert after["alive"] is False
+    assert after["status"] in {"completed", "not_running"}
+
+
+def test_run_status_api(tmp_path, monkeypatch):
+    monkeypatch.setenv("WORKBENCH_SKIP_SEED", "1")
+    monkeypatch.setenv("WORKBENCH_AI_MODE", "stub")
+    from fastapi.testclient import TestClient
+
+    from backend.app import create_app
+
+    app = create_app(db_path=tmp_path / "status_api.sqlite3", files_root=tmp_path / "files")
+    client = TestClient(app)
+    session = client.post("/api/copilot/sessions", json={"title": "api-status"}).json()
+    run = client.post(
+        f"/api/copilot/sessions/{session['session_id']}/messages",
+        json={"message": "hi", "page": "chat", "symbol": ""},
+    ).json()
+    resp = client.get(
+        f"/api/copilot/sessions/{session['session_id']}/runs/{run['run_id']}/status"
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["run_id"] == run["run_id"]
+    assert "alive" in body
+    assert "status" in body
 
 
 def test_stream_run_honours_cancel_flag(services, monkeypatch):

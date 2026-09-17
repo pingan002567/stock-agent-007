@@ -67,7 +67,7 @@ export function FunctionDock() {
           <ResizeHandle cssVar="--func-panel-w" storageKey="func-panel-w" min={360} max={880} />
         )}
         <div className="func-inner">
-          <div className="func-head" data-tauri-drag-region="">
+          <div className="func-head" data-tauri-drag-region="deep">
             <span className="func-title">
               {detailOpen && detail ? detailTitle : screenLabel}
             </span>
@@ -78,7 +78,7 @@ export function FunctionDock() {
             {!detailOpen && lastRefreshTime && (
               <span className="func-fresh">{formatTimeAgo(lastRefreshTime)}</span>
             )}
-            <button className="func-close" onClick={handleClose} title="收起">
+            <button className="func-close" onClick={handleClose} title="收起" data-tauri-drag-region="false">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
             </button>
           </div>

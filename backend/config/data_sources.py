@@ -14,7 +14,16 @@ DEFAULT_DATA_SOURCES = {
 # 设置页可填写的 API 凭证（保存到档案 DB；环境变量同名时优先读 DB 已保存值）
 PROVIDER_CREDENTIAL_SCHEMA: dict[str, list[dict[str, str | bool]]] = {
     "tushare": [
-        {"key": "token", "label": "Token", "env": "TUSHARE_TOKEN", "secret": True},
+        {
+            "key": "token",
+            "label": "Token",
+            "env": "TUSHARE_TOKEN",
+            "secret": True,
+            "hint": (
+                "约 5000 积分可覆盖日线/行情/财务/资金流(moneyflow≈2000)；"
+                "每日筹码 cyq_perf 约需 10000 积分。市场综述/板块/情报由其他源承接，不算降级。"
+            ),
+        },
     ],
     "tickflow": [
         {"key": "api_key", "label": "API Key", "env": "TICKFLOW_API_KEY", "secret": True},
@@ -68,8 +77,12 @@ AVAILABLE_PROVIDERS = [
         "markets": ["CN", "HK"],
         "free": False,
         "enabled_by_default": False,
-        "description": "Tushare Pro 金融数据接口，覆盖 A 股/港股行情、历史、财务数据",
-        "requirements": "pip install tushare && set TUSHARE_TOKEN",
+        "description": (
+            "Tushare Pro：A/港股行情、K 线、财务、资金流等。"
+            "不提供市场综述/板块/情报（自动改走其他源，不算降级）。"
+            "建议 ≥5000 积分；每日筹码 cyq_perf 约需 10000。"
+        ),
+        "requirements": "pip install tushare && Token（建议 ≥5000；筹码 ~10000）",
     },
     {
         "id": "pytdx",

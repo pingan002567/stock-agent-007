@@ -16,6 +16,8 @@ import {
   CHAT_COMPOSER_HEIGHT_VAR,
   STUCK_IDLE_MS,
   streamProgressKey,
+  toolStatusesKey,
+  workingDockCopy,
 } from "@/lib/chatShell";
 import {
   UPLOADS_UNSUPPORTED_COPY,
@@ -47,8 +49,10 @@ export function CopilotComposer() {
     currentSession,
     sending,
     streamMessage,
+    streamLiveness,
     handleSend: sendMessage,
     handleStop,
+    refreshRunStatus,
     ensureSession,
     sessionModelRef,
     modelOptions,
@@ -66,12 +70,14 @@ export function CopilotComposer() {
   const [uploadsSupported, setUploadsSupported] = useState(true);
   const [dragOver, setDragOver] = useState(false);
   const [stuck, setStuck] = useState(false);
+  const [contentIdle, setContentIdle] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const stackRef = useRef<HTMLDivElement>(null);
   const dragCountRef = useRef(0);
   const progressKeyRef = useRef("");
   const progressAtRef = useRef(0);
+  const contentAtRef = useRef(0);
 
   const runtimeStub = useMemo(() => {
     void globalLoading;
@@ -161,10 +167,12 @@ export function CopilotComposer() {
     };
   }, []);
 
-  // 流式卡住检测：指纹长时间不变
+  // 流式卡住检测：内容指纹或后端心跳任一推进都重置；仅真正静默才 stuck。
+  // 内容指纹闲置但心跳仍在 → working（长工具），避免误报「卡住」。
   useEffect(() => {
     if (!sending || !streamMessage) {
       setStuck(false);
+      setContentIdle(false);
       progressKeyRef.current = "";
       return;
     }
@@ -172,6 +180,7 @@ export function CopilotComposer() {
       phase: streamMessage.phase,
       answerText: streamMessage.answerText,
       toolCount: streamMessage.tools.length + streamMessage.steps.length,
+      toolStatuses: toolStatusesKey(streamMessage.tools),
       clarification: Boolean(streamMessage.clarificationRequest || streamMessage.clarificationText),
       errorText: streamMessage.errorText,
     });
@@ -179,21 +188,53 @@ export function CopilotComposer() {
     if (key !== progressKeyRef.current) {
       progressKeyRef.current = key;
       progressAtRef.current = now;
+      contentAtRef.current = now;
+      setStuck(false);
+      setContentIdle(false);
+    }
+    if (streamLiveness?.lastAt && streamLiveness.lastAt > progressAtRef.current) {
+      progressAtRef.current = streamLiveness.lastAt;
       setStuck(false);
     }
+    const CONTENT_IDLE_MS = 12_000;
     const tick = window.setInterval(() => {
-      if (Date.now() - progressAtRef.current >= STUCK_IDLE_MS) setStuck(true);
+      const nowTick = Date.now();
+      const lastLive = Math.max(progressAtRef.current, streamLiveness?.lastAt ?? 0);
+      const contentStale = nowTick - contentAtRef.current >= CONTENT_IDLE_MS;
+      setContentIdle(contentStale);
+      if (nowTick - lastLive >= STUCK_IDLE_MS) setStuck(true);
+      else setStuck(false);
     }, 2000);
     return () => clearInterval(tick);
-  }, [sending, streamMessage]);
+  }, [sending, streamMessage, streamLiveness]);
+
+  // 页签重新可见时用后端 status 对齐 dock（SSE 可能已断但 run 仍在）
+  useEffect(() => {
+    if (!sending) return;
+    const onVis = () => {
+      if (document.visibilityState === "visible") void refreshRunStatus();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onVis);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onVis);
+    };
+  }, [sending, refreshRunStatus]);
 
   const waitingClarify = Boolean(
     streamMessage?.clarificationRequest || streamMessage?.clarificationText,
   );
+  const stopping = streamLiveness?.status === "cancelling";
+  const liveWorking = Boolean(
+    streamLiveness?.alive
+    && (streamLiveness.phase === "tool" || contentIdle),
+  );
+  const showWorking = sending && !stuck && !waitingClarify && !stopping && liveWorking;
 
   const docks = useMemo(() => {
     const list: {
-      kind: "clarify" | "offline" | "stuck";
+      kind: "clarify" | "offline" | "stuck" | "working";
       title: string;
       detail?: string;
       actionLabel?: string;
@@ -206,11 +247,26 @@ export function CopilotComposer() {
         detail: "恢复后再发送；已发送的请求可能卡住。",
       });
     }
-    if (stuck && sending) {
+    if (stopping && sending) {
+      list.push({
+        kind: "working",
+        title: "正在停止…",
+        detail: "已通知服务端取消本轮。",
+      });
+    } else if (stuck && sending) {
       list.push({
         kind: "stuck",
         title: "响应似乎卡住了",
         detail: "可停止本轮后重试，或检查远端连接。",
+        actionLabel: "停止",
+        onAction: handleStop,
+      });
+    } else if (showWorking) {
+      const copy = workingDockCopy(streamLiveness);
+      list.push({
+        kind: "working",
+        title: copy.title,
+        detail: copy.detail,
         actionLabel: "停止",
         onAction: handleStop,
       });
@@ -223,7 +279,7 @@ export function CopilotComposer() {
       });
     }
     return list;
-  }, [online, stuck, sending, waitingClarify, handleStop]);
+  }, [online, stuck, sending, waitingClarify, handleStop, showWorking, stopping, streamLiveness]);
 
   const handleSend = () => {
     const text = input;

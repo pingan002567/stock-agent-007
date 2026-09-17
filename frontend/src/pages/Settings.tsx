@@ -35,6 +35,7 @@ interface ProviderCredentialField {
   label: string;
   env: string;
   secret?: boolean;
+  hint?: string;
 }
 interface AvailableDataProvider {
   id: string;
@@ -961,8 +962,19 @@ function MarketDataTab({
                             background: "var(--panel)", color: "var(--ink)", padding: "0 10px", fontSize: 12,
                           }}
                         />
+                        {field.hint ? (
+                          <span className="muted" style={{ fontSize: 10.5, lineHeight: 1.45 }}>
+                            {field.hint}
+                          </span>
+                        ) : null}
                       </label>
                     ))}
+                    {provider.id === "tushare" ? (
+                      <div className="muted" style={{ fontSize: 10.5, lineHeight: 1.5, marginTop: 2 }}>
+                        积分速查：日常行情/日线/财务与资金流约 5000 分即可；每日筹码（cyq_perf）约需 10000 分。
+                        若 A 股主源选 Tushare，市场综述/板块/情报会自动改走其他源，不再记为数据降级。
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>

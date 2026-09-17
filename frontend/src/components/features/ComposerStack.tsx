@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-export type ComposerDockKind = "clarify" | "offline" | "stuck" | "info";
+export type ComposerDockKind = "clarify" | "offline" | "stuck" | "working" | "info";
 
 type Dock = {
   kind: ComposerDockKind;
@@ -10,7 +10,7 @@ type Dock = {
   onAction?: () => void;
 };
 
-/** 输入区上方叠层：澄清等待 / 离线 / 卡住，贴近 TeamClu ComposerStack。 */
+/** 输入区上方叠层：澄清等待 / 离线 / 工作中 / 卡住，贴近 TeamClu ComposerStack。 */
 export function ComposerStack({
   docks,
   children,

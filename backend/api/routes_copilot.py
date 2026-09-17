@@ -283,10 +283,26 @@ def stream_session_run(session_id: str, run_id: str, request: Request, services:
         raise HTTPException(status_code=404, detail="copilot run not found")
 
     return StreamingResponse(
-        to_sse(services.copilot_service.stream_run(run_id, session_id=session_id)),
+        to_sse(
+            services.copilot_service.stream_run(run_id, session_id=session_id),
+            heartbeat=lambda: services.copilot_service.progress_payload(run_id),
+            run_id=run_id,
+        ),
         media_type="text/event-stream",
         headers=SSE_HEADERS,
     )
+
+
+@router.get("/sessions/{session_id}/runs/{run_id}/status")
+def get_session_run_status(
+    session_id: str,
+    run_id: str,
+    services: AppServices = Depends(get_services),
+):
+    try:
+        return services.copilot_service.get_run_status(run_id, session_id=session_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="copilot run not found") from exc
 
 
 @router.post("/sessions/{session_id}/runs/{run_id}/cancel")
@@ -317,7 +333,11 @@ def stream(run_id: str, request: Request, services: AppServices = Depends(get_se
     if not services.copilot_service.has_run(run_id):
         raise HTTPException(status_code=404, detail="copilot run not found")
     return StreamingResponse(
-        to_sse(services.copilot_service.stream_run(run_id)),
+        to_sse(
+            services.copilot_service.stream_run(run_id),
+            heartbeat=lambda: services.copilot_service.progress_payload(run_id),
+            run_id=run_id,
+        ),
         media_type="text/event-stream",
         headers=SSE_HEADERS,
     )

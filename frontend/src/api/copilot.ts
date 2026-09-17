@@ -184,6 +184,33 @@ export function createStreamUrl(sessionId: string, runId: string): string {
   );
 }
 
+export interface CopilotRunStatus {
+  run_id: string;
+  session_id?: string;
+  task_id?: string;
+  status: string;
+  phase?: string;
+  current_tool?: string | null;
+  last_event_at?: string | null;
+  last_event_type?: string | null;
+  started_at?: string;
+  updated_at?: string;
+  alive: boolean;
+}
+
+export async function cancelRun(sessionId: string, runId: string): Promise<{ status: string; run_id: string }> {
+  return api<{ status: string; run_id: string }>(
+    `/api/copilot/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/cancel`,
+    { method: "POST" },
+  );
+}
+
+export async function fetchRunStatus(sessionId: string, runId: string): Promise<CopilotRunStatus> {
+  return api<CopilotRunStatus>(
+    `/api/copilot/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/status`,
+  );
+}
+
 export function parseCopilotEvent(source: Record<string, unknown>) {
   if (!source) return { type: EVENT_FINAL, payload: {}, text: "" };
   if (source.type && source.payload) {

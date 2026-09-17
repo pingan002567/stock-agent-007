@@ -6,7 +6,7 @@ import { HumanInputCard } from "@/components/features/HumanInputCard";
 import { StreamMarkdown } from "@/components/features/StreamMarkdown";
 import { StreamAwaitingDots } from "@/components/features/StreamAwaitingDots";
 import { useStreamAwaitingNextEvent } from "@/hooks/useStreamAwaitingNextEvent";
-import { streamProgressKey } from "@/lib/chatShell";
+import { streamProgressKey, toolStatusesKey } from "@/lib/chatShell";
 import type { HumanInputResponse } from "@/lib/humanInput";
 
 interface Props {
@@ -51,6 +51,7 @@ export function CopilotStreamingMessage({
       phase: streamMessage.phase,
       answerText: streamMessage.answerText,
       toolCount: streamMessage.tools.length + streamMessage.steps.length,
+      toolStatuses: toolStatusesKey(streamMessage.tools),
       clarification: Boolean(streamMessage.clarificationRequest || streamMessage.clarificationText),
       errorText: streamMessage.errorText,
     }),

@@ -34,6 +34,7 @@ export function TopBar({ leftCollapsed, onToggleLeft, dockCollapsed, onToggleDoc
       className={`topbar3-btn${leftCollapsed ? "" : " on"}`}
       onClick={onToggleLeft}
       title={leftCollapsed ? "展开会话栏" : "收起会话栏"}
+      data-tauri-drag-region="false"
     >
       <FoldLeftIcon />
     </button>
@@ -44,6 +45,7 @@ export function TopBar({ leftCollapsed, onToggleLeft, dockCollapsed, onToggleDoc
       className={`topbar3-btn${dockCollapsed ? "" : " on"}`}
       onClick={onToggleDock}
       title={dockCollapsed ? "展开功能栏" : "收起功能栏"}
+      data-tauri-drag-region="false"
     >
       <FoldRightIcon />
     </button>
@@ -52,21 +54,21 @@ export function TopBar({ leftCollapsed, onToggleLeft, dockCollapsed, onToggleDoc
   const bothCollapsed = leftCollapsed && dockCollapsed;
 
   return (
-    <header className="topbar3" data-tauri-drag-region="">
+    <header className="topbar3" data-tauri-drag-region="deep">
       {!bothCollapsed && !dockCollapsed && (
-        <div className="topbar3-seg topbar3-left" data-tauri-drag-region="">
+        <div className="topbar3-seg topbar3-left" data-tauri-drag-region="deep">
           {!leftCollapsed && leftToggle}
         </div>
       )}
       {!bothCollapsed && dockCollapsed && !leftCollapsed && (
-        <div className="topbar3-seg topbar3-left" data-tauri-drag-region="">
+        <div className="topbar3-seg topbar3-left" data-tauri-drag-region="deep">
           {leftToggle}
         </div>
       )}
 
       <div
         className={`topbar3-seg topbar3-center${bothCollapsed ? " topbar3-center-span" : ""}`}
-        data-tauri-drag-region=""
+        data-tauri-drag-region="deep"
       >
         {leftCollapsed && leftToggle}
         <span className="topbar3-title">{displaySessionTitle(currentSession?.title)}</span>

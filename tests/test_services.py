@@ -1562,6 +1562,79 @@ def test_provider_router_reports_capability_status_for_cn_primary():
         assert status["capabilities"][capability]["degraded"] is False
 
 
+class UnsupportedMarketPrimaryProvider:
+    """Mimics Tushare: quotes work, market/sectors/intel are capability gaps."""
+
+    name = "tushare_stub"
+
+    def is_available(self) -> bool:
+        return True
+
+    def get_quote(self, symbol: str) -> PriceSnapshot:
+        return PriceSnapshot(last=100.0, change_pct=0.5, updated_at="now", source=self.name)
+
+    def get_history(self, symbol: str, days: int = 30) -> dict:
+        return {
+            "symbol": symbol,
+            "source": self.name,
+            "updated_at": "now",
+            "degraded": False,
+            "items": [],
+        }
+
+    def search_intel(self, symbol: str, query: str = "") -> dict:
+        raise ProviderError("tushare: intel/search not supported")
+
+    def get_market_review(self) -> dict:
+        raise ProviderError("tushare: market review not supported")
+
+    def get_sectors(self) -> dict:
+        raise ProviderError("tushare: sectors not supported")
+
+
+def test_provider_router_routes_unsupported_capability_without_degraded(monkeypatch):
+    primary = UnsupportedMarketPrimaryProvider()
+    secondary = HealthyCnOnlyPrimaryProvider()
+    router = ProviderRouter(primary=primary)
+    router._provider_for_market = lambda market: primary
+    monkeypatch.setattr(router, "_secondary_providers", lambda market, p: [secondary])
+
+    review = router.get_market_review()
+    assert review["source"] == "akshare"
+    assert review.get("degraded") is False
+
+    sectors = router.get_sectors()
+    assert sectors["source"] == "akshare"
+    assert sectors.get("degraded") is False
+
+    intel = router.search_intel("600519")
+    assert intel["source"] == "akshare"
+    assert intel.get("degraded") is False
+
+    status = router.status().to_dict()
+    assert status["degraded"] is False
+    assert status["capabilities"]["market"]["degraded"] is False
+    assert status["capabilities"]["sectors"]["degraded"] is False
+    assert status["capabilities"]["intel"]["degraded"] is False
+
+
+def test_provider_router_still_marks_degraded_on_real_primary_failure(monkeypatch):
+    primary = RaisingPrimaryProvider()
+    secondary = HealthyCnOnlyPrimaryProvider()
+    router = ProviderRouter(primary=primary)
+    router._provider_for_market = lambda market: primary
+    monkeypatch.setattr(router, "_secondary_providers", lambda market, p: [secondary])
+
+    quote = router.get_quote("600519")
+    assert quote.source == "akshare"
+    assert quote.degraded is True
+    assert "resolved by" in (quote.degraded_reason or "")
+
+    status = router.status().to_dict()
+    assert status["degraded"] is True
+    assert status["capabilities"]["quote"]["degraded"] is True
+
+
 def _make_hk_spot_df():
     import pandas as pd
     return pd.DataFrame([

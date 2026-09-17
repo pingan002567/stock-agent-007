@@ -8,6 +8,8 @@ import {
   createStreamUrl,
   updateSession,
   deleteSession,
+  cancelRun,
+  fetchRunStatus,
   type UploadedFileInfo,
 } from "@/api/copilot";
 import type { CopilotSession, CopilotMessage } from "@/api/client";
@@ -19,6 +21,7 @@ import {
   type HumanInputResponse,
 } from "@/lib/humanInput";
 import { isUsableSessionTitle } from "@/lib/sessionTitle";
+import type { RunLiveness } from "@/lib/chatShell";
 
 // ── Streaming message types ──
 
@@ -213,6 +216,8 @@ function useCopilotChatState() {
   const [sending, setSending] = useState(false);
   const [reasoningText, setReasoningText] = useState<string>("");
   const [streamMessage, setStreamMessage] = useState<StreamMessage | null>(null);
+  /** Backend-owned liveness for working vs stuck dock (heartbeat / progress). */
+  const [streamLiveness, setStreamLiveness] = useState<RunLiveness | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   /** 消息动作「填入输入框」：Composer 消费后清掉 */
   const [composerPrefill, setComposerPrefill] = useState<string | null>(null);
@@ -221,6 +226,7 @@ function useCopilotChatState() {
   // 按会话保活 SSE：切会话/新建对话不断开在途流，只切换视图；Stop/删除才关连接
   const streamsRef = useRef(new Map<string, EventSource>());
   const streamSnapshotsRef = useRef(new Map<string, StreamMessage>());
+  const activeRunIdRef = useRef(new Map<string, string>());
   /** 后台 error 在 snapshot 清掉后仍短暂留在左栏 */
   const stickyActivityRef = useRef<Record<string, SessionActivity>>({});
   const [sessionActivity, setSessionActivity] = useState<Record<string, SessionActivity>>({});
@@ -230,6 +236,24 @@ function useCopilotChatState() {
   const pendingNewRef = useRef(false);
 
   const viewingSession = useCallback((sid: string) => currentSessionIdRef.current === sid, []);
+
+  const noteLive = useCallback((
+    sid: string,
+    patch?: Partial<Pick<RunLiveness, "status" | "phase" | "currentTool" | "alive">>,
+  ) => {
+    setStreamLiveness((prev) => {
+      if (!viewingSession(sid)) return prev;
+      return {
+        lastAt: Date.now(),
+        status: patch?.status ?? prev?.status ?? "running",
+        phase: patch?.phase ?? prev?.phase ?? "llm",
+        currentTool: patch && "currentTool" in patch
+          ? (patch.currentTool ?? null)
+          : (prev?.currentTool ?? null),
+        alive: patch?.alive ?? prev?.alive ?? true,
+      };
+    });
+  }, [viewingSession]);
 
   const flushSessionActivity = useCallback(() => {
     activityFlushTimerRef.current = null;
@@ -281,12 +305,20 @@ function useCopilotChatState() {
   const bindStream = useCallback((sid: string, msg: StreamMessage) => {
     delete stickyActivityRef.current[sid];
     streamSnapshotsRef.current.set(sid, msg);
+    if (msg.runId) activeRunIdRef.current.set(sid, msg.runId);
     // ES 登记前也先点亮全局 busy，避免 bind→open 间隙被当成空闲
     setCopilotStreaming(true);
     if (viewingSession(sid)) {
       setStreamMessage(msg);
       setReasoningText(msg.reasoningText || "");
       setSending(true);
+      setStreamLiveness({
+        lastAt: Date.now(),
+        status: "running",
+        phase: "starting",
+        currentTool: null,
+        alive: true,
+      });
     }
     syncSessionActivity(true);
   }, [viewingSession, setCopilotStreaming, syncSessionActivity]);
@@ -299,10 +331,12 @@ function useCopilotChatState() {
       try { current.close(); } catch { /* empty */ }
     }
     streamSnapshotsRef.current.delete(sid);
+    activeRunIdRef.current.delete(sid);
     syncGlobalStreaming();
     if (viewingSession(sid)) {
       setSending(false);
       setReasoningText("");
+      setStreamLiveness(null);
     }
     syncSessionActivity(true);
     return true;
@@ -564,12 +598,34 @@ function useCopilotChatState() {
       syncGlobalStreaming();
       let settled = false;
 
-      // Named keepalive from the backend. Must be a real EventSource event
-      // (not an SSE comment) so WKWebView does not idle-cut the socket.
-      es.addEventListener("ping", () => {});
+      // Named keepalive + backend liveness (progress). Resets stuck timer without
+      // requiring fingerprint/content change — long tools stay "working".
+      const applyProgressPayload = (raw: string | undefined) => {
+        try {
+          const data = raw ? JSON.parse(raw) : {};
+          const payload = (data?.payload || data || {}) as Record<string, unknown>;
+          noteLive(sid, {
+            status: String(payload.status || "running"),
+            phase: String(payload.phase || "llm"),
+            currentTool: payload.current_tool != null ? String(payload.current_tool) : null,
+            alive: payload.alive !== false,
+          });
+        } catch {
+          noteLive(sid);
+        }
+      };
+      es.addEventListener("ping", (streamEvent: Event) => {
+        const raw = (streamEvent as MessageEvent).data;
+        if (raw && raw !== "{}") applyProgressPayload(raw);
+        else noteLive(sid);
+      });
+      es.addEventListener("progress", (streamEvent: Event) => {
+        applyProgressPayload((streamEvent as MessageEvent).data);
+      });
 
       // 只处理title事件（更新session标题）
       es.addEventListener("title", (streamEvent: Event) => {
+        noteLive(sid, { phase: "llm" });
         try {
           const data = JSON.parse((streamEvent as MessageEvent).data);
           const t = String((data?.payload?.title as string) || "").trim();
@@ -584,6 +640,7 @@ function useCopilotChatState() {
 
       // AI 反问澄清：DeerFlow-native human_input 卡片；下一条消息 / 卡片提交即回答
       es.addEventListener("clarification", (streamEvent: Event) => {
+        noteLive(sid, { status: "waiting_human", phase: "awaiting_human", currentTool: null });
         try {
           const data = JSON.parse((streamEvent as MessageEvent).data);
           const payload = (data?.payload || {}) as Record<string, unknown>;
@@ -601,6 +658,7 @@ function useCopilotChatState() {
 
       // 声明式技能链路：渲染 researcher→valuation→…→report 流水线
       es.addEventListener("skill_trace", (streamEvent: Event) => {
+        noteLive(sid, { phase: "llm" });
         try {
           const data = JSON.parse((streamEvent as MessageEvent).data);
           const items = skillTraceItems((data?.payload as Record<string, unknown>)?.items);
@@ -612,6 +670,7 @@ function useCopilotChatState() {
 
       // 推理过程：实时更新流式气泡的推理文本，并累积完整思维链供展开查看
       es.addEventListener("reasoning", (streamEvent: Event) => {
+        noteLive(sid, { phase: "llm", currentTool: null });
         try {
           const data = JSON.parse((streamEvent as MessageEvent).data);
           const p = (data?.payload || {}) as Record<string, unknown>;
@@ -650,6 +709,7 @@ function useCopilotChatState() {
           const callId = String(p.call_id || `${p.tool}-${Date.now()}`);
           const name = String(p.tool || "tool");
           if (name === "write_todos") {
+            noteLive(sid, { phase: "llm" });
             let args = p.arguments;
             if (typeof args === "string") {
               try { args = JSON.parse(args); } catch { args = {}; }
@@ -660,6 +720,7 @@ function useCopilotChatState() {
             }
             return;
           }
+          noteLive(sid, { phase: "tool", currentTool: name, status: "running" });
           let subagentType: string | undefined;
           let taskDescription: string | undefined;
           let taskPrompt: string | undefined;
@@ -686,6 +747,7 @@ function useCopilotChatState() {
 
       // 工具调用返回：把对应工具卡标记为完成
       es.addEventListener("tool_result", (streamEvent: Event) => {
+        noteLive(sid, { phase: "llm", currentTool: null });
         try {
           const data = JSON.parse((streamEvent as MessageEvent).data);
           const p = (data?.payload || {}) as Record<string, unknown>;
@@ -702,6 +764,7 @@ function useCopilotChatState() {
 
       // 收集partial_answer文本，并实时流式显示
       es.addEventListener("partial_answer", (streamEvent: Event) => {
+        noteLive(sid, { phase: "llm", currentTool: null });
         try {
           const data = JSON.parse((streamEvent as MessageEvent).data);
           const t = (data?.payload?.text as string) || "";
@@ -827,6 +890,7 @@ function useCopilotChatState() {
   }, [
     ensureSession, currentScreen, stock, setStock, loadSessions,
     bindStream, patchStream, releaseStream, syncGlobalStreaming, syncSessionActivity, viewingSession,
+    noteLive,
   ]);
 
   const handleStop = useCallback(() => {
@@ -835,14 +899,55 @@ function useCopilotChatState() {
       setStreamMessage(null);
       setReasoningText("");
       setSending(false);
+      setStreamLiveness(null);
       return;
+    }
+    const runId = activeRunIdRef.current.get(sid)
+      || streamSnapshotsRef.current.get(sid)?.runId
+      || streamMessage?.runId
+      || null;
+    setStreamLiveness((prev) => prev
+      ? { ...prev, status: "cancelling", phase: "finishing", lastAt: Date.now() }
+      : prev);
+    if (runId) {
+      void cancelRun(sid, runId).catch(() => { /* local stop still proceeds */ });
     }
     releaseStream(sid);
     setStreamMessage(null);
     void fetchSessionMessages(sid).then((items) => {
       if (currentSessionIdRef.current === sid) setMessages(items);
     });
-  }, [releaseStream]);
+  }, [releaseStream, streamMessage?.runId]);
+
+  const refreshRunStatus = useCallback(async () => {
+    const sid = currentSessionIdRef.current;
+    if (!sid || !sending) return;
+    const runId = activeRunIdRef.current.get(sid)
+      || streamSnapshotsRef.current.get(sid)?.runId
+      || null;
+    if (!runId) return;
+    try {
+      const status = await fetchRunStatus(sid, runId);
+      if (currentSessionIdRef.current !== sid) return;
+      if (status.alive) {
+        setStreamLiveness({
+          lastAt: Date.now(),
+          status: status.status,
+          phase: status.phase || "llm",
+          currentTool: status.current_tool ?? null,
+          alive: true,
+        });
+        return;
+      }
+      // Run finished while UI still thinks it's sending — hydrate and clear.
+      releaseStream(sid);
+      setStreamMessage(null);
+      const items = await fetchSessionMessages(sid);
+      if (currentSessionIdRef.current === sid) setMessages(items);
+    } catch {
+      /* keep current dock; silence alone will eventually mark stuck */
+    }
+  }, [sending, releaseStream]);
 
   const handleCopy = useCallback(async (msg: CopilotMessage) => {
     try {
@@ -890,6 +995,7 @@ function useCopilotChatState() {
     sending,
     reasoningText,
     streamMessage,
+    streamLiveness,
     sessionActivity,
     copiedId,
     composerPrefill,
@@ -903,6 +1009,7 @@ function useCopilotChatState() {
     handleDeleteSession,
     handleSend,
     handleStop,
+    refreshRunStatus,
     handleCopy,
     handlePrefillComposer,
     clearComposerPrefill,

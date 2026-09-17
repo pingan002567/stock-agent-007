@@ -135,6 +135,28 @@ final class ChatViewModel: ObservableObject {
 
     func handleAppBecameActive() async {
         await recoverInterruptedStreamsAfterRelaunch()
+        await refreshActiveRunStatus()
+    }
+
+    /// When returning to foreground while a turn looks streaming, ask backend if the run is still alive.
+    private func refreshActiveRunStatus() async {
+        guard let sid = currentSession?.sessionId,
+              streamingSessionIds.contains(sid) || streaming.isActive(sessionId: sid),
+              let runId = assistantTurnRunId(sessionId: sid)
+        else { return }
+        do {
+            let status = try await api.fetchRunStatus(sessionId: sid, runId: runId)
+            if status.alive { return }
+            // Run finished while we were backgrounded — hydrate history and clear streaming flags.
+            cancelStream(sessionId: sid, finalizeTurn: false)
+            streamingSessionIds.remove(sid)
+            if let built = try? await reloadRows(sessionId: sid) {
+                rowsBySession[sid] = built
+                rows = built
+            }
+        } catch {
+            // Keep local stream; idle watchdog still owns true silence.
+        }
     }
 
     func openSession(_ session: CopilotSession) async {

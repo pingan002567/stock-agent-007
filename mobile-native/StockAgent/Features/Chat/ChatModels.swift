@@ -268,6 +268,9 @@ enum CopilotStreamParser {
                 ?? stringValue(obj["message"])
                 ?? event.data
             return .error(msg)
+        case "ping", "progress":
+            // Backend liveness heartbeat — ChatStreamingService re-arms idle on any frame.
+            return .ignore
         default:
             break
         }

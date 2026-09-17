@@ -5,7 +5,7 @@ import json
 import os
 import time
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, Optional
 from uuid import uuid4
@@ -85,6 +85,11 @@ def _normalize_message_attachments(raw: list[Any] | None) -> list[dict[str, Any]
     return records
 
 
+# Live run statuses the UI may treat as "still working".
+_ALIVE_RUN_STATUSES = frozenset({"queued", "running", "waiting_human", "cancelling"})
+_UNSET = object()
+
+
 @dataclass
 class CopilotRunState:
     request: CopilotRequest
@@ -94,6 +99,13 @@ class CopilotRunState:
     intent: str
     skill: str
     skill_trace: list[dict[str, Any]]
+    status: str = "queued"
+    phase: str = "starting"
+    current_tool: str | None = None
+    last_event_at: str = field(default_factory=now_iso)
+    last_event_type: str | None = None
+    started_at: str = field(default_factory=now_iso)
+    updated_at: str = field(default_factory=now_iso)
 
 
 class CopilotService:
@@ -122,6 +134,8 @@ class CopilotService:
         self.result_normalizer = result_normalizer
         self.runtime_observer = runtime_observer
         self._runs: Dict[str, CopilotRunState] = {}
+        # Last known snapshot after a run leaves `_runs` (completed / cancelled / failed).
+        self._run_status_cache: Dict[str, dict[str, Any]] = {}
         self._session_states: dict[str, SessionStateData] = {}
         self._cancelled_runs: set[str] = set()
         self.llm_provider_service = None
@@ -466,8 +480,179 @@ class CopilotService:
         )
         if not active:
             return {"status": "not_running", "run_id": run_id}
+        state = self._runs[run_id]
+        self._touch_run(
+            run_id,
+            state,
+            status="cancelling",
+            phase="finishing",
+            event_type="cancel",
+        )
         self._cancelled_runs.add(run_id)
-        return {"status": "cancelling", "run_id": run_id}
+        return {"status": "cancelling", "run_id": run_id, **self.progress_payload(run_id)}
+
+    def get_run_status(self, run_id: str, session_id: str | None = None) -> dict[str, Any]:
+        """Return live (or last-known) run liveness for UI docks / reconnect."""
+        if session_id is not None:
+            self.get_session(session_id)
+        state = self._runs.get(run_id)
+        if state is not None:
+            if session_id is not None and state.session_id != session_id:
+                raise KeyError(run_id)
+            return self._snapshot_run(run_id, state)
+        cached = self._run_status_cache.get(run_id)
+        if cached is not None:
+            if session_id is not None and cached.get("session_id") != session_id:
+                raise KeyError(run_id)
+            return {**cached, "alive": False}
+        if self.has_run(run_id, session_id=session_id):
+            message = self.repo.get_copilot_user_message_by_run_id(run_id)
+            return {
+                "run_id": run_id,
+                "session_id": (message.session_id if message else session_id),
+                "status": "not_running",
+                "phase": "finishing",
+                "current_tool": None,
+                "last_event_at": None,
+                "last_event_type": None,
+                "alive": False,
+            }
+        raise KeyError(run_id)
+
+    def progress_payload(self, run_id: str) -> dict[str, Any]:
+        """SSE heartbeat / progress body for an in-memory (or cached) run."""
+        state = self._runs.get(run_id)
+        if state is not None:
+            return self._snapshot_run(run_id, state)
+        cached = self._run_status_cache.get(run_id)
+        if cached is not None:
+            return {**cached, "alive": False}
+        return {
+            "run_id": run_id,
+            "status": "not_running",
+            "phase": "finishing",
+            "current_tool": None,
+            "alive": False,
+        }
+
+    def _snapshot_run(self, run_id: str, state: CopilotRunState) -> dict[str, Any]:
+        snap = {
+            "run_id": run_id,
+            "session_id": state.session_id,
+            "task_id": state.task_id,
+            "status": state.status,
+            "phase": state.phase,
+            "current_tool": state.current_tool,
+            "last_event_at": state.last_event_at,
+            "last_event_type": state.last_event_type,
+            "started_at": state.started_at,
+            "updated_at": state.updated_at,
+            "alive": state.status in _ALIVE_RUN_STATUSES,
+        }
+        self._run_status_cache[run_id] = snap
+        return snap
+
+    def _touch_run(
+        self,
+        run_id: str,
+        state: CopilotRunState,
+        *,
+        status: str | None = None,
+        phase: str | None = None,
+        current_tool: Any = _UNSET,
+        event_type: str | None = None,
+    ) -> dict[str, Any]:
+        if status is not None:
+            state.status = status
+        if phase is not None:
+            state.phase = phase
+        if current_tool is not _UNSET:
+            state.current_tool = current_tool  # type: ignore[assignment]
+        if event_type is not None:
+            state.last_event_type = event_type
+        ts = now_iso()
+        state.last_event_at = ts
+        state.updated_at = ts
+        return self._snapshot_run(run_id, state)
+
+    def _apply_event_liveness(
+        self,
+        run_id: str,
+        state: CopilotRunState,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> bool:
+        """Update live phase from a stream event. Returns True if phase/tool changed."""
+        prev_phase = state.phase
+        prev_tool = state.current_tool
+        if event_type == "tool_call":
+            tool = str(payload.get("tool") or "") or None
+            self._touch_run(
+                run_id,
+                state,
+                status="running",
+                phase="tool",
+                current_tool=tool,
+                event_type=event_type,
+            )
+        elif event_type == "tool_result":
+            self._touch_run(
+                run_id,
+                state,
+                status="running",
+                phase="llm",
+                current_tool=None,
+                event_type=event_type,
+            )
+        elif event_type == "clarification":
+            self._touch_run(
+                run_id,
+                state,
+                status="waiting_human",
+                phase="awaiting_human",
+                current_tool=None,
+                event_type=event_type,
+            )
+        elif event_type in ("reasoning", "partial_answer", "skill_trace", "title"):
+            self._touch_run(
+                run_id,
+                state,
+                status="running" if state.status != "cancelling" else "cancelling",
+                phase="llm" if state.phase != "tool" else state.phase,
+                event_type=event_type,
+            )
+        elif event_type == "final":
+            self._touch_run(
+                run_id,
+                state,
+                status="completed",
+                phase="finishing",
+                current_tool=None,
+                event_type=event_type,
+            )
+        elif event_type == "error":
+            stage = str(payload.get("stage") or "")
+            if stage == "user_cancel":
+                self._touch_run(
+                    run_id,
+                    state,
+                    status="cancelled",
+                    phase="finishing",
+                    current_tool=None,
+                    event_type=event_type,
+                )
+            else:
+                self._touch_run(
+                    run_id,
+                    state,
+                    status="failed",
+                    phase="finishing",
+                    current_tool=None,
+                    event_type=event_type,
+                )
+        else:
+            self._touch_run(run_id, state, event_type=event_type)
+        return state.phase != prev_phase or state.current_tool != prev_tool
 
     def _is_run_cancelled(self, run_id: str) -> bool:
         return run_id in self._cancelled_runs
@@ -729,6 +914,14 @@ class CopilotService:
         clarification_args_by_call: dict[str, dict[str, Any]] = {}
 
         self._update_task_step(resolved_task_id, "accepted", 20)
+        self._touch_run(
+            run_id,
+            state,
+            status="running",
+            phase="llm",
+            current_tool=None,
+            event_type="stream_start",
+        )
 
         try:
             run_slot = self._resolve_session_slot(state.session_id)
@@ -757,6 +950,12 @@ class CopilotService:
                             state=state,
                             start_time=_start_time,
                         ):
+                            self._apply_event_liveness(
+                                run_id,
+                                state,
+                                cancelled.type,
+                                cancelled.payload if isinstance(cancelled.payload, dict) else {},
+                            )
                             yield cancelled
                         break
                     payload = event["payload"]
@@ -799,6 +998,15 @@ class CopilotService:
                             payload=clarification_payload,
                         )
                         self._persist_stream_event(state, clarification_sse)
+                        if self._apply_event_liveness(
+                            run_id, state, "clarification", clarification_payload or {}
+                        ):
+                            yield SSEEvent(
+                                run_id=run_id,
+                                task_id=resolved_task_id,
+                                type="progress",
+                                payload=self.progress_payload(run_id),
+                            )
                         yield clarification_sse
                     if event["type"] == "final":
                         last_report_result = captured["report"]
@@ -979,6 +1187,13 @@ class CopilotService:
                     # 历史，又会让断流恢复的「已收口」判定（any final_answer）误判。
                     if event["type"] not in ("reasoning", "partial_answer", "skill_trace", "title"):
                         self._persist_stream_event(state, sse_event)
+                    if self._apply_event_liveness(run_id, state, event["type"], payload if isinstance(payload, dict) else {}):
+                        yield SSEEvent(
+                            run_id=run_id,
+                            task_id=resolved_task_id,
+                            type="progress",
+                            payload=self.progress_payload(run_id),
+                        )
                     yield sse_event
                     if event["type"] in ("final", "error"):
                         pass
@@ -1021,6 +1236,33 @@ class CopilotService:
                 runtime_error=str(exc),
                 latency_ms=(time.monotonic() - _start_time) * 1000,
             )
+            self._touch_run(
+                run_id,
+                state,
+                status="failed",
+                phase="finishing",
+                current_tool=None,
+                event_type="error",
+            )
+        # Keep last snapshot for GET status after the in-memory run is gone.
+        if run_id in self._runs:
+            final_state = self._runs[run_id]
+            if final_state.status in _ALIVE_RUN_STATUSES:
+                terminal = (
+                    "cancelled"
+                    if self._is_run_cancelled(run_id)
+                    else "completed"
+                )
+                self._touch_run(
+                    run_id,
+                    final_state,
+                    status=terminal,
+                    phase="finishing",
+                    current_tool=None,
+                    event_type="stream_end",
+                )
+            else:
+                self._snapshot_run(run_id, final_state)
         self._cancelled_runs.discard(run_id)
         self._runs.pop(run_id, None)
 
