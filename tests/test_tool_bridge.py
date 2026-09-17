@@ -46,6 +46,9 @@ def test_tool_bridge_registry_includes_default_tools_and_blocks_real_orders(brid
         "get_backtest_result",
         "get_daily_history",
         "get_industry_context",
+        "list_data_sources",
+        "describe_data_capability",
+        "invoke_data_capability",
         "get_market_structure",
         "refresh_market_data",
         "get_decision_journal_entry",
@@ -917,14 +920,21 @@ def test_tool_bridge_monitor_events_explanation_matches_returned_event(bridge):
 def test_tool_bridge_industry_context_degrades_cleanly_and_computes_percentiles(bridge, monkeypatch):
     """get_industry_context：US 票明确降级提示 web_search；离线成分股失败降级；
     注入假数据时正确计算行业内排名/分位/Top10。"""
+    from backend.stock_domain import industry_tools
+
+    # Force empty network/fallback so "offline" stays degraded under seed data.
+    monkeypatch.setattr(industry_tools, "_boards_from_ths", lambda: [])
+    monkeypatch.setattr(industry_tools, "_boards_from_master", lambda: [])
+    monkeypatch.setattr(industry_tools, "_constituents_from_master", lambda industry: [])
+    industry_tools._BOARDS_CACHE.clear()
+    industry_tools._CONS_CACHE.clear()
+
     us = bridge.execute("get_industry_context", {"symbol": "AAPL"}, AuthorityLevel.A2)["result"]
     assert us["degraded"] is True
     assert "web_search" in us["reason"]
 
     offline = bridge.execute("get_industry_context", {"symbol": "600519"}, AuthorityLevel.A2)["result"]
     assert offline["degraded"] is True
-
-    from backend.stock_domain import industry_tools
 
     fake_cons = [
         {"symbol": "600519", "name": "贵州茅台", "price": 1500.0, "change_pct": 1.0,

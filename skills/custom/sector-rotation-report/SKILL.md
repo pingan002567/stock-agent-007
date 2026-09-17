@@ -7,6 +7,10 @@ allowed-tools:
   - get_stock_context
   - search_stock_intel
   - get_monitor_events
+  - list_data_sources
+  - describe_data_capability
+  - invoke_data_capability
+  - web_search
 ---
 
 # Sector Rotation Report
@@ -18,9 +22,10 @@ allowed-tools:
 整轮工具调用控制在约 **8～12 次**内收口，避免图递归耗尽：
 
 1. **轮动概览（≤3 次）**  
-   - 用户已点名板块：直接用 `get_industry_context(industry=…)` 拉 2～4 个板块快照。  
-   - 未点名：`web_search` 查「今日 A 股行业/概念涨跌幅或资金流向」→ 选出涨跌与资金维度上最值得写的 **2～3 个**板块；再用 `get_industry_context(industry=…)` 校验。  
-   - 不要遍历全部行业；不要为概览拉全市场个股。
+  - 用户已点名板块：直接用 `get_industry_context(industry=…)` 拉 2～4 个板块快照。  
+  - 未点名：`web_search` 查「今日 A 股行业/概念涨跌幅或资金流向」→ 选出涨跌与资金维度上最值得写的 **2～3 个**板块；再用 `get_industry_context(industry=…)` 校验。  
+  - `get_industry_context` 若 `degraded`：`list_data_sources` → `invoke_data_capability(provider="tonghuashun", capability="industry_boards")` 或 `industry_constituents`；仍不足再用 `web_search` 并标精度有限。  
+  - 不要遍历全部行业；不要为概览拉全市场个股。
 
 2. **重点板块深挖（每板块 ≤3 次）**  
    - 对每个重点板块：`get_industry_context`（含 Top 成分）→ 选 **1～2 只**代表性代码。  

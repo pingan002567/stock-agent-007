@@ -34,17 +34,137 @@ def _akshare_primary() -> AkShareMarketDataProvider | None:
     return primary if isinstance(primary, AkShareMarketDataProvider) else None
 
 
+def _boards_from_ths() -> list[dict[str, Any]]:
+    """同花顺行业摘要兜底（东财 ``stock_board_industry_*_em`` 不可用时）。"""
+    primary = _akshare_primary()
+    if primary is None:
+        return []
+    try:
+        ak = primary._ak()
+        frame = ak.stock_board_industry_summary_ths()
+    except Exception as exc:
+        _log.warning("THS industry summary fallback failed: %s", exc)
+        return []
+    from backend.stock_domain.providers import _frame_tail, _safe_float
+
+    rows = _frame_tail(frame, 500)
+    items: list[dict[str, Any]] = []
+    for idx, row in enumerate(rows, start=1):
+        name = str(row.get("板块") or "").strip()
+        if not name:
+            continue
+        items.append({
+            "industry": name,
+            "board_code": "",
+            "rank": _safe_float(row.get("序号")) or float(idx),
+            "change_pct": _safe_float(row.get("涨跌幅")),
+            "turnover_pct": None,
+            "total_market_cap": None,
+            "net_inflow": _safe_float(row.get("净流入")),
+            "source": "ths",
+        })
+    return items
+
+
+def _boards_from_master() -> list[dict[str, Any]]:
+    """主表已回填的 industry 去重列表（无实时涨跌，仅避免 sample 为空）。"""
+    repo = provider_router.repo
+    if repo is None:
+        return []
+    seen: dict[str, None] = {}
+    for stock in repo.list_stock_master(active_only=True):
+        if stock.market != "CN":
+            continue
+        name = (stock.industry or "").strip()
+        if name:
+            seen.setdefault(name, None)
+    return [
+        {
+            "industry": name,
+            "board_code": "",
+            "rank": None,
+            "change_pct": None,
+            "turnover_pct": None,
+            "total_market_cap": None,
+            "source": "stock_master",
+        }
+        for name in sorted(seen)
+    ]
+
+
 def _cached_boards() -> list[dict[str, Any]]:
     hit = _BOARDS_CACHE.get("boards")
     if hit and time.time() - hit[0] < _LIVE_CACHE_TTL:
         return hit[1]
     primary = _akshare_primary()
-    if primary is None:
-        return []
-    boards = primary.fetch_industry_boards()
+    boards: list[dict[str, Any]] = []
+    if primary is not None:
+        boards = primary.fetch_industry_boards()
+    if not boards:
+        boards = _boards_from_ths()
+    if not boards:
+        boards = _boards_from_master()
     if boards:
         _BOARDS_CACHE["boards"] = (time.time(), boards)
     return boards
+
+
+def _constituents_from_master(industry: str) -> list[dict[str, Any]]:
+    """东财成分股不可用时：用主表同行业股票 + 现货报价拼最小成分列表。"""
+    repo = provider_router.repo
+    primary = _akshare_primary()
+    if repo is None or primary is None or not industry:
+        return []
+    members = [
+        s for s in repo.list_stock_master(active_only=True)
+        if s.market == "CN" and (s.industry or "").strip() == industry
+    ]
+    if not members:
+        # 主表可能是东财名、请求是同花顺名（或反过来）：模糊匹配一次
+        all_cn = [s for s in repo.list_stock_master(active_only=True) if s.market == "CN" and s.industry]
+        names = list({(s.industry or "").strip() for s in all_cn})
+        matched = resolve_industry_name(industry, names)
+        if matched and matched != industry:
+            members = [s for s in all_cn if (s.industry or "").strip() == matched]
+    if not members:
+        return []
+
+    from backend.stock_domain.providers import _safe_float
+
+    spot_by_code: dict[str, dict[str, Any]] = {}
+    try:
+        frame = primary._cached(("cn_spot", "all"), ttl_seconds=60, loader=primary._load_cn_spot)
+        from backend.stock_domain.providers import _frame_tail
+
+        for row in _frame_tail(frame, 6000):
+            code = str(row.get("代码") or "").lower().removeprefix("sh").removeprefix("sz").removeprefix("bj")
+            if code:
+                spot_by_code[code] = row
+    except Exception as exc:
+        _log.warning("master-constituents spot lookup failed: %s", exc)
+
+    items: list[dict[str, Any]] = []
+    for stock in members:
+        row = spot_by_code.get(stock.symbol.upper()) or spot_by_code.get(stock.symbol)
+        turnover_amount = _safe_float(row.get("成交额")) if row else None
+        turnover_pct = _safe_float(row.get("换手率")) if row else None
+        cap_est = (
+            turnover_amount / (turnover_pct / 100)
+            if turnover_amount and turnover_pct
+            else None
+        )
+        items.append({
+            "symbol": stock.symbol,
+            "name": stock.name,
+            "price": _safe_float(row.get("最新价")) if row else None,
+            "change_pct": _safe_float(row.get("涨跌幅")) if row else None,
+            "turnover_pct": turnover_pct,
+            "pe": _safe_float(row.get("市盈率-动态") or row.get("市盈率")) if row else None,
+            "pb": _safe_float(row.get("市净率")) if row else None,
+            "cap_est": cap_est,
+            "source": "stock_master+spot",
+        })
+    return items
 
 
 def _cached_constituents(industry: str) -> list[dict[str, Any]]:
@@ -52,9 +172,11 @@ def _cached_constituents(industry: str) -> list[dict[str, Any]]:
     if hit and time.time() - hit[0] < _LIVE_CACHE_TTL:
         return hit[1]
     primary = _akshare_primary()
-    if primary is None:
-        return []
-    rows = primary.fetch_industry_constituents(industry)
+    rows: list[dict[str, Any]] = []
+    if primary is not None:
+        rows = primary.fetch_industry_constituents(industry)
+    if not rows:
+        rows = _constituents_from_master(industry)
     if rows:
         _CONS_CACHE[industry] = (time.time(), rows)
     return rows
@@ -267,6 +389,7 @@ def get_industry_context(
             "total_market_cap": board.get("total_market_cap") if board else None,
             "rank_among_industries": board.get("rank") if board else None,
             "industry_total": len(boards) or None,
+            "net_inflow": board.get("net_inflow") if board else None,
         },
         "valuation": {
             "pe_median": _median([c["pe"] for c in constituents]),
@@ -283,6 +406,18 @@ def get_industry_context(
             )[:10]
         ],
     }
+    # 标注降级来源：东财失败但同花顺/主表兜底成功时下调置信度，勿当正式东财榜单。
+    sources: set[str] = set()
+    if board:
+        sources.add(str(board.get("source") or "eastmoney"))
+    for c in constituents[:5]:
+        sources.add(str(c.get("source") or "eastmoney"))
+    if sources - {"eastmoney"}:
+        result["data_quality"] = {
+            "partial": True,
+            "sources": sorted(sources),
+            "note": "东财行业接口不可用，已用同花顺摘要和/或主表+现货拼装；涨跌幅/成分可能与东财口径不一致。",
+        }
 
     if resolved_symbol:
         target = next((c for c in constituents if c["symbol"] == resolved_symbol), None)

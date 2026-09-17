@@ -79,10 +79,15 @@ def test_product_skills_are_seeded_into_deerflow_user_custom_dir(tmp_path, monke
     assert (dest / "stock-researcher" / "SKILL.md").is_file()
     assert skill_md_path("stock-researcher") == dest / "stock-researcher" / "SKILL.md"
 
+    # Product skills re-sync from seed when content drifts (allowed-tools updates).
     edited = dest / "stock-researcher" / "SKILL.md"
-    edited.write_text(edited.read_text(encoding="utf-8") + "\n<!-- user edit -->\n", encoding="utf-8")
+    seed_text = (REPO_ROOT / "skills" / "custom" / "stock-researcher" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    edited.write_text(seed_text + "\n<!-- user edit -->\n", encoding="utf-8")
     ensure_user_custom_skills()
-    assert "user edit" in edited.read_text(encoding="utf-8")
+    assert "user edit" not in edited.read_text(encoding="utf-8")
+    assert "create_risk_policy" in (dest / "risk-officer" / "SKILL.md").read_text(encoding="utf-8")
 
     storage = UserScopedSkillStorage(DEFAULT_USER_ID, host_path=str(REPO_ROOT / "skills"))
     storage.ensure_custom_skill_is_editable("stock-researcher")
@@ -91,11 +96,24 @@ def test_product_skills_are_seeded_into_deerflow_user_custom_dir(tmp_path, monke
         "---\nname: notes-only\ndescription: scratch\n---\nbody\n",
         encoding="utf-8",
     )
+    ensure_user_custom_skills()
+    assert "scratch" in (dest / "notes-only" / "SKILL.md").read_text(encoding="utf-8")
     names = {skill.name for skill in storage.load_skills()}
     assert "stock-researcher" in names
     assert "notes-only" in names
     assert "sector-rotation-report" in names
 
+
+def test_patch_skill_policy_builtins_keeps_task_and_web_search():
+    from deerflow.skills import tool_policy
+    from backend.agent_runtime.deerflow_config import patch_skill_policy_builtins
+
+    before = set(tool_policy.ALWAYS_AVAILABLE_BUILTIN_TOOL_NAMES)
+    patch_skill_policy_builtins()
+    after = set(tool_policy.ALWAYS_AVAILABLE_BUILTIN_TOOL_NAMES)
+    assert "task" in after
+    assert "web_search" in after
+    assert before <= after
 
 def test_get_available_tools_honors_authority_tool_groups(tmp_path):
     """Native DeerFlow filter: full-open schema includes planner tools; A5 stays out."""

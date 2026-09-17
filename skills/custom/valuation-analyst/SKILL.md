@@ -7,6 +7,10 @@ allowed-tools:
   - get_daily_history
   - get_industry_context
   - get_market_structure
+  - list_data_sources
+  - describe_data_capability
+  - invoke_data_capability
+  - web_search
 ---
 
 # Valuation Analyst

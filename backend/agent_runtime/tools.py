@@ -231,6 +231,30 @@ class IndustryContextInput(BaseModel):
     )
 
 
+class ListDataSourcesInput(BaseModel):
+    pass
+
+
+class DescribeDataCapabilityInput(BaseModel):
+    provider: str | None = Field(
+        default=None,
+        description="数据源 id，如 eastmoney / tonghuashun / tushare；可与 capability 组合",
+    )
+    capability: str | None = Field(
+        default=None,
+        description="能力名：quote/history/financial/industry_boards/industry_constituents/sectors/market_review/intel_search/cyq/moneyflow",
+    )
+
+
+class InvokeDataCapabilityInput(BaseModel):
+    provider: str = Field(description="显式数据源 id，如 tonghuashun、tushare")
+    capability: str = Field(description="能力名，如 industry_boards、quote")
+    params: dict | None = Field(
+        default=None,
+        description="能力参数，如 {\"symbol\":\"600519\"} 或 {\"industry\":\"白酒\"}",
+    )
+
+
 class MonitorRuleUpsertInput(BaseModel):
     rule_id: str | None = Field(
         default=None,
@@ -531,6 +555,23 @@ get_industry_context = _tool(
     "get_industry_context",
     "获取行业竞争格局：行业行情快照、个股在行业内的市值排名与 PE/PB/涨幅分位、Top10 成分股对比。仅覆盖 A 股。",
     IndustryContextInput, AuthorityLevel.A2,
+)
+list_data_sources = _tool(
+    "list_data_sources",
+    "列出可用数据源目录（能力、鉴权方式说明、是否已配置凭证、健康态）。不含密钥。"
+    "快捷工具 degraded 或需跨源时先调本工具，再 describe/invoke。",
+    ListDataSourcesInput, AuthorityLevel.A2,
+)
+describe_data_capability = _tool(
+    "describe_data_capability",
+    "查看某数据源或某能力的参数 schema、返回摘要与局限。provider 与 capability 可单独或组合传入。",
+    DescribeDataCapabilityInput, AuthorityLevel.A2,
+)
+invoke_data_capability = _tool(
+    "invoke_data_capability",
+    "按指定数据源直接调用命名能力（Mode A）。凭证由服务端注入，勿在对话中粘贴 Token。"
+    "例：invoke_data_capability(provider='tonghuashun', capability='industry_boards')。",
+    InvokeDataCapabilityInput, AuthorityLevel.A2,
 )
 get_market_structure = _tool(
     "get_market_structure",

@@ -43,6 +43,8 @@ AVAILABLE_PROVIDERS = [
         "enabled_by_default": True,
         "description": "东方财富公开行情接口（经 AKShare 封装），A 股/港股实时行情、K 线、板块与情报",
         "requirements": "pip install akshare",
+        "auth_method": "none_public",
+        "rate_limit_hint": "≥3s/次，易被掐断",
     },
     {
         "id": "tonghuashun",
@@ -52,6 +54,8 @@ AVAILABLE_PROVIDERS = [
         "enabled_by_default": True,
         "description": "同花顺公开数据接口（经 AKShare 封装），A 股/港股行情、板块与同花顺特色指标",
         "requirements": "pip install akshare",
+        "auth_method": "none_public",
+        "rate_limit_hint": "≥1–3s/次；行业摘要较稳",
     },
     {
         "id": "akshare",
@@ -61,6 +65,8 @@ AVAILABLE_PROVIDERS = [
         "enabled_by_default": True,
         "description": "AKShare 多源聚合：东方财富、新浪、腾讯等，覆盖 A 股/港股行情与情报",
         "requirements": "pip install akshare",
+        "auth_method": "none_public",
+        "rate_limit_hint": "≥3s/次",
     },
     {
         "id": "tickflow",
@@ -70,6 +76,8 @@ AVAILABLE_PROVIDERS = [
         "enabled_by_default": False,
         "description": "A 股 Tick 级实时行情数据，需 TICKFLOW_API_KEY",
         "requirements": "pip install tickflow && set TICKFLOW_API_KEY",
+        "auth_method": "api_key",
+        "rate_limit_hint": "按套餐",
     },
     {
         "id": "tushare",
@@ -83,6 +91,8 @@ AVAILABLE_PROVIDERS = [
             "建议 ≥5000 积分；每日筹码 cyq_perf 约需 10000。"
         ),
         "requirements": "pip install tushare && Token（建议 ≥5000；筹码 ~10000）",
+        "auth_method": "token",
+        "rate_limit_hint": "≈200 次/分钟（免费档）",
     },
     {
         "id": "pytdx",
@@ -92,6 +102,8 @@ AVAILABLE_PROVIDERS = [
         "enabled_by_default": True,
         "description": "通过 pytdx 直连通达信行情服务器，免费，无需 API Key，仅限 A 股",
         "requirements": "pip install pytdx",
+        "auth_method": "none_public",
+        "rate_limit_hint": "本机连接限流",
     },
     {
         "id": "baostock",
@@ -101,6 +113,8 @@ AVAILABLE_PROVIDERS = [
         "enabled_by_default": True,
         "description": "证券宝免费 A 股数据，需 bs.login()，无需 API Key",
         "requirements": "pip install baostock",
+        "auth_method": "session_login",
+        "rate_limit_hint": "低频",
     },
     {
         "id": "yfinance",
@@ -110,6 +124,8 @@ AVAILABLE_PROVIDERS = [
         "enabled_by_default": True,
         "description": "Yahoo Finance 美股实时行情、历史 K 线、财务数据，免费",
         "requirements": "pip install yfinance",
+        "auth_method": "none_public",
+        "rate_limit_hint": "≥2s/次",
     },
     {
         "id": "longbridge",
@@ -119,5 +135,7 @@ AVAILABLE_PROVIDERS = [
         "enabled_by_default": False,
         "description": "长桥证券 OpenAPI 多市场实时行情，需 LONGBRIDGE_APP_KEY / APP_SECRET",
         "requirements": "pip install longbridge && set LONGBRIDGE_APP_KEY / APP_SECRET",
+        "auth_method": "app_key_secret",
+        "rate_limit_hint": "按 OpenAPI 配额",
     },
 ]

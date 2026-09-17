@@ -92,6 +92,7 @@ def _build_model_config() -> dict[str, Any]:
 A2_TOOLS = [
     "get_stock_context", "get_daily_history", "search_stock_intel",
     "get_industry_context", "get_market_structure", "refresh_market_data",
+    "list_data_sources", "describe_data_capability", "invoke_data_capability",
     "add_watchlist_item", "list_watchlist", "remove_watchlist_item",
     "get_monitor_events", "get_monitor_rules", "evaluate_monitor_rules",
     "list_strategies", "get_backtest_result",
@@ -164,14 +165,29 @@ def agent_name_for_authority(level: str | None) -> str:
     return _AUTHORITY_AGENT_NAMES["A2"]
 
 
+def _product_skill_names() -> set[str]:
+    """Skills owned by the workbench seed (``skill_specs.WORKBENCH_SKILLS``)."""
+    try:
+        from backend.agent_runtime.skill_specs import WORKBENCH_SKILLS
+
+        return {name for name, spec in WORKBENCH_SKILLS.items() if spec.is_subagent}
+    except Exception:
+        return set()
+
+
 def ensure_user_custom_skills() -> None:
-    """Copy repo skill packages into DeerFlow's per-user custom directory once.
+    """Copy repo skill packages into DeerFlow's per-user custom directory.
 
     ``skill_manage`` only writes ``users/<id>/skills/custom``. Repo
     ``skills/custom`` is the seed. Once that user directory contains any
     skill, DeerFlow stops loading the repo copies, so every product skill
-    must be seeded or it disappears. An existing ``SKILL.md`` is left alone
-    so later ``skill_manage`` edits survive restart.
+    must be seeded or it disappears.
+
+    Product skills listed in ``WORKBENCH_SKILLS`` are **re-synced from seed**
+    whenever ``SKILL.md`` differs — otherwise shipped ``allowed-tools`` updates
+    (e.g. risk write tools) never reach the runtime policy. User-created skills
+    outside that set are left alone; ``skill_manage`` edits to product skills
+    are overwritten on the next config generate / restart.
     """
     import shutil
 
@@ -185,11 +201,29 @@ def ensure_user_custom_skills() -> None:
         return
     dest_root = get_paths().user_custom_skills_dir(DEFAULT_USER_ID)
     dest_root.mkdir(parents=True, exist_ok=True)
+    product = _product_skill_names()
     for skill_dir in sorted(p for p in seed_root.iterdir() if p.is_dir()):
         if skill_dir.name.startswith(".") or not (skill_dir / "SKILL.md").is_file():
             continue
         dest = dest_root / skill_dir.name
-        if (dest / "SKILL.md").is_file():
+        seed_md = skill_dir / "SKILL.md"
+        dest_md = dest / "SKILL.md"
+        if dest_md.is_file():
+            if skill_dir.name not in product:
+                continue
+            if dest_md.read_text(encoding="utf-8") == seed_md.read_text(encoding="utf-8"):
+                continue
+            # Product skill drifted (or seed gained tools) — replace package files.
+            for src in skill_dir.rglob("*"):
+                rel = src.relative_to(skill_dir)
+                if any(part.startswith(".") for part in rel.parts):
+                    continue
+                target = dest / rel
+                if src.is_dir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, target)
             continue
         for src in skill_dir.rglob("*"):
             rel = src.relative_to(skill_dir)
@@ -203,6 +237,31 @@ def ensure_user_custom_skills() -> None:
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, target)
+
+
+def patch_skill_policy_builtins() -> None:
+    """Keep lead orchestration tools available under active skill policy.
+
+    DeerFlow's ``SkillToolPolicyMiddleware`` intersects tools with the active
+    skill's ``allowed-tools``. ``task`` and ``web_search`` are intentionally
+    outside that set for reviewed skill packages, but once a SKILL.md is loaded
+    into ``skill_context`` the lead loses both — so ``create_risk_policy`` fails
+    *and* ``task(risk-officer)`` cannot recover.
+
+    Extending ``ALWAYS_AVAILABLE_BUILTIN_TOOL_NAMES`` only **preserves** tools
+    already on the request (lead ``tool_groups`` / subagent ``extra_tools``); it
+    does not inject new ones. Subagents still omit ``task`` via
+    ``disallowed_tools``.
+    """
+    try:
+        from deerflow.skills import tool_policy
+    except Exception:
+        return
+    extra = ("task", "web_search")
+    current = set(getattr(tool_policy, "ALWAYS_AVAILABLE_BUILTIN_TOOL_NAMES", ()) or ())
+    merged = frozenset(current | set(extra))
+    if merged != current:
+        tool_policy.ALWAYS_AVAILABLE_BUILTIN_TOOL_NAMES = merged
 
 
 def _repo_soul_text() -> str:
@@ -488,6 +547,7 @@ def generate_config(target_dir: str | Path = "data") -> str:
     # Seed before custom_agents are generated so task() prompts follow
     # skill_manage edits, not the stale repo copy.
     ensure_user_custom_skills()
+    patch_skill_policy_builtins()
 
     target = Path(target_dir)
     target.mkdir(parents=True, exist_ok=True)

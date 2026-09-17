@@ -9,6 +9,10 @@ allowed-tools:
   - refresh_market_data
   - get_industry_context
   - search_stock_intel
+  - list_data_sources
+  - describe_data_capability
+  - invoke_data_capability
+  - web_search
 ---
 
 # Stock Researcher

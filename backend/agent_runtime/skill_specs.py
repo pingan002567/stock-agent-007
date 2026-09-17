@@ -129,10 +129,11 @@ def subagent_config_dicts() -> dict[str, dict]:
         if not spec.is_subagent:
             continue
         description, allowed, body = _read_skill_md(name)
+        tools = list(dict.fromkeys([*allowed, *spec.extra_tools]))
         out[name] = {
             "description": description,
             "system_prompt": body,
-            "tools": [*allowed, *spec.extra_tools],
+            "tools": tools,
             "disallowed_tools": [*_DEFAULT_DISALLOWED, *spec.disallowed_extra],
             "max_turns": spec.max_turns,
             "timeout_seconds": spec.timeout_seconds,
@@ -146,7 +147,7 @@ def skill_registry_specs() -> dict[str, dict]:
     for name, spec in WORKBENCH_SKILLS.items():
         if spec.is_subagent:
             _, allowed, _ = _read_skill_md(name)
-            tools = [*allowed, *spec.extra_tools]
+            tools = list(dict.fromkeys([*allowed, *spec.extra_tools]))
         else:
             tools = list(spec.synthetic_tools)
         out[name] = {

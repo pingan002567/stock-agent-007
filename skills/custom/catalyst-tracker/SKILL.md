@@ -4,6 +4,7 @@ description: 从情报与公告中提炼带时点的催化剂（事件驱动）�
 allowed-tools:
   - search_stock_intel
   - get_stock_context
+  - web_search
 ---
 
 # Catalyst Tracker

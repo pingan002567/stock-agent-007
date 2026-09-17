@@ -142,6 +142,9 @@ class WorkbenchToolBridge:
             "evaluate_policy_risk": self._evaluate_policy_risk,
             "analyze_portfolio_risk": self._analyze_portfolio_risk,
             "get_industry_context": self._get_industry_context,
+            "list_data_sources": self._list_data_sources,
+            "describe_data_capability": self._describe_data_capability,
+            "invoke_data_capability": self._invoke_data_capability,
             "get_market_structure": self._get_market_structure,
             "refresh_market_data": self._refresh_market_data,
             "get_monitor_events": self._get_monitor_events,
@@ -504,6 +507,33 @@ class WorkbenchToolBridge:
                 True,
                 {"symbol": "str?", "industry": "str?"},
                 ["industry_board", "industry_constituents"],
+            ),
+            "list_data_sources": ToolSpec(
+                "list_data_sources",
+                "data-source",
+                AuthorityLevel.A2,
+                "low",
+                True,
+                {},
+                ["capability_catalog"],
+            ),
+            "describe_data_capability": ToolSpec(
+                "describe_data_capability",
+                "data-source",
+                AuthorityLevel.A2,
+                "low",
+                True,
+                {"provider": "str?", "capability": "str?"},
+                ["capability_registry"],
+            ),
+            "invoke_data_capability": ToolSpec(
+                "invoke_data_capability",
+                "data-source",
+                AuthorityLevel.A2,
+                "medium",
+                True,
+                {"provider": "str", "capability": "str", "params": "dict?"},
+                ["capability_invoke", "provider_credentials"],
             ),
             "get_market_structure": ToolSpec(
                 "get_market_structure",
@@ -1053,6 +1083,31 @@ class WorkbenchToolBridge:
         return get_industry_context(
             symbol=arguments.get("symbol"),
             industry=arguments.get("industry"),
+        )
+
+    def _list_data_sources(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from backend.stock_domain.capability_invoke import list_data_sources
+
+        return list_data_sources()
+
+    def _describe_data_capability(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from backend.stock_domain.capability_invoke import describe_data_capability
+
+        return describe_data_capability(
+            provider=arguments.get("provider"),
+            capability=arguments.get("capability"),
+        )
+
+    def _invoke_data_capability(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from backend.stock_domain.capability_invoke import invoke_data_capability
+
+        params = arguments.get("params")
+        if params is not None and not isinstance(params, dict):
+            return {"ok": False, "error": "params must be an object"}
+        return invoke_data_capability(
+            provider=str(arguments.get("provider") or ""),
+            capability=str(arguments.get("capability") or ""),
+            params=params,
         )
 
     def _get_market_structure(self, arguments: dict[str, Any]) -> dict[str, Any]:
