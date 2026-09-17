@@ -36,6 +36,7 @@ allowed-tools:
    - A 股以外一律 web 降级并标注
 5. `search_stock_intel`：最新情报（新闻、公告、研报）→ 提炼**催化剂**
    - 壁垒/护城河/上下游信息优先查本会话**已上传的研报**（grep/read_file），其次 `web_search`
+5.5. 快捷工具 `degraded` 或需换源：与仪表盘**共用** `data_sources`；`list_data_sources` → `invoke_data_capability(provider, capability, params)`（如 tushare 的 `northbound_hold` / `margin_detail` / `lhb` / `share_float`）。禁止索要 Token。
 6. 综合为下方「输出框架」
 
 ## 输出框架（必须按此结构）

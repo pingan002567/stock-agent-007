@@ -280,6 +280,22 @@ def _invoke_moneyflow(provider_id: str, symbol: str) -> dict[str, Any]:
     return {"symbol": symbol, "items": rows[:_MAX_RESULT_ITEMS], "source": provider_id, "count": len(rows)}
 
 
+def _invoke_tushare_structure(provider_id: str, method: str, symbol: str, **kwargs: Any) -> dict[str, Any]:
+    if provider_id != "tushare":
+        raise ValueError(f"{method} is only available via tushare")
+    provider = create_provider(provider_id)
+    fn = getattr(provider, method, None)
+    if not callable(fn):
+        raise ValueError(f"{provider_id} does not support {method}")
+    raw = fn(symbol, **kwargs)
+    if not isinstance(raw, dict):
+        raise ValueError(f"{method} returned unexpected payload")
+    out = dict(raw)
+    out.setdefault("symbol", symbol)
+    out.setdefault("source", f"tushare.{method}")
+    return out
+
+
 def invoke_data_capability(
     provider: str,
     capability: str,
@@ -323,8 +339,8 @@ def invoke_data_capability(
             raw = create_provider(provider_id).get_quote(symbol)
             if write_cache and isinstance(raw, PriceSnapshot):
                 try:
-                    provider_router._mem_cache.set(
-                        ("quote", symbol.upper()), raw, ttl=60.0
+                    provider_router.ingest_quote(
+                        symbol, raw, provider_name=provider_id
                     )
                 except Exception:
                     pass
@@ -354,6 +370,22 @@ def invoke_data_capability(
         elif cap == "moneyflow":
             symbol = str(_require_param(params, "symbol"))
             raw = _invoke_moneyflow(provider_id, symbol)
+        elif cap == "northbound_hold":
+            symbol = str(_require_param(params, "symbol"))
+            raw = _invoke_tushare_structure(provider_id, "fetch_northbound_hold", symbol)
+        elif cap == "margin_detail":
+            symbol = str(_require_param(params, "symbol"))
+            raw = _invoke_tushare_structure(provider_id, "fetch_margin_detail", symbol)
+        elif cap == "lhb":
+            symbol = str(_require_param(params, "symbol"))
+            raw = _invoke_tushare_structure(
+                provider_id, "fetch_lhb", symbol, lookback_days=20, limit=5
+            )
+        elif cap == "share_float":
+            symbol = str(_require_param(params, "symbol"))
+            raw = _invoke_tushare_structure(
+                provider_id, "fetch_share_float", symbol, limit=10
+            )
         else:
             return {"ok": False, "error": f"capability not implemented: {cap}"}
 

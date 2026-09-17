@@ -231,7 +231,7 @@ const TAB_META: Record<SettingTab, { title: string; desc: string }> = {
   "agent-skills": { title: "技能", desc: "控制 AI 可委派的子代理技能开关。" },
   "agent-memory": { title: "记忆", desc: "AI 长期记住的用户事实，可纠偏或清空。" },
   "agent-mcp": { title: "MCP", desc: "无代码接入外部数据源与工具（保存后下一轮对话生效）。" },
-  data: { title: "数据源", desc: "A 股 / 港股 / 美股的行情 provider 与实时分发状态。" },
+  data: { title: "数据源", desc: "本配置同时供系统仪表盘（自选/持仓/盯盘）与对话 Agent 使用；启停与凭证只维护一处。" },
   intel: { title: "情报", desc: "新闻搜索、舆情分析 provider 与 API Key。" },
   trade: { title: "交易", desc: "V1 交易护栏（只读）与纸上交易模式。" },
   risk: { title: "风控", desc: "单票上限、行业集中度、冷却期等可编辑策略规则。" },
@@ -902,7 +902,7 @@ function MarketDataTab({
   return (
     <div className="settings-stack">
       <MarketRefreshCard value={marketRefresh} onSave={onSaveMarketRefresh} saving={savingMarketRefresh} />
-      <SectionCard title="数据源目录" description="仅已激活且配置完整的数据源可用于行情；免费源只需开关，付费源需填写 API 凭证">
+      <SectionCard title="数据源目录" description="本配置同时供系统仪表盘与对话 Agent；仅已激活且配置完整的数据源可用。免费源只需开关，付费源需填写 API 凭证">
         <div className="page-stack" style={{ gap: 10 }}>
           {availableProviders.map((provider) => {
             const enabled = localConfig.provider_states?.[provider.id]?.enabled

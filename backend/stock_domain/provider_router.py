@@ -299,6 +299,34 @@ class ProviderRouter:
             capabilities=capabilities,
         )
 
+    def ingest_quote(
+        self,
+        symbol: str,
+        snapshot: PriceSnapshot,
+        *,
+        provider_name: str = "",
+    ) -> None:
+        """Mode A → Mode B cache bridge: same key shape as get_quote.
+
+        Skips degraded snapshots. Writes mem (TTL=_CACHE_TTL['quote']) and SQLite.
+        Failures are swallowed by the caller; this method raises only on bad types.
+        """
+        if not isinstance(snapshot, PriceSnapshot):
+            return
+        if snapshot.degraded:
+            return
+        normalized = normalize_symbol(symbol)
+        if not normalized:
+            return
+        ck = self._cache_key("quote", normalized)
+        self._mem_cache.set(ck, snapshot, ttl=_CACHE_TTL["quote"])
+        self._persist_result(
+            "quote",
+            snapshot,
+            symbol=normalized,
+            provider_name=provider_name or str(snapshot.source or ""),
+        )
+
     def get_quote(self, symbol: str, *, force: bool = False) -> PriceSnapshot:
         normalized = normalize_symbol(symbol)
         ck = self._cache_key("quote", normalized)

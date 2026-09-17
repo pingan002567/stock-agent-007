@@ -1,6 +1,17 @@
 # 数据分层与缓存策略
 
-> 项目: stock-agent-001 | 日期: 2026-06-07
+> 项目: stock-agent-007  
+> 注：内存/SQLite TTL 以 `backend/stock_domain/provider_router.py` 的 `_CACHE_TTL` / `_SQLITE_CACHE_TTL` 为准。  
+> 双通道（Mode A/B）与写回规则见 [`DUAL_DATA_CHANNELS.md`](./DUAL_DATA_CHANNELS.md)。
+
+---
+
+## 0. 与双通道的关系
+
+- **Mode B**（仪表盘）：读 mem → SQLite → 上游；成功后写回 mem + SQLite。
+- **Mode A**（Agent `invoke_data_capability`）：仅非 degraded 的 `quote` 经 `ingest_quote` 写入与 Mode B 相同的 key（`quote:{SYMBOL}`）；结构/历史类不写回。
+
+当前代码中的内存 TTL 约：quote 60s、history 600s、intel 600s、market/sectors 300s、financial 3600s。
 
 ---
 

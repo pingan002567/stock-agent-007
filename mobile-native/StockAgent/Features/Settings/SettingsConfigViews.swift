@@ -165,7 +165,7 @@ struct DataSourcesSettingsView: View {
             } header: {
                 Text("数据源")
             } footer: {
-                Text("免费源只需开关。付费源需填写凭证后保存；凭证写入服务端档案，不会明文回显到其它设备日志。")
+                Text("本配置同时供系统仪表盘（自选/持仓/盯盘）与对话 Agent；启停与凭证只维护一处。免费源只需开关。付费源需填写凭证后保存；凭证写入服务端档案，不会明文回显。市场主源可在桌面设置中修改。")
             }
 
             if needsCredentialSave {
