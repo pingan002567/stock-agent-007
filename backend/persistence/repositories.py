@@ -29,6 +29,7 @@ from backend.schemas import (
     ReportTemplate,
     RebalanceDraft,
     RiskPolicy,
+    RiskPolicyRules,
     StockDaily,
     StockFinancial,
     StockMaster,
@@ -36,6 +37,7 @@ from backend.schemas import (
     StrategySpec,
     ToolExecution,
     WatchlistItem,
+    default_capital_tiers,
     model_to_dict,
     now_iso,
 )
@@ -73,10 +75,21 @@ class WorkbenchRepository(
                 RiskPolicy(
                     policy_id="default-conservative",
                     name="Default Conservative",
-                    description="默认保守型风险偏好；仅影响研究、提醒、回测与拟单草案。",
+                    description="默认保守型风险偏好：资金分层 + ETF 独立上限 + 单票亏损约束；仅影响研究、提醒、回测与拟单草案。",
+                    rules=RiskPolicyRules(
+                        single_position_max_weight_pct=15,
+                        single_position_warning_weight_pct=12,
+                        sector_max_weight_pct=35,
+                        min_holdings_count=7,
+                        etf_max_weight_pct=100,
+                        single_position_max_loss_pct_of_nav=3,
+                        capital_tiers=default_capital_tiers(),
+                    ),
                 )
             )
             self.activate_risk_policy(policy.policy_id or "default-conservative")
+        else:
+            self._soft_merge_default_risk_tiers()
         if not self.list_strategy_specs():
             self.save_strategy_spec(
                 StrategySpec(
@@ -133,8 +146,55 @@ class WorkbenchRepository(
                     sector="大型科技",
                     aliases=["apple", "苹果", "aapl"],
                 ),
+                StockMaster(
+                    symbol="510300",
+                    name="沪深300ETF",
+                    market="CN",
+                    industry="ETF",
+                    sector="宽基指数 / ETF",
+                    aliases=["510300", "沪深300"],
+                    instrument_type="etf",
+                ),
+                StockMaster(
+                    symbol="510500",
+                    name="中证500ETF",
+                    market="CN",
+                    industry="ETF",
+                    sector="宽基指数 / ETF",
+                    aliases=["510500", "中证500"],
+                    instrument_type="etf",
+                ),
+                StockMaster(
+                    symbol="512880",
+                    name="证券ETF",
+                    market="CN",
+                    industry="ETF",
+                    sector="行业主题 / ETF",
+                    aliases=["512880", "证券ETF"],
+                    instrument_type="etf",
+                ),
+                StockMaster(
+                    symbol="512800",
+                    name="银行ETF",
+                    market="CN",
+                    industry="ETF",
+                    sector="行业主题 / ETF",
+                    aliases=["512800", "银行ETF"],
+                    instrument_type="etf",
+                ),
+                StockMaster(
+                    symbol="SPY",
+                    name="SPDR S&P 500 ETF",
+                    market="US",
+                    industry="ETF",
+                    sector="美股宽基 / ETF",
+                    aliases=["SPY", "标普500"],
+                    instrument_type="etf",
+                ),
             ]:
                 self.upsert_stock_master(item)
+        self._ensure_etf_master_rows()
+
         if not self.list_monitor_rules():
             seed_rules: list[MonitorRule] = [
                 MonitorRule(
@@ -186,6 +246,105 @@ class WorkbenchRepository(
         if not self.get_monitor_status():
             self.save_monitor_status(MonitorStatus(status="paused", auto_start=False))
         self._normalize_seed_concentration_strategy()
+
+    def _soft_merge_default_risk_tiers(self) -> None:
+        """已有 default-conservative 若缺 capital_tiers，补上出厂分层（不强制覆盖用户改过的策略）。"""
+        policy = self.get_risk_policy("default-conservative")
+        if not policy:
+            return
+        raw = model_to_dict(policy.rules) if policy.rules else {}
+        # 仅当 payload 里原本没有 capital_tiers 键时合并（Pydantic 缺省会填好，需看 DB 原文）
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT payload FROM risk_policy WHERE policy_id = ?",
+                ("default-conservative",),
+            ).fetchone()
+        if not row:
+            return
+        from backend.persistence.repo_base import _loads
+
+        payload = _loads(row["payload"])
+        rules = payload.get("rules") or {}
+        if "capital_tiers" in rules and rules.get("capital_tiers") is not None:
+            return
+        if policy.version > 1:
+            # 用户曾编辑过：仍补缺字段，但不改 base 15/12/35
+            pass
+        merged = RiskPolicyRules(
+            **{
+                **raw,
+                "capital_tiers": default_capital_tiers(),
+                "etf_max_weight_pct": rules.get("etf_max_weight_pct", 100),
+                "single_position_max_loss_pct_of_nav": rules.get(
+                    "single_position_max_loss_pct_of_nav", 3
+                ),
+                "min_holdings_count": rules.get("min_holdings_count", 7),
+            }
+        )
+        updated = policy.model_copy(
+            update={
+                "rules": merged,
+                "updated_at": now_iso(),
+                "description": policy.description
+                or "默认保守型风险偏好：资金分层 + ETF 独立上限 + 单票亏损约束；仅影响研究、提醒、回测与拟单草案。",
+            }
+        )
+        self.save_risk_policy(updated)
+
+    def _ensure_etf_master_rows(self) -> None:
+        seeds = [
+            StockMaster(
+                symbol="510300",
+                name="沪深300ETF",
+                market="CN",
+                industry="ETF",
+                sector="宽基指数 / ETF",
+                aliases=["510300", "沪深300"],
+                instrument_type="etf",
+            ),
+            StockMaster(
+                symbol="510500",
+                name="中证500ETF",
+                market="CN",
+                industry="ETF",
+                sector="宽基指数 / ETF",
+                aliases=["510500", "中证500"],
+                instrument_type="etf",
+            ),
+            StockMaster(
+                symbol="512880",
+                name="证券ETF",
+                market="CN",
+                industry="ETF",
+                sector="行业主题 / ETF",
+                aliases=["512880", "证券ETF"],
+                instrument_type="etf",
+            ),
+            StockMaster(
+                symbol="512800",
+                name="银行ETF",
+                market="CN",
+                industry="ETF",
+                sector="行业主题 / ETF",
+                aliases=["512800", "银行ETF"],
+                instrument_type="etf",
+            ),
+        ]
+        for item in seeds:
+            existing = self.get_stock_master(item.symbol)
+            if existing is None:
+                self.upsert_stock_master(item)
+            elif (existing.instrument_type or "stock") == "stock":
+                self.upsert_stock_master(
+                    existing.model_copy(
+                        update={
+                            "instrument_type": "etf",
+                            "industry": existing.industry or "ETF",
+                            "sector": existing.sector or item.sector,
+                            "updated_at": now_iso(),
+                        }
+                    )
+                )
 
     def seed_demo_portfolio(self) -> None:
         """Test-only sample book. Production startup never calls this."""

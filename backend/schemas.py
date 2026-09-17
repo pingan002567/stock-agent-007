@@ -256,6 +256,55 @@ class AIRunEvaluationResult(BaseModel):
     notes: List[str] = Field(default_factory=list)
 
 
+class CapitalTierRule(BaseModel):
+    """资金分层：max_nav 为该档上限（不含）；None 表示无穷大。"""
+
+    max_nav: Optional[float] = None
+    single_position_max_weight_pct: float
+    single_position_warning_weight_pct: float
+    sector_max_weight_pct: float
+    min_holdings_count: int = 1
+
+    @model_validator(mode="after")
+    def validate_tier(self) -> "CapitalTierRule":
+        if self.max_nav is not None and self.max_nav <= 0:
+            raise ValueError("max_nav must be greater than 0 when set")
+        if (
+            not 0
+            < self.single_position_warning_weight_pct
+            <= self.single_position_max_weight_pct
+            <= 100
+        ):
+            raise ValueError(
+                "tier warning/max weights must satisfy 0 < warning <= max <= 100"
+            )
+        if not 0 < self.sector_max_weight_pct <= 100:
+            raise ValueError("tier sector_max_weight_pct must satisfy 0 < value <= 100")
+        if self.min_holdings_count < 1:
+            raise ValueError("min_holdings_count must be >= 1")
+        return self
+
+
+def default_capital_tiers() -> List["CapitalTierRule"]:
+    """出厂三档：<1万 / 1–10万；≥10万走 RiskPolicyRules 基线字段。"""
+    return [
+        CapitalTierRule(
+            max_nav=10_000,
+            single_position_max_weight_pct=50,
+            single_position_warning_weight_pct=40,
+            sector_max_weight_pct=80,
+            min_holdings_count=3,
+        ),
+        CapitalTierRule(
+            max_nav=100_000,
+            single_position_max_weight_pct=25,
+            single_position_warning_weight_pct=20,
+            sector_max_weight_pct=50,
+            min_holdings_count=4,
+        ),
+    ]
+
+
 class RiskPolicyRules(BaseModel):
     single_position_max_weight_pct: float = 15
     single_position_warning_weight_pct: float = 12
@@ -263,6 +312,13 @@ class RiskPolicyRules(BaseModel):
     draft_valid_hours: int = 24
     rebalance_min_delta_pct: float = 2.0
     monitor_default_cooldown_seconds: int = 3600
+    # ≥10万层兜底最少持仓；resolve 时被 capital_tiers 覆盖
+    min_holdings_count: int = 7
+    # ETF 用独立上限替代股票单票上限
+    etf_max_weight_pct: float = 100
+    # 单票浮亏金额 / NAV 上限（%）
+    single_position_max_loss_pct_of_nav: float = 3
+    capital_tiers: List[CapitalTierRule] = Field(default_factory=default_capital_tiers)
 
     @model_validator(mode="after")
     def validate_thresholds(self) -> "RiskPolicyRules":
@@ -289,7 +345,29 @@ class RiskPolicyRules(BaseModel):
             raise ValueError(
                 "monitor_default_cooldown_seconds must be greater than or equal to 0"
             )
+        if self.min_holdings_count < 1:
+            raise ValueError("min_holdings_count must be >= 1")
+        if not 0 < self.etf_max_weight_pct <= 100:
+            raise ValueError("etf_max_weight_pct must satisfy 0 < value <= 100")
+        if self.single_position_max_loss_pct_of_nav < 0:
+            raise ValueError("single_position_max_loss_pct_of_nav must be >= 0")
         return self
+
+
+class EffectiveRiskRules(BaseModel):
+    """按组合 NAV 解析后的有效阈值（供分析/拟单共用）。"""
+
+    single_position_max_weight_pct: float
+    single_position_warning_weight_pct: float
+    sector_max_weight_pct: float
+    min_holdings_count: int
+    etf_max_weight_pct: float
+    single_position_max_loss_pct_of_nav: float
+    draft_valid_hours: int
+    rebalance_min_delta_pct: float
+    monitor_default_cooldown_seconds: int
+    capital_tier_label: str = "base"
+    portfolio_nav: float = 0.0
 
 
 class RiskPolicyRef(BaseModel):
@@ -847,6 +925,8 @@ class StockMaster(BaseModel):
     industry: str = ""
     sector: str = ""
     aliases: List[str] = Field(default_factory=list)
+    # stock | etf | fund | other
+    instrument_type: str = "stock"
     is_active: bool = True
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)

@@ -257,7 +257,9 @@ def test_pre_trade_review_service_passes_and_paper_trading_fills_without_touchin
     services.rebalance_draft_service.confirm(draft.draft_id, RebalanceDraftDecisionNoteRequest(note="ready"))
 
     review = services.pre_trade_review_service.create(draft_id=draft.draft_id, strict_status=True)
-    assert review.status == PreTradeReviewStatus.PASSED
+    # 出厂 demo 仅 3 只持仓，≥10万层要求最少 7 只 → 可能 WARNING，但不能 BLOCKED
+    assert review.status in (PreTradeReviewStatus.PASSED, PreTradeReviewStatus.WARNING)
+    assert not review.blocker_codes
     assert review.execution_guard == CANONICAL_EXECUTION_GUARD
 
     entry_after_review = services.repo.get_decision_journal_entry_by_decision_id(draft.decision_id)

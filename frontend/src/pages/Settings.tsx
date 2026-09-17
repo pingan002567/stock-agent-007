@@ -265,10 +265,21 @@ function SectionCard({ title, subtitle, description, icon, children }: {
 
 /* ---------- Risk Policy types ---------- */
 
+interface CapitalTierRule {
+  max_nav: number | null;
+  single_position_max_weight_pct: number;
+  single_position_warning_weight_pct: number;
+  sector_max_weight_pct: number;
+  min_holdings_count: number;
+}
 interface RiskPolicyRules {
   single_position_max_weight_pct: number; single_position_warning_weight_pct: number;
   sector_max_weight_pct: number; draft_valid_hours: number;
   rebalance_min_delta_pct: number; monitor_default_cooldown_seconds: number;
+  min_holdings_count: number;
+  etf_max_weight_pct: number;
+  single_position_max_loss_pct_of_nav: number;
+  capital_tiers: CapitalTierRule[];
 }
 interface RiskPolicy {
   policy_id: string; name: string; description: string;
@@ -277,23 +288,44 @@ interface RiskPolicy {
 }
 interface RiskPolicyFormState { name: string; description: string; rules: RiskPolicyRules; }
 
+const DEFAULT_TIERS: CapitalTierRule[] = [
+  { max_nav: 10000, single_position_max_weight_pct: 50, single_position_warning_weight_pct: 40, sector_max_weight_pct: 80, min_holdings_count: 3 },
+  { max_nav: 100000, single_position_max_weight_pct: 25, single_position_warning_weight_pct: 20, sector_max_weight_pct: 50, min_holdings_count: 4 },
+];
+
 const DEFAULT_RULES: RiskPolicyRules = {
   single_position_max_weight_pct: 15, single_position_warning_weight_pct: 12,
   sector_max_weight_pct: 35, draft_valid_hours: 24,
   rebalance_min_delta_pct: 2.0, monitor_default_cooldown_seconds: 3600,
+  min_holdings_count: 7, etf_max_weight_pct: 100, single_position_max_loss_pct_of_nav: 3,
+  capital_tiers: DEFAULT_TIERS.map((t) => ({ ...t })),
 };
 
 function formatRules(rules?: Partial<RiskPolicyRules>) {
   if (!rules) return "-";
-  return `单票上限 ${rules.single_position_max_weight_pct ?? "-"}% · 预警 ${rules.single_position_warning_weight_pct ?? "-"}% · 行业上限 ${rules.sector_max_weight_pct ?? "-"}% · 草案有效 ${rules.draft_valid_hours ?? "-"}h · 最小调仓 ${rules.rebalance_min_delta_pct ?? "-"}% · 盯盘冷却 ${rules.monitor_default_cooldown_seconds ?? "-"}s`;
+  const tiers = rules.capital_tiers?.length ?? 0;
+  return `单票上限 ${rules.single_position_max_weight_pct ?? "-"}% · 预警 ${rules.single_position_warning_weight_pct ?? "-"}% · 行业上限 ${rules.sector_max_weight_pct ?? "-"}% · ETF ${rules.etf_max_weight_pct ?? "-"}% · 亏损 ${rules.single_position_max_loss_pct_of_nav ?? "-"}% NAV · 分层 ${tiers} 档 · 草案 ${rules.draft_valid_hours ?? "-"}h`;
 }
 
 function PolicyForm({ title, submitLabel, initial, saving, onSubmit, onCancel }: {
   title: string; submitLabel: string; initial: RiskPolicyFormState;
   saving: boolean; onSubmit: (v: RiskPolicyFormState) => Promise<void>; onCancel: () => void;
 }) {
-  const [form, setForm] = useState<RiskPolicyFormState>(initial);
+  const [form, setForm] = useState<RiskPolicyFormState>(() => ({
+    ...initial,
+    rules: {
+      ...DEFAULT_RULES,
+      ...initial.rules,
+      capital_tiers: (initial.rules.capital_tiers?.length ? initial.rules.capital_tiers : DEFAULT_TIERS).map((t) => ({ ...t })),
+    },
+  }));
   const upd = (k: keyof RiskPolicyRules, v: number) => setForm((p) => ({ ...p, rules: { ...p.rules, [k]: v } }));
+  const updTier = (idx: number, key: keyof CapitalTierRule, value: number | null) => {
+    setForm((p) => {
+      const tiers = p.rules.capital_tiers.map((t, i) => (i === idx ? { ...t, [key]: value } : t));
+      return { ...p, rules: { ...p.rules, capital_tiers: tiers } };
+    });
+  };
   return (
     <div className="panel" style={{ marginTop: 10 }}>
       <div className="head"><span className="title">{title}</span></div>
@@ -306,11 +338,48 @@ function PolicyForm({ title, submitLabel, initial, saving, onSubmit, onCancel }:
             <input value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} />
           </label>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
-            {([["单只上限 (%)", "single_position_max_weight_pct"], ["预警阈值 (%)", "single_position_warning_weight_pct"], ["行业上限 (%)", "sector_max_weight_pct"], ["草案有效 (h)", "draft_valid_hours"], ["最小调仓差 (%)", "rebalance_min_delta_pct"], ["盯盘冷却 (s)", "monitor_default_cooldown_seconds"]] as const).map(([label, key]) => (
+            {([
+              ["单只上限·≥10万 (%)", "single_position_max_weight_pct"],
+              ["预警阈值·≥10万 (%)", "single_position_warning_weight_pct"],
+              ["行业上限·≥10万 (%)", "sector_max_weight_pct"],
+              ["最少持仓·≥10万", "min_holdings_count"],
+              ["ETF 上限 (%)", "etf_max_weight_pct"],
+              ["单票最大亏损 (% NAV)", "single_position_max_loss_pct_of_nav"],
+              ["草案有效 (h)", "draft_valid_hours"],
+              ["最小调仓差 (%)", "rebalance_min_delta_pct"],
+              ["盯盘冷却 (s)", "monitor_default_cooldown_seconds"],
+            ] as const).map(([label, key]) => (
               <label key={key} className="page-stack" style={{ gap: 4 }}>
                 <span className="muted" style={{ fontSize: 12 }}>{label}</span>
-                <input type="number" step={key === "rebalance_min_delta_pct" ? "0.1" : "1"} value={form.rules[key]} onChange={(e) => upd(key, Number(e.target.value))} required />
+                <input type="number" step={key === "rebalance_min_delta_pct" || key === "single_position_max_loss_pct_of_nav" ? "0.1" : "1"} value={form.rules[key]} onChange={(e) => upd(key, Number(e.target.value))} required />
               </label>
+            ))}
+          </div>
+          <div className="page-stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12 }}>资金分层（按组合市值选档；上限不含）</span>
+            {form.rules.capital_tiers.map((tier, idx) => (
+              <div key={idx} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8, padding: 8, border: "1px solid var(--line)", borderRadius: 8 }}>
+                <label className="page-stack" style={{ gap: 2 }}>
+                  <span className="muted" style={{ fontSize: 11 }}>NAV 上限</span>
+                  <input type="number" value={tier.max_nav ?? ""} onChange={(e) => updTier(idx, "max_nav", e.target.value === "" ? null : Number(e.target.value))} />
+                </label>
+                <label className="page-stack" style={{ gap: 2 }}>
+                  <span className="muted" style={{ fontSize: 11 }}>单票上限 %</span>
+                  <input type="number" value={tier.single_position_max_weight_pct} onChange={(e) => updTier(idx, "single_position_max_weight_pct", Number(e.target.value))} />
+                </label>
+                <label className="page-stack" style={{ gap: 2 }}>
+                  <span className="muted" style={{ fontSize: 11 }}>预警 %</span>
+                  <input type="number" value={tier.single_position_warning_weight_pct} onChange={(e) => updTier(idx, "single_position_warning_weight_pct", Number(e.target.value))} />
+                </label>
+                <label className="page-stack" style={{ gap: 2 }}>
+                  <span className="muted" style={{ fontSize: 11 }}>行业 %</span>
+                  <input type="number" value={tier.sector_max_weight_pct} onChange={(e) => updTier(idx, "sector_max_weight_pct", Number(e.target.value))} />
+                </label>
+                <label className="page-stack" style={{ gap: 2 }}>
+                  <span className="muted" style={{ fontSize: 11 }}>最少持仓</span>
+                  <input type="number" value={tier.min_holdings_count} onChange={(e) => updTier(idx, "min_holdings_count", Number(e.target.value))} />
+                </label>
+              </div>
             ))}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
@@ -1170,7 +1239,7 @@ function RiskTab({
   deletePolicy: (p: RiskPolicy) => Promise<void>;
 }) {
   return (
-    <SectionCard title="风控策略" description="单票上限、行业集中度、冷却期等规则；同时仅一条策略生效">
+    <SectionCard title="风控策略" description="资金分层、单票/行业上限、ETF 独立上限与单票亏损约束；同时仅一条策略生效">
       {showCreateForm ? (
         <div style={{ marginBottom: 10 }}>
           <PolicyForm title="新建" submitLabel="创建" initial={{ name: "", description: "", rules: { ...DEFAULT_RULES } }}

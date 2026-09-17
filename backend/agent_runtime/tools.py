@@ -257,6 +257,68 @@ class MonitorRuleDeleteInput(BaseModel):
     rule_id: str = Field(description="要删除的规则ID")
 
 
+class CapitalTierPatchInput(BaseModel):
+    max_nav: float | None = Field(default=None, description="该档 NAV 上限（不含）；不传保留")
+    single_position_max_weight_pct: float | None = Field(default=None, description="单票上限 %")
+    single_position_warning_weight_pct: float | None = Field(default=None, description="单票预警 %")
+    sector_max_weight_pct: float | None = Field(default=None, description="行业上限 %")
+    min_holdings_count: int | None = Field(default=None, description="最少持仓只数")
+
+
+class RiskPolicyUpdateInput(BaseModel):
+    policy_id: str | None = Field(
+        default=None,
+        description="要修改的策略 ID；不传则修改当前生效策略（通常是 default-conservative）",
+    )
+    name: str | None = Field(default=None, description="策略名称")
+    description: str | None = Field(default=None, description="策略描述")
+    single_position_max_weight_pct: float | None = Field(
+        default=None, description="≥10万档单票上限 %（基线字段）"
+    )
+    single_position_warning_weight_pct: float | None = Field(
+        default=None, description="≥10万档单票预警 %"
+    )
+    sector_max_weight_pct: float | None = Field(default=None, description="≥10万档行业上限 %")
+    min_holdings_count: int | None = Field(default=None, description="≥10万档最少持仓只数")
+    etf_max_weight_pct: float | None = Field(default=None, description="ETF 独立仓位上限 %")
+    single_position_max_loss_pct_of_nav: float | None = Field(
+        default=None, description="单票浮亏占 NAV 上限 %"
+    )
+    draft_valid_hours: int | None = Field(default=None, description="调仓草案有效小时数")
+    rebalance_min_delta_pct: float | None = Field(default=None, description="最小调仓变动 %")
+    monitor_default_cooldown_seconds: int | None = Field(
+        default=None, description="盯盘规则默认冷却秒数"
+    )
+    capital_tiers: list[CapitalTierPatchInput] | None = Field(
+        default=None,
+        description="完整替换资金分层表（按 max_nav 升序）；不传则保留原分层",
+    )
+    activate: bool = Field(default=False, description="更新后是否设为当前生效策略")
+
+
+class RiskPolicyCreateInput(BaseModel):
+    name: str = Field(description="新策略名称，如「均衡型」")
+    description: str | None = Field(default="", description="策略描述")
+    policy_id: str | None = Field(default=None, description="可选自定义 ID；默认由名称生成")
+    single_position_max_weight_pct: float | None = Field(default=None, description="≥10万档单票上限 %")
+    single_position_warning_weight_pct: float | None = Field(default=None, description="≥10万档预警 %")
+    sector_max_weight_pct: float | None = Field(default=None, description="≥10万档行业上限 %")
+    min_holdings_count: int | None = Field(default=None, description="≥10万档最少持仓")
+    etf_max_weight_pct: float | None = Field(default=None, description="ETF 上限 %")
+    single_position_max_loss_pct_of_nav: float | None = Field(default=None, description="单票最大亏损 %NAV")
+    draft_valid_hours: int | None = Field(default=None, description="草案有效小时")
+    rebalance_min_delta_pct: float | None = Field(default=None, description="最小调仓 %")
+    monitor_default_cooldown_seconds: int | None = Field(default=None, description="盯盘冷却秒")
+    capital_tiers: list[CapitalTierPatchInput] | None = Field(
+        default=None, description="资金分层；不传则用出厂默认三档"
+    )
+    activate: bool = Field(default=False, description="创建后是否立即设为生效策略")
+
+
+class RiskPolicyActivateInput(BaseModel):
+    policy_id: str = Field(description="要激活的风险策略 ID")
+
+
 class StrategyListInput(BaseModel):
     enabled: bool | None = Field(default=None, description="是否只返回启用策略")
 
@@ -562,6 +624,23 @@ list_risk_policies = _tool(
     "list_risk_policies",
     "获取所有已定义的风险策略列表。",
     EmptyInput, AuthorityLevel.A3,
+)
+update_risk_policy = _tool(
+    "update_risk_policy",
+    "部分更新风险策略阈值（资金分层、单票/行业上限、ETF 上限、单票最大亏损等）。"
+    "未传字段保留原值；不传 policy_id 则改当前生效策略。仅改本系统风控规则，不涉及真实交易。",
+    RiskPolicyUpdateInput, AuthorityLevel.A3,
+)
+create_risk_policy = _tool(
+    "create_risk_policy",
+    "新建一条风险策略（默认不激活）。可传 activate=true 创建后立即生效。"
+    "未传的阈值字段用出厂默认（含资金分层与 ETF 上限）。",
+    RiskPolicyCreateInput, AuthorityLevel.A3,
+)
+activate_risk_policy = _tool(
+    "activate_risk_policy",
+    "切换当前生效的风险策略（同时仅一条生效）。",
+    RiskPolicyActivateInput, AuthorityLevel.A3,
 )
 evaluate_policy_risk = _tool(
     "evaluate_policy_risk",

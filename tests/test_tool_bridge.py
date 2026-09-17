@@ -66,6 +66,9 @@ def test_tool_bridge_registry_includes_default_tools_and_blocks_real_orders(brid
         "list_report_templates",
         "list_review_inbox",
         "list_risk_policies",
+        "update_risk_policy",
+        "create_risk_policy",
+        "activate_risk_policy",
         "list_strategies",
         "list_watchlist",
         "mark_inbox_item_done",
@@ -287,6 +290,59 @@ def test_tool_bridge_lists_and_reads_active_risk_policies_with_ledger(bridge):
         ("list_risk_policies", "risk", "succeeded"),
         ("evaluate_policy_risk", "risk", "succeeded"),
     ]
+
+
+def test_tool_bridge_updates_creates_and_activates_risk_policy(bridge):
+    updated = bridge.execute(
+        "update_risk_policy",
+        {
+            "single_position_max_weight_pct": 18,
+            "etf_max_weight_pct": 80,
+            "single_position_max_loss_pct_of_nav": 2.5,
+        },
+        AuthorityLevel.A3,
+        run_id="run_policy_write",
+        task_id="task_policy_write",
+        call_id="call_update_policy",
+        source_mode="stub",
+    )
+    assert updated["result"]["policy_id"] == "default-conservative"
+    assert updated["result"]["policy"]["rules"]["single_position_max_weight_pct"] == 18
+    assert updated["result"]["policy"]["rules"]["etf_max_weight_pct"] == 80
+    assert updated["result"]["version"] >= 2
+
+    created = bridge.execute(
+        "create_risk_policy",
+        {
+            "name": "均衡型",
+            "single_position_max_weight_pct": 20,
+            "sector_max_weight_pct": 40,
+            "activate": False,
+        },
+        AuthorityLevel.A3,
+        run_id="run_policy_write",
+        task_id="task_policy_write",
+        call_id="call_create_policy",
+        source_mode="stub",
+    )
+    new_id = created["result"]["policy_id"]
+    assert new_id
+    assert created["result"]["is_active"] is False
+    assert created["result"]["policy"]["rules"]["single_position_max_weight_pct"] == 20
+
+    activated = bridge.execute(
+        "activate_risk_policy",
+        {"policy_id": new_id},
+        AuthorityLevel.A3,
+        run_id="run_policy_write",
+        task_id="task_policy_write",
+        call_id="call_activate_policy",
+        source_mode="stub",
+    )
+    assert activated["result"]["policy_id"] == new_id
+    assert activated["result"]["is_active"] is True
+    active = bridge.risk_policy_service.get_active_policy()
+    assert active.policy_id == new_id
 
 
 def test_tool_bridge_lists_and_gets_rebalance_drafts_with_a4(bridge):

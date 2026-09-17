@@ -8,6 +8,9 @@ from backend.app_services.rebalance_draft_service import RebalanceDraftService
 from backend.app_services.risk_policy_service import RiskPolicyService
 from backend.execution_guard import canonical_execution_guard, extract_execution_guard, is_canonical_execution_guard
 from backend.persistence.repositories import WorkbenchRepository
+from backend.stock_domain.catalog import get_stock, is_etf_like
+from backend.stock_domain.provider_router import provider_router
+from backend.stock_domain.risk_tools import position_max_weight_for_symbol, resolve_effective_rules
 from backend.schemas import (
     AuthorityLevel,
     PreTradeReview,
@@ -16,11 +19,8 @@ from backend.schemas import (
     RebalanceDraftStatus,
     RiskPolicy,
     RiskPolicyRef,
-    RiskPolicyRules,
     model_to_dict,
 )
-from backend.stock_domain.catalog import get_stock
-from backend.stock_domain.provider_router import provider_router
 
 
 class PreTradeReviewConflictError(ValueError):
@@ -105,7 +105,12 @@ class PreTradeReviewService:
             blocker_codes.append("execution_guard_unsafe")
         review_execution_guard = canonical_execution_guard() if not execution_blocked else raw_execution_guard or {}
 
-        effective_rules = policy.rules if policy else None
+        policy_rules = policy.rules if policy else None
+        effective = (
+            resolve_effective_rules(policy_rules, portfolio_total_value)
+            if policy_rules is not None
+            else None
+        )
         checklist.append(
             self._check_item(
                 code="risk_policy_ref_match",
@@ -118,24 +123,29 @@ class PreTradeReviewService:
             )
         )
 
-        if effective_rules:
-            single_position_blocked = draft.target_weight_pct > effective_rules.single_position_max_weight_pct
+        if effective is not None:
+            stock = get_stock(draft.symbol) or {}
+            etf = is_etf_like(draft.symbol, stock)
+            max_weight = position_max_weight_for_symbol(effective, draft.symbol, stock=stock)
+            single_position_blocked = draft.target_weight_pct > max_weight
             checklist.append(
                 self._check_item(
-                    code="single_position_max_weight_pct",
+                    code="etf_max_weight_pct" if etf else "single_position_max_weight_pct",
                     status="blocked" if single_position_blocked else "passed",
                     severity="high" if single_position_blocked else "low",
-                    message="目标仓位不得超过单股上限。",
+                    message=("目标仓位不得超过 ETF 上限。" if etf else "目标仓位不得超过单股上限。"),
                     actual_value=draft.target_weight_pct,
-                    threshold_value=effective_rules.single_position_max_weight_pct,
-                    evidence_refs=["rebalance_draft", "risk_policy"],
+                    threshold_value=max_weight,
+                    evidence_refs=["rebalance_draft", "risk_policy", "stock_catalog"],
                 )
             )
             if single_position_blocked:
-                blocker_codes.append("single_position_max_weight_exceeded")
+                blocker_codes.append(
+                    "etf_max_weight_exceeded" if etf else "single_position_max_weight_exceeded"
+                )
 
             projected_sector = self._projected_sector_weight(draft, holdings)
-            sector_blocked = projected_sector > effective_rules.sector_max_weight_pct
+            sector_blocked = projected_sector > effective.sector_max_weight_pct
             checklist.append(
                 self._check_item(
                     code="sector_max_weight_pct",
@@ -143,27 +153,30 @@ class PreTradeReviewService:
                     severity="high" if sector_blocked else "low",
                     message="投影后板块暴露不得超过风险策略上限。",
                     actual_value=projected_sector,
-                    threshold_value=effective_rules.sector_max_weight_pct,
+                    threshold_value=effective.sector_max_weight_pct,
                     evidence_refs=["holding_position", "risk_policy", "stock_catalog"],
                 )
             )
             if sector_blocked:
                 blocker_codes.append("sector_max_weight_exceeded")
 
-            single_position_warning = draft.target_weight_pct > effective_rules.single_position_warning_weight_pct
-            checklist.append(
-                self._check_item(
-                    code="single_position_warning_weight_pct",
-                    status="warning" if single_position_warning else "passed",
-                    severity="medium" if single_position_warning else "low",
-                    message="目标仓位若超过预警线，需要人工二次确认。",
-                    actual_value=draft.target_weight_pct,
-                    threshold_value=effective_rules.single_position_warning_weight_pct,
-                    evidence_refs=["rebalance_draft", "risk_policy"],
+            if not etf:
+                single_position_warning = (
+                    draft.target_weight_pct > effective.single_position_warning_weight_pct
                 )
-            )
+                checklist.append(
+                    self._check_item(
+                        code="single_position_warning_weight_pct",
+                        status="warning" if single_position_warning else "passed",
+                        severity="medium" if single_position_warning else "low",
+                        message="目标仓位若超过预警线，需要人工二次确认。",
+                        actual_value=draft.target_weight_pct,
+                        threshold_value=effective.single_position_warning_weight_pct,
+                        evidence_refs=["rebalance_draft", "risk_policy"],
+                    )
+                )
 
-            min_delta_warning = abs(draft.delta_weight_pct) < effective_rules.rebalance_min_delta_pct
+            min_delta_warning = abs(draft.delta_weight_pct) < effective.rebalance_min_delta_pct
             checklist.append(
                 self._check_item(
                     code="rebalance_min_delta_pct",
@@ -171,8 +184,22 @@ class PreTradeReviewService:
                     severity="medium" if min_delta_warning else "low",
                     message="调仓变动过小，可能不足以形成有效再平衡。",
                     actual_value=abs(draft.delta_weight_pct),
-                    threshold_value=effective_rules.rebalance_min_delta_pct,
+                    threshold_value=effective.rebalance_min_delta_pct,
                     evidence_refs=["rebalance_draft", "risk_policy"],
+                )
+            )
+
+            projected_count = self._projected_holdings_count(draft, holdings)
+            min_holdings_warning = projected_count < effective.min_holdings_count
+            checklist.append(
+                self._check_item(
+                    code="min_holdings_count",
+                    status="warning" if min_holdings_warning else "passed",
+                    severity="medium" if min_holdings_warning else "low",
+                    message="投影持仓数低于当前资金分层要求的最少只数。",
+                    actual_value=projected_count,
+                    threshold_value=effective.min_holdings_count,
+                    evidence_refs=["holding_position", "risk_policy"],
                 )
             )
         else:
@@ -231,7 +258,7 @@ class PreTradeReviewService:
             delta_weight_pct=draft.delta_weight_pct,
             draft_status_at_review=draft.status.value,
             risk_policy_ref=policy_ref,
-            risk_policy_rules_snapshot=model_to_dict(effective_rules) if effective_rules else {},
+            risk_policy_rules_snapshot=model_to_dict(effective) if effective else {},
             quote_snapshot=model_to_dict(quote),
             portfolio_total_value=portfolio_total_value,
             checklist=checklist,
@@ -329,6 +356,14 @@ class PreTradeReviewService:
         if projected == 0:
             projected = draft.target_weight_pct
         return round(projected, 2)
+
+    def _projected_holdings_count(self, draft: RebalanceDraft, holdings: list) -> int:
+        symbols = {str(item.symbol).upper() for item in holdings if float(item.weight_pct or 0) > 0}
+        if draft.target_weight_pct > 0:
+            symbols.add(str(draft.symbol).upper())
+        elif str(draft.symbol).upper() in symbols and draft.target_weight_pct <= 0:
+            symbols.discard(str(draft.symbol).upper())
+        return len(symbols)
 
     def _side_for_delta(self, delta_weight_pct: float) -> str:
         if delta_weight_pct > 0:

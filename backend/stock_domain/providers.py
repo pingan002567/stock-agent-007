@@ -661,51 +661,73 @@ class AkShareMarketDataProvider:
             - timedelta(days=max(_bounded_days(days) * 2, 30))
         ).strftime("%Y%m%d")
 
-        try:
-            with self._call_lock:
-                frame = ak.stock_zh_a_hist(
-                    symbol=normalized,
-                    period="daily",
-                    start_date=start,
-                    end_date=end,
-                    adjust="",
+        from backend.stock_domain.catalog import is_etf_like
+
+        etf_like = is_etf_like(normalized, stock)
+        items: list[dict] = []
+        source_interface = "stock_zh_a_hist"
+        # ETF/基金优先走东财基金日线，避免 stock_zh_a_hist 对 51xxxx 返回空
+        if etf_like:
+            try:
+                items = self._fetch_cn_etf_history(ak, normalized, days, start, end)
+                source_interface = "fund_etf_hist_em"
+            except Exception:
+                items = []
+
+        if not items:
+            try:
+                with self._call_lock:
+                    frame = ak.stock_zh_a_hist(
+                        symbol=normalized,
+                        period="daily",
+                        start_date=start,
+                        end_date=end,
+                        adjust="",
+                    )
+                rows = _frame_tail(frame, _bounded_days(days))
+                items = [
+                    _history_item(
+                        row,
+                        idx + 1,
+                        date_keys=("日期",),
+                        open_keys=("开盘",),
+                        high_keys=("最高",),
+                        low_keys=("最低",),
+                        close_keys=("收盘",),
+                    )
+                    for idx, row in enumerate(rows)
+                ]
+                source_interface = "stock_zh_a_hist"
+            except Exception:
+                fallback_symbol = (
+                    f"sh{normalized}" if normalized.startswith(("5", "6")) else f"sz{normalized}"
                 )
-            rows = _frame_tail(frame, _bounded_days(days))
-            items = [
-                _history_item(
-                    row,
-                    idx + 1,
-                    date_keys=("日期",),
-                    open_keys=("开盘",),
-                    high_keys=("最高",),
-                    low_keys=("最低",),
-                    close_keys=("收盘",),
-                )
-                for idx, row in enumerate(rows)
-            ]
-            source_interface = "stock_zh_a_hist"
-        except Exception:
-            fallback_symbol = (
-                f"sh{normalized}" if normalized.startswith("6") else f"sz{normalized}"
-            )
-            with self._call_lock:
-                frame = ak.stock_zh_a_hist_tx(
-                    symbol=fallback_symbol, start_date=start, end_date=end, adjust=""
-                )
-            rows = _frame_tail(frame, _bounded_days(days))
-            items = [
-                _history_item(
-                    row,
-                    idx + 1,
-                    date_keys=("date",),
-                    open_keys=("open",),
-                    high_keys=("high",),
-                    low_keys=("low",),
-                    close_keys=("close",),
-                )
-                for idx, row in enumerate(rows)
-            ]
-            source_interface = "stock_zh_a_hist_tx"
+                with self._call_lock:
+                    frame = ak.stock_zh_a_hist_tx(
+                        symbol=fallback_symbol, start_date=start, end_date=end, adjust=""
+                    )
+                rows = _frame_tail(frame, _bounded_days(days))
+                items = [
+                    _history_item(
+                        row,
+                        idx + 1,
+                        date_keys=("date",),
+                        open_keys=("open",),
+                        high_keys=("high",),
+                        low_keys=("low",),
+                        close_keys=("close",),
+                    )
+                    for idx, row in enumerate(rows)
+                ]
+                source_interface = "stock_zh_a_hist_tx"
+
+        if not items and etf_like:
+            try:
+                items = self._fetch_cn_etf_history(ak, normalized, days, start, end)
+                source_interface = "fund_etf_hist_em"
+            except Exception:
+                items = []
+
         if not items:
             raise ProviderError(f"empty history for {normalized}")
         return {
@@ -1292,9 +1314,9 @@ class AkShareMarketDataProvider:
     def _tencent_quote_raw(self, symbol: str) -> str:
         import requests as _req
 
-        if symbol.startswith(("6", "688")):
+        if symbol.startswith(("5", "6", "688", "11")):
             tencent_sym = f"sh{symbol}"
-        elif symbol.startswith(("0", "3")):
+        elif symbol.startswith(("0", "1", "3")):
             tencent_sym = f"sz{symbol}"
         else:
             tencent_sym = symbol
@@ -1649,6 +1671,53 @@ class AkShareMarketDataProvider:
             f"East Money HTTP fallback failed after {max_attempts} attempts: {last_exc}"
         ) from last_exc
 
+    def _fetch_cn_etf_history(
+        self,
+        ak: Any,
+        symbol: str,
+        days: int,
+        start: str,
+        end: str,
+    ) -> list[dict]:
+        """东财 ETF 日线；A 股 51xxxx/15xxxx 等走股票 hist 常为空。"""
+        start_dash = f"{start[:4]}-{start[4:6]}-{start[6:8]}"
+        end_dash = f"{end[:4]}-{end[4:6]}-{end[6:8]}"
+        with self._call_lock:
+            frame = None
+            last_err: Exception | None = None
+            for loader in (
+                lambda: ak.fund_etf_hist_em(
+                    symbol=symbol, period="daily", start_date=start_dash, end_date=end_dash, adjust=""
+                ),
+                lambda: ak.fund_etf_hist_em(symbol=symbol, period="daily", adjust=""),
+            ):
+                try:
+                    frame = loader()
+                    break
+                except Exception as exc:  # noqa: BLE001 — try next API variant
+                    last_err = exc
+                    frame = None
+            if frame is None:
+                raise ProviderError(f"fund_etf_hist_em failed for {symbol}: {last_err}")
+        rows = _frame_tail(frame, _bounded_days(days))
+        items = [
+            _history_item(
+                row,
+                idx + 1,
+                date_keys=("日期", "date", "trade_date"),
+                open_keys=("开盘", "open"),
+                high_keys=("最高", "high"),
+                low_keys=("最低", "low"),
+                close_keys=("收盘", "close"),
+                volume_keys=("成交量", "volume", "vol"),
+                amount_keys=("成交额", "amount"),
+            )
+            for idx, row in enumerate(rows)
+        ]
+        if not items:
+            raise ProviderError(f"empty ETF history for {symbol}")
+        return items
+
     def _fetch_cn_quote_tencent(self, symbol: str) -> PriceSnapshot:
         """Fetch single CN stock quote from Tencent Finance API.
 
@@ -1658,9 +1727,9 @@ class AkShareMarketDataProvider:
         """
         import requests as _req
 
-        if symbol.startswith(("6", "688")):
+        if symbol.startswith(("5", "6", "688", "11")):
             tencent_sym = f"sh{symbol}"
-        elif symbol.startswith(("0", "3")):
+        elif symbol.startswith(("0", "1", "3")):
             tencent_sym = f"sz{symbol}"
         else:
             tencent_sym = symbol

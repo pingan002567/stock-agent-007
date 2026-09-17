@@ -129,16 +129,25 @@ class CopilotContextBuilder:
         if cached:
             return cached
         policy = self.risk_policy_service.get_active_policy()
+        nav = self.risk_policy_service.portfolio_nav()
+        from backend.stock_domain.risk_tools import resolve_effective_rules
+
+        effective = resolve_effective_rules(policy.rules, nav)
         result = {
             "policy_id": policy.policy_id,
             "name": policy.name,
             "version": policy.version,
             "updated_at": policy.updated_at,
+            "portfolio_nav": nav,
+            "capital_tier": effective.capital_tier_label,
             "rules": {
-                "single_position_max_weight_pct": policy.rules.single_position_max_weight_pct,
-                "single_position_warning_weight_pct": policy.rules.single_position_warning_weight_pct,
-                "sector_max_weight_pct": policy.rules.sector_max_weight_pct,
-                "draft_valid_hours": policy.rules.draft_valid_hours,
+                "single_position_max_weight_pct": effective.single_position_max_weight_pct,
+                "single_position_warning_weight_pct": effective.single_position_warning_weight_pct,
+                "sector_max_weight_pct": effective.sector_max_weight_pct,
+                "min_holdings_count": effective.min_holdings_count,
+                "etf_max_weight_pct": effective.etf_max_weight_pct,
+                "single_position_max_loss_pct_of_nav": effective.single_position_max_loss_pct_of_nav,
+                "draft_valid_hours": effective.draft_valid_hours,
             },
         }
         self._cache.set("policy_summary", result)

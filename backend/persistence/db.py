@@ -346,6 +346,7 @@ SCHEMA: Iterable[str] = (
       industry TEXT DEFAULT '',
       sector TEXT DEFAULT '',
       aliases TEXT DEFAULT '[]',
+      instrument_type TEXT DEFAULT 'stock',
       is_active INTEGER DEFAULT 1,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -449,7 +450,19 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_copilot_run_log_columns(conn)
     _ensure_copilot_session_columns(conn)
     _ensure_stock_quote_columns(conn)
+    _ensure_stock_master_columns(conn)
     conn.commit()
+
+
+def _ensure_stock_master_columns(conn: sqlite3.Connection) -> None:
+    columns = {
+        row["name"] if isinstance(row, sqlite3.Row) else row[1]
+        for row in conn.execute("PRAGMA table_info(stock_master)").fetchall()
+    }
+    if "instrument_type" not in columns:
+        conn.execute(
+            "ALTER TABLE stock_master ADD COLUMN instrument_type TEXT DEFAULT 'stock'"
+        )
 
 
 def _ensure_monitor_event_columns(conn: sqlite3.Connection) -> None:

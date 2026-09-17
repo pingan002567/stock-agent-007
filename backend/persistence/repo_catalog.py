@@ -75,6 +75,15 @@ def _row_to_stock_daily(row: sqlite3.Row) -> StockDaily:
     )
 
 
+def _instrument_type_from_row(row: sqlite3.Row) -> str:
+    try:
+        value = row["instrument_type"]
+    except (KeyError, IndexError):
+        value = None
+    text = str(value or "stock").strip().lower()
+    return text if text in {"stock", "etf", "fund", "other"} else "stock"
+
+
 class CatalogRepoMixin:
     def list_watchlist(self) -> List[WatchlistItem]:
         with self._lock:
@@ -230,6 +239,7 @@ class CatalogRepoMixin:
                     industry=row["industry"] or "",
                     sector=row["sector"] or "",
                     aliases=json.loads(row["aliases"] or "[]"),
+                    instrument_type=_instrument_type_from_row(row),
                     is_active=bool(row["is_active"]),
                     created_at=row["created_at"],
                     updated_at=row["updated_at"],
@@ -251,6 +261,7 @@ class CatalogRepoMixin:
             industry=row["industry"] or "",
             sector=row["sector"] or "",
             aliases=json.loads(row["aliases"] or "[]"),
+            instrument_type=_instrument_type_from_row(row),
             is_active=bool(row["is_active"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
@@ -295,14 +306,18 @@ class CatalogRepoMixin:
         with self._lock:
             self.conn.execute(
                 """
-                INSERT INTO stock_master(symbol, name, market, industry, sector, aliases, is_active, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO stock_master(
+                  symbol, name, market, industry, sector, aliases, instrument_type,
+                  is_active, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(symbol) DO UPDATE SET
                   name=excluded.name,
                   market=excluded.market,
                   industry=excluded.industry,
                   sector=excluded.sector,
                   aliases=excluded.aliases,
+                  instrument_type=excluded.instrument_type,
                   is_active=excluded.is_active,
                   updated_at=excluded.updated_at
                 """,
@@ -313,6 +328,7 @@ class CatalogRepoMixin:
                     item.industry,
                     item.sector,
                     json.dumps(item.aliases, ensure_ascii=False),
+                    (item.instrument_type or "stock").lower(),
                     int(item.is_active),
                     item.created_at,
                     item.updated_at,
@@ -347,13 +363,13 @@ class CatalogRepoMixin:
         from backend.schemas import now_iso
 
         now_val = now_iso()
-        # SQLite caps bind variables (often 999 or 32766). 9 cols/row → keep chunks small.
+        # SQLite caps bind variables (often 999 or 32766). 10 cols/row → keep chunks small.
         _CHUNK = 80
         total = 0
         with self._lock:
             for start in range(0, len(items), _CHUNK):
                 chunk = items[start : start + _CHUNK]
-                placeholders = ",".join("(?, ?, ?, ?, ?, ?, ?, ?, ?)" for _ in chunk)
+                placeholders = ",".join("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" for _ in chunk)
                 flat_params: list[Any] = []
                 for item in chunk:
                     flat_params.extend(
@@ -364,13 +380,17 @@ class CatalogRepoMixin:
                             item.industry,
                             item.sector,
                             json.dumps(item.aliases, ensure_ascii=False),
+                            (item.instrument_type or "stock").lower(),
                             int(item.is_active),
                             now_val,
                             now_val,
                         )
                     )
                 sql = f"""
-                    INSERT INTO stock_master(symbol, name, market, industry, sector, aliases, is_active, created_at, updated_at)
+                    INSERT INTO stock_master(
+                      symbol, name, market, industry, sector, aliases, instrument_type,
+                      is_active, created_at, updated_at
+                    )
                     VALUES {placeholders}
                     ON CONFLICT(symbol) DO UPDATE SET
                       name=excluded.name,
@@ -378,6 +398,7 @@ class CatalogRepoMixin:
                       industry=excluded.industry,
                       sector=excluded.sector,
                       aliases=excluded.aliases,
+                      instrument_type=COALESCE(excluded.instrument_type, stock_master.instrument_type),
                       is_active=excluded.is_active,
                       updated_at=excluded.updated_at
                 """

@@ -103,6 +103,7 @@ A3_TOOLS = [
     "get_portfolio_snapshot", "upsert_holding", "remove_holding",
     "analyze_portfolio_risk", "get_active_risk_policy",
     "list_risk_policies", "evaluate_policy_risk",
+    "update_risk_policy", "create_risk_policy", "activate_risk_policy",
     "upsert_monitor_rule", "delete_monitor_rule",
     "run_strategy_backtest", "list_pre_trade_reviews", "list_paper_orders",
     "get_paper_portfolio", "analyze_paper_performance", "create_paper_portfolio_snapshot",

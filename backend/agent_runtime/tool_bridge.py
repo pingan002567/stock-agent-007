@@ -27,6 +27,7 @@ from backend.stock_domain.financial_tools import get_stock_financial
 from backend.stock_domain.history_tools import get_daily_history
 from backend.stock_domain.intel_tools import INTEL_DEFAULT_LIMIT, search_stock_intel
 from backend.stock_domain.portfolio_tools import summarize_portfolio
+from backend.stock_domain.risk_tools import resolve_effective_rules
 
 
 @dataclass(frozen=True)
@@ -135,6 +136,9 @@ class WorkbenchToolBridge:
             "get_portfolio_snapshot": self._get_portfolio_snapshot,
             "get_active_risk_policy": self._get_active_risk_policy,
             "list_risk_policies": self._list_risk_policies,
+            "update_risk_policy": self._update_risk_policy,
+            "create_risk_policy": self._create_risk_policy,
+            "activate_risk_policy": self._activate_risk_policy,
             "evaluate_policy_risk": self._evaluate_policy_risk,
             "analyze_portfolio_risk": self._analyze_portfolio_risk,
             "get_industry_context": self._get_industry_context,
@@ -253,6 +257,41 @@ class WorkbenchToolBridge:
                 "low",
                 True,
                 {},
+                ["risk_policy", "local_sqlite"],
+            ),
+            "update_risk_policy": ToolSpec(
+                "update_risk_policy",
+                "risk",
+                AuthorityLevel.A3,
+                "medium",
+                True,
+                {
+                    "policy_id": "str?",
+                    "name": "str?",
+                    "description": "str?",
+                    "single_position_max_weight_pct": "float?",
+                    "etf_max_weight_pct": "float?",
+                    "capital_tiers": "list?",
+                    "activate": "bool?",
+                },
+                ["risk_policy", "local_sqlite"],
+            ),
+            "create_risk_policy": ToolSpec(
+                "create_risk_policy",
+                "risk",
+                AuthorityLevel.A3,
+                "medium",
+                True,
+                {"name": "str", "activate": "bool?", "rules": "object?"},
+                ["risk_policy", "local_sqlite"],
+            ),
+            "activate_risk_policy": ToolSpec(
+                "activate_risk_policy",
+                "risk",
+                AuthorityLevel.A3,
+                "medium",
+                True,
+                {"policy_id": "str"},
                 ["risk_policy", "local_sqlite"],
             ),
             "evaluate_policy_risk": ToolSpec(
@@ -899,6 +938,108 @@ class WorkbenchToolBridge:
 
     def _list_risk_policies(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return {"items": [model_to_dict(item) for item in self.risk_policy_service.list_policies()]}
+
+    _RISK_RULE_PATCH_FIELDS = (
+        "single_position_max_weight_pct",
+        "single_position_warning_weight_pct",
+        "sector_max_weight_pct",
+        "min_holdings_count",
+        "etf_max_weight_pct",
+        "single_position_max_loss_pct_of_nav",
+        "draft_valid_hours",
+        "rebalance_min_delta_pct",
+        "monitor_default_cooldown_seconds",
+    )
+
+    def _rules_patch_from_args(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        patch: dict[str, Any] = {
+            key: arguments[key]
+            for key in self._RISK_RULE_PATCH_FIELDS
+            if arguments.get(key) is not None
+        }
+        tiers = arguments.get("capital_tiers")
+        if tiers is not None:
+            if not isinstance(tiers, list):
+                raise ValueError("capital_tiers must be a list")
+            patch["capital_tiers"] = [
+                item if isinstance(item, dict) else model_to_dict(item)
+                for item in tiers
+            ]
+        return patch
+
+    def _update_risk_policy(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        policy_id = str(arguments.get("policy_id") or "").strip() or None
+        patch = self._rules_patch_from_args(arguments)
+        name = arguments.get("name")
+        description = arguments.get("description")
+        activate = bool(arguments.get("activate") or False)
+        if not patch and name is None and description is None and not activate:
+            raise ValueError("update_risk_policy requires at least one field to change")
+        before = (
+            self.risk_policy_service.get_policy(policy_id)
+            if policy_id
+            else self.risk_policy_service.get_active_policy()
+        )
+        saved = self.risk_policy_service.patch_policy(
+            policy_id=policy_id,
+            name=str(name) if name is not None else None,
+            description=str(description) if description is not None else None,
+            rules_patch=patch or None,
+            activate=activate,
+        )
+        return {
+            "policy": model_to_dict(saved),
+            "policy_id": saved.policy_id,
+            "version": saved.version,
+            "is_active": saved.is_active,
+            "changed_from_version": before.version,
+            "effective_rules": model_to_dict(
+                resolve_effective_rules(
+                    saved.rules,
+                    self.risk_policy_service.portfolio_nav(),
+                )
+            ),
+        }
+
+    def _create_risk_policy(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from backend.schemas import RiskPolicy, RiskPolicyRules, default_capital_tiers
+
+        name = str(arguments.get("name") or "").strip()
+        if not name:
+            raise ValueError("create_risk_policy requires name")
+        base = model_to_dict(RiskPolicyRules())
+        patch = self._rules_patch_from_args(arguments)
+        if "capital_tiers" not in patch:
+            patch["capital_tiers"] = [model_to_dict(t) for t in default_capital_tiers()]
+        rules = RiskPolicyRules(**{**base, **patch})
+        created = self.risk_policy_service.create_policy(
+            RiskPolicy(
+                policy_id=str(arguments.get("policy_id") or "").strip() or None,
+                name=name,
+                description=str(arguments.get("description") or ""),
+                rules=rules,
+            )
+        )
+        if bool(arguments.get("activate") or False):
+            created = self.risk_policy_service.activate_policy(created.policy_id or "")
+        return {
+            "policy": model_to_dict(created),
+            "policy_id": created.policy_id,
+            "is_active": created.is_active,
+            "created": True,
+        }
+
+    def _activate_risk_policy(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        policy_id = str(arguments.get("policy_id") or "").strip()
+        if not policy_id:
+            raise ValueError("activate_risk_policy requires policy_id")
+        activated = self.risk_policy_service.activate_policy(policy_id)
+        return {
+            "policy": model_to_dict(activated),
+            "policy_id": activated.policy_id,
+            "is_active": True,
+            "activated": True,
+        }
 
     def _evaluate_policy_risk(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return self.risk_policy_service.analyze_portfolio_risk(self.repo.list_holdings())

@@ -242,27 +242,54 @@ class TushareMarketDataProvider:
             datetime.now(timezone.utc)
             - timedelta(days=max(_bounded_days(days) * 2, 30))
         ).strftime("%Y%m%d")
-        df = pro.daily(
-            ts_code=_ts_code(normalized, stock), start_date=start, end_date=end
-        )
-        # Sort by trade_date ascending
-        if hasattr(df, "sort_values"):
-            df = df.sort_values("trade_date")
-        rows = _frame_tail(df, _bounded_days(days))
-        items = [
-            _history_item(
-                r,
-                idx + 1,
-                date_keys=("trade_date",),
-                open_keys=("open",),
-                high_keys=("high",),
-                low_keys=("low",),
-                close_keys=("close",),
-                volume_keys=("vol",),
-                amount_keys=("amount",),
-            )
-            for idx, r in enumerate(rows)
-        ]
+        ts = _ts_code(normalized, stock)
+        from backend.stock_domain.catalog import is_etf_like
+
+        items: list[dict] = []
+        source_interface = "tushare.daily"
+        if is_etf_like(normalized, stock) and str(stock["market"]) == "CN":
+            try:
+                df = pro.fund_daily(ts_code=ts, start_date=start, end_date=end)
+                if hasattr(df, "sort_values"):
+                    df = df.sort_values("trade_date")
+                rows = _frame_tail(df, _bounded_days(days))
+                items = [
+                    _history_item(
+                        r,
+                        idx + 1,
+                        date_keys=("trade_date",),
+                        open_keys=("open",),
+                        high_keys=("high",),
+                        low_keys=("low",),
+                        close_keys=("close",),
+                        volume_keys=("vol",),
+                        amount_keys=("amount",),
+                    )
+                    for idx, r in enumerate(rows)
+                ]
+                source_interface = "tushare.fund_daily"
+            except Exception:
+                items = []
+        if not items:
+            df = pro.daily(ts_code=ts, start_date=start, end_date=end)
+            if hasattr(df, "sort_values"):
+                df = df.sort_values("trade_date")
+            rows = _frame_tail(df, _bounded_days(days))
+            items = [
+                _history_item(
+                    r,
+                    idx + 1,
+                    date_keys=("trade_date",),
+                    open_keys=("open",),
+                    high_keys=("high",),
+                    low_keys=("low",),
+                    close_keys=("close",),
+                    volume_keys=("vol",),
+                    amount_keys=("amount",),
+                )
+                for idx, r in enumerate(rows)
+            ]
+            source_interface = "tushare.daily"
         if not items:
             raise ProviderError(f"tushare empty history for {normalized}")
         return {
@@ -273,7 +300,7 @@ class TushareMarketDataProvider:
             "coverage": {
                 "market": str(stock["market"]),
                 "mode": "real",
-                "source_interface": "tushare.daily",
+                "source_interface": source_interface,
             },
             "items": items,
         }
@@ -662,15 +689,15 @@ def _tushare_snapshot(basic: dict[str, Any], daily: dict[str, Any]) -> dict[str,
 def _ts_code(symbol: str, stock: dict) -> str:
     """Convert normalized symbol to Tushare ts_code format.
 
-    CN: '000001.SZ' or '600519.SH'
+    CN: '000001.SZ' or '600519.SH' / '510300.SH'
     HK: '00700.HK'
     """
     market = str(stock.get("market", ""))
     if market == "HK":
         code = symbol.removeprefix("HK")
         return f"{code}.HK"
-    # CN: determine exchange by prefix
-    if symbol.startswith(("6", "688")):
+    # CN: SH — 6/688 股票、5 开头 ETF/基金、11 债；其余默认 SZ
+    if symbol.startswith(("5", "6", "688", "11")):
         return f"{symbol}.SH"
     return f"{symbol}.SZ"
 

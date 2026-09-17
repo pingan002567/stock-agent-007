@@ -144,6 +144,15 @@ def _overlay_stock_dict(master: Any, stock_dict: Dict[str, object] | None = None
     except Exception:
         alias_seed = []
     aliases = list(dict.fromkeys([*(master.aliases or []), *alias_seed]))
+    instrument_type = str(getattr(master, "instrument_type", None) or "").strip().lower()
+    if instrument_type not in {"stock", "etf", "fund", "other"}:
+        instrument_type = infer_instrument_type(
+            str(master.symbol),
+            name=str(master.name or ""),
+            industry=str(master.industry or ""),
+            sector=str(master.sector or ""),
+            aliases=aliases,
+        )
     result: Dict[str, object] = {
         "symbol": master.symbol,
         "name": master.name,
@@ -151,6 +160,7 @@ def _overlay_stock_dict(master: Any, stock_dict: Dict[str, object] | None = None
         "industry": master.industry or "",
         "sector": master.sector or "",
         "aliases": aliases,
+        "instrument_type": instrument_type,
         "price": 0.0,
         "change_pct": 0.0,
         "score": 0,
@@ -162,12 +172,63 @@ def _overlay_stock_dict(master: Any, stock_dict: Dict[str, object] | None = None
         for key in ("price", "change_pct", "score", "risk_label", "stance", "confidence"):
             if key in stock_dict:
                 result[key] = stock_dict[key]
+        if stock_dict.get("instrument_type") and not getattr(master, "instrument_type", None):
+            result["instrument_type"] = stock_dict["instrument_type"]
     elif _repo is not None:
         quote = _repo.get_stock_quote(master.symbol)
         if quote is not None:
             result["price"] = quote.last
             result["change_pct"] = quote.change_pct
     return result
+
+
+# 常见 A 股宽基 / 行业 ETF 前缀或整码（启发式，可被 master.instrument_type 覆盖）
+_CN_ETF_PREFIXES = ("51", "15", "56", "58", "159")
+_KNOWN_ETF_SYMBOLS = {
+    "510300", "510500", "512880", "512800", "510050", "159915", "159919",
+    "SPY", "QQQ", "DIA", "IWM", "ARKK", "02800", "02801",
+}
+
+
+def infer_instrument_type(
+    symbol: str,
+    *,
+    name: str = "",
+    industry: str = "",
+    sector: str = "",
+    aliases: list | None = None,
+) -> str:
+    sym = str(symbol or "").strip().upper()
+    hay = " ".join(
+        [sym, name, industry, sector, *(aliases or [])]
+    ).upper()
+    if "ETF" in hay or "交易型开放式" in hay or "指数基金" in (name or ""):
+        return "etf"
+    if sym in _KNOWN_ETF_SYMBOLS:
+        return "etf"
+    # A 股 6 位：51xxxx / 15xxxx 等 ETF 常见段
+    if len(sym) == 6 and sym.isdigit() and sym.startswith(_CN_ETF_PREFIXES):
+        return "etf"
+    if "FUND" in hay or "基金" in (name or industry or sector):
+        # 宽基 ETF 已在上面；其余基金归 fund
+        if "ETF" not in hay:
+            return "fund"
+    return "stock"
+
+
+def is_etf_like(symbol: str, stock: Dict[str, object] | None = None) -> bool:
+    info = stock if stock is not None else (get_stock(symbol) or {})
+    itype = str(info.get("instrument_type") or "").lower()
+    if itype in {"etf", "fund"}:
+        return True
+    return infer_instrument_type(
+        str(info.get("symbol") or symbol),
+        name=str(info.get("name") or ""),
+        industry=str(info.get("industry") or ""),
+        sector=str(info.get("sector") or ""),
+        aliases=list(info.get("aliases") or []),  # type: ignore[arg-type]
+    ) in {"etf", "fund"}
+
 
 
 def get_stock(symbol: str) -> Optional[Dict[str, object]]:
@@ -196,6 +257,7 @@ def get_stock(symbol: str) -> Optional[Dict[str, object]]:
             return {
                 "symbol": normalized, "name": normalized, "market": "CN",
                 "industry": "", "sector": "", "aliases": [],
+                "instrument_type": infer_instrument_type(normalized),
                 "price": 0.0, "change_pct": 0.0,
                 "score": 0, "risk_label": "", "stance": "", "confidence": "",
             }
@@ -203,6 +265,7 @@ def get_stock(symbol: str) -> Optional[Dict[str, object]]:
             return {
                 "symbol": f"HK{normalized}", "name": normalized, "market": "HK",
                 "industry": "", "sector": "", "aliases": [],
+                "instrument_type": "stock",
                 "price": 0.0, "change_pct": 0.0,
                 "score": 0, "risk_label": "", "stance": "", "confidence": "",
             }
