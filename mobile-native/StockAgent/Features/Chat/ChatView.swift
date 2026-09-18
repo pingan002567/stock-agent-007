@@ -9,7 +9,6 @@ struct ChatView: View {
     @State private var appeared = false
     /// Distance to lift the composer above the software keyboard.
     @State private var keyboardLift: CGFloat = 0
-    @State private var keyboardAnimationDuration: Double = 0.25
     /// Host view used to measure composer-bottom ↔ keyboard-top overlap.
     @StateObject private var keyboardHost = ChatKeyboardHost()
 
@@ -27,9 +26,9 @@ struct ChatView: View {
                             ChatKeyboardHostAnchor(host: keyboardHost)
                         }
                 }
-                // Animate only the composer chrome; list layout updates without animation.
+                // Snap with keyboard — no ease/bounce on the composer.
                 .offset(y: -keyboardLift)
-                .animation(.easeOut(duration: keyboardAnimationDuration), value: keyboardLift)
+                .transaction { $0.animation = nil }
             }
             .ignoresSafeArea(.keyboard)
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { note in
@@ -42,9 +41,9 @@ struct ChatView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { note in
                 let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
-                keyboardAnimationDuration = duration
-                // No withAnimation — list spacer snaps; chrome eases via its own animation.
-                keyboardLift = 0
+                var t = Transaction()
+                t.animation = nil
+                withTransaction(t) { keyboardLift = 0 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.05) {
                     keyboardHost.clearRestingBaseline()
                 }
@@ -128,15 +127,14 @@ struct ChatView: View {
 
     private func applyKeyboardShow(_ note: Notification) {
         guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
-        let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
 
         let lift = keyboardHost.lift(forKeyboardFrame: frame, currentLift: keyboardLift)
         guard lift > 0.5 || keyboardLift > 0.5 else { return }
         guard abs(lift - keyboardLift) > 0.5 else { return }
 
-        keyboardAnimationDuration = duration
-        // Update lift without withAnimation so the message list doesn't scrub layout.
-        keyboardLift = lift
+        var t = Transaction()
+        t.animation = nil
+        withTransaction(t) { keyboardLift = lift }
     }
 
     private func dismissKeyboard() {
@@ -147,8 +145,9 @@ struct ChatView: View {
             for: nil
         )
         if keyboardLift > 0 {
-            keyboardAnimationDuration = 0.2
-            keyboardLift = 0
+            var t = Transaction()
+            t.animation = nil
+            withTransaction(t) { keyboardLift = 0 }
             keyboardHost.clearRestingBaseline()
         }
     }
