@@ -50,6 +50,8 @@ log/
 *.sqlite3-shm
 *.sqlite3-wal
 *.png
+# Tauri 桌面图标：构建与部署归档需要
+!desktop/src-tauri/icons/**/*.png
 ui-mockup.html
 chat-init-snapshot.md
 
