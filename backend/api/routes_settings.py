@@ -12,6 +12,12 @@ from backend.config.tools import DEFAULT_TOOLS
 from backend.config.data_sources import AVAILABLE_PROVIDERS, DEFAULT_DATA_SOURCES, PROVIDER_CREDENTIAL_SCHEMA
 from backend.config.market_refresh import CONFIG_KEY as MARKET_REFRESH_KEY
 from backend.config.market_refresh import load_market_refresh, normalize_market_refresh
+from backend.config.investor_profile import (
+    CONFIG_KEY as INVESTOR_PROFILE_KEY,
+    InvestorProfileError,
+    load_investor_profile,
+    normalize_investor_profile,
+)
 from backend.config.data_source_sanitize import sanitize_data_sources, sanitize_intel_sources
 from backend.config.intel_sources import (
     AVAILABLE_INTEL_PROVIDERS,
@@ -67,6 +73,7 @@ def get_settings(request: Request, services: AppServices = Depends(get_services)
         "agent_runtime": services.copilot_service.deerflow.status().to_dict(),
         "data_provider": provider_router.status().to_dict(),
         "market_refresh": load_market_refresh(services.repo),
+        "investor_profile": load_investor_profile(services.repo),
         "data_sources": sanitize_data_sources(
             services.repo.get_config("data_sources", DEFAULT_DATA_SOURCES)
         ),
@@ -145,6 +152,19 @@ def put_market_refresh(
     cleaned = normalize_market_refresh(payload)
     services.audit_service.record("settings market refresh updated", MARKET_REFRESH_KEY)
     services.repo.set_config(MARKET_REFRESH_KEY, cleaned)
+    return cleaned
+
+
+@router.put("/investor-profile")
+def put_investor_profile(
+    payload: dict, services: AppServices = Depends(get_services)
+):
+    try:
+        cleaned = normalize_investor_profile(payload)
+    except InvestorProfileError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    services.audit_service.record("settings investor profile updated", INVESTOR_PROFILE_KEY)
+    services.repo.set_config(INVESTOR_PROFILE_KEY, cleaned)
     return cleaned
 
 

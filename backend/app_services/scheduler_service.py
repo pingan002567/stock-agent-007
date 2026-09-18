@@ -34,7 +34,33 @@ DUTY_PREAMBLE = (
     "不要调用 generate_report，系统会在运行结束后自动落盘值班简报。"
 )
 
+DISCOVERY_PREAMBLE = (
+    "你是盘前机会发现员。可给目标价与操作观点，须声明不构成投资建议；禁止自动交易。\n"
+    "范围：全市场机会发现，**不得只看自选与持仓**（自选/持仓仅可作对照，不可当作唯一宇宙）。\n"
+    "必须先拉市场面：invoke_data_capability 或快捷工具获取 market_review、sectors、"
+    "industry_boards（必要时 Mode A 换源）；再按用户风险画像筛选候选。\n"
+    "输出固定结构：\n"
+    "1) 一句话结论；\n"
+    "2) 机会 3～5 条（标的、理由、匹配的风险档、来源）；\n"
+    "3) 回避清单（今日不适合画像的方向）；\n"
+    "4) 例外/降级。\n"
+    "禁止编造未拉到的数字；不要调用 generate_report，系统会在运行结束后自动落盘机会发现报告。"
+)
+
 DEFAULT_TASKS: list[dict[str, Any]] = [
+    {
+        "task_id": "sched_premarket_discovery",
+        "name": "盘前机会发现",
+        "prompt": (
+            "扫描全市场（大盘、板块轮动、行业），找出与用户风险画像匹配的今日机会，"
+            "不局限于自选与持仓；列出 3～5 个值得跟进的标的及回避方向。"
+        ),
+        "page": "chat",
+        "authority_level": "A3",
+        "schedule": "daily@08:20",
+        "enabled": True,
+        "calendar": "CN",
+    },
     {
         "task_id": "sched_premarket",
         "name": "盘前简报",
@@ -67,9 +93,17 @@ DEFAULT_TASKS: list[dict[str, Any]] = [
 ]
 
 
+def is_discovery_task(task: dict[str, Any]) -> bool:
+    task_id = str(task.get("task_id") or "")
+    name = str(task.get("name") or "")
+    return task_id == "sched_premarket_discovery" or "机会发现" in name
+
+
 def infer_ops_session(task: dict[str, Any]) -> str:
     task_id = str(task.get("task_id") or "")
     name = str(task.get("name") or "")
+    if is_discovery_task(task):
+        return "discovery"
     if task_id == "sched_weekly_review" or "周" in name:
         return "weekly"
     if "收盘" in name or task_id.endswith("_close") or "close" in task_id:
@@ -83,7 +117,11 @@ def uses_cn_session_calendar(task: dict[str, Any]) -> bool:
         return True
     if calendar:
         return False
-    return str(task.get("task_id") or "") in {"sched_premarket", "sched_close"}
+    return str(task.get("task_id") or "") in {
+        "sched_premarket",
+        "sched_premarket_discovery",
+        "sched_close",
+    }
 
 
 def next_duty_run(task: dict[str, Any], after: datetime) -> Optional[datetime]:
@@ -172,7 +210,10 @@ class SchedulerService:
             known = {item.get("task_id") for item in items}
             added = False
             for seed in DEFAULT_TASKS:
-                if seed["task_id"] not in known and seed["task_id"] == "sched_close":
+                if seed["task_id"] not in known and seed["task_id"] in {
+                    "sched_close",
+                    "sched_premarket_discovery",
+                }:
                     items.append(dict(seed))
                     added = True
             if added:
@@ -258,9 +299,20 @@ class SchedulerService:
                 self._write_run_trace(task, outcome)
                 return outcome
         stamp = datetime.now().strftime("%m-%d %H:%M")
+        discovery = is_discovery_task(task)
+        preamble = DISCOVERY_PREAMBLE if discovery else DUTY_PREAMBLE
+        profile_block = ""
+        if discovery:
+            from backend.config.investor_profile import (
+                format_profile_for_prompt,
+                load_investor_profile,
+            )
+
+            profile_block = format_profile_for_prompt(load_investor_profile(self.repo)) + "\n\n"
         request = CopilotRequest(
             message=(
-                f"[定时任务·{task['name']} {stamp}]\n{DUTY_PREAMBLE}\n\n"
+                f"[定时任务·{task['name']} {stamp}]\n{preamble}\n\n"
+                f"{profile_block}"
                 f"用户任务：{task.get('prompt') or ''}"
             ),
             page=task.get("page") or "chat",
@@ -329,6 +381,7 @@ class SchedulerService:
         session = infer_ops_session(task)
         title_map = {
             "premarket": "盘前值班简报",
+            "discovery": "盘前机会发现",
             "close": "收盘值班简报",
             "weekly": "周度值班复盘",
         }

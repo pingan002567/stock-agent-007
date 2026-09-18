@@ -111,6 +111,7 @@ interface SettingsData {
   skills?: SkillInfo[];
   llm_providers?: LlmProvidersSnapshot;
   market_refresh?: MarketRefreshConfig;
+  investor_profile?: InvestorProfile;
 }
 
 interface SkillInfo {
@@ -123,6 +124,22 @@ interface MarketRefreshConfig {
   warmup_seconds: number;
   manual_cooldown_seconds: number;
 }
+
+type InvestorRiskLevel = "conservative" | "moderate" | "aggressive";
+
+interface InvestorProfile {
+  risk_level: InvestorRiskLevel;
+  notes: string;
+}
+
+const INVESTOR_RISK_OPTIONS: Array<{ id: InvestorRiskLevel; label: string; hint: string }> = [
+  { id: "conservative", label: "保守", hint: "偏防御、质量与低波动" },
+  { id: "moderate", label: "普通", hint: "轮动主线与中等弹性" },
+  { id: "aggressive", label: "激进", hint: "主题催化与高弹性" },
+];
+
+const DEFAULT_INVESTOR_PROFILE: InvestorProfile = { risk_level: "moderate", notes: "" };
+
 
 const REFRESH_PRESETS: Array<MarketRefreshConfig & { id: string; label: string }> = [
   { id: "relaxed", label: "宽松", page_refresh_seconds: 180, warmup_seconds: 900, manual_cooldown_seconds: 300 },
@@ -224,7 +241,7 @@ type SettingTab =
 /** 右栏顶部说明（每个分区一句，降低「不知道改哪」的困惑） */
 const TAB_META: Record<SettingTab, { title: string; desc: string }> = {
   appearance: { title: "外观", desc: "界面明暗与系统跟随。" },
-  workspace: { title: "工作区", desc: "当前档案名称与本地数据目录。" },
+  workspace: { title: "工作区", desc: "档案、数据目录与投资画像（风险承受等级）。" },
   channels: { title: "通知通道", desc: "盯盘告警、邮件/Webhook 等外发渠道。" },
   ai: { title: "提供商", desc: "连接多家 OpenAI 兼容提供商。" },
   "ai-models": { title: "默认模型", desc: "从已连接提供商中选择 Copilot 默认模型与 Thinking 偏好。" },
@@ -427,9 +444,17 @@ function AppearanceTab() {
   );
 }
 
-function WorkspaceTab() {
+function WorkspaceTab({
+  investorProfile, onSaveInvestorProfile, savingInvestorProfile,
+}: {
+  investorProfile: InvestorProfile;
+  onSaveInvestorProfile: (next: InvestorProfile) => Promise<void>;
+  savingInvestorProfile: boolean;
+}) {
   const { switchBackend } = useAppActions();
   const [ws, setWs] = useState<{ name?: string; data_dir?: string } | null>(null);
+  const [local, setLocal] = useState<InvestorProfile>(investorProfile);
+  const [dirty, setDirty] = useState(false);
   const profile = loadConnection();
   const connLabel = formatConnectionLabel(profile ?? { mode: "local" });
   const remote = isRemoteMode(profile);
@@ -444,6 +469,10 @@ function WorkspaceTab() {
     window.addEventListener("workspace-changed", refresh);
     return () => { alive = false; window.removeEventListener("workspace-changed", refresh); };
   }, []);
+  useEffect(() => {
+    setLocal(investorProfile);
+    setDirty(false);
+  }, [investorProfile]);
   return (
     <div className="settings-stack">
       <SectionCard title="后端连接" description="本地模式使用本机服务；远端模式把请求发到已部署的后端。">
@@ -461,6 +490,61 @@ function WorkspaceTab() {
         <SettingRow label="数据目录">
           <span className="num" style={{ fontSize: 11, color: "var(--muted)", wordBreak: "break-all", textAlign: "right" }}>{ws?.data_dir ?? "-"}</span>
         </SettingRow>
+      </SectionCard>
+      <SectionCard
+        title="投资画像"
+        description="盘前机会发现会按风险承受等级筛选全市场候选；自述会原样注入 AI，用于细化偏好。"
+      >
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          {INVESTOR_RISK_OPTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              className={local.risk_level === opt.id ? "primary" : "ghost"}
+              onClick={() => {
+                setLocal((prev) => ({ ...prev, risk_level: opt.id }));
+                setDirty(true);
+              }}
+              title={opt.hint}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <label className="page-stack" style={{ gap: 4 }}>
+          <span style={{ fontSize: 12 }}>自述（可选）</span>
+          <textarea
+            rows={3}
+            value={local.notes}
+            placeholder="例如：偏好低估值蓝筹，单票不超过 1 成；不追连板"
+            onChange={(e) => {
+              setLocal((prev) => ({ ...prev, notes: e.target.value }));
+              setDirty(true);
+            }}
+            style={{
+              width: "100%",
+              resize: "vertical",
+              fontSize: 13,
+              padding: "8px 10px",
+              borderRadius: 6,
+              border: "1px solid var(--line)",
+              background: "var(--bg)",
+              color: "var(--text)",
+            }}
+          />
+        </label>
+        {dirty ? (
+          <div style={{ marginTop: 12 }}>
+            <button
+              className="primary"
+              type="button"
+              disabled={savingInvestorProfile}
+              onClick={() => void onSaveInvestorProfile(local)}
+            >
+              {savingInvestorProfile ? "保存中…" : "保存投资画像"}
+            </button>
+          </div>
+        ) : null}
       </SectionCard>
     </div>
   );
@@ -1640,6 +1724,7 @@ export default function Settings({ initialTab }: { initialTab?: string } = {}) {
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [savingDataSources, setSavingDataSources] = useState(false);
   const [savingMarketRefresh, setSavingMarketRefresh] = useState(false);
+  const [savingInvestorProfile, setSavingInvestorProfile] = useState(false);
   const [savingIntelSources, setSavingIntelSources] = useState(false);
 
   const loadPolicies = async () => {
@@ -1691,6 +1776,18 @@ export default function Settings({ initialTab }: { initialTab?: string } = {}) {
     }
   };
 
+  const submitInvestorProfile = async (config: InvestorProfile) => {
+    setSavingInvestorProfile(true);
+    try {
+      await apiPut<InvestorProfile>("/api/settings/investor-profile", config);
+      await loadAll();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "保存投资画像失败");
+    } finally {
+      setSavingInvestorProfile(false);
+    }
+  };
+
   const submitIntelSources = async (config: IntelSourcesConfig) => {
     setSavingIntelSources(true);
     try {
@@ -1736,7 +1833,13 @@ export default function Settings({ initialTab }: { initialTab?: string } = {}) {
     if (!settings) return null;
     switch (activeTab) {
       case "appearance": return <AppearanceTab />;
-      case "workspace": return <WorkspaceTab />;
+      case "workspace": return (
+        <WorkspaceTab
+          investorProfile={settings.investor_profile ?? DEFAULT_INVESTOR_PROFILE}
+          onSaveInvestorProfile={submitInvestorProfile}
+          savingInvestorProfile={savingInvestorProfile}
+        />
+      );
       case "channels": return <ChannelsTab />;
       case "ai": return settings.llm_providers ? (
         <ModelProvidersTab

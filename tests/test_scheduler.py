@@ -22,6 +22,7 @@ def _dt(s: str) -> datetime:
 
 def test_infer_ops_session_and_cap_duty_authority():
     assert infer_ops_session({"task_id": "sched_premarket", "name": "盘前简报"}) == "premarket"
+    assert infer_ops_session({"task_id": "sched_premarket_discovery", "name": "盘前机会发现"}) == "discovery"
     assert infer_ops_session({"task_id": "x", "name": "收盘复评"}) == "close"
     assert infer_ops_session({"task_id": "sched_weekly_review", "name": "周度复盘"}) == "weekly"
     assert cap_duty_authority("A5") == AuthorityLevel.A3
@@ -56,10 +57,12 @@ def test_scheduled_tasks_api_roundtrip(tmp_path, monkeypatch):
     # 默认种子任务可见,含 next_run_at 派生字段
     listed = client.get("/api/scheduled-tasks").json()["items"]
     names = {t["task_id"] for t in listed}
-    assert {"sched_premarket", "sched_close", "sched_weekly_review"} <= names
+    assert {"sched_premarket_discovery", "sched_premarket", "sched_close", "sched_weekly_review"} <= names
+    discovery = next(t for t in listed if t["task_id"] == "sched_premarket_discovery")
     premarket = next(t for t in listed if t["task_id"] == "sched_premarket")
     close = next(t for t in listed if t["task_id"] == "sched_close")
     weekly = next(t for t in listed if t["task_id"] == "sched_weekly_review")
+    assert discovery["enabled"] is True and discovery["schedule"] == "daily@08:20"
     assert premarket["enabled"] is True and premarket["next_run_at"]
     assert close["enabled"] is True and close["schedule"] == "daily@15:15"
     assert weekly["enabled"] is False
@@ -201,4 +204,42 @@ def test_sched_close_injected_when_missing_from_existing_config(tmp_path):
     )
     listed = services.scheduler_service.list_tasks()
     assert any(item["task_id"] == "sched_close" for item in listed)
+    assert any(item["task_id"] == "sched_premarket_discovery" for item in listed)
     assert any(item["task_id"] == "sched_premarket" for item in listed)
+
+
+def test_discovery_run_persists_session_and_overview_card(tmp_path):
+    from tests.test_api import make_client
+
+    client = make_client(tmp_path)
+    services = client.app.state.services
+    client.put(
+        "/api/settings/investor-profile",
+        json={"risk_level": "aggressive", "notes": "可追主题"},
+    ).raise_for_status()
+
+    captured: list[str] = []
+    real_create = services.copilot_service.create_run
+
+    def wrap_create(request):
+        captured.append(request.message)
+        return real_create(request)
+
+    services.copilot_service.create_run = wrap_create  # type: ignore[method-assign]
+    ran = client.post("/api/scheduled-tasks/sched_premarket_discovery/run-now").json()
+    assert ran["status"] == "completed"
+    assert ran.get("report_id")
+    assert captured
+    msg = captured[0]
+    assert "不得只看自选" in msg or "全市场" in msg
+    assert "激进" in msg or "aggressive" in msg
+    assert "可追主题" in msg
+
+    report = client.get(f"/api/reports/{ran['report_id']}").json()
+    assert report["payload"]["session"] == "discovery"
+
+    overview = client.get("/api/overview").json()
+    assert overview["latest_discovery_briefing"]["report_id"] == ran["report_id"]
+    assert overview["latest_discovery_briefing"]["session"] == "discovery"
+    # 仅有 discovery 时，值班简报槽应为空（互不抢占）
+    assert overview.get("latest_ops_briefing") is None

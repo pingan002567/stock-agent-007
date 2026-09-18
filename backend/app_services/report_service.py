@@ -147,9 +147,20 @@ class ReportService:
         return self.repo.list_reports()
 
     def latest_ops_briefing(self) -> Report | None:
-        items = self.repo.list_reports(report_type="ops_briefing", limit=1)
-        return items[0] if items else None
+        """Latest duty briefing excluding opportunity-discovery sessions."""
+        items = self.repo.list_reports(report_type="ops_briefing", limit=40)
+        for item in items:
+            session = str((item.payload or {}).get("session") or "premarket")
+            if session != "discovery":
+                return item
+        return None
 
+    def latest_discovery_briefing(self) -> Report | None:
+        items = self.repo.list_reports(report_type="ops_briefing", limit=40)
+        for item in items:
+            if str((item.payload or {}).get("session") or "") == "discovery":
+                return item
+        return None
     def get_report(self, report_id: str) -> Report:
         report = self.repo.get_report(report_id)
         if not report:
@@ -1004,7 +1015,7 @@ class ReportService:
             market_review = {"degraded": True, "degraded_reason": str(exc)[:200]}
         task_name = str(options.get("task_name") or request.source_id)
         session = str(options.get("session") or "premarket")
-        if session not in {"premarket", "close", "weekly"}:
+        if session not in {"premarket", "close", "weekly", "discovery"}:
             session = "premarket"
         return {
             "source_id": request.source_id,
@@ -1042,6 +1053,7 @@ class ReportService:
         session = str(payload.get("session") or "premarket")
         session_title = {
             "premarket": "盘前值班简报",
+            "discovery": "盘前机会发现",
             "close": "收盘值班简报",
             "weekly": "周度值班复盘",
         }.get(session, "值班简报")

@@ -20,6 +20,7 @@ interface OverviewData {
   tasks?: TaskItem[]; monitor_summary?: { event_count?: number; high_count?: number };
   market?: string;
   latest_ops_briefing?: OpsBriefingCard | null;
+  latest_discovery_briefing?: OpsBriefingCard | null;
   inbox_summary?: { open_count?: number; high_count?: number; overdue_count?: number };
 }
 interface OpsBriefingCard {
@@ -138,6 +139,49 @@ export default function Overview() {
                 </div>
               ) : (
                 <div className="muted">今日尚无值班简报。默认每天 08:30 盘前任务会自动生成；也可在「任务」页立即运行。</div>
+              )}
+            </div>
+          </div>
+
+          <div className="panel">
+            <div className="panel-header">
+              <div className="panel-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <path d="M12 8v4l2 2"/>
+                </svg>
+                今日机会
+                {data.latest_discovery_briefing?.exception_count ? (
+                  <span className="panel-badge">{data.latest_discovery_briefing.exception_count} 例外</span>
+                ) : null}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" className="small" onClick={() => setCurrentScreen("tasks")}>任务</button>
+                <button type="button" className="small" onClick={() => setCurrentScreen("settings")}>投资画像</button>
+                <button type="button" className="small" onClick={() => setCurrentScreen("reports")}>报告</button>
+              </div>
+            </div>
+            <div className="panel-body">
+              {data.latest_discovery_briefing ? (
+                <div
+                  className="event-item"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setCurrentScreen("reports")}
+                  onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") setCurrentScreen("reports"); }}
+                  style={{ cursor: "pointer" }}
+                >
+                  <div className={`event-dot ${data.latest_discovery_briefing.degraded || (data.latest_discovery_briefing.exception_count ?? 0) > 0 ? "warning" : "info"}`} />
+                  <div className="event-content">
+                    <div className="event-title">{data.latest_discovery_briefing.title}</div>
+                    <div className="event-desc">{data.latest_discovery_briefing.conclusion}</div>
+                  </div>
+                  <div className="event-time">{data.latest_discovery_briefing.created_at?.slice(5, 16).replace("T", " ") ?? ""}</div>
+                </div>
+              ) : (
+                <div className="muted">
+                  今日尚无机会发现。默认每个交易日 08:20 按投资画像扫全市场；可在「设置 → 工作区」配置风险档，或在「任务」页立即运行「盘前机会发现」。
+                </div>
               )}
             </div>
           </div>
