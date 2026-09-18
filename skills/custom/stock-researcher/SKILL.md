@@ -32,7 +32,7 @@ allowed-tools:
    - `research_status=未生成研报` 时 score 0 不是评分。
 4. `get_industry_context`：行业格局（行业行情快照、该股行业内市值排名与 PE/PB/涨幅分位、Top10 成分股对比）
    - **优先用 symbol=代码**；若返回「不在股票主表」或主表过薄，在降级说明里写明，并改用 `industry=` 东财精确板块名（看 `available_industries_sample` / `recovery_hint`）重试一次
-   - `degraded=true` 时：禁止编造排名/分位；可用 web_search 补公开口径，但必须标 web 来源与「精度有限」
+   - `degraded=true` 时：**禁止编造**排名/分位；**必须**跟随返回的 `mode_a_recovery` 调用 `invoke_data_capability(provider="tonghuashun", …)`；仍失败才用 web_search 并标「精度有限」
    - A 股以外一律 web 降级并标注
 5. `search_stock_intel`：最新情报（新闻、公告、研报）→ 提炼**催化剂**
    - 壁垒/护城河/上下游信息优先查本会话**已上传的研报**（grep/read_file），其次 `web_search`

@@ -607,7 +607,8 @@ class CatalogRepoMixin:
                   profit=excluded.profit,
                   total_assets=excluded.total_assets,
                   total_liabilities=excluded.total_liabilities,
-                  payload=excluded.payload
+                  payload=excluded.payload,
+                  created_at=excluded.created_at
                 """,
                 (
                     item.symbol.upper(),

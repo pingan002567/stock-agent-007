@@ -119,10 +119,18 @@ def _frontend_file(rel: str) -> Path | None:
 
 
 def _warmup_cache() -> None:
-    """Preload slow external APIs (AKShare) in background so first user request is fast."""
+    """Preload slow external APIs (AKShare) in background so first user request is fast.
+
+    Skipped outside the CN trading window (Mode B preheat gate).
+    """
     import logging
 
+    from backend.stock_domain.provider_router import should_run_market_warmup
+
     logger = logging.getLogger("warmup")
+    if not should_run_market_warmup():
+        logger.info("skip provider cache warmup (outside CN trading window)")
+        return
     logger.info("warming up data provider cache…")
     try:
         provider_router.get_market_review()

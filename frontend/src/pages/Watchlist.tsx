@@ -7,7 +7,25 @@ import { useAppState } from "@/hooks/useAppState";
 import { AskAiButton } from "@/components/ui/AskAiButton";
 import { inferMarket, marketMoney, pct, changeCls } from "@/utils/market";
 
-interface WatchlistItem { symbol: string; name?: string; group?: string; tags?: string[]; monitored?: boolean; ai_score?: number; market?: string; price?: { last?: number; change_pct?: number } }
+interface WatchlistItem {
+  symbol: string;
+  name?: string;
+  group?: string;
+  tags?: string[];
+  monitored?: boolean;
+  ai_score?: number;
+  market?: string;
+  quote_degraded?: boolean;
+  price?: {
+    last?: number | null;
+    change_pct?: number | null;
+    degraded?: boolean;
+    degraded_reason?: string | null;
+    stale?: boolean;
+    from_cache?: boolean;
+  };
+  _mode_b?: { quotes_degraded_count?: number; quotes_total?: number; note?: string };
+}
 interface WatchlistGroup { name: string; color: string; sort_order: number }
 
 export default function Watchlist() {
@@ -39,6 +57,11 @@ export default function Watchlist() {
     if (!activeGroup) return items;
     return items.filter(i => (i.group ?? "默认") === activeGroup);
   }, [items, activeGroup]);
+
+  const quotesDegraded = useMemo(
+    () => items.filter((i) => i.quote_degraded || i.price?.degraded || i.price?.last == null).length,
+    [items],
+  );
 
   const loadAll = async () => {
     setError(null);
@@ -81,6 +104,13 @@ export default function Watchlist() {
     <PageContainer>
       <div className="page-stack fade-in">
         {error && <ErrorMessage message={error} />}
+        {quotesDegraded > 0 && items.length > 0 && (
+          <div className="panel" style={{ borderColor: "var(--amber)", background: "var(--amber-soft, rgba(245,158,11,.08))" }}>
+            <div className="panel-body" style={{ fontSize: 13, color: "var(--amber)" }}>
+              行情通道降级：{quotesDegraded}/{items.length} 只自选无实时价或已标记 degraded（Mode B 缓存）。列表仍展示持仓自选，数字可能过期，勿当作盘中最新。
+            </div>
+          </div>
+        )}
         <PageHead
           kpis={[
             { label: "自选", value: `${items.length} 只` },

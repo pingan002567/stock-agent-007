@@ -12,13 +12,55 @@ router = APIRouter(prefix="/api/watchlist", tags=["watchlist"])
 
 @router.get("")
 def list_watchlist(request: Request, services: AppServices = Depends(get_services)):
+    """Mode B list: enrich from provider_router cache/SQLite; never blank on degrade."""
+    from backend.stock_domain.provider_router import provider_router
+
     items = services.repo.list_watchlist()
     result = []
+    degraded_count = 0
     for item in items:
         d = model_to_dict(item)
         stock = get_stock(item.symbol)
         d["market"] = str(stock["market"]) if stock else ""
+        price_block: dict = {
+            "last": None,
+            "change_pct": None,
+            "updated_at": None,
+            "degraded": True,
+            "degraded_reason": "quote unavailable",
+            "stale": True,
+            "channel": "mode_b",
+        }
+        try:
+            quote = provider_router.get_quote(item.symbol)
+            coverage = quote.coverage if isinstance(quote.coverage, dict) else {}
+            price_block = {
+                "last": quote.last if not quote.degraded or quote.last else None,
+                "change_pct": quote.change_pct,
+                "updated_at": quote.updated_at,
+                "degraded": bool(quote.degraded),
+                "degraded_reason": quote.degraded_reason,
+                "stale": bool(coverage.get("stale")),
+                "from_cache": bool(coverage.get("from_cache")),
+                "source": quote.source,
+                "channel": "mode_b",
+            }
+            if quote.degraded or price_block["last"] is None:
+                degraded_count += 1
+        except Exception as exc:
+            price_block["degraded_reason"] = str(exc)[:160]
+            degraded_count += 1
+        d["price"] = price_block
+        d["quote_degraded"] = bool(price_block.get("degraded") or price_block.get("last") is None)
         result.append(d)
+    # Keep list response for SPA compatibility; meta rides on each item + summary hint
+    # via first-item sentinel when empty is fine — frontend aggregates quote_degraded.
+    if result:
+        result[0]["_mode_b"] = {
+            "quotes_degraded_count": degraded_count,
+            "quotes_total": len(result),
+            "note": "行情来自系统缓存通道（Mode B）；降级时展示缓存/占位，不假装实时。",
+        }
     return result
 
 
@@ -90,27 +132,47 @@ def delete_group(name: str, request: Request, services: AppServices = Depends(ge
 
 @router.get("/quotes")
 def watchlist_quotes(request: Request, services: AppServices = Depends(get_services)):
+    """Mode B quotes for watchlist — prefer cache; surface degraded explicitly."""
+    from backend.stock_domain.provider_router import provider_router
+
     items = services.repo.list_watchlist()
     result = []
+    degraded_count = 0
     for item in items:
         stock = get_stock(item.symbol)
         mkt = str(stock["market"]) if stock else ""
+        row = {
+            "symbol": item.symbol,
+            "name": item.name,
+            "group": item.group or "默认",
+            "monitored": bool(item.monitored),
+            "market": mkt,
+            "price": None,
+            "change_pct": None,
+            "degraded": True,
+            "degraded_reason": "quote unavailable",
+            "channel": "mode_b",
+        }
         try:
-            ctx = services.context_builder.build_stock_context(item.symbol)
-            price_info = getattr(ctx, "price", None)
-            result.append({
-                "symbol": item.symbol, "name": item.name,
-                "group": item.group or "默认", "monitored": bool(item.monitored), "market": mkt,
-                "price": price_info.last if price_info and getattr(price_info, "last", None) else None,
-                "change_pct": price_info.change_pct if price_info and getattr(price_info, "change_pct", None) else None,
-            })
-        except Exception:
-            result.append({
-                "symbol": item.symbol, "name": item.name,
-                "group": item.group or "默认", "monitored": bool(item.monitored), "market": mkt,
-                "price": None, "change_pct": None,
-            })
-    return result
+            quote = provider_router.get_quote(item.symbol)
+            row["price"] = quote.last if quote.last else None
+            row["change_pct"] = quote.change_pct
+            row["degraded"] = bool(quote.degraded) or row["price"] is None
+            row["degraded_reason"] = quote.degraded_reason
+            row["updated_at"] = quote.updated_at
+            row["source"] = quote.source
+            if row["degraded"]:
+                degraded_count += 1
+        except Exception as exc:
+            row["degraded_reason"] = str(exc)[:160]
+            degraded_count += 1
+        result.append(row)
+    return {
+        "items": result,
+        "quotes_degraded_count": degraded_count,
+        "quotes_total": len(result),
+        "channel": "mode_b",
+    }
 
 
 @router.post("/{symbol}/monitor")

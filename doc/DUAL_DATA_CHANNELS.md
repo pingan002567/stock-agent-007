@@ -62,6 +62,13 @@ SPA / REST /api/*
 
 简单事实题优先快捷工具；需换源或复杂研究再 Mode A（`list` → `describe` → `invoke`）。
 
+`get_industry_context` 在 `degraded=true` 时会附带结构化 `mode_a_recovery.steps`（优先 `tonghuashun`）。Lead / 研究类 skill **必须**跟随该步骤，禁止跳过编造。
+
+## Mode B 仪表盘降级展示
+
+- 自选 `/api/watchlist`、持仓 `/api/holdings`：报价走 `provider_router.get_quote`（mem/SQLite 优先），失败时返回 `quote.degraded` / `quotes_degraded_count`，前端展示琥珀提示而非空白表。
+- 后台预热（`warmup_hot_stocks` / app 启动 market+sectors）受 `should_run_market_warmup` 约束：仅 CN 交易日 08:30–15:30。
+
 ## 何时用哪条
 
 | 场景 | 通道 |

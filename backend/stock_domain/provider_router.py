@@ -147,6 +147,21 @@ def _is_trading_hours(market: str) -> bool:
     return True  # unknown market: always consider trading
 
 
+def should_run_market_warmup(now: datetime | None = None) -> bool:
+    """Gate expensive Mode B warmups to CN pre-open through session close.
+
+    Weekends / holidays / overnight: skip market_review / sectors / hot-quote
+    warmups — they only thrash public APIs with no dashboard benefit.
+    """
+    from backend.stock_domain.trading_calendar import is_trading_day, market_now
+    from datetime import time as dtime
+
+    local = market_now("CN", now)
+    if not is_trading_day("CN", local.date()):
+        return False
+    return dtime(8, 30) <= local.time() <= dtime(15, 30)
+
+
 @dataclass
 class _CircuitBreakerState:
     failures: int = 0
@@ -581,6 +596,10 @@ class ProviderRouter:
         cached = self._mem_cache.get(ck)
         if cached is not None:
             return cached
+        sqlite_hit = self._financial_from_sqlite(normalized)
+        if sqlite_hit is not None:
+            self._mem_cache.set(ck, sqlite_hit, ttl=_CACHE_TTL["financial"])
+            return sqlite_hit
         provider = self._provider_for_market(market)
         result = self._call_with_provider(
             "financial",
@@ -593,6 +612,56 @@ class ProviderRouter:
             self._mem_cache.set(ck, result, ttl=_CACHE_TTL["financial"])
         return result
 
+    def _financial_from_sqlite(self, symbol: str) -> dict | None:
+        """Mode B: trust persisted financials for ``_SQLITE_CACHE_TTL['financial']``."""
+        if self.repo is None:
+            return None
+        try:
+            rows = self.repo.list_stock_financial(symbol)
+        except Exception:
+            return None
+        if not rows:
+            return None
+        newest = rows[0]
+        cached_at = newest.created_at or ""
+        try:
+            cache_time = datetime.fromisoformat(cached_at)
+            if cache_time.tzinfo is None:
+                cache_time = cache_time.replace(tzinfo=timezone.utc)
+            age = (datetime.now(timezone.utc) - cache_time).total_seconds()
+        except Exception:
+            return None
+        if age > _SQLITE_CACHE_TTL["financial"]:
+            return None
+        items = [
+            {
+                "report_date": r.report_date,
+                "report_type": r.report_type,
+                "revenue": r.revenue,
+                "profit": r.profit,
+                "total_assets": r.total_assets,
+                "total_liabilities": r.total_liabilities,
+                **(r.payload if isinstance(r.payload, dict) else {}),
+            }
+            for r in rows
+        ]
+        source = ""
+        if isinstance(newest.payload, dict):
+            source = str(newest.payload.get("source") or "sqlite_cache")
+        return {
+            "symbol": symbol,
+            "source": source or "sqlite_cache",
+            "updated_at": cached_at,
+            "degraded": False,
+            "coverage": {
+                "mode": "persisted",
+                "source": "sqlite_cache",
+                "cached_at": cached_at,
+                "age_seconds": age,
+            },
+            "items": items,
+        }
+
     def invalidate_cache(self, capability: str, symbol: str = "", **extra: str) -> None:
         if symbol:
             self._mem_cache.invalidate(self._cache_key(capability, symbol, **extra))
@@ -600,7 +669,16 @@ class ProviderRouter:
             self._mem_cache.invalidate_prefix(f"{capability}:")
 
     def warmup_hot_stocks(self, symbols: list[str] | None = None) -> None:
-        """Pre-fetch quotes for hot stocks. Gated: skips if warmed < 4 hours ago."""
+        """Pre-fetch quotes for hot stocks.
+
+        Gated by: CN trading window (``should_run_market_warmup``) and 4h cooldown.
+        """
+        import logging as _log
+
+        logger = _log.getLogger("provider_router")
+        if not should_run_market_warmup():
+            logger.info("skip hot-stock warmup (outside CN trading window)")
+            return
         now = time.monotonic()
         if now - self._last_warmup < 14400:  # 4 hours
             return
@@ -614,11 +692,7 @@ class ProviderRouter:
                     return
         if not symbols:
             return
-        import logging as _log
-
-        _log.getLogger("provider_router").info(
-            "warming up %d hot stocks …", len(symbols[:20])
-        )
+        logger.info("warming up %d hot stocks …", len(symbols[:20]))
         for symbol in symbols[:5]:
             try:
                 self.get_quote(symbol)

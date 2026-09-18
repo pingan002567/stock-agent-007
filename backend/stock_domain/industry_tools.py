@@ -302,6 +302,32 @@ def _median(values: list[float]) -> float | None:
     return pool[mid] if len(pool) % 2 else round((pool[mid - 1] + pool[mid]) / 2, 4)
 
 
+def _mode_a_industry_recovery(industry: str | None = None) -> dict[str, Any]:
+    """Deterministic Mode A recovery steps when eastmoney industry path fails."""
+    steps = [
+        {"tool": "list_data_sources", "purpose": "确认 tonghuashun/akshare 是否 usable"},
+        {
+            "tool": "invoke_data_capability",
+            "provider": "tonghuashun",
+            "capability": "industry_boards",
+            "params": {},
+        },
+    ]
+    if industry:
+        steps.append({
+            "tool": "invoke_data_capability",
+            "provider": "tonghuashun",
+            "capability": "industry_constituents",
+            "params": {"industry": industry},
+        })
+    return {
+        "channel": "mode_a",
+        "required": True,
+        "steps": steps,
+        "fallback": "web_search（标注精度有限）",
+    }
+
+
 def get_industry_context(
     symbol: str | None = None, industry: str | None = None
 ) -> dict[str, Any]:
@@ -373,10 +399,12 @@ def get_industry_context(
             "industry": resolved_industry,
             "available_industries_sample": related or sample,
             "recovery_hint": (
-                "从 available_industries_sample 选精确东财板块名重试；"
-                "勿用口语别名硬猜。主表过薄时先导入 A 股主表。"
-                "若 sample 为空：东财行业接口暂不可用，可稍后重试或改用 web_search 并标精度有限。"
+                "必须走 Mode A：list_data_sources → "
+                "invoke_data_capability(provider='tonghuashun', capability='industry_boards'|industry_constituents)。"
+                "从 available_industries_sample 选精确板块名重试；sample 为空时勿编造排名。"
+                "仍失败再用 web_search 并标精度有限。"
             ),
+            "mode_a_recovery": _mode_a_industry_recovery(resolved_industry),
         }
 
     result: dict[str, Any] = {

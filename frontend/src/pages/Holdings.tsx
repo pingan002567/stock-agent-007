@@ -16,11 +16,21 @@ interface HoldingItem {
   market_value?: number;
   weight_pct?: number;
   market?: string;
+  quote?: {
+    last?: number | null;
+    change_pct?: number | null;
+    degraded?: boolean;
+    degraded_reason?: string | null;
+    stale?: boolean;
+  };
 }
 
 interface HoldingsResponse {
   items: HoldingItem[];
   demo?: boolean;
+  quotes_degraded_count?: number;
+  quotes_total?: number;
+  channel?: string;
   summary?: {
     total_value?: number;
     positions?: number;
@@ -144,6 +154,14 @@ export default function Holdings() {
   return (
     <PageContainer>
       <div className="page-stack fade-in">
+        {error && <ErrorMessage message={error} />}
+        {(holdings?.quotes_degraded_count ?? 0) > 0 && (
+          <div className="panel" style={{ borderColor: "var(--amber)", background: "var(--amber-soft, rgba(245,158,11,.08))" }}>
+            <div className="panel-body" style={{ fontSize: 13, color: "var(--amber)" }}>
+              行情通道降级：{holdings?.quotes_degraded_count}/{holdings?.quotes_total ?? holdings?.items.length ?? 0} 只持仓报价不可用或已 degraded（Mode B）。仓位权重仍可用，现价相关判断请降置信度。
+            </div>
+          </div>
+        )}
         <PageHead
           kpis={[
             { label: "总资产", value: money(holdings?.summary?.total_value),
