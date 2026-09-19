@@ -318,10 +318,17 @@ class SchedulerService:
             page=task.get("page") or "chat",
             authority_level=cap_duty_authority(str(task.get("authority_level") or "A2")),
         )
-        outcome: dict[str, Any] = {"run_id": None, "status": "failed", "error": None, "report_id": None}
+        outcome: dict[str, Any] = {
+            "run_id": None,
+            "status": "failed",
+            "error": None,
+            "report_id": None,
+            "session_id": None,
+        }
         try:
             run = self.copilot_service.create_run(request)
             outcome["run_id"] = run.run_id
+            outcome["session_id"] = getattr(run, "session_id", None)
 
             async def _drain() -> None:
                 async for event in self.copilot_service.stream_run(run.run_id, run.task_id):
@@ -356,12 +363,41 @@ class SchedulerService:
         )
 
     def _notify_duty_outcome(self, task: dict[str, Any], outcome: dict[str, Any]) -> None:
-        if outcome.get("status") != "failed" or self.alert_sink is None:
+        if self.alert_sink is None:
             return
+        status = str(outcome.get("status") or "")
+        if status == "skipped":
+            return
+
+        from backend.config.notification_prefs import load_notification_prefs
+
+        prefs = load_notification_prefs(self.repo)
         name = str(task.get("name") or task.get("task_id") or "值班任务")
-        detail = str(outcome.get("error") or "定时任务未收口")
+        task_id = str(task.get("task_id") or "")
+        session_id = outcome.get("session_id")
+        report_id = outcome.get("report_id")
+        deep = {
+            "kind": "scheduled_task",
+            "task_id": task_id or None,
+            "session_id": str(session_id) if session_id else None,
+            "report_id": str(report_id) if report_id else None,
+        }
+
+        if status == "failed":
+            detail = str(outcome.get("error") or "定时任务未收口")
+            title = f"值班失败 · {name}"
+            body = detail[:400]
+        elif status == "completed":
+            if not prefs.get("duty_completion_push", True):
+                return
+            narrative = self._copilot_narrative(outcome.get("run_id")).strip()
+            title = f"值班完成 · {name}"
+            body = (narrative[:280] if narrative else "任务已完成，可在对话或研究报告中查看。")
+        else:
+            return
+
         try:
-            self.alert_sink(f"值班失败 · {name}", detail[:400])
+            self.alert_sink(title, body, **deep)
         except Exception:
             logger.exception("duty alert push failed")
 

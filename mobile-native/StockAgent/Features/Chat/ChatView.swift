@@ -672,6 +672,9 @@ struct ComposerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let dock = chat.workingDock {
+                composerDock(dock)
+            }
             Divider()
             HStack(alignment: .center, spacing: 10) {
                 Menu {
@@ -706,6 +709,12 @@ struct ComposerView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .focused($focused)
                     .disabled(!chat.canSend && !chat.sending)
+                    .onChange(of: chat.draft) { _, value in
+                        if let sid = chat.currentSession?.sessionId {
+                            // Keep per-session draft warm while typing.
+                            chat.rememberDraft(value, for: sid)
+                        }
+                    }
 
                 Group {
                     if chat.sending {
@@ -757,6 +766,36 @@ struct ComposerView: View {
                 photoItem = nil
             }
         }
+    }
+
+    private func composerDock(_ dock: ChatViewModel.WorkingDock) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            if dock.kind == .stuck {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(dock.title)
+                    .font(.caption.weight(.semibold))
+                Text(dock.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            if dock.kind == .stuck {
+                Button("停止") { chat.stop() }
+                    .font(.caption.weight(.semibold))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(dock.kind == .stuck ? Color.orange.opacity(0.12) : Color.accentColor.opacity(0.10))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(dock.title)。\(dock.detail)")
     }
 }
 

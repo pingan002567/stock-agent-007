@@ -35,5 +35,15 @@ struct MainTabView: View {
                 Task { await monitorUnread.refreshFromServer() }
             }
         }
+        .sheet(isPresented: $tabs.showReports) {
+            NavigationStack {
+                ReportsListView(initialReportId: tabs.consumePendingReportId())
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("关闭") { tabs.showReports = false }
+                        }
+                    }
+            }
+        }
     }
 }

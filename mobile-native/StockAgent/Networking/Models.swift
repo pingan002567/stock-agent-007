@@ -63,6 +63,8 @@ struct WorkbenchSettings: Decodable {
     let availableDataProviders: [AvailableDataProvider]?
     let providerCredentialSchema: [String: [ProviderCredentialField]]?
     let llmProviders: LlmProvidersSnapshot?
+    let investorProfile: InvestorProfile?
+    let notificationPrefs: NotificationPrefs?
 
     enum CodingKeys: String, CodingKey {
         case skills
@@ -75,7 +77,39 @@ struct WorkbenchSettings: Decodable {
         case availableDataProviders = "available_data_providers"
         case providerCredentialSchema = "provider_credential_schema"
         case llmProviders = "llm_providers"
+        case investorProfile = "investor_profile"
+        case notificationPrefs = "notification_prefs"
     }
+}
+
+struct InvestorProfile: Codable, Hashable {
+    var riskLevel: String
+    var notes: String
+
+    enum CodingKeys: String, CodingKey {
+        case riskLevel = "risk_level"
+        case notes
+    }
+
+    static let `default` = InvestorProfile(riskLevel: "moderate", notes: "")
+
+    var riskLabel: String {
+        switch riskLevel {
+        case "conservative": return "保守"
+        case "aggressive": return "激进"
+        default: return "普通"
+        }
+    }
+}
+
+struct NotificationPrefs: Codable, Hashable {
+    var dutyCompletionPush: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case dutyCompletionPush = "duty_completion_push"
+    }
+
+    static let `default` = NotificationPrefs(dutyCompletionPush: true)
 }
 
 struct SkillInfo: Identifiable, Decodable, Hashable {

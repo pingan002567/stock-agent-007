@@ -195,6 +195,8 @@ enum StreamUpdate: Sendable {
     case clarification(HumanInputRequest?, text: String?)
     case skillTrace([SkillTraceStep])
     case error(String)
+    /// Backend ping/progress heartbeat for composer working/stuck dock.
+    case liveness(status: String, phase: String, currentTool: String?, alive: Bool)
     case ignore
 }
 
@@ -269,8 +271,17 @@ enum CopilotStreamParser {
                 ?? event.data
             return .error(msg)
         case "ping", "progress":
-            // Backend liveness heartbeat — ChatStreamingService re-arms idle on any frame.
-            return .ignore
+            let payload = (obj["payload"] as? [String: Any]) ?? obj
+            let status = stringValue(payload["status"]) ?? "running"
+            let phase = stringValue(payload["phase"]) ?? "llm"
+            let tool = stringValue(payload["current_tool"])
+            let alive: Bool
+            if let b = payload["alive"] as? Bool {
+                alive = b
+            } else {
+                alive = true
+            }
+            return .liveness(status: status, phase: phase, currentTool: tool, alive: alive)
         default:
             break
         }

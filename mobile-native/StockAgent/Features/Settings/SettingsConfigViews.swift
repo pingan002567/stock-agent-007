@@ -658,3 +658,127 @@ private struct LlmConnectSheet: View {
         }
     }
 }
+
+// MARK: - Investor profile
+
+struct InvestorProfileSettingsView: View {
+    var initial: InvestorProfile?
+
+    private struct RiskOption: Identifiable {
+        let id: String
+        let label: String
+        let hint: String
+    }
+
+    private let options: [RiskOption] = [
+        RiskOption(id: "conservative", label: "保守", hint: "偏防御、质量与低波动"),
+        RiskOption(id: "moderate", label: "普通", hint: "轮动主线与中等弹性"),
+        RiskOption(id: "aggressive", label: "激进", hint: "主题催化与高弹性"),
+    ]
+
+    @State private var profile: InvestorProfile = .default
+    @State private var baseline: InvestorProfile = .default
+    @State private var saving = false
+    @State private var message = ""
+    @State private var error = ""
+
+    private var dirty: Bool {
+        profile.riskLevel != baseline.riskLevel
+            || profile.notes != baseline.notes
+    }
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(options) { opt in
+                    Button {
+                        profile.riskLevel = opt.id
+                        message = ""
+                    } label: {
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: profile.riskLevel == opt.id ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(profile.riskLevel == opt.id ? Color.accentColor : Color.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(opt.label).foregroundStyle(.primary)
+                                Text(opt.hint)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            } header: {
+                Text("风险承受")
+            } footer: {
+                Text("盘前机会发现会按等级筛选全市场候选；自述会原样注入 AI，用于细化偏好。")
+            }
+
+            Section("自述（可选）") {
+                TextField("例如：偏好低估值蓝筹，单票不超过 1 成；不追连板", text: $profile.notes, axis: .vertical)
+                    .lineLimit(3...8)
+            }
+
+            if dirty {
+                Section {
+                    Button {
+                        Task { await save() }
+                    } label: {
+                        if saving {
+                            ProgressView()
+                        } else {
+                            Text("保存投资画像")
+                        }
+                    }
+                    .disabled(saving)
+                }
+            }
+
+            if !message.isEmpty {
+                Section {
+                    Text(message).font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            if !error.isEmpty {
+                Section {
+                    Text(error).font(.footnote).foregroundStyle(.red)
+                }
+            }
+        }
+        .navigationTitle("投资画像")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            let loaded = initial ?? .default
+            profile = loaded
+            baseline = loaded
+            await reload()
+        }
+    }
+
+    private func reload() async {
+        do {
+            let settings = try await APIClient.shared.fetchSettings()
+            let loaded = settings.investorProfile ?? .default
+            profile = loaded
+            baseline = loaded
+        } catch {
+            // Keep initial; settings fetch may fail on older backends without the field.
+        }
+    }
+
+    private func save() async {
+        saving = true
+        message = ""
+        error = ""
+        defer { saving = false }
+        do {
+            let saved = try await APIClient.shared.updateInvestorProfile(profile)
+            profile = saved
+            baseline = saved
+            message = "已保存"
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+}

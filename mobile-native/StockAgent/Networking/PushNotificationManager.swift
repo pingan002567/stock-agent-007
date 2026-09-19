@@ -9,8 +9,7 @@ final class PushNotificationManager: NSObject, ObservableObject {
     @Published private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
     @Published private(set) var deviceTokenHex: String?
 
-    private var pendingDeepLinkEventId: String?
-    private var pendingDeepLinkSymbol: String?
+    private var pendingUserInfo: [AnyHashable: Any]?
 
     func configure() {
         UNUserNotificationCenter.current().delegate = self
@@ -56,11 +55,24 @@ final class PushNotificationManager: NSObject, ObservableObject {
     }
 
     func handleNotificationUserInfo(_ userInfo: [AnyHashable: Any]) {
+        pendingUserInfo = userInfo
+        let kind = (userInfo["kind"] as? String) ?? ""
+        if kind == "scheduled_task" {
+            var info: [AnyHashable: Any] = ["kind": "scheduled_task"]
+            if let sessionId = userInfo["session_id"] as? String { info["session_id"] = sessionId }
+            if let reportId = userInfo["report_id"] as? String { info["report_id"] = reportId }
+            if let taskId = userInfo["task_id"] as? String { info["task_id"] = taskId }
+            NotificationCenter.default.post(
+                name: .stockAgentOpenScheduledTask,
+                object: nil,
+                userInfo: info
+            )
+            return
+        }
+
         let eventId = (userInfo["event_id"] as? String)
             ?? (userInfo["eventId"] as? String)
         let symbol = userInfo["symbol"] as? String
-        pendingDeepLinkEventId = eventId
-        pendingDeepLinkSymbol = symbol
         var info: [AnyHashable: Any] = [:]
         if let eventId { info["event_id"] = eventId }
         if let symbol { info["symbol"] = symbol }
@@ -71,12 +83,9 @@ final class PushNotificationManager: NSObject, ObservableObject {
         )
     }
 
-    func consumePendingDeepLink() -> (eventId: String?, symbol: String?) {
-        defer {
-            pendingDeepLinkEventId = nil
-            pendingDeepLinkSymbol = nil
-        }
-        return (pendingDeepLinkEventId, pendingDeepLinkSymbol)
+    func consumePendingUserInfo() -> [AnyHashable: Any]? {
+        defer { pendingUserInfo = nil }
+        return pendingUserInfo
     }
 }
 
@@ -104,6 +113,7 @@ extension PushNotificationManager: UNUserNotificationCenterDelegate {
 
 extension Notification.Name {
     static let stockAgentOpenMonitor = Notification.Name("stockAgentOpenMonitor")
+    static let stockAgentOpenScheduledTask = Notification.Name("stockAgentOpenScheduledTask")
 }
 
 final class AppDelegate: NSObject, UIApplicationDelegate {

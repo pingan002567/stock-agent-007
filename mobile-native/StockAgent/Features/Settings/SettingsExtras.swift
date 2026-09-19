@@ -230,6 +230,8 @@ struct CostSettingsView: View {
 }
 
 struct ReportsListView: View {
+    var initialReportId: String? = nil
+
     @State private var items: [ReportListItem] = []
     @State private var error = ""
     @State private var loading = true
@@ -276,7 +278,12 @@ struct ReportsListView: View {
         }
         .navigationTitle("研究报告")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await load() }
+        .task {
+            await load()
+            if let rid = initialReportId, !rid.isEmpty {
+                await open(rid)
+            }
+        }
         .refreshable { await load() }
         .sheet(item: $selected) { report in
             NavigationStack {

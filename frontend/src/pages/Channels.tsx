@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiGet, apiPost, apiDelete } from "@/api/client";
+import { apiGet, apiPost, apiDelete, apiPut } from "@/api/client";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { formatTimeAgo } from "@/utils/format";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
@@ -22,17 +22,21 @@ export default function ChannelsTab() {
   const [saving, setSaving] = useState<string | null>(null);
   const [connect, setConnect] = useState<ConnectState | null>(null);
   const [now, setNow] = useState(0);
+  const [dutyCompletionPush, setDutyCompletionPush] = useState(true);
+  const [savingDutyPush, setSavingDutyPush] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [cfg, st, bd] = await Promise.all([
+      const [cfg, st, bd, settings] = await Promise.all([
         apiGet<ChannelsConfig>("/api/channels/config").catch(() => ({})),
         apiGet<ChannelStatus>("/api/channels/status").catch(() => null),
         apiGet<{ items: Binding[] }>("/api/channels/bindings").then((r) => r.items).catch(() => []),
+        apiGet<{ notification_prefs?: { duty_completion_push?: boolean } }>("/api/settings").catch(() => null),
       ]);
       setConfig(cfg); setStatus(st); setBindings(bd);
+      setDutyCompletionPush(settings?.notification_prefs?.duty_completion_push ?? true);
     } finally { setLoading(false); }
   }, []);
 
@@ -59,6 +63,22 @@ export default function ChannelsTab() {
   const toggleRequireBinding = async (value: boolean) => {
     setConfig((c) => ({ ...c, require_binding: value }));
     await apiPost("/api/channels/config", { require_binding: value });
+  };
+
+  const toggleDutyCompletionPush = async (value: boolean) => {
+    setDutyCompletionPush(value);
+    setSavingDutyPush(true);
+    try {
+      const saved = await apiPut<{ duty_completion_push: boolean }>(
+        "/api/settings/notification-prefs",
+        { duty_completion_push: value },
+      );
+      setDutyCompletionPush(saved.duty_completion_push);
+    } catch {
+      setDutyCompletionPush(!value);
+    } finally {
+      setSavingDutyPush(false);
+    }
   };
 
   const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
@@ -119,6 +139,24 @@ export default function ChannelsTab() {
 
   return (
     <div className="page-stack">
+      <div className="panel">
+        <div className="panel-header">
+          <div className="panel-title">定时任务通知</div>
+        </div>
+        <div className="panel-body" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 13 }}>完成时推送（IM / APNs）</div>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
+              盘前简报、机会发现等任务成功后通知；失败始终推送。
+            </div>
+          </div>
+          <ToggleSwitch
+            checked={dutyCompletionPush}
+            disabled={savingDutyPush || loading}
+            onChange={(v) => void toggleDutyCompletionPush(v)}
+          />
+        </div>
+      </div>
       <div className="panel">
         <div className="panel-header">
           <div className="panel-title">IM 渠道</div>

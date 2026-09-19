@@ -174,7 +174,7 @@ final class ChatStreamingService {
             if turn.displayAnswer.isEmpty {
                 turn.answerText = message
             }
-        case .ignore:
+        case .liveness, .ignore:
             break
         }
     }

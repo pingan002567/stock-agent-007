@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 from backend.channels.binding import BindingStore
 from backend.channels.message_bus import MessageBus, OutboundMessage
@@ -26,9 +27,10 @@ class ChannelNotifier:
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
 
-    def push(self, title: str, text: str) -> None:
+    def push(self, title: str, text: str, **_: Any) -> None:
         """Thread-safe: schedule a push to the bound chats that opted in to
-        alerts. No-op if the channel service isn't running yet."""
+        alerts. Extra kwargs (APNs deep-link fields) are ignored here.
+        No-op if the channel service isn't running yet."""
         loop = self._loop
         if loop is None or not loop.is_running():
             return

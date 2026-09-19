@@ -145,6 +145,7 @@ class MonitorService:
                             event.trigger_rule or "",
                             symbol=event.symbol,
                             event_id=event.event_id,
+                            kind="monitor",
                         )
                     except Exception:
                         pass

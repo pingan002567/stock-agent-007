@@ -488,6 +488,25 @@ final class APIClient: ObservableObject {
     }
 
     @discardableResult
+    func updateInvestorProfile(_ profile: InvestorProfile) async throws -> InvestorProfile {
+        let body: [String: Any] = [
+            "risk_level": profile.riskLevel,
+            "notes": profile.notes,
+        ]
+        let data = try await request(path: "/api/settings/investor-profile", method: "PUT", json: body)
+        return try JSONDecoder().decode(InvestorProfile.self, from: data)
+    }
+
+    @discardableResult
+    func updateNotificationPrefs(_ prefs: NotificationPrefs) async throws -> NotificationPrefs {
+        let body: [String: Any] = [
+            "duty_completion_push": prefs.dutyCompletionPush,
+        ]
+        let data = try await request(path: "/api/settings/notification-prefs", method: "PUT", json: body)
+        return try JSONDecoder().decode(NotificationPrefs.self, from: data)
+    }
+
+    @discardableResult
     func updateDataSources(_ config: DataSourcesConfig) async throws -> DataSourcesConfig {
         let encoded = try JSONEncoder().encode(config)
         guard let json = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] else {

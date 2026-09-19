@@ -11,6 +11,8 @@ struct SettingsView: View {
     @State private var loading = false
     @State private var probeMessage = ""
     @State private var loadError = ""
+    @State private var dutyCompletionPush = true
+    @State private var savingNotificationPrefs = false
 
     var body: some View {
         NavigationStack {
@@ -148,6 +150,16 @@ struct SettingsView: View {
 
     private var featuresSection: some View {
         Section("功能") {
+            NavigationLink {
+                InvestorProfileSettingsView(initial: settings?.investorProfile)
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("投资画像")
+                    Text(investorSubtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             NavigationLink("外观与主题") {
                 ChatAppearanceSettingsView()
             }
@@ -182,10 +194,21 @@ struct SettingsView: View {
                 "Device Token",
                 value: push.deviceTokenHex.map { String($0.prefix(16)) + "…" } ?? "未注册"
             )
+            Toggle(
+                "定时任务完成通知",
+                isOn: Binding(
+                    get: { dutyCompletionPush },
+                    set: { newValue in
+                        dutyCompletionPush = newValue
+                        Task { await saveDutyCompletionPush(newValue) }
+                    }
+                )
+            )
+            .disabled(savingNotificationPrefs)
         } header: {
             Text("通知")
         } footer: {
-            Text("需在 Apple Developer 为 Bundle ID 开通 Push，并在 entitlements 加回 aps-environment 后才能真机收到远程推送。")
+            Text("完成通知默认开启；失败始终推送。需付费 Apple 开发者账号开通 Push，并配置服务端 APNS_* 后真机才能收到远程推送。")
         }
     }
 
@@ -277,6 +300,13 @@ struct SettingsView: View {
         return "\(on)/\(available.count) 启用"
     }
 
+    private var investorSubtitle: String {
+        let profile = settings?.investorProfile ?? .default
+        let notes = profile.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        if notes.isEmpty { return profile.riskLabel }
+        return "\(profile.riskLabel) · 已填自述"
+    }
+
     private var skillsCountLabel: String {
         let skills = settings?.skills ?? []
         guard !skills.isEmpty else { return "—" }
@@ -316,8 +346,24 @@ struct SettingsView: View {
         defer { loading = false }
         do {
             settings = try await api.fetchSettings()
+            dutyCompletionPush = settings?.notificationPrefs?.dutyCompletionPush ?? true
             _ = try? await api.probeHealth()
         } catch {
+            loadError = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    private func saveDutyCompletionPush(_ enabled: Bool) async {
+        savingNotificationPrefs = true
+        defer { savingNotificationPrefs = false }
+        do {
+            let saved = try await api.updateNotificationPrefs(
+                NotificationPrefs(dutyCompletionPush: enabled)
+            )
+            dutyCompletionPush = saved.dutyCompletionPush
+        } catch {
+            // Revert UI on failure.
+            dutyCompletionPush = settings?.notificationPrefs?.dutyCompletionPush ?? true
             loadError = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
@@ -331,6 +377,7 @@ struct SettingsView: View {
             let model = health.agentRuntime?.modelName.map { " · \($0)" } ?? ""
             probeMessage = "健康检查通过（\(client)\(model)）"
             settings = try? await api.fetchSettings()
+            dutyCompletionPush = settings?.notificationPrefs?.dutyCompletionPush ?? true
         } catch {
             probeMessage = (error as? APIError)?.message ?? error.localizedDescription
         }

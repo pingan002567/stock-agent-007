@@ -113,8 +113,12 @@ def test_failed_scheduled_task_still_persists_briefing_and_inbox_item(tmp_path, 
     def boom(*_args, **_kwargs):
         raise RuntimeError("forced scheduler failure")
 
-    pushed: list[tuple[str, str]] = []
-    services.scheduler_service.alert_sink = lambda title, text: pushed.append((title, text))
+    pushed: list[tuple] = []
+
+    def sink(title, text, **kwargs):
+        pushed.append((title, text, kwargs))
+
+    services.scheduler_service.alert_sink = sink
     monkeypatch.setattr(services.copilot_service, "create_run", boom)
     ran = client.post("/api/scheduled-tasks/sched_premarket/run-now").json()
     assert ran["status"] == "failed"
@@ -125,6 +129,50 @@ def test_failed_scheduled_task_still_persists_briefing_and_inbox_item(tmp_path, 
     assert overview["latest_ops_briefing"]["report_id"] == ran["report_id"]
     assert overview["inbox_summary"]["high_count"] >= 1
     assert pushed and pushed[0][0].startswith("值班失败")
+    assert pushed[0][2].get("kind") == "scheduled_task"
+    assert pushed[0][2].get("report_id") == ran["report_id"]
+
+
+def test_completed_scheduled_task_pushes_when_pref_enabled(tmp_path):
+    from tests.test_api import make_client
+
+    client = make_client(tmp_path)
+    services = client.app.state.services
+    pushed: list[tuple] = []
+
+    def sink(title, text, **kwargs):
+        pushed.append((title, text, kwargs))
+
+    services.scheduler_service.alert_sink = sink
+    client.put(
+        "/api/settings/notification-prefs",
+        json={"duty_completion_push": True},
+    ).raise_for_status()
+    ran = client.post("/api/scheduled-tasks/sched_premarket/run-now").json()
+    assert ran["status"] == "completed"
+    assert pushed and pushed[0][0].startswith("值班完成")
+    assert pushed[0][2].get("kind") == "scheduled_task"
+    assert pushed[0][2].get("task_id") == "sched_premarket"
+    assert pushed[0][2].get("report_id") == ran.get("report_id")
+    assert pushed[0][2].get("session_id")
+
+
+def test_completed_scheduled_task_skips_push_when_pref_disabled(tmp_path):
+    from tests.test_api import make_client
+
+    client = make_client(tmp_path)
+    services = client.app.state.services
+    pushed: list[tuple] = []
+    services.scheduler_service.alert_sink = lambda title, text, **kw: pushed.append((title, text))
+    client.put(
+        "/api/settings/notification-prefs",
+        json={"duty_completion_push": False},
+    ).raise_for_status()
+    prefs = client.get("/api/settings").json()["notification_prefs"]
+    assert prefs["duty_completion_push"] is False
+    ran = client.post("/api/scheduled-tasks/sched_premarket/run-now").json()
+    assert ran["status"] == "completed"
+    assert pushed == []
 
 
 def test_uses_cn_session_calendar_only_for_duty_or_explicit_cn():

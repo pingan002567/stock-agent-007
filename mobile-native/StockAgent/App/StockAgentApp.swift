@@ -25,6 +25,14 @@ struct StockAgentApp: App {
                     tabs.openMonitor(eventId: eventId, symbol: symbol)
                     Task { await MonitorUnreadStore.shared.refreshFromServer() }
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .stockAgentOpenScheduledTask)) { note in
+                    let sessionId = note.userInfo?["session_id"] as? String
+                    let reportId = note.userInfo?["report_id"] as? String
+                    tabs.openScheduledTask(sessionId: sessionId, reportId: reportId)
+                    if let sessionId, !sessionId.isEmpty {
+                        Task { await chat.openSessionById(sessionId) }
+                    }
+                }
                 .onChange(of: auth.isConnected) { _, connected in
                     if connected {
                         PushNotificationManager.shared.requestAuthorizationAndRegister()
@@ -57,11 +65,25 @@ final class TabRouter: ObservableObject {
     /// Deep-link target from APNs / local notification.
     @Published var pendingMonitorEventId: String?
     @Published var pendingMonitorSymbol: String?
+    @Published var pendingReportId: String?
+    @Published var showReports = false
 
     func openMonitor(eventId: String? = nil, symbol: String? = nil) {
         pendingMonitorEventId = eventId
         pendingMonitorSymbol = symbol
         selected = .monitor
+    }
+
+    func openScheduledTask(sessionId: String?, reportId: String?) {
+        if let sessionId, !sessionId.isEmpty {
+            selected = .chat
+        } else if let reportId, !reportId.isEmpty {
+            pendingReportId = reportId
+            showReports = true
+            selected = .settings
+        } else {
+            selected = .chat
+        }
     }
 
     var hasMonitorDeepLink: Bool {
@@ -74,6 +96,11 @@ final class TabRouter: ObservableObject {
             pendingMonitorSymbol = nil
         }
         return (pendingMonitorEventId, pendingMonitorSymbol)
+    }
+
+    func consumePendingReportId() -> String? {
+        defer { pendingReportId = nil }
+        return pendingReportId
     }
 }
 

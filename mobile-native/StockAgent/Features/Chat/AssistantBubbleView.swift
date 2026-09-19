@@ -253,10 +253,34 @@ struct AssistantBubbleView: View {
         HStack(spacing: 8) {
             ProgressView()
                 .controlSize(.small)
-            Text(turn.phase.label.isEmpty ? "处理中" : turn.phase.label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(phaseTitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let detail = phaseDetail {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
         }
+    }
+
+    private var phaseTitle: String {
+        if turn.phase == .tools {
+            if let running = turn.tools.last(where: { $0.status == .running }) {
+                return "正在执行 \(ToolLabels.displayName(for: running.name))"
+            }
+            return turn.phase.label
+        }
+        return turn.phase.label.isEmpty ? "处理中" : turn.phase.label
+    }
+
+    private var phaseDetail: String? {
+        if turn.phase == .tools, turn.tools.contains(where: { $0.status == .running }) {
+            return "长工具调用中，请稍候"
+        }
+        return nil
     }
 
     private var toolsCollapsedSection: some View {
@@ -366,9 +390,9 @@ struct AssistantBubbleView: View {
             VStack(alignment: .leading, spacing: 8) {
                 MarkdownText(
                     source: turn.answerText,
-                    showCursor: turn.isStreaming && turn.phase == .answering
+                    showCursor: turn.isStreaming && turn.phase == .answering,
+                    richBlocks: true
                 )
-                .font(.body)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 if !turn.isStreaming, !turn.displayAnswer.isEmpty {

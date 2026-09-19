@@ -41,6 +41,25 @@ enum PendingStreamStore {
 
 @MainActor
 final class ChatViewModel: ObservableObject {
+    struct RunLiveness: Equatable {
+        var lastAt: Date
+        var status: String
+        var phase: String
+        var currentTool: String?
+        var alive: Bool
+    }
+
+    struct WorkingDock: Equatable {
+        enum Kind: Equatable { case working, stuck }
+        var kind: Kind
+        var title: String
+        var detail: String
+    }
+
+    /// Matches desktop STUCK_IDLE_MS — show stuck dock before hard idle timeout.
+    private static let stuckIdleSeconds: TimeInterval = 90
+    private static let statusPollSeconds: TimeInterval = 5
+
     @Published var sessions: [CopilotSession] = []
     @Published var currentSession: CopilotSession?
     @Published var rows: [ChatRow] = []
@@ -58,6 +77,9 @@ final class ChatViewModel: ObservableObject {
     /// Symbol/page context for the next send (e.g. from stock detail).
     @Published var composeContext: ComposeContext?
     @Published var sendBlockedReason: String?
+    /// Backend-owned liveness for working vs stuck composer dock.
+    @Published private(set) var runLiveness: RunLiveness?
+    @Published private(set) var streamStuck = false
 
     enum ScrollTarget: Equatable {
         case bottom(id: String)
@@ -66,6 +88,10 @@ final class ChatViewModel: ObservableObject {
 
     private var rowsBySession: [String: [ChatRow]] = [:]
     private var failedTextBySession: [String: String] = [:]
+    private var draftsBySession: [String: String] = [:]
+    private var lastProgressAt: Date = .distantPast
+    private var statusPollTask: Task<Void, Never>?
+    private var stuckWatchTask: Task<Void, Never>?
     private let api = APIClient.shared
     private let pager = ChatHistoryPager()
     private let streaming = ChatStreamingService()
@@ -74,6 +100,65 @@ final class ChatViewModel: ObservableObject {
     var sending: Bool {
         guard let sid = currentSession?.sessionId else { return false }
         return streamingSessionIds.contains(sid)
+    }
+
+    /// Composer dock copy when the current session is streaming.
+    var workingDock: WorkingDock? {
+        guard sending else { return nil }
+        if streamStuck {
+            return WorkingDock(
+                kind: .stuck,
+                title: "可能卡住了",
+                detail: "超过 90 秒没有服务端心跳。可点停止后重试，或继续等待。"
+            )
+        }
+        let live = runLiveness
+        if live?.phase == "tool", let tool = live?.currentTool, !tool.isEmpty {
+            return WorkingDock(
+                kind: .working,
+                title: "正在执行 \(ToolLabels.displayName(for: tool))…",
+                detail: "长工具调用中，心跳正常。"
+            )
+        }
+        if live?.phase == "awaiting_human" {
+            return WorkingDock(kind: .working, title: "等待你的回复", detail: "本轮已暂停在澄清步骤。")
+        }
+        if live?.phase == "llm" || live?.phase == "starting" {
+            return WorkingDock(kind: .working, title: "模型推理中…", detail: "连接正常，请稍候。")
+        }
+        if let phase = currentAssistantPhase, phase == .tools {
+            let running = currentRunningToolName
+            if let running, !running.isEmpty {
+                return WorkingDock(
+                    kind: .working,
+                    title: "正在执行 \(ToolLabels.displayName(for: running))…",
+                    detail: "长工具调用中，请稍候。"
+                )
+            }
+            return WorkingDock(kind: .working, title: "调用工具中…", detail: "连接正常，请稍候。")
+        }
+        return WorkingDock(kind: .working, title: "正在生成…", detail: "连接正常，请稍候。")
+    }
+
+    private var currentAssistantPhase: AssistantPhase? {
+        guard let sid = currentSession?.sessionId else { return nil }
+        let list = rowsBySession[sid] ?? rows
+        for row in list.reversed() {
+            if case .assistant(let turn) = row, turn.isStreaming { return turn.phase }
+        }
+        return nil
+    }
+
+    private var currentRunningToolName: String? {
+        guard let sid = currentSession?.sessionId else { return nil }
+        let list = rowsBySession[sid] ?? rows
+        for row in list.reversed() {
+            if case .assistant(let turn) = row {
+                return turn.tools.last(where: { $0.status == .running })?.name
+                    ?? turn.tools.last?.name
+            }
+        }
+        return nil
     }
 
     var title: String {
@@ -104,6 +189,9 @@ final class ChatViewModel: ObservableObject {
     func prepareCompose(page: String, symbol: String, draft prompt: String) {
         composeContext = ComposeContext(page: page, symbol: symbol)
         draft = prompt
+        if let sid = currentSession?.sessionId {
+            draftsBySession[sid] = prompt
+        }
     }
 
     func bootstrap() async {
@@ -146,7 +234,16 @@ final class ChatViewModel: ObservableObject {
         else { return }
         do {
             let status = try await api.fetchRunStatus(sessionId: sid, runId: runId)
-            if status.alive { return }
+            if status.alive {
+                noteLiveProgress(
+                    status: status.status,
+                    phase: status.phase ?? "llm",
+                    currentTool: status.currentTool,
+                    alive: true,
+                    forSession: sid
+                )
+                return
+            }
             // Run finished while we were backgrounded — hydrate history and clear streaming flags.
             cancelStream(sessionId: sid, finalizeTurn: false)
             streamingSessionIds.remove(sid)
@@ -164,13 +261,40 @@ final class ChatViewModel: ObservableObject {
             drawerOpen = false
             return
         }
+        persistCurrentDraft()
         persistCurrentRows()
         currentSession = session
+        draft = draftsBySession[session.sessionId] ?? ""
         drawerOpen = false
         error = ""
         do {
             try await presentSession(session.sessionId, preferCacheIfStreaming: true)
             await refreshUploads()
+            syncLivenessForVisibleSession()
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+            noteAuthFailure(error)
+        }
+    }
+
+    /// Deep-link from scheduled-task push: refresh list and open the duty session.
+    func openSessionById(_ sessionId: String) async {
+        let sid = sessionId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sid.isEmpty else { return }
+        do {
+            if sessions.isEmpty {
+                sessions = try await api.fetchSessions()
+            }
+            if let existing = sessions.first(where: { $0.sessionId == sid }) {
+                await openSession(existing)
+                return
+            }
+            sessions = try await api.fetchSessions()
+            if let existing = sessions.first(where: { $0.sessionId == sid }) {
+                await openSession(existing)
+            } else {
+                notice = "未找到对应会话，可在研究报告中查看值班简报。"
+            }
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
             noteAuthFailure(error)
@@ -179,11 +303,14 @@ final class ChatViewModel: ObservableObject {
 
     func newSession() async {
         error = ""
+        persistCurrentDraft()
         persistCurrentRows()
         do {
             let session = try await api.createSession()
             sessions.insert(session, at: 0)
             currentSession = session
+            draft = ""
+            draftsBySession[session.sessionId] = ""
             rows = []
             rowsBySession[session.sessionId] = []
             pager.resetEmpty(sessionId: session.sessionId)
@@ -193,6 +320,7 @@ final class ChatViewModel: ObservableObject {
             uploads = []
             uploadsSupported = true
             drawerOpen = false
+            clearLivenessUI()
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
             noteAuthFailure(error)
@@ -269,6 +397,9 @@ final class ChatViewModel: ObservableObject {
         error = ""
         notice = ""
         draft = ""
+        if let sid = currentSession?.sessionId {
+            draftsBySession[sid] = ""
+        }
 
         let pendingUploads = uploads
         uploads = []
@@ -624,6 +755,15 @@ final class ChatViewModel: ObservableObject {
 
     private func startStream(url: URL, turnId: String, sessionId: String) {
         streamingSessionIds.insert(sessionId)
+        noteLiveProgress(
+            status: "running",
+            phase: "starting",
+            currentTool: nil,
+            alive: true,
+            forSession: sessionId
+        )
+        startStatusPolling(sessionId: sessionId)
+        startStuckWatch(sessionId: sessionId)
         var settledByIdle = false
         streaming.start(
             url: url,
@@ -643,10 +783,12 @@ final class ChatViewModel: ObservableObject {
                     surfaceError: true
                 )
                 self.streamingSessionIds.remove(sessionId)
+                self.clearLiveness(for: sessionId)
             },
             onFinished: { [weak self] cancelled, transportError in
                 guard let self else { return }
                 self.streamingSessionIds.remove(sessionId)
+                self.clearLiveness(for: sessionId)
                 Task { @MainActor in
                     if !cancelled, !transportError, !settledByIdle {
                         await self.settleStreamCompletion(sessionId: sessionId, turnId: turnId)
@@ -761,11 +903,13 @@ final class ChatViewModel: ObservableObject {
         }
         failedTextBySession[sessionId] = lastUserText(in: sessionId)
         clearPending(sessionId: sessionId)
+        clearLiveness(for: sessionId)
     }
 
     private func cancelStream(sessionId: String, finalizeTurn: Bool) {
         streaming.cancelLocal(sessionId: sessionId)
         streamingSessionIds.remove(sessionId)
+        clearLiveness(for: sessionId)
         guard finalizeTurn else { return }
         mutateLastAssistant(sessionId: sessionId) { turn in
             guard turn.isStreaming || turn.phase != .final else { return }
@@ -785,6 +929,26 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func apply(update: StreamUpdate, sessionId: String, turnId: String) {
+        if case .liveness(let status, let phase, let tool, let alive) = update {
+            noteLiveProgress(
+                status: status,
+                phase: phase,
+                currentTool: tool,
+                alive: alive,
+                forSession: sessionId
+            )
+            return
+        }
+
+        // Content / tool events also prove forward progress.
+        noteLiveProgress(
+            status: "running",
+            phase: contentPhase(for: update),
+            currentTool: contentTool(for: update),
+            alive: true,
+            forSession: sessionId
+        )
+
         mutateAssistant(sessionId: sessionId, turnId: turnId) { turn in
             ChatStreamingService.apply(update, to: &turn)
             switch update {
@@ -796,15 +960,152 @@ final class ChatViewModel: ObservableObject {
                 if self.currentSession?.sessionId == sessionId, !message.contains("停止") {
                     self.error = message
                 }
-                if !message.contains("停止") {
-                    self.failedTextBySession[sessionId] = self.lastUserText(in: sessionId)
-                } else {
-                    self.failedTextBySession[sessionId] = self.lastUserText(in: sessionId)
-                }
+                self.failedTextBySession[sessionId] = self.lastUserText(in: sessionId)
                 self.clearPending(sessionId: sessionId)
             default:
                 break
             }
+        }
+    }
+
+    private func contentPhase(for update: StreamUpdate) -> String {
+        switch update {
+        case .reasoning: return "llm"
+        case .toolCall, .toolResult: return "tool"
+        case .partialAnswer, .finalAnswer: return "llm"
+        case .clarification: return "awaiting_human"
+        default: return runLiveness?.phase ?? "llm"
+        }
+    }
+
+    private func contentTool(for update: StreamUpdate) -> String? {
+        switch update {
+        case .toolCall(_, let name): return name
+        case .toolResult: return nil
+        default: return runLiveness?.currentTool
+        }
+    }
+
+    private func persistCurrentDraft() {
+        guard let sid = currentSession?.sessionId else { return }
+        draftsBySession[sid] = draft
+    }
+
+    func rememberDraft(_ text: String, for sessionId: String) {
+        draftsBySession[sessionId] = text
+    }
+
+    private func noteLiveProgress(
+        status: String,
+        phase: String,
+        currentTool: String?,
+        alive: Bool,
+        forSession sessionId: String
+    ) {
+        lastProgressAt = Date()
+        streamStuck = false
+        guard currentSession?.sessionId == sessionId else { return }
+        runLiveness = RunLiveness(
+            lastAt: lastProgressAt,
+            status: status,
+            phase: phase,
+            currentTool: currentTool,
+            alive: alive
+        )
+    }
+
+    private func clearLiveness(for sessionId: String) {
+        if currentSession?.sessionId == sessionId {
+            clearLivenessUI()
+        }
+        // Keep pollers scoped to the active stream via task cancel on finish.
+        if !streamingSessionIds.contains(sessionId) {
+            stopWatchersIfIdle()
+        }
+    }
+
+    private func clearLivenessUI() {
+        runLiveness = nil
+        streamStuck = false
+        lastProgressAt = .distantPast
+        statusPollTask?.cancel()
+        statusPollTask = nil
+        stuckWatchTask?.cancel()
+        stuckWatchTask = nil
+    }
+
+    private func stopWatchersIfIdle() {
+        if streamingSessionIds.isEmpty {
+            statusPollTask?.cancel()
+            statusPollTask = nil
+            stuckWatchTask?.cancel()
+            stuckWatchTask = nil
+        }
+    }
+
+    private func syncLivenessForVisibleSession() {
+        guard let sid = currentSession?.sessionId, streamingSessionIds.contains(sid) else {
+            clearLivenessUI()
+            return
+        }
+        startStatusPolling(sessionId: sid)
+        startStuckWatch(sessionId: sid)
+    }
+
+    private func startStatusPolling(sessionId: String) {
+        statusPollTask?.cancel()
+        statusPollTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(Self.statusPollSeconds * 1_000_000_000))
+                guard let self, !Task.isCancelled else { return }
+                guard self.streamingSessionIds.contains(sessionId) else { return }
+                await self.pollRunStatus(sessionId: sessionId)
+            }
+        }
+    }
+
+    private func startStuckWatch(sessionId: String) {
+        stuckWatchTask?.cancel()
+        stuckWatchTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard let self, !Task.isCancelled else { return }
+                guard self.streamingSessionIds.contains(sessionId) else { return }
+                let idle = Date().timeIntervalSince(self.lastProgressAt)
+                if idle >= Self.stuckIdleSeconds {
+                    if self.currentSession?.sessionId == sessionId {
+                        self.streamStuck = true
+                    }
+                }
+            }
+        }
+    }
+
+    private func pollRunStatus(sessionId: String) async {
+        guard let runId = assistantTurnRunId(sessionId: sessionId) else { return }
+        do {
+            let status = try await api.fetchRunStatus(sessionId: sessionId, runId: runId)
+            guard streamingSessionIds.contains(sessionId) else { return }
+            if status.alive {
+                noteLiveProgress(
+                    status: status.status,
+                    phase: status.phase ?? "llm",
+                    currentTool: status.currentTool,
+                    alive: true,
+                    forSession: sessionId
+                )
+                return
+            }
+            // Finished while UI still streaming — hydrate and clear.
+            cancelStream(sessionId: sessionId, finalizeTurn: false)
+            if let built = try? await reloadRows(sessionId: sessionId) {
+                rowsBySession[sessionId] = built
+                if currentSession?.sessionId == sessionId {
+                    rows = built
+                }
+            }
+        } catch {
+            // Keep dock; silence alone will eventually mark stuck / idle-timeout.
         }
     }
 

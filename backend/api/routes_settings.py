@@ -18,6 +18,11 @@ from backend.config.investor_profile import (
     load_investor_profile,
     normalize_investor_profile,
 )
+from backend.config.notification_prefs import (
+    CONFIG_KEY as NOTIFICATION_PREFS_KEY,
+    load_notification_prefs,
+    normalize_notification_prefs,
+)
 from backend.config.data_source_sanitize import sanitize_data_sources, sanitize_intel_sources
 from backend.config.intel_sources import (
     AVAILABLE_INTEL_PROVIDERS,
@@ -74,6 +79,7 @@ def get_settings(request: Request, services: AppServices = Depends(get_services)
         "data_provider": provider_router.status().to_dict(),
         "market_refresh": load_market_refresh(services.repo),
         "investor_profile": load_investor_profile(services.repo),
+        "notification_prefs": load_notification_prefs(services.repo),
         "data_sources": sanitize_data_sources(
             services.repo.get_config("data_sources", DEFAULT_DATA_SOURCES)
         ),
@@ -165,6 +171,16 @@ def put_investor_profile(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     services.audit_service.record("settings investor profile updated", INVESTOR_PROFILE_KEY)
     services.repo.set_config(INVESTOR_PROFILE_KEY, cleaned)
+    return cleaned
+
+
+@router.put("/notification-prefs")
+def put_notification_prefs(
+    payload: dict, services: AppServices = Depends(get_services)
+):
+    cleaned = normalize_notification_prefs(payload)
+    services.audit_service.record("settings notification prefs updated", NOTIFICATION_PREFS_KEY)
+    services.repo.set_config(NOTIFICATION_PREFS_KEY, cleaned)
     return cleaned
 
 
