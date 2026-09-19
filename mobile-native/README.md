@@ -45,7 +45,7 @@ Bundle ID：`com.stockagent.app`
 
 ## APNs 推送（可选，需付费 Apple Developer）
 
-个人 Team（Personal Team）**不支持** Push Notifications。当前 `StockAgent.entitlements` **故意不含** `aps-environment`，以便真机用免费账号安装调试。
+个人 Team（Personal Team）**不支持** Push Notifications。工程已**取消** `CODE_SIGN_ENTITLEMENTS`（不再签名 entitlements），避免 Xcode 构建时自动写回 `aps-environment` 导致真机签名失败。
 
 定时任务完成/失败推送的**服务端逻辑已就绪**；真机系统通知要等付费账号后再开：
 
