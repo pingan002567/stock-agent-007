@@ -43,20 +43,19 @@ Bundle ID：`com.stockagent.app`
 标的详情里可点 **在对话中分析**（预填问题并切到对话 Tab）。
 设置 → **切换后端** 会回到连接页。
 
-## APNs 推送（可选）
+## APNs 推送（可选，需付费 Apple Developer）
 
-当前 `StockAgent.entitlements` 含 `aps-environment=development`（Debug 真机）。正式发布需在 Xcode Signing 切到 production，并配置服务端证书。
+个人 Team（Personal Team）**不支持** Push Notifications。当前 `StockAgent.entitlements` **故意不含** `aps-environment`，以便真机用免费账号安装调试。
 
-要启用推送：
-1. Apple Developer → Identifiers → `com.stockagent.app` → 勾选 **Push Notifications**
-2. Xcode → Signing & Capabilities 确认 **Push Notifications** 已启用
-3. App 连接成功后会请求通知权限并上报 device token 到 `POST /api/devices/apns`
-4. 服务器配置 `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_KEY_PATH`（`.p8`）后才会真正下发
-5. 推送场景：
-   - 盯盘 `high`/`medium` → IM + APNs（`kind=monitor`）
-   - 定时任务**失败** → 始终推送（`kind=scheduled_task`）
-   - 定时任务**成功** → 默认推送，可在设置关闭「定时任务完成通知」（`duty_completion_push`）
-6. 点开定时任务通知会进入对应对话会话；无 session 时打开研究报告
+定时任务完成/失败推送的**服务端逻辑已就绪**；真机系统通知要等付费账号后再开：
+
+1. 加入付费 Apple Developer Program
+2. Apple Developer → Identifiers → `com.stockagent.app` → 勾选 **Push Notifications**
+3. Xcode → Signing & Capabilities → **+ Capability → Push Notifications**（会写入 `aps-environment`）
+4. 可选再勾 Background Modes → Remote notifications
+5. App 连接成功后会请求通知权限并上报 device token 到 `POST /api/devices/apns`
+6. 服务器配置 `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_KEY_PATH`（`.p8`）后才会真正下发
+7. 推送场景：盯盘 high/medium；定时任务失败始终推；成功默认推（设置可关）
 
 ## 命令行编译
 
