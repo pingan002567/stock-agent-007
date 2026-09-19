@@ -47,6 +47,8 @@ def test_tool_bridge_registry_includes_default_tools_and_blocks_real_orders(brid
         "get_backtest_result",
         "get_daily_history",
         "get_industry_context",
+        "get_investor_profile",
+        "get_notification_prefs",
         "list_data_sources",
         "describe_data_capability",
         "invoke_data_capability",
@@ -64,6 +66,7 @@ def test_tool_bridge_registry_includes_default_tools_and_blocks_real_orders(brid
 
 
         "list_decision_journal",
+        "list_memory_facts",
         "list_paper_orders",
         "list_pre_trade_reviews",
         "list_rebalance_drafts",
@@ -89,8 +92,13 @@ def test_tool_bridge_registry_includes_default_tools_and_blocks_real_orders(brid
         "summarize_review_inbox",
         "toggle_scheduled_task",
         "upsert_holding",
+        "upsert_memory_fact",
         "upsert_monitor_rule",
         "upsert_scheduled_task",
+        "update_investor_profile",
+        "update_notification_prefs",
+        "delete_memory_fact",
+        "clear_memory",
         "list_skills",
         "update_skill",
         "list_mcp_servers",
@@ -98,6 +106,14 @@ def test_tool_bridge_registry_includes_default_tools_and_blocks_real_orders(brid
         "remove_mcp_server",
     }
     assert tools["get_stock_context"]["required_authority"] == "A2"
+    assert tools["get_investor_profile"]["required_authority"] == "A2"
+    assert tools["get_notification_prefs"]["required_authority"] == "A2"
+    assert tools["list_memory_facts"]["required_authority"] == "A2"
+    assert tools["update_investor_profile"]["required_authority"] == "A3"
+    assert tools["update_notification_prefs"]["required_authority"] == "A3"
+    assert tools["upsert_memory_fact"]["required_authority"] == "A3"
+    assert tools["delete_memory_fact"]["required_authority"] == "A3"
+    assert tools["clear_memory"]["required_authority"] == "A3"
     assert tools["list_scheduled_tasks"]["required_authority"] == "A2"
     assert tools["toggle_scheduled_task"]["required_authority"] == "A3"
     assert tools["upsert_scheduled_task"]["required_authority"] == "A3"
@@ -257,6 +273,114 @@ def test_tool_bridge_scheduled_tasks_list_toggle_upsert_and_run_now(bridge, monk
         bridge.execute(
             "toggle_scheduled_task",
             {"task_id": "sched_premarket", "enabled": False},
+            AuthorityLevel.A2,
+        )
+
+
+def test_tool_bridge_investor_profile_notification_prefs_and_memory(bridge):
+    profile = bridge.execute("get_investor_profile", {}, AuthorityLevel.A2)["result"]
+    assert profile["risk_level"] == "moderate"
+    assert profile["risk_level_label"] == "普通"
+
+    updated = bridge.execute(
+        "update_investor_profile",
+        {"risk_level": "conservative", "notes": "偏防御"},
+        AuthorityLevel.A3,
+    )["result"]
+    assert updated["risk_level"] == "conservative"
+    assert updated["notes"] == "偏防御"
+    assert updated["risk_level_label"] == "保守"
+
+    prefs = bridge.execute("get_notification_prefs", {}, AuthorityLevel.A2)["result"]
+    assert "duty_completion_push" in prefs
+    toggled = bridge.execute(
+        "update_notification_prefs",
+        {"duty_completion_push": False},
+        AuthorityLevel.A3,
+    )["result"]
+    assert toggled["duty_completion_push"] is False
+
+    memory = bridge.execute("list_memory_facts", {}, AuthorityLevel.A2)["result"]
+    # stub DeerFlow has no memory client
+    assert memory.get("supported") is False
+
+    class FakeMemory:
+        def __init__(self):
+            self.facts = [
+                {"id": "f1", "content": "不做短线", "category": "preference", "confidence": 0.8}
+            ]
+
+        def get_memory_status(self):
+            return {"config": {"enabled": True}, "data": {"facts": list(self.facts)}}
+
+        def create_memory_fact(self, content, category="context", confidence=0.5):
+            item = {
+                "id": f"f{len(self.facts) + 1}",
+                "content": content,
+                "category": category,
+                "confidence": confidence,
+            }
+            self.facts.append(item)
+            return {"fact": item}
+
+        def update_memory_fact(self, fact_id, content=None, category=None, confidence=None):
+            for item in self.facts:
+                if item["id"] == fact_id:
+                    if content is not None:
+                        item["content"] = content
+                    if category is not None:
+                        item["category"] = category
+                    if confidence is not None:
+                        item["confidence"] = confidence
+                    return {"fact": item}
+            return {"error": "not found"}
+
+        def delete_memory_fact(self, fact_id):
+            self.facts = [item for item in self.facts if item["id"] != fact_id]
+            return {"success": True, "fact_id": fact_id}
+
+        def clear_memory(self):
+            self.facts = []
+            return {"success": True}
+
+    fake = FakeMemory()
+    bridge._deerflow().client = fake
+
+    listed = bridge.execute("list_memory_facts", {}, AuthorityLevel.A2)["result"]
+    assert listed["supported"] is True
+    assert listed["count"] == 1
+
+    created = bridge.execute(
+        "upsert_memory_fact",
+        {"content": "只看 A 股", "category": "preference"},
+        AuthorityLevel.A3,
+    )["result"]
+    assert created["supported"] is True
+    assert created["fact"]["content"] == "只看 A 股"
+
+    patched = bridge.execute(
+        "upsert_memory_fact",
+        {"fact_id": "f1", "content": "不做日内交易"},
+        AuthorityLevel.A3,
+    )["result"]
+    assert patched["fact"]["content"] == "不做日内交易"
+
+    deleted = bridge.execute(
+        "delete_memory_fact", {"fact_id": "f1"}, AuthorityLevel.A3
+    )["result"]
+    assert deleted["success"] is True
+
+    with pytest.raises(ValueError, match="confirm"):
+        bridge.execute("clear_memory", {"confirm": False}, AuthorityLevel.A3)
+
+    cleared = bridge.execute("clear_memory", {"confirm": True}, AuthorityLevel.A3)["result"]
+    assert cleared["success"] is True
+    assert fake.facts == []
+
+    with pytest.raises(PermissionDenied):
+        bridge.execute(
+            "update_investor_profile",
+            {"risk_level": "aggressive"},
             AuthorityLevel.A2,
         )
 

@@ -826,6 +826,53 @@ class ScheduledTaskUpsertInput(BaseModel):
     page: str | None = Field(default=None, description="会话页，默认 chat")
 
 
+class InvestorProfileUpdateInput(BaseModel):
+    risk_level: str | None = Field(
+        default=None,
+        description="风险档：conservative（保守）/ moderate（普通）/ aggressive（激进）",
+    )
+    notes: str | None = Field(
+        default=None,
+        description="补充备注（如市场偏好、禁忌），最长 2000 字；不传则保留原备注",
+    )
+
+
+class NotificationPrefsUpdateInput(BaseModel):
+    duty_completion_push: bool | None = Field(
+        default=None,
+        description="值班/机会发现任务成功完成后是否推送通知（失败始终推送）",
+    )
+
+
+class MemoryFactUpsertInput(BaseModel):
+    fact_id: str | None = Field(
+        default=None,
+        description="事实 ID。提供则更新；不提供则新建",
+    )
+    content: str | None = Field(
+        default=None,
+        description="记忆正文。新建时必填；更新时可只改 category/confidence",
+    )
+    category: str | None = Field(
+        default=None,
+        description="分类，如 context / preference / constraint；默认 context",
+    )
+    confidence: float | None = Field(
+        default=None,
+        description="置信度 0~1，默认 0.5",
+    )
+
+
+class MemoryFactDeleteInput(BaseModel):
+    fact_id: str = Field(description="要删除的记忆事实 ID")
+
+
+class MemoryClearInput(BaseModel):
+    confirm: bool = Field(
+        description="必须为 true 才清空全部记忆；不可撤销",
+    )
+
+
 list_skills = _tool(
     "list_skills",
     "列出 DeerFlow 技能目录及启用状态（原生 list_skills）。用户要求查看/调整技能时先调用。",
@@ -875,6 +922,47 @@ run_scheduled_task_now = _tool(
     "立即后台执行指定定时任务（不等待收口，最长约 15 分钟）。"
     "完成后会落盘报告并按通知设置推送；用 list_scheduled_tasks 查看 last_status。",
     ScheduledTaskRunNowInput, AuthorityLevel.A3,
+)
+
+get_investor_profile = _tool(
+    "get_investor_profile",
+    "获取用户投资画像（风险档 conservative/moderate/aggressive 与备注）。影响盘前机会发现等值班提示。",
+    EmptyInput, AuthorityLevel.A2,
+)
+update_investor_profile = _tool(
+    "update_investor_profile",
+    "更新投资画像。可只改 risk_level 或 notes；未传字段保留。",
+    InvestorProfileUpdateInput, AuthorityLevel.A3,
+)
+get_notification_prefs = _tool(
+    "get_notification_prefs",
+    "获取通知偏好（如值班任务成功完成后是否推送）。",
+    EmptyInput, AuthorityLevel.A2,
+)
+update_notification_prefs = _tool(
+    "update_notification_prefs",
+    "更新通知偏好。当前支持 duty_completion_push（失败始终推送，不受此开关影响）。",
+    NotificationPrefsUpdateInput, AuthorityLevel.A3,
+)
+list_memory_facts = _tool(
+    "list_memory_facts",
+    "列出 AI 长期记忆中的用户事实（DeerFlow memory）。stub/降级时 supported=false。",
+    EmptyInput, AuthorityLevel.A2,
+)
+upsert_memory_fact = _tool(
+    "upsert_memory_fact",
+    "新建或更新一条长期记忆。带 fact_id 为更新；否则新建（content 必填）。",
+    MemoryFactUpsertInput, AuthorityLevel.A3,
+)
+delete_memory_fact = _tool(
+    "delete_memory_fact",
+    "删除指定的长期记忆事实。",
+    MemoryFactDeleteInput, AuthorityLevel.A3,
+)
+clear_memory = _tool(
+    "clear_memory",
+    "清空全部长期记忆。必须传 confirm=true；不可撤销。",
+    MemoryClearInput, AuthorityLevel.A3,
 )
 
 # A4: Planner tools

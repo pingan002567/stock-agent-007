@@ -99,6 +99,7 @@ A2_TOOLS = [
     "list_report_templates", "generate_report", "get_report_quality",
     "list_skills", "list_mcp_servers",
     "list_scheduled_tasks",
+    "get_investor_profile", "get_notification_prefs", "list_memory_facts",
 ]
 
 A3_TOOLS = [
@@ -114,6 +115,8 @@ A3_TOOLS = [
     "dismiss_inbox_item", "snooze_inbox_item", "mark_inbox_item_done",
     "update_skill", "upsert_mcp_server", "remove_mcp_server",
     "upsert_scheduled_task", "toggle_scheduled_task", "run_scheduled_task_now",
+    "update_investor_profile", "update_notification_prefs",
+    "upsert_memory_fact", "delete_memory_fact", "clear_memory",
 ]
 
 A4_TOOLS = [

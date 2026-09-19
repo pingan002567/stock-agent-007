@@ -199,6 +199,14 @@ class WorkbenchToolBridge:
             "toggle_scheduled_task": self._toggle_scheduled_task,
             "upsert_scheduled_task": self._upsert_scheduled_task,
             "run_scheduled_task_now": self._run_scheduled_task_now,
+            "get_investor_profile": self._get_investor_profile,
+            "update_investor_profile": self._update_investor_profile,
+            "get_notification_prefs": self._get_notification_prefs,
+            "update_notification_prefs": self._update_notification_prefs,
+            "list_memory_facts": self._list_memory_facts,
+            "upsert_memory_fact": self._upsert_memory_fact,
+            "delete_memory_fact": self._delete_memory_fact,
+            "clear_memory": self._clear_memory,
         }
         self._specs = {
             "get_stock_context": ToolSpec(
@@ -814,6 +822,81 @@ class WorkbenchToolBridge:
                 True,
                 {"task_id": "str"},
                 ["scheduled_tasks", "copilot_run"],
+            ),
+            "get_investor_profile": ToolSpec(
+                "get_investor_profile",
+                "settings",
+                AuthorityLevel.A2,
+                "low",
+                True,
+                {},
+                ["investor_profile"],
+            ),
+            "update_investor_profile": ToolSpec(
+                "update_investor_profile",
+                "settings",
+                AuthorityLevel.A3,
+                "medium",
+                True,
+                {"risk_level": "str?", "notes": "str?"},
+                ["investor_profile"],
+            ),
+            "get_notification_prefs": ToolSpec(
+                "get_notification_prefs",
+                "settings",
+                AuthorityLevel.A2,
+                "low",
+                True,
+                {},
+                ["notification_prefs"],
+            ),
+            "update_notification_prefs": ToolSpec(
+                "update_notification_prefs",
+                "settings",
+                AuthorityLevel.A3,
+                "medium",
+                True,
+                {"duty_completion_push": "bool?"},
+                ["notification_prefs"],
+            ),
+            "list_memory_facts": ToolSpec(
+                "list_memory_facts",
+                "runtime",
+                AuthorityLevel.A2,
+                "low",
+                True,
+                {},
+                ["deerflow:get_memory_status"],
+            ),
+            "upsert_memory_fact": ToolSpec(
+                "upsert_memory_fact",
+                "runtime",
+                AuthorityLevel.A3,
+                "medium",
+                True,
+                {
+                    "fact_id": "str?", "content": "str?",
+                    "category": "str?", "confidence": "float?",
+                },
+                ["deerflow:create_memory_fact", "deerflow:update_memory_fact"],
+            ),
+            "delete_memory_fact": ToolSpec(
+                "delete_memory_fact",
+                "runtime",
+                AuthorityLevel.A3,
+                "medium",
+                True,
+                {"fact_id": "str"},
+                ["deerflow:delete_memory_fact"],
+            ),
+            "clear_memory": ToolSpec(
+                "clear_memory",
+                "runtime",
+                AuthorityLevel.A3,
+                "high",
+                True,
+                {"confirm": "bool"},
+                ["deerflow:clear_memory"],
             ),
         }
 
@@ -1786,3 +1869,134 @@ class WorkbenchToolBridge:
                 "完成后会落盘报告并按通知设置推送；可用 list_scheduled_tasks 查看 last_status。"
             ),
         }
+
+    def _get_investor_profile(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from backend.config.investor_profile import RISK_LEVEL_LABELS_ZH, load_investor_profile
+
+        profile = load_investor_profile(self.repo)
+        return {
+            **profile,
+            "risk_level_label": RISK_LEVEL_LABELS_ZH.get(
+                profile.get("risk_level", ""), profile.get("risk_level")
+            ),
+        }
+
+    def _update_investor_profile(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from backend.config.investor_profile import (
+            CONFIG_KEY,
+            InvestorProfileError,
+            RISK_LEVEL_LABELS_ZH,
+            load_investor_profile,
+            normalize_investor_profile,
+        )
+
+        current = load_investor_profile(self.repo)
+        if arguments.get("risk_level") is None and arguments.get("notes") is None:
+            raise ValueError("provide risk_level and/or notes to update")
+        merged = dict(current)
+        if arguments.get("risk_level") is not None:
+            merged["risk_level"] = arguments.get("risk_level")
+        if arguments.get("notes") is not None:
+            merged["notes"] = arguments.get("notes")
+        try:
+            cleaned = normalize_investor_profile(merged)
+        except InvestorProfileError as exc:
+            raise ValueError(str(exc)) from exc
+        self.repo.set_config(CONFIG_KEY, cleaned)
+        AuditService(self.repo).record("settings investor profile updated", CONFIG_KEY)
+        return {
+            **cleaned,
+            "risk_level_label": RISK_LEVEL_LABELS_ZH.get(
+                cleaned.get("risk_level", ""), cleaned.get("risk_level")
+            ),
+        }
+
+    def _get_notification_prefs(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from backend.config.notification_prefs import load_notification_prefs
+
+        return load_notification_prefs(self.repo)
+
+    def _update_notification_prefs(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from backend.config.notification_prefs import (
+            CONFIG_KEY,
+            load_notification_prefs,
+            normalize_notification_prefs,
+        )
+
+        current = load_notification_prefs(self.repo)
+        merged = dict(current)
+        if arguments.get("duty_completion_push") is not None:
+            merged["duty_completion_push"] = bool(arguments.get("duty_completion_push"))
+        elif "duty_completion_push" not in arguments:
+            raise ValueError("duty_completion_push is required")
+        cleaned = normalize_notification_prefs(merged)
+        self.repo.set_config(CONFIG_KEY, cleaned)
+        AuditService(self.repo).record("settings notification prefs updated", CONFIG_KEY)
+        return cleaned
+
+    def _list_memory_facts(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        result = self._deerflow().memory_status()
+        if result.get("supported") is False:
+            return result
+        if result.get("error") and "data" not in result:
+            raise RuntimeError(str(result["error"]))
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        facts = data.get("facts") if isinstance(data, dict) else []
+        if not isinstance(facts, list):
+            facts = []
+        return {
+            "supported": True,
+            "items": facts,
+            "count": len(facts),
+            "config": result.get("config"),
+        }
+
+    def _upsert_memory_fact(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        fact_id = str(arguments.get("fact_id") or "").strip()
+        content = arguments.get("content")
+        category = arguments.get("category")
+        confidence = arguments.get("confidence")
+        if fact_id:
+            result = self._deerflow().update_memory_fact(
+                fact_id,
+                content=str(content) if content is not None else None,
+                category=str(category) if category is not None else None,
+                confidence=float(confidence) if confidence is not None else None,
+            )
+        else:
+            text = str(content or "").strip()
+            if not text:
+                raise ValueError("content is required when creating a memory fact")
+            result = self._deerflow().create_memory_fact(
+                content=text,
+                category=str(category or "context"),
+                confidence=float(confidence) if confidence is not None else 0.5,
+            )
+        if result.get("supported") is False:
+            return result
+        if result.get("error") and not any(
+            key in result for key in ("fact", "fact_id", "id", "data", "result")
+        ):
+            raise RuntimeError(str(result["error"]))
+        return result
+
+    def _delete_memory_fact(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        fact_id = str(arguments.get("fact_id") or "").strip()
+        if not fact_id:
+            raise ValueError("fact_id is required")
+        result = self._deerflow().delete_memory_fact(fact_id)
+        if result.get("supported") is False:
+            return result
+        if result.get("error") and not result.get("success"):
+            raise RuntimeError(str(result["error"]))
+        return result
+
+    def _clear_memory(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        if not bool(arguments.get("confirm")):
+            raise ValueError("confirm=true is required to clear all memory")
+        result = self._deerflow().clear_memory()
+        if result.get("supported") is False:
+            return result
+        if result.get("error") and not result.get("success"):
+            raise RuntimeError(str(result["error"]))
+        return result
