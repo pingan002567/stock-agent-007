@@ -389,6 +389,7 @@ def create_services(
         report_service=report_service,
         alert_sink=alert_sink,
     )
+    tool_bridge.bind_scheduler(lambda: scheduler_service)
 
     llm_provider_service = LlmProviderService(
         repo=repo, copilot_service=copilot_service

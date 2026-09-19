@@ -784,6 +784,48 @@ class McpRemoveInput(BaseModel):
     name: str = Field(description="要删除的 MCP 服务器名称")
 
 
+class ScheduledTaskListInput(BaseModel):
+    enabled_only: bool = Field(
+        default=False,
+        description="为 true 时只返回已启用任务",
+    )
+
+
+class ScheduledTaskToggleInput(BaseModel):
+    task_id: str = Field(description="任务 ID，如 sched_premarket、sched_close")
+    enabled: bool = Field(description="是否启用")
+
+
+class ScheduledTaskRunNowInput(BaseModel):
+    task_id: str = Field(description="要立即执行的任务 ID")
+
+
+class ScheduledTaskUpsertInput(BaseModel):
+    task_id: str | None = Field(
+        default=None,
+        description="任务 ID。提供则更新（未传字段保留原值）；不提供则新建",
+    )
+    name: str | None = Field(default=None, description="任务名称，如「盘前简报」")
+    prompt: str | None = Field(
+        default=None,
+        description="发给值班 Agent 的提示词（系统会自动加值班 preamble）",
+    )
+    schedule: str | None = Field(
+        default=None,
+        description="日程：daily@HH:MM / weekly@N@HH:MM（N=1周一..7周日）/ every@Nm（N≥5）",
+    )
+    enabled: bool | None = Field(default=None, description="是否启用")
+    authority_level: str | None = Field(
+        default=None,
+        description="运行权限档：A2/A3/A4，默认 A2（新建）或保留原值",
+    )
+    calendar: str | None = Field(
+        default=None,
+        description="交易日历：CN 表示仅 A 股交易日；空表示不按日历跳过",
+    )
+    page: str | None = Field(default=None, description="会话页，默认 chat")
+
+
 list_skills = _tool(
     "list_skills",
     "列出 DeerFlow 技能目录及启用状态（原生 list_skills）。用户要求查看/调整技能时先调用。",
@@ -810,6 +852,29 @@ remove_mcp_server = _tool(
     "remove_mcp_server",
     "从 extensions 配置中删除指定 MCP 服务器（原生 update_mcp_config）。",
     McpRemoveInput, AuthorityLevel.A3,
+)
+
+list_scheduled_tasks = _tool(
+    "list_scheduled_tasks",
+    "列出定时值班任务（盘前简报/收盘体检/周度复盘等），含 schedule、enabled、next_run_at、last_status。",
+    ScheduledTaskListInput, AuthorityLevel.A2,
+)
+toggle_scheduled_task = _tool(
+    "toggle_scheduled_task",
+    "启用或停用指定定时值班任务。",
+    ScheduledTaskToggleInput, AuthorityLevel.A3,
+)
+upsert_scheduled_task = _tool(
+    "upsert_scheduled_task",
+    "创建或修改定时值班任务。带 task_id 为部分更新（未传字段保留）；否则新建。"
+    "日程：daily@HH:MM / weekly@N@HH:MM / every@Nm。",
+    ScheduledTaskUpsertInput, AuthorityLevel.A3,
+)
+run_scheduled_task_now = _tool(
+    "run_scheduled_task_now",
+    "立即后台执行指定定时任务（不等待收口，最长约 15 分钟）。"
+    "完成后会落盘报告并按通知设置推送；用 list_scheduled_tasks 查看 last_status。",
+    ScheduledTaskRunNowInput, AuthorityLevel.A3,
 )
 
 # A4: Planner tools

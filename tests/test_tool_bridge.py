@@ -22,6 +22,7 @@ def bridge(tmp_path):
         tool_execution_service=services.tool_execution_service,
     )
     bridge.bind_deerflow(lambda: services.copilot_service.deerflow)
+    bridge.bind_scheduler(lambda: services.scheduler_service)
     return bridge
 
 
@@ -72,6 +73,7 @@ def test_tool_bridge_registry_includes_default_tools_and_blocks_real_orders(brid
         "update_risk_policy",
         "create_risk_policy",
         "activate_risk_policy",
+        "list_scheduled_tasks",
         "list_strategies",
         "list_watchlist",
         "mark_inbox_item_done",
@@ -79,13 +81,16 @@ def test_tool_bridge_registry_includes_default_tools_and_blocks_real_orders(brid
         "reject_rebalance_draft",
         "remove_holding",
         "remove_watchlist_item",
+        "run_scheduled_task_now",
         "run_strategy_backtest",
         "search_stock_intel",
         "snooze_inbox_item",
         "summarize_decision_outcomes",
         "summarize_review_inbox",
+        "toggle_scheduled_task",
         "upsert_holding",
         "upsert_monitor_rule",
+        "upsert_scheduled_task",
         "list_skills",
         "update_skill",
         "list_mcp_servers",
@@ -93,6 +98,10 @@ def test_tool_bridge_registry_includes_default_tools_and_blocks_real_orders(brid
         "remove_mcp_server",
     }
     assert tools["get_stock_context"]["required_authority"] == "A2"
+    assert tools["list_scheduled_tasks"]["required_authority"] == "A2"
+    assert tools["toggle_scheduled_task"]["required_authority"] == "A3"
+    assert tools["upsert_scheduled_task"]["required_authority"] == "A3"
+    assert tools["run_scheduled_task_now"]["required_authority"] == "A3"
     assert tools["analyze_portfolio_risk"]["required_authority"] == "A3"
     assert tools["generate_draft_order"]["required_authority"] == "A4"
     assert tools["create_pre_trade_review"]["required_authority"] == "A4"
@@ -182,6 +191,72 @@ def test_tool_bridge_monitor_rule_crud_with_partial_update_and_authority(bridge)
         bridge.execute(
             "upsert_monitor_rule",
             {"rule_type": "volume_spike", "symbol": "AAPL"},
+            AuthorityLevel.A2,
+        )
+
+
+def test_tool_bridge_scheduled_tasks_list_toggle_upsert_and_run_now(bridge, monkeypatch):
+    listed = bridge.execute("list_scheduled_tasks", {}, AuthorityLevel.A2)["result"]
+    assert listed["count"] >= 4
+    ids = {item["task_id"] for item in listed["items"]}
+    assert "sched_premarket" in ids
+
+    toggled = bridge.execute(
+        "toggle_scheduled_task",
+        {"task_id": "sched_weekly_review", "enabled": True},
+        AuthorityLevel.A3,
+    )["result"]
+    assert toggled["enabled"] is True
+    assert toggled["task_id"] == "sched_weekly_review"
+
+    updated = bridge.execute(
+        "upsert_scheduled_task",
+        {"task_id": "sched_premarket", "schedule": "daily@08:05"},
+        AuthorityLevel.A3,
+    )["result"]
+    assert updated["schedule"] == "daily@08:05"
+    assert "盘前" in updated["name"]
+
+    created = bridge.execute(
+        "upsert_scheduled_task",
+        {
+            "name": "测试值班",
+            "prompt": "写一句测试结论",
+            "schedule": "every@30m",
+            "enabled": False,
+        },
+        AuthorityLevel.A3,
+    )["result"]
+    assert created["task_id"].startswith("sched_")
+    assert created["enabled"] is False
+
+    started: list[str] = []
+
+    async def fake_run(task_id: str):
+        started.append(task_id)
+        return {"status": "completed", "run_id": "run_test", "report_id": None}
+
+    monkeypatch.setattr(bridge._scheduler(), "run_task_now", fake_run)
+    ran = bridge.execute(
+        "run_scheduled_task_now",
+        {"task_id": "sched_premarket"},
+        AuthorityLevel.A3,
+    )["result"]
+    assert ran["status"] == "started"
+    assert ran["task_id"] == "sched_premarket"
+
+    import time
+
+    for _ in range(50):
+        if started:
+            break
+        time.sleep(0.02)
+    assert started == ["sched_premarket"]
+
+    with pytest.raises(PermissionDenied):
+        bridge.execute(
+            "toggle_scheduled_task",
+            {"task_id": "sched_premarket", "enabled": False},
             AuthorityLevel.A2,
         )
 

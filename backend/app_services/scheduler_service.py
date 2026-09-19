@@ -235,20 +235,41 @@ class SchedulerService:
         self.repo.set_config(CONFIG_KEY, {"items": persistable})
 
     def upsert_task(self, payload: dict[str, Any]) -> dict[str, Any]:
-        schedule = str(payload.get("schedule") or "")
+        items = self.list_tasks()
+        task_id = str(payload.get("task_id") or "").strip() or f"sched_{uuid4().hex[:8]}"
+        existing = next((t for t in items if t["task_id"] == task_id), None)
+
+        if "schedule" in payload and payload.get("schedule") is not None:
+            schedule = str(payload.get("schedule") or "")
+        elif existing:
+            schedule = str(existing.get("schedule") or "")
+        else:
+            schedule = str(payload.get("schedule") or "")
         if compute_next_run(schedule, datetime.now()) is None:
             raise ValueError(f"invalid schedule: {schedule!r} (daily@HH:MM / weekly@N@HH:MM / every@Nm)")
-        items = self.list_tasks()
-        task_id = str(payload.get("task_id") or f"sched_{uuid4().hex[:8]}")
-        existing = next((t for t in items if t["task_id"] == task_id), None)
+
+        def _merge(key: str, default: Any = None) -> Any:
+            if key in payload and payload[key] is not None:
+                return payload[key]
+            if existing is not None and key in existing:
+                return existing[key]
+            return default
+
+        if "enabled" in payload and payload.get("enabled") is not None:
+            enabled = bool(payload["enabled"])
+        elif existing is not None:
+            enabled = bool(existing.get("enabled", True))
+        else:
+            enabled = True
+
         record = {
             "task_id": task_id,
-            "name": str(payload.get("name") or "未命名任务"),
-            "prompt": str(payload.get("prompt") or ""),
-            "page": str(payload.get("page") or "chat"),
-            "authority_level": str(payload.get("authority_level") or "A2"),
+            "name": str(_merge("name", "未命名任务")),
+            "prompt": str(_merge("prompt", "")),
+            "page": str(_merge("page", "chat")),
+            "authority_level": str(_merge("authority_level", "A2")),
             "schedule": schedule,
-            "enabled": bool(payload.get("enabled", True)),
+            "enabled": enabled,
             "last_run_at": (existing or {}).get("last_run_at"),
             "last_status": (existing or {}).get("last_status"),
             "last_run_id": (existing or {}).get("last_run_id"),

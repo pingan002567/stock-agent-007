@@ -98,6 +98,7 @@ A2_TOOLS = [
     "list_strategies", "get_backtest_result",
     "list_report_templates", "generate_report", "get_report_quality",
     "list_skills", "list_mcp_servers",
+    "list_scheduled_tasks",
 ]
 
 A3_TOOLS = [
@@ -112,6 +113,7 @@ A3_TOOLS = [
     "list_review_inbox", "summarize_review_inbox",
     "dismiss_inbox_item", "snooze_inbox_item", "mark_inbox_item_done",
     "update_skill", "upsert_mcp_server", "remove_mcp_server",
+    "upsert_scheduled_task", "toggle_scheduled_task", "run_scheduled_task_now",
 ]
 
 A4_TOOLS = [

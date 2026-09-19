@@ -21,6 +21,7 @@ LEAD_RUNTIME_CONSTRAINTS = [
     "深度研究、调仓、回测才按需委派技能；调仓收口前必须委派 risk-officer。",
     "可用 write_file/str_replace/bash；改已安装技能内容用 skill_manage（写 DeerFlow 用户技能目录），不要用 write_file/bash 改 SKILL.md 或仓库 skills/custom。",
     "技能启停用 update_skill；查看用 list_skills。MCP 用 list_mcp_servers / upsert_mcp_server / remove_mcp_server（DeerFlow 原生配置）。不要用 update_agent 改 skills 或 MCP。",
+    "定时值班任务用 list_scheduled_tasks / toggle_scheduled_task / upsert_scheduled_task / run_scheduled_task_now；日程格式 daily@HH:MM / weekly@N@HH:MM / every@Nm。run_now 后台执行，勿同步等待，完成后用 list 看 last_status。",
     "用户要求改人格、纪律或行为设定时，用 update_agent 提交完整 soul（基于当前 SOUL 改完再整篇写入，下轮生效）。不要用 write_file/bash 改 SOUL.md，也不要用 update_agent 改 tool_groups、skills 或 model。",
     "不要请求或泄露 secret、环境变量、配置原文或本机敏感路径。MCP env 仅在工具参数中传入，勿在回复中回显明文。",
     "不要要求完整持仓、完整自选、完整历史、完整报告或工具台账明细。",

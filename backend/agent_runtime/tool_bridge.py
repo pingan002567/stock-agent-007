@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import datetime
+import logging
+import threading
 from dataclasses import asdict, dataclass
 from typing import Any, Callable, Dict
 
@@ -28,6 +31,8 @@ from backend.stock_domain.history_tools import get_daily_history
 from backend.stock_domain.intel_tools import INTEL_DEFAULT_LIMIT, search_stock_intel
 from backend.stock_domain.portfolio_tools import summarize_portfolio
 from backend.stock_domain.risk_tools import resolve_effective_rules
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -128,6 +133,8 @@ class WorkbenchToolBridge:
         # DeerFlow native skill/MCP APIs — bound after CopilotService exists (circular init).
         self._get_deerflow: Callable[[], Any] | None = None
         self._on_extensions_changed: Callable[[], Any] | None = None
+        # Scheduler — bound after SchedulerService exists (depends on CopilotService).
+        self._get_scheduler: Callable[[], Any] | None = None
         self._handlers: dict[str, Callable[[dict[str, Any]], Any]] = {
             "get_stock_context": self._get_stock_context,
             "get_stock_financial": self._get_stock_financial,
@@ -188,6 +195,10 @@ class WorkbenchToolBridge:
             "list_mcp_servers": self._list_mcp_servers,
             "upsert_mcp_server": self._upsert_mcp_server,
             "remove_mcp_server": self._remove_mcp_server,
+            "list_scheduled_tasks": self._list_scheduled_tasks,
+            "toggle_scheduled_task": self._toggle_scheduled_task,
+            "upsert_scheduled_task": self._upsert_scheduled_task,
+            "run_scheduled_task_now": self._run_scheduled_task_now,
         }
         self._specs = {
             "get_stock_context": ToolSpec(
@@ -764,6 +775,46 @@ class WorkbenchToolBridge:
                 {"name": "str"},
                 ["deerflow:update_mcp_config", "extensions_config"],
             ),
+            "list_scheduled_tasks": ToolSpec(
+                "list_scheduled_tasks",
+                "scheduler",
+                AuthorityLevel.A2,
+                "low",
+                True,
+                {"enabled_only": "bool"},
+                ["scheduled_tasks"],
+            ),
+            "toggle_scheduled_task": ToolSpec(
+                "toggle_scheduled_task",
+                "scheduler",
+                AuthorityLevel.A3,
+                "medium",
+                True,
+                {"task_id": "str", "enabled": "bool"},
+                ["scheduled_tasks"],
+            ),
+            "upsert_scheduled_task": ToolSpec(
+                "upsert_scheduled_task",
+                "scheduler",
+                AuthorityLevel.A3,
+                "medium",
+                True,
+                {
+                    "task_id": "str?", "name": "str?", "prompt": "str?",
+                    "schedule": "str?", "enabled": "bool?",
+                    "authority_level": "str?", "calendar": "str?", "page": "str?",
+                },
+                ["scheduled_tasks"],
+            ),
+            "run_scheduled_task_now": ToolSpec(
+                "run_scheduled_task_now",
+                "scheduler",
+                AuthorityLevel.A3,
+                "medium",
+                True,
+                {"task_id": "str"},
+                ["scheduled_tasks", "copilot_run"],
+            ),
         }
 
     def bind_deerflow(
@@ -775,6 +826,15 @@ class WorkbenchToolBridge:
         """Inject DeerFlow adapter accessor after CopilotService construction."""
         self._get_deerflow = get_deerflow
         self._on_extensions_changed = on_extensions_changed
+
+    def bind_scheduler(self, get_scheduler: Callable[[], Any]) -> None:
+        """Inject SchedulerService accessor after it is constructed in bootstrap."""
+        self._get_scheduler = get_scheduler
+
+    def _scheduler(self) -> Any:
+        if self._get_scheduler is None:
+            raise RuntimeError("Scheduler not bound — call bind_scheduler() after bootstrap")
+        return self._get_scheduler()
 
     def _deerflow(self) -> Any:
         if self._get_deerflow is None:
@@ -1661,3 +1721,68 @@ class WorkbenchToolBridge:
         if runtime is not None:
             out["agent_runtime"] = runtime
         return out
+
+    def _list_scheduled_tasks(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        items = self._scheduler().list_tasks()
+        if bool(arguments.get("enabled_only")):
+            items = [item for item in items if item.get("enabled")]
+        return {"items": items, "count": len(items)}
+
+    def _toggle_scheduled_task(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        task_id = str(arguments.get("task_id") or "").strip()
+        if not task_id:
+            raise ValueError("task_id is required")
+        if "enabled" not in arguments or arguments.get("enabled") is None:
+            raise ValueError("enabled is required")
+        try:
+            return self._scheduler().set_enabled(task_id, bool(arguments.get("enabled")))
+        except KeyError as exc:
+            raise ValueError(f"scheduled task not found: {task_id}") from exc
+
+    def _upsert_scheduled_task(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        payload = {
+            key: arguments[key]
+            for key in (
+                "task_id", "name", "prompt", "schedule", "enabled",
+                "authority_level", "calendar", "page",
+            )
+            if key in arguments and arguments[key] is not None
+        }
+        if "task_id" in payload:
+            payload["task_id"] = str(payload["task_id"]).strip() or None
+            if not payload["task_id"]:
+                del payload["task_id"]
+        if "task_id" not in payload and "schedule" not in payload:
+            raise ValueError("schedule is required when creating a scheduled task")
+        return self._scheduler().upsert_task(payload)
+
+    def _run_scheduled_task_now(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        task_id = str(arguments.get("task_id") or "").strip()
+        if not task_id:
+            raise ValueError("task_id is required")
+        scheduler = self._scheduler()
+        task = next((item for item in scheduler.list_tasks() if item.get("task_id") == task_id), None)
+        if task is None:
+            raise ValueError(f"scheduled task not found: {task_id}")
+
+        def _worker() -> None:
+            try:
+                asyncio.run(scheduler.run_task_now(task_id))
+            except Exception:
+                logger.exception("scheduled task run_now failed: %s", task_id)
+
+        threading.Thread(
+            target=_worker,
+            daemon=True,
+            name=f"sched-run-{task_id}",
+        ).start()
+        return {
+            "ok": True,
+            "status": "started",
+            "task_id": task_id,
+            "name": task.get("name"),
+            "message": (
+                "已在后台开始执行（最长约 15 分钟）。"
+                "完成后会落盘报告并按通知设置推送；可用 list_scheduled_tasks 查看 last_status。"
+            ),
+        }
