@@ -92,6 +92,9 @@ final class ChatViewModel: ObservableObject {
     private var lastProgressAt: Date = .distantPast
     private var statusPollTask: Task<Void, Never>?
     private var stuckWatchTask: Task<Void, Never>?
+    private var reattachAttemptsBySession: [String: Int] = [:]
+    private var streamURLBySession: [String: URL] = [:]
+    private let maxReattachAttempts = 5
     private let api = APIClient.shared
     private let pager = ChatHistoryPager()
     private let streaming = ChatStreamingService()
@@ -209,6 +212,7 @@ final class ChatViewModel: ObservableObject {
                 uploads = []
             }
             await recoverInterruptedStreamsAfterRelaunch()
+            wireReachabilityReattach()
             #if DEBUG
             let parserFailures = ChatParserSmoke.runAll()
             if !parserFailures.isEmpty {
@@ -219,6 +223,45 @@ final class ChatViewModel: ObservableObject {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
             noteAuthFailure(error)
         }
+    }
+
+    private func wireReachabilityReattach() {
+        reachability.onBecameOnline = { [weak self] in
+            Task { @MainActor in
+                await self?.reattachStreamingSessionsAfterOnline()
+            }
+        }
+    }
+
+    private func reattachStreamingSessionsAfterOnline() async {
+        for sid in streamingSessionIds {
+            guard let turnId = streamingTurnId(sessionId: sid) else { continue }
+            let url: URL?
+            if let cached = streamURLBySession[sid] {
+                url = cached
+            } else if let runId = assistantTurnRunId(sessionId: sid) {
+                url = try? api.streamURL(sessionId: sid, runId: runId)
+            } else {
+                url = nil
+            }
+            guard let url else { continue }
+            await attemptStreamReattach(
+                sessionId: sid,
+                turnId: turnId,
+                url: url,
+                reason: "网络已恢复，正在重连…"
+            )
+        }
+    }
+
+    private func streamingTurnId(sessionId: String) -> String? {
+        let list = rowsBySession[sessionId] ?? rows
+        for row in list.reversed() {
+            if case .assistant(let turn) = row, turn.isStreaming || turn.phase != .final {
+                return turn.id
+            }
+        }
+        return nil
     }
 
     func handleAppBecameActive() async {
@@ -662,30 +705,76 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func settleInterruptedPending(_ item: PendingStream) async {
-        defer { PendingStreamStore.remove(sessionId: item.sessionId) }
-
+        // Prefer reattach / hydrate over cancel — cancel only when user taps stop.
         if let runId = item.runId {
-            try? await api.cancelRun(sessionId: item.sessionId, runId: runId)
-            if let url = try? api.streamURL(sessionId: item.sessionId, runId: runId) {
-                await drainStreamQuietly(url: url)
+            do {
+                let status = try await api.fetchRunStatus(sessionId: item.sessionId, runId: runId)
+                if status.alive {
+                    if currentSession?.sessionId != item.sessionId,
+                       let target = sessions.first(where: { $0.sessionId == item.sessionId }) {
+                        await openSession(target)
+                    }
+                    let turnId = streamingTurnId(sessionId: item.sessionId)
+                        ?? "stream-\(UUID().uuidString)"
+                    if assistantTurn(sessionId: item.sessionId, turnId: turnId) == nil {
+                        var list = rowsBySession[item.sessionId] ?? []
+                        list.append(.assistant(AssistantTurn(
+                            id: turnId,
+                            phase: .reasoning,
+                            isStreaming: true,
+                            runId: runId
+                        )))
+                        rowsBySession[item.sessionId] = list
+                        if currentSession?.sessionId == item.sessionId {
+                            rows = list
+                        }
+                    } else {
+                        mutateAssistant(sessionId: item.sessionId, turnId: turnId) {
+                            $0.runId = runId
+                            $0.isStreaming = true
+                            $0.failed = false
+                        }
+                    }
+                    if let url = try? api.streamURL(sessionId: item.sessionId, runId: runId) {
+                        notice = "正在恢复未完成的回答…"
+                        startStream(url: url, turnId: turnId, sessionId: item.sessionId)
+                        return
+                    }
+                }
+                // Finished while away — hydrate history, keep pending text for retry if empty.
+                if let built = try? await reloadRows(sessionId: item.sessionId) {
+                    rowsBySession[item.sessionId] = built
+                    if currentSession?.sessionId == item.sessionId {
+                        rows = built
+                    }
+                }
+                PendingStreamStore.remove(sessionId: item.sessionId)
+                let hasAnswer = (rowsBySession[item.sessionId] ?? []).contains {
+                    if case .assistant(let t) = $0 {
+                        return !t.displayAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    }
+                    return false
+                }
+                if !hasAnswer {
+                    failedTextBySession[item.sessionId] = item.userText
+                    if currentSession?.sessionId == item.sessionId {
+                        notice = streaming.fallbacks.interruptedExit
+                    }
+                }
+                return
+            } catch {
+                // Fall through to soft notice.
             }
         }
 
+        PendingStreamStore.remove(sessionId: item.sessionId)
+        failedTextBySession[item.sessionId] = item.userText
         if currentSession?.sessionId == item.sessionId {
-            if let built = try? await reloadRows(sessionId: item.sessionId) {
-                rowsBySession[item.sessionId] = built
-                rows = built
-            }
             markLastAssistantInterrupted(sessionId: item.sessionId)
-            failedTextBySession[item.sessionId] = item.userText
-            error = streaming.fallbacks.interruptedExit
             notice = streaming.fallbacks.interruptedExit
-        } else {
-            failedTextBySession[item.sessionId] = item.userText
-            if notice.isEmpty {
-                let title = sessions.first(where: { $0.sessionId == item.sessionId })?.displayTitle ?? "另一会话"
-                notice = "「\(title)」上次回答在退出后中断，打开该会话后可重试。"
-            }
+        } else if notice.isEmpty {
+            let title = sessions.first(where: { $0.sessionId == item.sessionId })?.displayTitle ?? "另一会话"
+            notice = "「\(title)」上次回答可能中断，打开该会话后可重试或等待自动恢复。"
         }
     }
 
@@ -755,6 +844,7 @@ final class ChatViewModel: ObservableObject {
 
     private func startStream(url: URL, turnId: String, sessionId: String) {
         streamingSessionIds.insert(sessionId)
+        streamURLBySession[sessionId] = url
         noteLiveProgress(
             status: "running",
             phase: "starting",
@@ -771,26 +861,42 @@ final class ChatViewModel: ObservableObject {
             turnId: turnId,
             api: api,
             onEvent: { [weak self] update in
+                self?.reattachAttemptsBySession[sessionId] = 0
                 self?.apply(update: update, sessionId: sessionId, turnId: turnId)
             },
             onTransportError: { [weak self] message in
                 guard let self else { return }
                 settledByIdle = true
-                self.failTurn(
-                    sessionId: sessionId,
-                    turnId: turnId,
-                    message: message,
-                    surfaceError: true
-                )
-                self.streamingSessionIds.remove(sessionId)
-                self.clearLiveness(for: sessionId)
+                Task { @MainActor in
+                    let recovered = await self.attemptStreamReattach(
+                        sessionId: sessionId,
+                        turnId: turnId,
+                        url: url,
+                        reason: message
+                    )
+                    if !recovered {
+                        self.failTurn(
+                            sessionId: sessionId,
+                            turnId: turnId,
+                            message: message.contains("重连")
+                                ? "回答超时：重连失败。请点重试，或检查远端连接。"
+                                : message,
+                            surfaceError: true
+                        )
+                        self.streamingSessionIds.remove(sessionId)
+                        self.clearLiveness(for: sessionId)
+                    }
+                }
             },
             onFinished: { [weak self] cancelled, transportError in
                 guard let self else { return }
+                // Transport errors are handled by reattach; don't settle as empty failure yet.
+                if transportError { return }
                 self.streamingSessionIds.remove(sessionId)
+                self.streamURLBySession.removeValue(forKey: sessionId)
                 self.clearLiveness(for: sessionId)
                 Task { @MainActor in
-                    if !cancelled, !transportError, !settledByIdle {
+                    if !cancelled, !settledByIdle {
                         await self.settleStreamCompletion(sessionId: sessionId, turnId: turnId)
                     }
                     if !cancelled {
@@ -809,6 +915,68 @@ final class ChatViewModel: ObservableObject {
                 }
             }
         )
+    }
+
+    /// Returns true when a new SSE subscription was started (or run already hydrated).
+    @discardableResult
+    private func attemptStreamReattach(
+        sessionId: String,
+        turnId: String,
+        url: URL,
+        reason: String
+    ) async -> Bool {
+        let attempt = (reattachAttemptsBySession[sessionId] ?? 0) + 1
+        reattachAttemptsBySession[sessionId] = attempt
+        guard attempt <= maxReattachAttempts else { return false }
+
+        if currentSession?.sessionId == sessionId {
+            notice = reason.contains("重连") || reason.contains("恢复")
+                ? reason
+                : "连接中断，正在重连（\(attempt)/\(maxReattachAttempts)）…"
+        }
+
+        let backoffNs = UInt64(min(8.0, pow(2.0, Double(attempt - 1)))) * 400_000_000
+        try? await Task.sleep(nanoseconds: backoffNs)
+
+        guard let runId = assistantTurn(sessionId: sessionId, turnId: turnId)?.runId
+                ?? assistantTurnRunId(sessionId: sessionId)
+        else {
+            return false
+        }
+
+        do {
+            let status = try await api.fetchRunStatus(sessionId: sessionId, runId: runId)
+            if status.alive {
+                mutateAssistant(sessionId: sessionId, turnId: turnId) {
+                    $0.isStreaming = true
+                    $0.failed = false
+                    if $0.phase == .error { $0.phase = .answering }
+                }
+                let resumeURL = (try? api.streamURL(sessionId: sessionId, runId: runId)) ?? url
+                startStream(url: resumeURL, turnId: turnId, sessionId: sessionId)
+                if currentSession?.sessionId == sessionId {
+                    notice = ""
+                }
+                return true
+            }
+            cancelStream(sessionId: sessionId, finalizeTurn: false)
+            if let built = try? await reloadRows(sessionId: sessionId) {
+                rowsBySession[sessionId] = built
+                if currentSession?.sessionId == sessionId {
+                    rows = built
+                }
+            }
+            await settleStreamCompletion(sessionId: sessionId, turnId: turnId)
+            if currentSession?.sessionId == sessionId {
+                notice = ""
+            }
+            return true
+        } catch {
+            if !reachability.isOnline {
+                return attempt < maxReattachAttempts
+            }
+            return false
+        }
     }
 
     private func settleStreamCompletion(sessionId: String, turnId: String) async {

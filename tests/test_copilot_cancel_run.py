@@ -75,26 +75,23 @@ def test_get_run_status_tracks_tool_phase(services, monkeypatch):
 
     async def collect():
         events = []
+        saw_tool_progress = False
         async for event in services.copilot_service.stream_run(
             run.run_id, session_id=session.session_id
         ):
             events.append(event)
-            if event.type == "tool_call":
-                snap = services.copilot_service.get_run_status(
-                    run.run_id, session_id=session.session_id
-                )
-                assert snap["phase"] == "tool"
-                assert snap["current_tool"] == "web_search"
-                assert snap["alive"] is True
-            if event.type == "progress":
-                assert event.payload.get("run_id") == run.run_id
-        return events
+            if event.type == "progress" and event.payload.get("phase") == "tool":
+                saw_tool_progress = True
+                assert event.payload.get("current_tool") == "web_search"
+                assert event.payload.get("alive") is True
+        return events, saw_tool_progress
 
-    events = asyncio.run(collect())
+    events, saw_tool_progress = asyncio.run(collect())
     types = [e.type for e in events]
     assert "progress" in types
     assert "tool_call" in types
     assert "final" in types
+    assert saw_tool_progress is True
 
     after = services.copilot_service.get_run_status(run.run_id, session_id=session.session_id)
     assert after["alive"] is False

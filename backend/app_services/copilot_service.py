@@ -106,6 +106,12 @@ class CopilotRunState:
     last_event_type: str | None = None
     started_at: str = field(default_factory=now_iso)
     updated_at: str = field(default_factory=now_iso)
+    # Fan-out: agent runs in a background task; SSE clients subscribe.
+    producer_task: asyncio.Task | None = field(default=None, repr=False)
+    producer_done: bool = False
+    live_buffer: list[SSEEvent] = field(default_factory=list, repr=False)
+    subscribers: list[asyncio.Queue] = field(default_factory=list, repr=False)
+    subscriber_lock: asyncio.Lock | None = field(default=None, repr=False)
 
 
 class CopilotService:
@@ -506,17 +512,7 @@ class CopilotService:
                 raise KeyError(run_id)
             return {**cached, "alive": False}
         if self.has_run(run_id, session_id=session_id):
-            message = self.repo.get_copilot_user_message_by_run_id(run_id)
-            return {
-                "run_id": run_id,
-                "session_id": (message.session_id if message else session_id),
-                "status": "not_running",
-                "phase": "finishing",
-                "current_tool": None,
-                "last_event_at": None,
-                "last_event_type": None,
-                "alive": False,
-            }
+            return self._persisted_run_progress(run_id, session_id=session_id)
         raise KeyError(run_id)
 
     def progress_payload(self, run_id: str) -> dict[str, Any]:
@@ -527,6 +523,10 @@ class CopilotService:
         cached = self._run_status_cache.get(run_id)
         if cached is not None:
             return {**cached, "alive": False}
+        if self.has_run(run_id):
+            # Covers the race where to_sse heartbeats before stream_run rehydrates
+            # ``_runs`` after a process-local clear / reattach.
+            return self._persisted_run_progress(run_id)
         return {
             "run_id": run_id,
             "status": "not_running",
@@ -534,6 +534,34 @@ class CopilotService:
             "current_tool": None,
             "alive": False,
         }
+
+    def _persisted_run_progress(
+        self, run_id: str, session_id: str | None = None
+    ) -> dict[str, Any]:
+        """Status from SQLite when the run is not in the in-memory fan-out map."""
+        message = self.repo.get_copilot_user_message_by_run_id(run_id)
+        task = self.repo.get_task_by_run_id(run_id)
+        persisted = [
+            item
+            for item in self.repo.list_copilot_run_messages(run_id)
+            if item.role != "user"
+        ]
+        has_final = any(item.kind == "final_answer" for item in persisted)
+        base = {
+            "run_id": run_id,
+            "session_id": (message.session_id if message else session_id),
+            "task_id": (task.task_id if task else (message.task_id if message else None)),
+            "current_tool": None,
+            "last_event_at": None,
+            "last_event_type": None,
+        }
+        if has_final:
+            return {**base, "status": "completed", "phase": "finishing", "alive": False}
+        if persisted:
+            # Partial history + no live producer → orphan (clients hydrate / retry).
+            return {**base, "status": "not_running", "phase": "finishing", "alive": False}
+        # User message only: producer can still be started on subscribe/reattach.
+        return {**base, "status": "starting", "phase": "thinking", "alive": True}
 
     def _snapshot_run(self, run_id: str, state: CopilotRunState) -> dict[str, Any]:
         snap = {
@@ -817,7 +845,11 @@ class CopilotService:
         task_id: Optional[str] = None,
         session_id: str | None = None,
     ) -> AsyncIterator[SSEEvent]:
-        _start_time = time.monotonic()
+        """Subscribe to a run's SSE fan-out (replay + live tail).
+
+        Agent execution is owned by a background producer task so HTTP disconnect
+        does not cancel the run. Re-opening the same ``run_id`` reattaches.
+        """
         persisted_messages = self.repo.list_copilot_run_messages(run_id)
         persisted_events = [item for item in persisted_messages if item.role != "user"]
         if any(item.kind == "final_answer" for item in persisted_events):
@@ -825,61 +857,214 @@ class CopilotService:
                 yield self._message_to_event(item)
             return
 
-        if persisted_events:
-            recovered_state = self._runs.get(run_id) or self._recover_run_state(
-                run_id, session_id
-            )
-            if not recovered_state:
+        state = self._runs.get(run_id)
+        if state is None:
+            if persisted_events:
+                # Orphan: partial history, no live producer — do not re-execute tools.
+                async for event in self._emit_orphan_stream_terminal(
+                    run_id, task_id=task_id, session_id=session_id, persisted=persisted_events
+                ):
+                    yield event
+                return
+            recovered = self._recover_run_state(run_id, session_id)
+            if not recovered:
                 raise KeyError(run_id)
-            for item in persisted_events:
-                yield self._message_to_event(item)
-            resolved_task_id = task_id or recovered_state.task_id
-            error_event = SSEEvent(
-                run_id=run_id,
-                task_id=resolved_task_id,
-                type="error",
-                payload={
-                    "stage": "stream_recovery",
-                    "error": "copilot stream interrupted after partial output; start a new run to avoid re-executing tools",
-                    "authority_level": recovered_state.request.authority_level.value,
-                },
-            )
-            final_payload = self.result_normalizer.normalize_final(
-                {
-                    "conclusion": "本次 AI Chat 流式输出已中断，系统已停止恢复执行以避免重复创建报告、草案、审查或 snapshot。",
-                    "confidence": "low",
-                    "counter_reasons": ["检测到已有部分 SSE 事件但缺少 final_answer。"],
-                    "evidence_refs": ["copilot_message", "stream_recovery_guard"],
-                    "next_actions": ["重新发送消息以创建新的 run_id。"],
-                    "disclaimer": RESEARCH_DISCLAIMER,
-                }
-            )
-            final_event = SSEEvent(
-                run_id=run_id,
-                task_id=resolved_task_id,
-                type="final",
-                payload=final_payload,
-            )
+            self._runs[run_id] = recovered
+            state = recovered
+
+        self._ensure_run_producer(run_id, task_id=task_id, session_id=session_id)
+        state = self._runs.get(run_id) or state
+
+        if state.subscriber_lock is None:
+            state.subscriber_lock = asyncio.Lock()
+        queue: asyncio.Queue[SSEEvent | None] = asyncio.Queue()
+        async with state.subscriber_lock:
+            if state.producer_done:
+                snapshot = list(state.live_buffer)
+                attached = False
+            else:
+                state.subscribers.append(queue)
+                snapshot = list(state.live_buffer)
+                attached = True
+
+        for event in snapshot:
+            yield event
+
+        if not attached:
+            # Producer finished between ensure and subscribe — drain any DB finals.
+            if not any(ev.type == "final" for ev in snapshot):
+                persisted_after = [
+                    item
+                    for item in self.repo.list_copilot_run_messages(run_id)
+                    if item.role != "user"
+                ]
+                seen = {(ev.type, id(ev)) for ev in snapshot}
+                for item in persisted_after:
+                    ev = self._message_to_event(item)
+                    if (ev.type, id(ev)) not in seen:
+                        yield ev
+            return
+
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item
+        finally:
+            live = self._runs.get(run_id)
+            if live is not None:
+                try:
+                    live.subscribers.remove(queue)
+                except ValueError:
+                    pass
+
+    async def _emit_orphan_stream_terminal(
+        self,
+        run_id: str,
+        *,
+        task_id: Optional[str],
+        session_id: str | None,
+        persisted: list[Any],
+    ) -> AsyncIterator[SSEEvent]:
+        recovered_state = self._recover_run_state(run_id, session_id)
+        if not recovered_state:
+            raise KeyError(run_id)
+        for item in persisted:
+            yield self._message_to_event(item)
+        resolved_task_id = task_id or recovered_state.task_id
+        error_event = SSEEvent(
+            run_id=run_id,
+            task_id=resolved_task_id,
+            type="error",
+            payload={
+                "stage": "stream_orphan",
+                "error": "copilot run is no longer running; partial output was preserved",
+                "authority_level": recovered_state.request.authority_level.value,
+            },
+        )
+        final_payload = self.result_normalizer.normalize_final(
+            {
+                "conclusion": "本次回答已中断且服务端进程内已无活跃执行。可点重试开启新的一轮。",
+                "confidence": "low",
+                "counter_reasons": ["检测到部分 SSE 事件但缺少 final_answer，且无活跃 producer。"],
+                "evidence_refs": ["copilot_message", "stream_orphan"],
+                "next_actions": ["重新发送消息以创建新的 run_id。"],
+                "disclaimer": RESEARCH_DISCLAIMER,
+            }
+        )
+        final_event = SSEEvent(
+            run_id=run_id,
+            task_id=resolved_task_id,
+            type="final",
+            payload=final_payload,
+        )
+        # Persist only if not already terminal in DB.
+        if not any(item.kind == "final_answer" for item in persisted):
             self._persist_stream_event(recovered_state, error_event)
             self._persist_stream_event(recovered_state, final_event)
             self._update_task_step(
-                resolved_task_id, "stream_recovery_stopped", 100, status="failed"
+                resolved_task_id, "stream_orphan_stopped", 100, status="failed"
             )
             self._upsert_run_log(
                 run_id,
                 status="failed",
-                error_category="stream_recovery",
+                error_category="stream_orphan",
                 runtime_error=str(error_event.payload.get("error") or ""),
-                latency_ms=(time.monotonic() - _start_time) * 1000,
             )
-            yield error_event
-            yield final_event
-            self._runs.pop(run_id, None)
-            return
+        yield error_event
+        yield final_event
 
+    def _ensure_run_producer(
+        self,
+        run_id: str,
+        *,
+        task_id: Optional[str] = None,
+        session_id: str | None = None,
+    ) -> None:
+        state = self._runs.get(run_id)
+        if state is None:
+            raise KeyError(run_id)
+        if state.producer_done:
+            return
+        task = state.producer_task
+        if task is not None and not task.done():
+            return
+        state.producer_task = asyncio.create_task(
+            self._run_producer_task(run_id, task_id=task_id, session_id=session_id),
+            name=f"copilot-run-{run_id}",
+        )
+
+    async def _run_producer_task(
+        self,
+        run_id: str,
+        *,
+        task_id: Optional[str] = None,
+        session_id: str | None = None,
+    ) -> None:
+        try:
+            async for event in self._drive_agent_stream(
+                run_id, task_id=task_id, session_id=session_id
+            ):
+                self._publish_run_event(run_id, event)
+        except Exception:
+            # _drive_agent_stream already emits error/final on most failures;
+            # unexpected escapes still finalize subscribers.
+            pass
+        finally:
+            self._complete_run_producer(run_id)
+
+    def _publish_run_event(self, run_id: str, event: SSEEvent) -> None:
+        state = self._runs.get(run_id)
+        if state is None:
+            return
+        state.live_buffer.append(event)
+        for queue in list(state.subscribers):
+            try:
+                queue.put_nowait(event)
+            except Exception:
+                pass
+
+    def _complete_run_producer(self, run_id: str) -> None:
+        state = self._runs.get(run_id)
+        if state is None:
+            return
+        state.producer_done = True
+        for queue in list(state.subscribers):
+            try:
+                queue.put_nowait(None)
+            except Exception:
+                pass
+        state.subscribers.clear()
+        if state.status in _ALIVE_RUN_STATUSES:
+            terminal = (
+                "cancelled" if self._is_run_cancelled(run_id) else "completed"
+            )
+            self._touch_run(
+                run_id,
+                state,
+                status=terminal,
+                phase="finishing",
+                current_tool=None,
+                event_type="stream_end",
+            )
+        else:
+            self._snapshot_run(run_id, state)
+        self._cancelled_runs.discard(run_id)
+        self._runs.pop(run_id, None)
+
+    async def _drive_agent_stream(
+        self,
+        run_id: str,
+        task_id: Optional[str] = None,
+        session_id: str | None = None,
+    ) -> AsyncIterator[SSEEvent]:
+        _start_time = time.monotonic()
         state = self._runs.get(run_id) or self._recover_run_state(run_id, session_id)
         if not state:
             raise KeyError(run_id)
+        if run_id not in self._runs:
+            self._runs[run_id] = state
 
         request = state.request
         # UI chips (symbol relation) still use the builder. The model only sees
@@ -1244,27 +1429,6 @@ class CopilotService:
                 current_tool=None,
                 event_type="error",
             )
-        # Keep last snapshot for GET status after the in-memory run is gone.
-        if run_id in self._runs:
-            final_state = self._runs[run_id]
-            if final_state.status in _ALIVE_RUN_STATUSES:
-                terminal = (
-                    "cancelled"
-                    if self._is_run_cancelled(run_id)
-                    else "completed"
-                )
-                self._touch_run(
-                    run_id,
-                    final_state,
-                    status=terminal,
-                    phase="finishing",
-                    current_tool=None,
-                    event_type="stream_end",
-                )
-            else:
-                self._snapshot_run(run_id, final_state)
-        self._cancelled_runs.discard(run_id)
-        self._runs.pop(run_id, None)
 
     @staticmethod
     def _capture_tool_result(

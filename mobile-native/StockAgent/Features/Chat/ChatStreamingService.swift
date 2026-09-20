@@ -20,8 +20,8 @@ final class ChatStreamingService {
         idleTimeoutSeconds: TimeInterval = 120,
         fallbacks: Fallbacks = Fallbacks(
             emptyAnswer: "回答未生成完整（工具可能已执行）。请点重试，或换个问法再试。",
-            idleTimeout: "回答超时：长时间没有服务端心跳。请点重试，或检查远端连接。",
-            interruptedExit: "上次回答在退出后中断（服务端已停止该轮，避免重复执行工具）。请点重试。",
+            idleTimeout: "回答超时：长时间没有服务端心跳。正在尝试重连…",
+            interruptedExit: "上次回答在退出后中断。正在尝试恢复…",
             stopped: "已停止生成。可点重试继续。"
         )
     ) {

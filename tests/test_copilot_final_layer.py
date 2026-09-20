@@ -70,8 +70,10 @@ def test_copilot_session_message_history_and_persisted_stream_recovery(tmp_path)
         body = "".join(response.iter_text())
 
     events = parse_sse_events(body)
-    assert events[0]["type"] == "reasoning"
-    assert events[-1]["type"] == "final"
+    # Fan-out publishes progress heartbeats; content still starts with reasoning.
+    content = [event for event in events if event["type"] != "progress"]
+    assert content[0]["type"] == "reasoning"
+    assert content[-1]["type"] == "final"
     assert all(event["run_id"] == run["run_id"] for event in events)
     assert all(event["task_id"] == run["task_id"] for event in events)
 
@@ -154,9 +156,35 @@ def test_missing_copilot_stream_returns_404_instead_of_fake_continue(tmp_path):
     assert "not found" in response.text.lower()
 
 
-def test_partial_stream_recovery_replays_without_rerunning_side_effect_tools(tmp_path):
+def test_partial_stream_reattach_continues_without_rerunning_tools(tmp_path, monkeypatch):
+    """First subscriber disconnects mid-run; second reattaches to the same producer."""
     client = make_client(tmp_path)
     services = client.app.state.services
+    hold = asyncio.Event()
+    drafts_created = {"n": 0}
+
+    async def slow_stream(**kwargs):
+        yield {
+            "type": "tool_call",
+            "payload": {
+                "tool": "generate_draft_order",
+                "call_id": "d1",
+                "arguments": {"symbol": "AAPL"},
+            },
+        }
+        drafts_created["n"] += 1
+        yield {
+            "type": "tool_result",
+            "payload": {
+                "tool": "generate_draft_order",
+                "call_id": "d1",
+                "result": {"draft_id": "draft_reattach_1", "status": "draft"},
+            },
+        }
+        await hold.wait()
+        yield {"type": "final", "payload": {"conclusion": "done"}}
+
+    monkeypatch.setattr(services.copilot_service.deerflow, "stream", slow_stream)
 
     run = client.post(
         "/api/copilot/chat",
@@ -168,24 +196,95 @@ def test_partial_stream_recovery_replays_without_rerunning_side_effect_tools(tmp
         },
     ).json()
 
-    async def consume_until_tool_result():
-        seen = []
+    async def scenario():
         agen = services.copilot_service.stream_run(run["run_id"], run["task_id"])
         try:
             async for event in agen:
-                seen.append(event)
                 if event.type == "tool_result":
                     break
         finally:
             await agen.aclose()
-        return seen
 
-    partial_events = asyncio.run(consume_until_tool_result())
-    assert any(event.type == "tool_result" for event in partial_events)
-    drafts_before = client.get("/api/rebalance-drafts").json()["items"]
-    assert len(drafts_before) == 1
+        assert run["run_id"] in services.copilot_service._runs
+        assert services.copilot_service.get_run_status(run["run_id"])["alive"] is True
+        assert drafts_created["n"] == 1
 
-    services.copilot_service._runs.clear()
+        types: list[str] = []
+
+        async def second():
+            async for event in services.copilot_service.stream_run(run["run_id"], run["task_id"]):
+                types.append(event.type)
+                if event.type == "final":
+                    break
+
+        second_task = asyncio.create_task(second())
+        await asyncio.sleep(0.05)
+        hold.set()
+        await second_task
+        return types
+
+    types = asyncio.run(scenario())
+    assert "final" in types
+    assert drafts_created["n"] == 1
+
+
+def test_orphan_partial_stream_does_not_rerun_tools(tmp_path, monkeypatch):
+    """No live producer + partial history → soft terminal, no new side effects."""
+    import contextlib
+
+    client = make_client(tmp_path)
+    services = client.app.state.services
+    hold = asyncio.Event()
+
+    async def slow_stream(**kwargs):
+        yield {
+            "type": "tool_call",
+            "payload": {
+                "tool": "generate_draft_order",
+                "call_id": "d1",
+                "arguments": {"symbol": "AAPL"},
+            },
+        }
+        yield {
+            "type": "tool_result",
+            "payload": {
+                "tool": "generate_draft_order",
+                "call_id": "d1",
+                "result": {"draft_id": "draft_orphan_1", "status": "draft"},
+            },
+        }
+        await hold.wait()
+        yield {"type": "final", "payload": {"conclusion": "should not reach"}}
+
+    monkeypatch.setattr(services.copilot_service.deerflow, "stream", slow_stream)
+
+    run = client.post(
+        "/api/copilot/chat",
+        json={
+            "message": "把 AAPL 降到 15% 并生成调仓方案",
+            "page": "holdings",
+            "symbol": "AAPL",
+            "authority_level": "A4",
+        },
+    ).json()
+
+    async def leave_orphan_partial():
+        agen = services.copilot_service.stream_run(run["run_id"], run["task_id"])
+        try:
+            async for event in agen:
+                if event.type == "tool_result":
+                    break
+        finally:
+            await agen.aclose()
+        state = services.copilot_service._runs.get(run["run_id"])
+        assert state is not None and state.producer_task is not None
+        state.producer_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await state.producer_task
+        services.copilot_service._runs.pop(run["run_id"], None)
+        services.copilot_service._run_status_cache.pop(run["run_id"], None)
+
+    asyncio.run(leave_orphan_partial())
 
     with client.stream("GET", f"/api/copilot/stream/{run['run_id']}") as response:
         assert response.status_code == 200
@@ -193,10 +292,7 @@ def test_partial_stream_recovery_replays_without_rerunning_side_effect_tools(tmp
 
     events = parse_sse_events(body)
     assert [event["type"] for event in events][-2:] == ["error", "final"]
-    assert events[-2]["payload"]["stage"] == "stream_recovery"
-    assert "避免重复创建" in events[-1]["payload"]["conclusion"]
-    drafts_after = client.get("/api/rebalance-drafts").json()["items"]
-    assert [item["draft_id"] for item in drafts_after] == [item["draft_id"] for item in drafts_before]
+    assert events[-2]["payload"]["stage"] == "stream_orphan"
 
 
 def test_copilot_context_builder_redacts_full_holdings_reports_and_tool_args(tmp_path):

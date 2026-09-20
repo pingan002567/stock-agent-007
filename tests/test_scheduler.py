@@ -256,6 +256,57 @@ def test_sched_close_injected_when_missing_from_existing_config(tmp_path):
     assert any(item["task_id"] == "sched_premarket" for item in listed)
 
 
+def test_legacy_default_prompts_upgraded_on_list(tmp_path):
+    from backend.app_services.scheduler_service import DEFAULT_TASKS
+    from tests.test_api import make_client
+
+    client = make_client(tmp_path)
+    services = client.app.state.services
+    services.repo.set_config(
+        "scheduled_tasks",
+        {
+            "items": [
+                {
+                    "task_id": "sched_premarket",
+                    "name": "盘前简报",
+                    "prompt": "汇总自选与持仓相关的隔夜要闻与情报，列出今天需要重点关注的标的和风险点。",
+                    "schedule": "daily@08:30",
+                    "enabled": True,
+                    "page": "chat",
+                    "authority_level": "A3",
+                    "calendar": "CN",
+                },
+                {
+                    "task_id": "sched_weekly_review",
+                    "name": "周度复盘",
+                    "prompt": "本周持仓表现、盯盘事件回顾、风险状况变化与下周关注点。",
+                    "schedule": "weekly@7@17:00",
+                    "enabled": False,
+                    "page": "chat",
+                    "authority_level": "A3",
+                },
+                {
+                    "task_id": "sched_close",
+                    "name": "收盘体检",
+                    "prompt": "我自己改过的收盘文案",
+                    "schedule": "daily@15:15",
+                    "enabled": True,
+                    "page": "chat",
+                    "authority_level": "A3",
+                    "calendar": "CN",
+                },
+            ]
+        },
+    )
+    listed = {t["task_id"]: t for t in services.scheduler_service.list_tasks()}
+    seed = {t["task_id"]: t for t in DEFAULT_TASKS}
+    assert listed["sched_premarket"]["prompt"] == seed["sched_premarket"]["prompt"]
+    assert listed["sched_weekly_review"]["prompt"] == seed["sched_weekly_review"]["prompt"]
+    assert listed["sched_close"]["prompt"] == "我自己改过的收盘文案"
+    assert "集合竞价前" in listed["sched_premarket"]["prompt"]
+    assert "不重复 08:20" in listed["sched_premarket"]["prompt"]
+
+
 def test_discovery_run_persists_session_and_overview_card(tmp_path):
     from tests.test_api import make_client
 

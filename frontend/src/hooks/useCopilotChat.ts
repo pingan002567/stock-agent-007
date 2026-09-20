@@ -22,6 +22,11 @@ import {
 } from "@/lib/humanInput";
 import { isUsableSessionTitle } from "@/lib/sessionTitle";
 import type { RunLiveness } from "@/lib/chatShell";
+import {
+  listPendingStreams,
+  removePendingStream,
+  upsertPendingStream,
+} from "@/lib/pendingStream";
 
 // ── Streaming message types ──
 
@@ -413,6 +418,17 @@ function useCopilotChatState() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadSessions(); }, [loadSessions]);
 
+  // Drop stale pending entries after refresh; live ones are resumed via visibility/online.
+  useEffect(() => {
+    for (const item of listPendingStreams()) {
+      void fetchRunStatus(item.sessionId, item.runId)
+        .then((status) => {
+          if (!status.alive) removePendingStream(item.sessionId);
+        })
+        .catch(() => { /* keep */ });
+    }
+  }, []);
+
   useEffect(() => { refreshCopilotContext(); }, [currentScreen, stock, refreshCopilotContext]);
 
   const switchSession = useCallback(async (id: string) => {
@@ -575,6 +591,12 @@ function useCopilotChatState() {
         responseMeta,
       );
       bindStream(sid, { ...initialStream, runId: run.run_id });
+      upsertPendingStream({
+        sessionId: sid,
+        runId: run.run_id,
+        userText: text,
+        updatedAt: Date.now(),
+      });
 
       const userMsg: CopilotMessage = {
         message_id: `msg-${Date.now()}`,
@@ -806,6 +828,7 @@ function useCopilotChatState() {
         } else {
           delete stickyActivityRef.current[sid];
         }
+        removePendingStream(sid);
 
         // 后台完成：清掉快照，切回该会话时靠 loadMessages 拿完整历史
         if (!viewingSession(sid)) {
@@ -841,23 +864,167 @@ function useCopilotChatState() {
       // 处理error事件
       es.addEventListener("error", (streamEvent: Event) => {
         // 浏览器原生 EventSource 在「连接层中断」时也会派发 error 事件，
-        // 这类事件不带 data。只有带 data 的才是服务端真正发出的业务错误，
-        // 否则误把一次网络抖动渲染成「错误: null」并杀掉整轮对话。
+        // 这类事件不带 data。带 data 的才是服务端业务错误。
         if (settled || streamsRef.current.get(sid) !== es) return;
         const raw = (streamEvent as MessageEvent).data;
         if (raw === undefined || raw === null) {
-          errorText = "连接中断，请重新发送消息";
-        } else {
-          try {
-            const data = JSON.parse(raw);
-            errorText = String(data?.payload?.error || "stream error");
-          } catch {
-            errorText = "stream error";
+          // CONNECTING: browser auto-reconnect. CLOSED: try status + reattach.
+          if (es.readyState === EventSource.CONNECTING) {
+            noteLive(sid);
+            return;
           }
+          void (async () => {
+            for (let attempt = 1; attempt <= 5; attempt += 1) {
+              await new Promise((r) => setTimeout(r, Math.min(8000, 400 * 2 ** (attempt - 1))));
+              if (settled || streamsRef.current.get(sid) !== es) return;
+              try {
+                const status = await fetchRunStatus(sid, run.run_id);
+                if (status.alive) {
+                  // Re-open SSE on the same run (backend fan-out).
+                  releaseStream(sid, es);
+                  const next = new EventSource(createStreamUrl(sid, run.run_id));
+                  streamsRef.current.set(sid, next);
+                  syncGlobalStreaming();
+                  // Forward to the same listeners by cloning via re-entry:
+                  // close this handler's es; wire critical paths onto next.
+                  next.addEventListener("ping", (ev: Event) => {
+                    const rawPing = (ev as MessageEvent).data;
+                    if (rawPing && rawPing !== "{}") applyProgressPayload(rawPing);
+                    else noteLive(sid);
+                  });
+                  next.addEventListener("progress", (ev: Event) => {
+                    applyProgressPayload((ev as MessageEvent).data);
+                  });
+                  next.addEventListener("final", (ev: Event) => {
+                    // Delegate to original final handler by synthesizing on es path:
+                    // simplest: reload messages when final arrives on reattach.
+                    settled = true;
+                    releaseStream(sid, next);
+                    removePendingStream(sid);
+                    setSending(false);
+                    void fetchSessionMessages(sid).then((items) => {
+                      if (currentSessionIdRef.current !== sid) return;
+                      setMessages(items);
+                      streamSnapshotsRef.current.delete(sid);
+                      setStreamMessage(null);
+                      syncSessionActivity(true);
+                    });
+                    loadSessions();
+                    void ev;
+                  });
+                  next.addEventListener("error", (ev: Event) => {
+                    const d = (ev as MessageEvent).data;
+                    if (d === undefined || d === null) {
+                      if (next.readyState === EventSource.CONNECTING) {
+                        noteLive(sid);
+                        return;
+                      }
+                      return;
+                    }
+                    // business error on reattach
+                    try {
+                      const data = JSON.parse(d);
+                      errorText = String(data?.payload?.error || "stream error");
+                    } catch {
+                      errorText = "stream error";
+                    }
+                    settled = true;
+                    releaseStream(sid, next);
+                    removePendingStream(sid);
+                    if (viewingSession(sid)) {
+                      patchStream(sid, (prev) => ({
+                        ...prev,
+                        phase: "error",
+                        errorText,
+                      }));
+                      setSending(false);
+                    }
+                  });
+                  // Also forward partial/tool to keep bubble updating
+                  for (const type of ["reasoning", "partial_answer", "tool_call", "tool_result", "clarification", "skill_trace"] as const) {
+                    next.addEventListener(type, (ev: Event) => {
+                      noteLive(sid);
+                      try {
+                        const data = JSON.parse((ev as MessageEvent).data);
+                        const payload = (data?.payload || {}) as Record<string, unknown>;
+                        if (type === "partial_answer") {
+                          const t = String(payload.text || data?.text || "");
+                          if (t) {
+                            patchStream(sid, (prev) => ({
+                              ...prev,
+                              phase: "answering",
+                              answerText: (prev.answerText || "") + t,
+                            }));
+                          }
+                        } else if (type === "reasoning") {
+                          const t = String(payload.text || "");
+                          if (t) {
+                            patchStream(sid, (prev) => ({
+                              ...prev,
+                              phase: "reasoning",
+                              reasoningText: t,
+                            }));
+                          }
+                        }
+                      } catch { /* empty */ }
+                    });
+                  }
+                  return;
+                }
+                // Run finished — hydrate.
+                settled = true;
+                releaseStream(sid, es);
+                removePendingStream(sid);
+                setSending(false);
+                const items = await fetchSessionMessages(sid);
+                if (currentSessionIdRef.current === sid) {
+                  setMessages(items);
+                  streamSnapshotsRef.current.delete(sid);
+                  setStreamMessage(null);
+                }
+                loadSessions();
+                return;
+              } catch {
+                /* retry */
+              }
+            }
+            // Exhausted — surface soft failure.
+            if (settled || streamsRef.current.get(sid) !== es) return;
+            settled = true;
+            errorText = "连接中断，重连失败。请点重试。";
+            stickyActivityRef.current[sid] = { kind: "error", summary: "出错 · 可重试" };
+            releaseStream(sid, es);
+            removePendingStream(sid);
+            if (viewingSession(sid)) {
+              const errorMsg: CopilotMessage = {
+                message_id: `msg-error-${run.run_id.slice(-8)}`,
+                session_id: sid,
+                role: "assistant",
+                kind: "final_answer",
+                text: `错误: ${errorText}`,
+                payload: { error: errorText },
+                created_at: new Date().toISOString(),
+                run_id: run.run_id,
+              };
+              setMessages((prev) => [...prev, errorMsg]);
+              setStreamMessage(null);
+              setReasoningText("");
+              setSending(false);
+            }
+            loadSessions();
+          })();
+          return;
+        }
+        try {
+          const data = JSON.parse(raw);
+          errorText = String(data?.payload?.error || "stream error");
+        } catch {
+          errorText = "stream error";
         }
 
         stickyActivityRef.current[sid] = { kind: "error", summary: "出错 · 可重试" };
         releaseStream(sid, es);
+        removePendingStream(sid);
 
         // 用户已切到别的会话：丢弃这条在途回调（后台也清掉快照）
         if (!viewingSession(sid)) {
@@ -915,6 +1082,7 @@ function useCopilotChatState() {
     if (runId) {
       void cancelRun(sid, runId).catch(() => { /* local stop still proceeds */ });
     }
+    removePendingStream(sid);
     releaseStream(sid);
     setStreamMessage(null);
     void fetchSessionMessages(sid).then((items) => {
@@ -940,17 +1108,52 @@ function useCopilotChatState() {
           currentTool: status.current_tool ?? null,
           alive: true,
         });
+        if (!streamsRef.current.get(sid)) {
+          const next = new EventSource(createStreamUrl(sid, runId));
+          streamsRef.current.set(sid, next);
+          syncGlobalStreaming();
+          next.addEventListener("final", () => {
+            releaseStream(sid, next);
+            removePendingStream(sid);
+            setSending(false);
+            void fetchSessionMessages(sid).then((items) => {
+              if (currentSessionIdRef.current !== sid) return;
+              setMessages(items);
+              streamSnapshotsRef.current.delete(sid);
+              setStreamMessage(null);
+            });
+          });
+          next.addEventListener("progress", (ev: Event) => {
+            try {
+              const data = JSON.parse((ev as MessageEvent).data || "{}");
+              const payload = (data?.payload || data || {}) as Record<string, unknown>;
+              setStreamLiveness({
+                lastAt: Date.now(),
+                status: String(payload.status || "running"),
+                phase: String(payload.phase || "llm"),
+                currentTool: payload.current_tool != null ? String(payload.current_tool) : null,
+                alive: payload.alive !== false,
+              });
+            } catch {
+              setStreamLiveness((prev) => prev
+                ? { ...prev, lastAt: Date.now(), alive: true }
+                : prev);
+            }
+          });
+        }
         return;
       }
       // Run finished while UI still thinks it's sending — hydrate and clear.
       releaseStream(sid);
+      removePendingStream(sid);
+      setSending(false);
       setStreamMessage(null);
       const items = await fetchSessionMessages(sid);
       if (currentSessionIdRef.current === sid) setMessages(items);
     } catch {
       /* keep current dock; silence alone will eventually mark stuck */
     }
-  }, [sending, releaseStream]);
+  }, [sending, releaseStream, syncGlobalStreaming]);
 
   const handleCopy = useCallback(async (msg: CopilotMessage) => {
     try {

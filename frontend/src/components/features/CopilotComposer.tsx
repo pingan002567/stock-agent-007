@@ -26,12 +26,15 @@ import {
 } from "@/lib/sessionUploads";
 import { isMobileLayout } from "@/lib/connection";
 
-function useOnline(): boolean {
+function useOnline(onOnline?: () => void): boolean {
   const [online, setOnline] = useState(
     () => (typeof navigator === "undefined" ? true : navigator.onLine),
   );
   useEffect(() => {
-    const on = () => setOnline(true);
+    const on = () => {
+      setOnline(true);
+      onOnline?.();
+    };
     const off = () => setOnline(false);
     window.addEventListener("online", on);
     window.addEventListener("offline", off);
@@ -39,7 +42,7 @@ function useOnline(): boolean {
       window.removeEventListener("online", on);
       window.removeEventListener("offline", off);
     };
-  }, []);
+  }, [onOnline]);
   return online;
 }
 
@@ -62,7 +65,10 @@ export function CopilotComposer() {
   } = useCopilotChat();
   const { appDataCache, globalLoading, lastRefreshTime } = useAppState();
   const { showToast } = useToast();
-  const online = useOnline();
+  const onOnline = useCallback(() => {
+    if (sending) void refreshRunStatus();
+  }, [sending, refreshRunStatus]);
+  const online = useOnline(onOnline);
 
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [uploading, setUploading] = useState(false);
@@ -256,10 +262,12 @@ export function CopilotComposer() {
     } else if (stuck && sending) {
       list.push({
         kind: "stuck",
-        title: "响应似乎卡住了",
-        detail: "可停止本轮后重试，或检查远端连接。",
-        actionLabel: "停止",
-        onAction: handleStop,
+        title: streamLiveness?.alive ? "服务端仍在生成" : "响应似乎卡住了",
+        detail: streamLiveness?.alive
+          ? "心跳偏少，可尝试重连或停止本轮。"
+          : "可停止本轮后重试，或检查远端连接。",
+        actionLabel: streamLiveness?.alive ? "重连" : "停止",
+        onAction: streamLiveness?.alive ? () => { void refreshRunStatus(); } : handleStop,
       });
     } else if (showWorking) {
       const copy = workingDockCopy(streamLiveness);
@@ -279,7 +287,7 @@ export function CopilotComposer() {
       });
     }
     return list;
-  }, [online, stuck, sending, waitingClarify, handleStop, showWorking, stopping, streamLiveness]);
+  }, [online, stuck, sending, waitingClarify, handleStop, showWorking, stopping, streamLiveness, refreshRunStatus]);
 
   const handleSend = () => {
     const text = input;

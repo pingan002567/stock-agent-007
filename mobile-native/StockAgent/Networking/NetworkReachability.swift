@@ -8,6 +8,8 @@ final class NetworkReachability: ObservableObject {
 
     @Published private(set) var isOnline = true
     @Published var authFailureMessage: String?
+    /// Fires when path transitions from unsatisfied → satisfied.
+    var onBecameOnline: (() -> Void)?
 
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "stockagent.reachability")
@@ -15,7 +17,13 @@ final class NetworkReachability: ObservableObject {
     private init() {
         monitor.pathUpdateHandler = { [weak self] path in
             Task { @MainActor in
-                self?.isOnline = path.status == .satisfied
+                guard let self else { return }
+                let online = path.status == .satisfied
+                let wasOffline = !self.isOnline
+                self.isOnline = online
+                if wasOffline && online {
+                    self.onBecameOnline?()
+                }
             }
         }
         monitor.start(queue: queue)

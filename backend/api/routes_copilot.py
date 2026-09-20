@@ -282,11 +282,13 @@ def stream_session_run(session_id: str, run_id: str, request: Request, services:
     if not services.copilot_service.has_run(run_id, session_id=session_id):
         raise HTTPException(status_code=404, detail="copilot run not found")
 
+    progress = services.copilot_service.progress_payload(run_id)
     return StreamingResponse(
         to_sse(
             services.copilot_service.stream_run(run_id, session_id=session_id),
             heartbeat=lambda: services.copilot_service.progress_payload(run_id),
             run_id=run_id,
+            task_id=progress.get("task_id"),
         ),
         media_type="text/event-stream",
         headers=SSE_HEADERS,
@@ -332,11 +334,13 @@ def chat(payload: CopilotRequest, request: Request, services: AppServices = Depe
 def stream(run_id: str, request: Request, services: AppServices = Depends(get_services)):
     if not services.copilot_service.has_run(run_id):
         raise HTTPException(status_code=404, detail="copilot run not found")
+    progress = services.copilot_service.progress_payload(run_id)
     return StreamingResponse(
         to_sse(
             services.copilot_service.stream_run(run_id),
             heartbeat=lambda: services.copilot_service.progress_payload(run_id),
             run_id=run_id,
+            task_id=progress.get("task_id"),
         ),
         media_type="text/event-stream",
         headers=SSE_HEADERS,

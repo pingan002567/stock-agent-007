@@ -25,35 +25,77 @@ CONFIG_KEY = "scheduled_tasks"
 CHECK_INTERVAL_SECONDS = 30
 RUN_TIMEOUT_SECONDS = 900
 
+_DATA_DISCIPLINE = (
+    "取数：优先本地缓存；遇 degraded / stale / 缺字段先 list_data_sources 再换可用 provider"
+    "（行业优先同花顺）；仍失败写「未获取+原因」，禁止编造。不索要完整持仓明细、不回显密钥、不做真实下单。"
+)
+_DISCLAIMER_TAIL = (
+    "结尾附固定句：可含目标价与操作指令，仅供研究参考，不构成投资建议。"
+)
+
 DUTY_PREAMBLE = (
-    "你是值班研究员。可给目标价与操作观点，须声明不构成投资建议；禁止自动交易。\n"
+    "你是值班研究员。禁止自动交易。\n"
+    f"{_DATA_DISCIPLINE}\n"
     "必须调用：get_portfolio_snapshot、get_monitor_events、summarize_review_inbox。\n"
     "持仓+自选合计超过 15 只时，只深拉权重最高与今日异动 Top 8，其余一行涨跌，禁止逐只深研。\n"
     "A 股讨论抛压/套牢时必须 get_market_structure；港美股禁止写获利/套牢比例。\n"
-    "输出：一句话结论；今日关注最多 3 条；例外（降级/告警/失败）。禁止编造数字。\n"
+    "输出按下方「用户任务」小节；表格合计 ≤8 行。\n"
+    f"{_DISCLAIMER_TAIL}\n"
     "不要调用 generate_report，系统会在运行结束后自动落盘值班简报。"
 )
 
 DISCOVERY_PREAMBLE = (
-    "你是盘前机会发现员。可给目标价与操作观点，须声明不构成投资建议；禁止自动交易。\n"
-    "范围：全市场机会发现，**不得只看自选与持仓**（自选/持仓仅可作对照，不可当作唯一宇宙）。\n"
+    "你是盘前机会发现员。禁止自动交易。\n"
+    "范围：全市场，**不得只看自选与持仓**（自选/持仓仅作重叠对照，不可当作唯一宇宙）。\n"
+    f"{_DATA_DISCIPLINE}\n"
     "必须先拉市场面：invoke_data_capability 或快捷工具获取 market_review、sectors、"
-    "industry_boards（必要时 Mode A 换源）；再按用户风险画像筛选候选。\n"
-    "输出固定结构：\n"
-    "1) 一句话结论；\n"
-    "2) 机会 3～5 条（标的、理由、匹配的风险档、来源）；\n"
-    "3) 回避清单（今日不适合画像的方向）；\n"
-    "4) 例外/降级。\n"
-    "禁止编造未拉到的数字；不要调用 generate_report，系统会在运行结束后自动落盘机会发现报告。"
+    "industry_boards（必要时 Mode A 换源）；再按**上方已注入**的风险画像筛选候选。\n"
+    "输出按下方「用户任务」小节；表格合计 ≤8 行。\n"
+    f"{_DISCLAIMER_TAIL}\n"
+    "不要调用 generate_report，系统会在运行结束后自动落盘机会发现报告。"
 )
+
+# 仍等于这些旧默认文案的已落库任务，会在 list_tasks 时升级到 DEFAULT_TASKS 新 prompt。
+_LEGACY_DEFAULT_PROMPTS: dict[str, frozenset[str]] = {
+    "sched_premarket_discovery": frozenset(
+        {
+            "扫描全市场（大盘、板块轮动、行业），找出与用户风险画像匹配的今日机会，"
+            "不局限于自选与持仓；列出 3～5 个值得跟进的标的及回避方向。",
+        }
+    ),
+    "sched_premarket": frozenset(
+        {
+            "汇总自选与持仓相关的隔夜要闻与情报，列出今天需要重点关注的标的和风险点。",
+        }
+    ),
+    "sched_close": frozenset(
+        {
+            "复盘今日持仓与自选涨跌、盯盘未处理事件、数据源是否降级、风控距硬限。"
+            "列出例外，不要编造未拉到的数字。",
+        }
+    ),
+    "sched_weekly_review": frozenset(
+        {
+            "本周持仓表现、盯盘事件回顾、风险状况变化与下周关注点。",
+        }
+    ),
+}
 
 DEFAULT_TASKS: list[dict[str, Any]] = [
     {
         "task_id": "sched_premarket_discovery",
         "name": "盘前机会发现",
         "prompt": (
-            "扫描全市场（大盘、板块轮动、行业），找出与用户风险画像匹配的今日机会，"
-            "不局限于自选与持仓；列出 3～5 个值得跟进的标的及回避方向。"
+            "【任务】盘前机会发现（A股交易日 08:20）。范围＝全市场，不限于自选/持仓。\n"
+            "【取数】按已注入的风险画像筛选；大盘/板块走市场复盘与行业能力（行业优先同花顺）；"
+            "逐个候选排查与现有持仓是否重叠；失败须标注「精度有限」。\n"
+            "【输出】≤600 字\n"
+            "1. 市场环境：1 段，指数与板块强弱（缺失则说明）。\n"
+            "2. 机会清单：3–5 个；每条含代码/名称、行业、触发逻辑、参考入场区间、止损位、"
+            "仓位上限（不超风险策略单票上限）、与持仓是否重叠。\n"
+            "3. 回避清单：2–3 个方向及理由。\n"
+            "4. 数据健康：降级/缺失项。\n"
+            "【约束】只写市场环境+全市场机会，不写自选/持仓隔夜简报（留给 08:30）。"
         ),
         "page": "chat",
         "authority_level": "A3",
@@ -64,7 +106,17 @@ DEFAULT_TASKS: list[dict[str, Any]] = [
     {
         "task_id": "sched_premarket",
         "name": "盘前简报",
-        "prompt": "汇总自选与持仓相关的隔夜要闻与情报，列出今天需要重点关注的标的和风险点。",
+        "prompt": (
+            "【任务】今日盘前简报（A股交易日 08:30，集合竞价前）。只做自选/持仓+隔夜要闻，"
+            "不重复 08:20 机会发现已述的全市场机会清单。\n"
+            "【取数】自选/持仓/盯盘优先本地缓存；隔夜要闻与情报窗口＝上一交易日收盘后至今。\n"
+            "【输出】≤600 字\n"
+            "1. 隔夜要闻：≤5 条；每条含来源与对自选/持仓影响（利好/利空/中性）。\n"
+            "2. 今日重点标的：≤5 个；关注理由与关键价位；此刻无开盘价，不得编造。\n"
+            "3. 风险与日历：今日解禁/财报/停复牌、公司或监管公告、昨日已触发的盯盘规则。\n"
+            "4. 数据健康：本次降级/缺失字段。\n"
+            "【约束】只写例外与动作，不复述行情流水账。"
+        ),
         "page": "chat",
         "authority_level": "A3",
         "schedule": "daily@08:30",
@@ -74,7 +126,17 @@ DEFAULT_TASKS: list[dict[str, Any]] = [
     {
         "task_id": "sched_close",
         "name": "收盘体检",
-        "prompt": "复盘今日持仓与自选涨跌、盯盘未处理事件、数据源是否降级、风控距硬限。列出例外，不要编造未拉到的数字。",
+        "prompt": (
+            "【任务】收盘体检（A股交易日 15:15）。\n"
+            "【取数】持仓/自选/盯盘优先本地缓存；结论依赖当日现价时，同一标的最多 refresh 一次。\n"
+            "【输出】≤600 字\n"
+            "1. 组合表现：整体涨跌；正/负贡献最大各 ≤3 只（含权重与当日涨跌）。\n"
+            "2. 盯盘事件：未处理事件按严重度排序 + 建议动作。\n"
+            "3. 距硬限：逐项「当前值/阈值/剩余空间」；阈值以风险策略为准，无则用 5 个百分点；"
+            "剩余空间 <5 个百分点即预警。\n"
+            "4. 例外清单：明确今日「无需处理」与「必须处理」。\n"
+            "5. 数据健康：降级/缺失字段与原因。"
+        ),
         "page": "chat",
         "authority_level": "A3",
         "schedule": "daily@15:15",
@@ -84,7 +146,18 @@ DEFAULT_TASKS: list[dict[str, Any]] = [
     {
         "task_id": "sched_weekly_review",
         "name": "周度复盘",
-        "prompt": "本周持仓表现、盯盘事件回顾、风险状况变化与下周关注点。",
+        "prompt": (
+            "【任务】本周周度复盘（周日 17:00）。\n"
+            "【取数】持仓/自选走本地缓存；归因用决策日志与结果汇总；板块/行业走行业能力。\n"
+            "【输出】≤900 字\n"
+            "1. 周度表现：组合收益 vs 基准（基准不可得则说明），最大回撤。\n"
+            "2. 归因：前 3 大正/负贡献标的及原因（事件/情绪/基本面）。\n"
+            "3. 决策复盘：本周建议与实际走势是否一致，偏差在哪。\n"
+            "4. 风险变化：集中度、单票超限、行业集中、距硬限的环比变化。\n"
+            "5. 下周关注：3–5 条，含催化剂时点与回避方向。\n"
+            "6. 数据健康：降级/缺失项。\n"
+            "【约束】只写结论与动作，不复述每日简报。"
+        ),
         "page": "chat",
         "authority_level": "A3",
         "schedule": "weekly@7@17:00",
@@ -208,15 +281,25 @@ class SchedulerService:
             self._save(items)
         else:
             known = {item.get("task_id") for item in items}
-            added = False
+            dirty = False
             for seed in DEFAULT_TASKS:
                 if seed["task_id"] not in known and seed["task_id"] in {
                     "sched_close",
                     "sched_premarket_discovery",
                 }:
                     items.append(dict(seed))
-                    added = True
-            if added:
+                    dirty = True
+            seed_by_id = {seed["task_id"]: seed for seed in DEFAULT_TASKS}
+            for item in items:
+                tid = str(item.get("task_id") or "")
+                seed = seed_by_id.get(tid)
+                if seed is None:
+                    continue
+                legacy = _LEGACY_DEFAULT_PROMPTS.get(tid) or frozenset()
+                if str(item.get("prompt") or "") in legacy:
+                    item["prompt"] = seed["prompt"]
+                    dirty = True
+            if dirty:
                 self._save(items)
         now = datetime.now()
         for item in items:
