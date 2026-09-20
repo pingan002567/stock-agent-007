@@ -560,6 +560,31 @@ final class APIClient: ObservableObject {
         return try JSONDecoder().decode(ReportListResponse.self, from: data)
     }
 
+    // MARK: - Scheduled tasks (duty)
+
+    func fetchScheduledTasks() async throws -> [ScheduledTask] {
+        let data = try await getData(path: "/api/scheduled-tasks")
+        return try JSONDecoder().decode(ScheduledTaskListResponse.self, from: data).items
+    }
+
+    @discardableResult
+    func toggleScheduledTask(taskId: String, enabled: Bool) async throws -> ScheduledTask {
+        let data = try await request(
+            path: "/api/scheduled-tasks/\(enc(taskId))/toggle",
+            method: "POST",
+            json: ["enabled": enabled]
+        )
+        return try JSONDecoder().decode(ScheduledTask.self, from: data)
+    }
+
+    func runScheduledTaskNow(taskId: String) async throws {
+        _ = try await request(
+            path: "/api/scheduled-tasks/\(enc(taskId))/run-now",
+            method: "POST",
+            json: [:]
+        )
+    }
+
     // MARK: - Devices / APNs
 
     func registerAPNsDevice(token: String, environment: String) async throws {

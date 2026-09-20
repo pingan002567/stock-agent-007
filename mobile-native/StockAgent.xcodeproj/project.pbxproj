@@ -19,6 +19,7 @@
 		5A57E36C836849D095124536 /* StockDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53B20343BC6E46059927092B /* StockDetailView.swift */; };
 		6C4B4694D6514F4A8E3004A1 /* AssistantBubbleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8907E83ABE249449C5CE55C /* AssistantBubbleView.swift */; };
 		6F793A6861B84C14B8F9669B /* StrategyListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35B67D1A439949A089211681 /* StrategyListView.swift */; };
+		B8C9D0E1F203142536475869 /* ScheduledTasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B8C9D0E1F2031425364758 /* ScheduledTasksView.swift */; };
 		97E96B237A8941B28A257024 /* PushNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62DB959757194004A4454639 /* PushNotificationManager.swift */; };
 		A81C2F0E9B4D4E6F8A1C3D5E /* AnswerFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B72E1A0C4D5F678901234ABC /* AnswerFormatter.swift */; };
 		AA11BB22CC33DD44EE550001 /* ChatHistoryPager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB11CC22DD33EE44FF660001 /* ChatHistoryPager.swift */; };
@@ -53,6 +54,7 @@
 		289EB7273F274AF0BCA3950D /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		2D095BF49D55425292CDE5BF /* WatchlistView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchlistView.swift; sourceTree = "<group>"; };
 		35B67D1A439949A089211681 /* StrategyListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrategyListView.swift; sourceTree = "<group>"; };
+		A7B8C9D0E1F2031425364758 /* ScheduledTasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduledTasksView.swift; sourceTree = "<group>"; };
 		41D87491E990496896AD7DE4 /* AssistantTurnDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantTurnDetailView.swift; sourceTree = "<group>"; };
 		489DBDC480C9415D80DBCF98 /* MonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorView.swift; sourceTree = "<group>"; };
 		4D8EAE2AD4D34C9DAFBB449C /* HoldingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoldingsView.swift; sourceTree = "<group>"; };
@@ -130,6 +132,14 @@
 				35B67D1A439949A089211681 /* StrategyListView.swift */,
 			);
 			path = Strategy;
+			sourceTree = "<group>";
+		};
+		C9D0E1F2031425364758697A /* Duty */ = {
+			isa = PBXGroup;
+			children = (
+				A7B8C9D0E1F2031425364758 /* ScheduledTasksView.swift */,
+			);
+			path = Duty;
 			sourceTree = "<group>";
 		};
 		29AF740D2FB844B0B0AB8396 /* Resources */ = {
@@ -222,6 +232,7 @@
 				AF314AC564D8430FA3221071 /* Monitor */,
 				9E39667E9A52445A83C2891F /* Settings */,
 				20752BEBB58B4398B9172A1E /* Strategy */,
+				C9D0E1F2031425364758697A /* Duty */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -355,6 +366,7 @@
 				3655B123EBFD456DAF85D6BD /* SSEClient.swift in Sources */,
 				5A57E36C836849D095124536 /* StockDetailView.swift in Sources */,
 				6F793A6861B84C14B8F9669B /* StrategyListView.swift in Sources */,
+				B8C9D0E1F203142536475869 /* ScheduledTasksView.swift in Sources */,
 				97E96B237A8941B28A257024 /* PushNotificationManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

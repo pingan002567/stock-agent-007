@@ -13,6 +13,8 @@ struct SettingsView: View {
     @State private var loadError = ""
     @State private var dutyCompletionPush = true
     @State private var savingNotificationPrefs = false
+    @State private var dutySubtitle = "盘前简报 / 收盘体检"
+    @State private var reportsSubtitle = "值班简报与研究报告"
 
     var body: some View {
         NavigationStack {
@@ -163,11 +165,30 @@ struct SettingsView: View {
             NavigationLink("外观与主题") {
                 ChatAppearanceSettingsView()
             }
+            NavigationLink {
+                ScheduledTasksView()
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("定时值班")
+                    Text(dutySubtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            NavigationLink {
+                ReportsListView()
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("研究报告")
+                    Text(reportsSubtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
             NavigationLink("策略回测") {
                 StrategyListView()
-            }
-            NavigationLink("研究报告") {
-                ReportsListView()
             }
         }
     }
@@ -350,6 +371,24 @@ struct SettingsView: View {
             _ = try? await api.probeHealth()
         } catch {
             loadError = (error as? APIError)?.message ?? error.localizedDescription
+        }
+        await refreshFeatureSubtitles()
+    }
+
+    private func refreshFeatureSubtitles() async {
+        async let tasksResult = APIClient.shared.fetchScheduledTasks()
+        async let reportsResult = APIClient.shared.fetchReports(page: 1, pageSize: 5)
+        if let tasks = try? await tasksResult {
+            let on = tasks.filter(\.enabled).count
+            if let next = tasks.first(where: { $0.enabled && $0.nextRunAt != nil }) {
+                dutySubtitle = "\(on)/\(tasks.count) 启用 · \(next.name) \(next.nextRunShort)"
+            } else {
+                dutySubtitle = "\(on)/\(tasks.count) 启用"
+            }
+        }
+        if let reports = try? await reportsResult, let first = reports.items.first {
+            let when = first.generatedAt.map { String($0.replacingOccurrences(of: "T", with: " ").prefix(16)) } ?? ""
+            reportsSubtitle = "最近：\(first.typeLabelZh)\(when.isEmpty ? "" : " · \(when)")"
         }
     }
 

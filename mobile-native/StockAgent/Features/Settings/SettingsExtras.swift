@@ -232,46 +232,114 @@ struct CostSettingsView: View {
 struct ReportsListView: View {
     var initialReportId: String? = nil
 
+    private enum Filter: String, CaseIterable, Identifiable {
+        case all, duty, research
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .all: return "全部"
+            case .duty: return "值班"
+            case .research: return "研究"
+            }
+        }
+    }
+
     @State private var items: [ReportListItem] = []
     @State private var error = ""
     @State private var loading = true
+    @State private var loadingMore = false
     @State private var selected: ReportDetail?
+    @State private var filter: Filter = .all
+    @State private var page = 1
+    @State private var totalPages = 1
+    @State private var total = 0
+
+    private var filtered: [ReportListItem] {
+        switch filter {
+        case .all: return items
+        case .duty: return items.filter(\.isDutyType)
+        case .research: return items.filter(\.isResearchType)
+        }
+    }
 
     var body: some View {
         Group {
             if loading && items.isEmpty {
                 ProgressView("加载报告…")
             } else if items.isEmpty {
-                ContentUnavailableView("暂无报告", systemImage: "doc.text", description: Text(error.isEmpty ? "深研或值班简报会出现在这里。" : error))
+                ContentUnavailableView(
+                    "暂无报告",
+                    systemImage: "doc.text",
+                    description: Text(error.isEmpty ? "深研或值班简报会出现在这里。" : error)
+                )
             } else {
-                List(items) { item in
-                    Button {
-                        Task { await open(item.reportId) }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item.title ?? item.reportId)
-                                .font(.headline)
-                                .foregroundStyle(.primary)
-                            HStack {
-                                if let type = item.reportType {
-                                    Text(type).font(.caption2)
-                                }
-                                if let symbol = item.symbol, !symbol.isEmpty {
-                                    Text(symbol).font(.caption2)
-                                }
-                                Spacer()
-                                if let at = item.generatedAt {
-                                    Text(at).font(.caption2)
-                                }
-                            }
-                            .foregroundStyle(.secondary)
-                            if let conclusion = item.conclusion, !conclusion.isEmpty {
-                                Text(conclusion)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
+                List {
+                    Section {
+                        Picker("筛选", selection: $filter) {
+                            ForEach(Filter.allCases) { f in
+                                Text(f.label).tag(f)
                             }
                         }
+                        .pickerStyle(.segmented)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .listRowBackground(Color.clear)
+                    }
+
+                    if filtered.isEmpty {
+                        Text("当前筛选下暂无报告")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(filtered) { item in
+                            Button {
+                                Task { await open(item.reportId) }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(item.title ?? item.reportId)
+                                        .font(.headline)
+                                        .foregroundStyle(.primary)
+                                    HStack {
+                                        Text(item.typeLabelZh)
+                                            .font(.caption2.weight(.semibold))
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+                                        if let symbol = item.symbol, !symbol.isEmpty {
+                                            Text(symbol).font(.caption2)
+                                        }
+                                        Spacer()
+                                        if let at = item.generatedAt {
+                                            Text(Self.shortTime(at)).font(.caption2)
+                                        }
+                                    }
+                                    .foregroundStyle(.secondary)
+                                    if let conclusion = item.conclusion, !conclusion.isEmpty {
+                                        Text(conclusion)
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if page < totalPages {
+                        Button {
+                            Task { await loadMore() }
+                        } label: {
+                            HStack {
+                                Spacer()
+                                if loadingMore {
+                                    ProgressView()
+                                } else {
+                                    Text("加载更多（\(items.count)/\(total)）")
+                                        .font(.footnote)
+                                }
+                                Spacer()
+                            }
+                        }
+                        .disabled(loadingMore)
                     }
                 }
             }
@@ -279,12 +347,12 @@ struct ReportsListView: View {
         .navigationTitle("研究报告")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            await load()
+            await load(reset: true)
             if let rid = initialReportId, !rid.isEmpty {
                 await open(rid)
             }
         }
-        .refreshable { await load() }
+        .refreshable { await load(reset: true) }
         .sheet(item: $selected) { report in
             NavigationStack {
                 ScrollView {
@@ -305,12 +373,36 @@ struct ReportsListView: View {
         }
     }
 
-    private func load() async {
-        loading = true
+    private func load(reset: Bool) async {
+        if reset {
+            page = 1
+            if items.isEmpty { loading = true }
+        }
         defer { loading = false }
         do {
-            items = try await APIClient.shared.fetchReports().items
+            let resp = try await APIClient.shared.fetchReports(page: 1, pageSize: 20)
+            items = resp.items
+            total = resp.total ?? resp.items.count
+            totalPages = max(resp.totalPages ?? 1, 1)
+            page = resp.page ?? 1
             error = ""
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    private func loadMore() async {
+        guard !loadingMore, page < totalPages else { return }
+        loadingMore = true
+        defer { loadingMore = false }
+        let next = page + 1
+        do {
+            let resp = try await APIClient.shared.fetchReports(page: next, pageSize: 20)
+            let existing = Set(items.map(\.reportId))
+            items.append(contentsOf: resp.items.filter { !existing.contains($0.reportId) })
+            total = resp.total ?? items.count
+            totalPages = max(resp.totalPages ?? totalPages, 1)
+            page = resp.page ?? next
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
@@ -322,5 +414,13 @@ struct ReportsListView: View {
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
+    }
+
+    private static func shortTime(_ raw: String) -> String {
+        let s = raw.replacingOccurrences(of: "T", with: " ")
+        if s.count >= 16 {
+            return String(s.dropFirst(5).prefix(11))
+        }
+        return s
     }
 }

@@ -380,6 +380,90 @@ struct ReportListResponse: Decodable {
     }
 }
 
+extension ReportListItem {
+    var typeLabelZh: String {
+        switch (reportType ?? "").lowercased() {
+        case "ops_briefing": return "值班简报"
+        case "ops_discovery": return "机会发现"
+        case "stock_research", "research": return "研究报告"
+        case "paper_portfolio_review": return "模拟盘复盘"
+        case "": return "报告"
+        default: return reportType ?? "报告"
+        }
+    }
+
+    var isDutyType: Bool {
+        switch (reportType ?? "").lowercased() {
+        case "ops_briefing", "ops_discovery": return true
+        default: return false
+        }
+    }
+
+    var isResearchType: Bool { !isDutyType }
+}
+
+struct ScheduledTask: Identifiable, Decodable, Hashable {
+    let taskId: String
+    var name: String
+    var prompt: String?
+    var schedule: String
+    var enabled: Bool
+    var nextRunAt: String?
+    var lastRunAt: String?
+    var lastStatus: String?
+    var lastError: String?
+    var lastReportId: String?
+    var lastRunId: String?
+    var skipReason: String?
+
+    var id: String { taskId }
+
+    enum CodingKeys: String, CodingKey {
+        case name, prompt, schedule, enabled
+        case taskId = "task_id"
+        case nextRunAt = "next_run_at"
+        case lastRunAt = "last_run_at"
+        case lastStatus = "last_status"
+        case lastError = "last_error"
+        case lastReportId = "last_report_id"
+        case lastRunId = "last_run_id"
+        case skipReason = "skip_reason"
+    }
+
+    var scheduleLabelZh: String {
+        let parts = schedule.split(separator: "@").map(String.init)
+        guard let kind = parts.first else { return schedule }
+        switch kind {
+        case "daily":
+            return "每天 \(parts.dropFirst().first ?? "")"
+        case "weekly":
+            let n = Int(parts.dropFirst().first ?? "") ?? 0
+            let day = ["", "一", "二", "三", "四", "五", "六", "日"]
+            let dayZh = (1...7).contains(n) ? day[n] : "?"
+            let time = parts.count > 2 ? parts[2] : ""
+            return "每周\(dayZh) \(time)"
+        case "every":
+            return "每 \(parts.dropFirst().first ?? "")"
+        default:
+            return schedule
+        }
+    }
+
+    var nextRunShort: String {
+        guard enabled, let raw = nextRunAt, !raw.isEmpty else { return "—" }
+        // "2026-09-21T08:30" → "09-21 08:30"
+        let s = raw.replacingOccurrences(of: "T", with: " ")
+        if s.count >= 16 {
+            return String(s.dropFirst(5).prefix(11))
+        }
+        return s
+    }
+}
+
+struct ScheduledTaskListResponse: Decodable {
+    let items: [ScheduledTask]
+}
+
 struct CopilotSession: Identifiable, Decodable, Hashable {
     let sessionId: String
     var title: String

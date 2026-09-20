@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>iOS 原型 · 定时值班 &amp; 研究报告 · Stock Agent</title>
+<style>
+  :root {
+    --bg: #f2f0eb;
+    --paper: #fbfaf7;
+    --ink: #1c1917;
+    --ink2: #44403c;
+    --muted: #78716c;
+    --faint: #a8a29e;
+    --line: #e7e5e4;
+    --accent: #5c4033;
+    --accent-soft: #f0e8e2;
+    --ok: #166534;
+    --ok-soft: #dcfce7;
+    --bad: #b91c1c;
+    --bad-soft: #fee2e2;
+    --busy: #1d4ed8;
+    --busy-soft: #dbeafe;
+    --off: #78716c;
+    --off-soft: #f5f5f4;
+    --skip: #a16207;
+    --skip-soft: #fef3c7;
+    --tab: #fafaf9;
+    --shadow: 0 24px 60px rgba(28, 25, 23, 0.18);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font: 14px/1.45 -apple-system, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+    background: linear-gradient(160deg, #d6d3d1 0%, #e7e5e4 40%, #c4b5a5 100%);
+    color: var(--ink);
+    min-height: 100vh;
+    padding: 32px 24px 64px;
+  }
+  .doc {
+    max-width: 1100px;
+    margin: 0 auto 28px;
+  }
+  .doc h1 {
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .doc p { color: var(--muted); margin-top: 8px; max-width: 52rem; }
+  .doc .hint {
+    margin-top: 14px;
+    padding: 12px 14px;
+    background: rgba(251, 250, 247, 0.85);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    font-size: 13px;
+    color: var(--ink2);
+  }
+  .doc .hint b { color: var(--ink); }
+  .stage {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 28px;
+    justify-content: center;
+    align-items: flex-start;
+  }
+  .phone-wrap { text-align: center; }
+  .phone-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink2);
+    margin-bottom: 10px;
+    letter-spacing: 0.02em;
+  }
+  .phone-label span {
+    display: inline-block;
+    font-family: ui-monospace, Menlo, monospace;
+    font-weight: 400;
+    color: var(--faint);
+    margin-right: 6px;
+  }
+
+  .phone {
+    width: 390px;
+    height: 780px;
+    background: #111;
+    border-radius: 44px;
+    padding: 12px;
+    box-shadow: var(--shadow);
+    position: relative;
+  }
+  .phone-screen {
+    width: 100%;
+    height: 100%;
+    background: var(--paper);
+    border-radius: 34px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  .notch {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 120px;
+    height: 28px;
+    background: #111;
+    border-radius: 20px;
+    z-index: 5;
+  }
+  .status-bar {
+    height: 54px;
+    padding: 18px 28px 0;
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    font-weight: 600;
+    flex: none;
+  }
+  .nav {
+    height: 44px;
+    padding: 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .nav .back {
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    font-size: 16px;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 6px 4px;
+  }
+  .nav .title {
+    flex: 1;
+    text-align: center;
+    font-size: 17px;
+    font-weight: 650;
+    margin-right: 36px;
+  }
+  .scroll {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tabbar {
+    flex: none;
+    height: 72px;
+    border-top: 1px solid var(--line);
+    background: var(--tab);
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    padding: 6px 4px 18px;
+  }
+  .tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    font-size: 10px;
+    color: var(--faint);
+  }
+  .tab.on { color: var(--accent); font-weight: 600; }
+  .tab .ico { font-size: 18px; line-height: 1.2; }
+
+  .group-label {
+    padding: 18px 20px 6px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .list-card {
+    margin: 0 16px 12px;
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    overflow: hidden;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line);
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
+    background: #fff;
+    border-left: 0;
+    border-right: 0;
+    border-top: 0;
+    font: inherit;
+    color: inherit;
+  }
+  .row:last-child { border-bottom: 0; }
+  .row:active { background: #f5f5f4; }
+  .row .main { flex: 1; min-width: 0; }
+  .row .main .name { font-size: 16px; font-weight: 500; }
+  .row .main .sub {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .row .chev { color: var(--faint); font-size: 18px; }
+
+  .task {
+    margin: 10px 16px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 14px;
+  }
+  .task-top {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .task-top .name { font-size: 16px; font-weight: 650; flex: 1; }
+  .task-meta {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); }
+  .pill.bad { background: var(--bad-soft); color: var(--bad); }
+  .pill.busy { background: var(--busy-soft); color: var(--busy); }
+  .pill.off { background: var(--off-soft); color: var(--off); }
+  .pill.skip { background: var(--skip-soft); color: var(--skip); }
+  .task-actions {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .btn {
+    border: 1px solid var(--line);
+    background: var(--paper);
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 550;
+    cursor: pointer;
+    color: var(--ink);
+  }
+  .btn:active { opacity: 0.75; }
+  .btn.primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .btn.link {
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    padding: 8px 4px;
+  }
+  .toggle {
+    width: 50px;
+    height: 30px;
+    border-radius: 999px;
+    background: #d6d3d1;
+    position: relative;
+    flex: none;
+    border: 0;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .toggle.on { background: var(--accent); }
+  .toggle::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,.2);
+    transition: transform 0.15s;
+  }
+  .toggle.on::after { transform: translateX(20px); }
+  .skip-hint {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--skip);
+  }
+
+  .seg {
+    margin: 10px 16px 4px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    background: #e7e5e4;
+    border-radius: 10px;
+    padding: 3px;
+    gap: 2px;
+  }
+  .seg button {
+    border: 0;
+    background: transparent;
+    border-radius: 8px;
+    padding: 7px 4px;
+    font-size: 13px;
+    font-weight: 550;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .seg button.on {
+    background: #fff;
+    color: var(--ink);
+    box-shadow: 0 1px 2px rgba(0,0,0,.06);
+  }
+  .report-row {
+    display: block;
+    width: calc(100% - 32px);
+    margin: 8px 16px;
+    text-align: left;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 14px;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+  }
+  .report-row:active { background: #fafaf9; }
+  .report-row .rtitle { font-size: 15px; font-weight: 650; }
+  .report-row .rmeta {
+    margin-top: 6px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .tag {
+    font-size: 10px;
+    font-weight: 650;
+    padding: 2px 6px;
+    border-radius: 6px;
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .tag.duty { background: #e0e7ff; color: #3730a3; }
+  .tag.disc { background: #ffedd5; color: #9a3412; }
+  .report-row .concl {
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--ink2);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .detail { padding: 16px 20px 40px; }
+  .detail h2 {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .detail .meta { font-size: 12px; color: var(--muted); margin-bottom: 16px; }
+  .detail .body {
+    font-size: 15px;
+    line-height: 1.65;
+    color: var(--ink2);
+  }
+  .detail .body h3 { font-size: 15px; color: var(--ink); margin: 16px 0 6px; }
+  .detail .body ul { padding-left: 18px; margin: 6px 0; }
+  .toast {
+    position: absolute;
+    left: 50%;
+    bottom: 90px;
+    transform: translateX(-50%);
+    background: rgba(28, 25, 23, 0.88);
+    color: #fff;
+    font-size: 13px;
+    padding: 10px 16px;
+    border-radius: 999px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+    white-space: nowrap;
+    z-index: 10;
+  }
+  .toast.show { opacity: 1; }
+  .screen { display: none; flex-direction: column; height: 100%; }
+  .screen.on { display: flex; }
+  .empty {
+    padding: 48px 24px;
+    text-align: center;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+  <div class="doc">
+    <h1>Stock Agent · iOS 原型</h1>
+    <p>定时值班 + 研究报告（不新增 Tab；入口在设置 → 功能）。点击手机内按钮可在屏间跳转。</p>
+    <div class="hint">
+      <b>范围：</b>启停 / 立即运行 / 查看最近报告；报告列表过滤与 Markdown 详情。
+      <b>不做：</b>新建/编辑/删除任务、报告生成与导出。
+      文件：<code>doc/design/ios-duty-reports-prototype.html</code>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="phone-wrap">
+      <div class="phone-label"><span>A</span>可交互主原型</div>
+      <div class="phone">
+        <div class="phone-screen" id="app">
+          <div class="notch"></div>
+          <div class="toast" id="toast"></div>
+
+          <section class="screen on" data-screen="settings">
+            <div class="status-bar"><span>12:24</span><span>●●● 5G</span></div>
+            <div class="nav"><div class="title" style="margin-right:0">设置</div></div>
+            <div class="scroll">
+              <div class="group-label">功能</div>
+              <div class="list-card">
+                <button class="row" type="button" onclick="go('duty')">
+                  <div class="main">
+                    <div class="name">定时值班</div>
+                    <div class="sub">3/4 启用 · 下次盘前 08:30</div>
+                  </div>
+                  <span class="chev">›</span>
+                </button>
+                <button class="row" type="button" onclick="go('reports')">
+                  <div class="main">
+                    <div class="name">研究报告</div>
+                    <div class="sub">最近：盘前简报 · 今天 08:32</div>
+                  </div>
+                  <span class="chev">›</span>
+                </button>
+                <div class="row" style="cursor:default">
+                  <div class="main">
+                    <div class="name">策略回测</div>
+                    <div class="sub">已有页面</div>
+                  </div>
+                  <span class="chev">›</span>
+                </div>
+                <div class="row" style="cursor:default">
+                  <div class="main">
+                    <div class="name">投资画像</div>
+                    <div class="sub">普通</div>
+                  </div>
+                  <span class="chev">›</span>
+                </div>
+              </div>
+              <div class="group-label">通知</div>
+              <div class="list-card">
+                <div class="row" style="cursor:default">
+                  <div class="main">
+                    <div class="name">值班完成推送</div>
+                    <div class="sub">成功后通知；失败始终推送</div>
+                  </div>
+                  <button class="toggle on" type="button" aria-label="toggle" onclick="this.classList.toggle('on')"></button>
+                </div>
+              </div>
+            </div>
+            <div class="tabbar">
+              <div class="tab"><div class="ico">💬</div>对话</div>
+              <div class="tab"><div class="ico">★</div>自选</div>
+              <div class="tab"><div class="ico">↗</div>持仓</div>
+              <div class="tab"><div class="ico">🔔</div>盯盘</div>
+              <div class="tab on"><div class="ico">⚙</div>设置</div>
+            </div>
+          </section>
+
+          <section class="screen" data-screen="duty">
+            <div class="status-bar"><span>12:24</span><span>●●● 5G</span></div>
+            <div class="nav">
+              <button class="back" type="button" onclick="go('settings')">‹ 设置</button>
+              <div class="title">定时值班</div>
+            </div>
+            <div class="scroll" id="duty-list"></div>
+            <div class="tabbar">
+              <div class="tab"><div class="ico">💬</div>对话</div>
+              <div class="tab"><div class="ico">★</div>自选</div>
+              <div class="tab"><div class="ico">↗</div>持仓</div>
+              <div class="tab"><div class="ico">🔔</div>盯盘</div>
+              <div class="tab on"><div class="ico">⚙</div>设置</div>
+            </div>
+          </section>
+
+          <section class="screen" data-screen="reports">
+            <div class="status-bar"><span>12:24</span><span>●●● 5G</span></div>
+            <div class="nav">
+              <button class="back" type="button" onclick="go('settings')">‹ 设置</button>
+              <div class="title">研究报告</div>
+            </div>
+            <div class="seg" id="report-seg">
+              <button type="button" class="on" data-filter="all" onclick="setFilter('all')">全部</button>
+              <button type="button" data-filter="duty" onclick="setFilter('duty')">值班</button>
+              <button type="button" data-filter="research" onclick="setFilter('research')">研究</button>
+            </div>
+            <div class="scroll" id="report-list"></div>
+            <div class="tabbar">
+              <div class="tab"><div class="ico">💬</div>对话</div>
+              <div class="tab"><div class="ico">★</div>自选</div>
+              <div class="tab"><div class="ico">↗</div>持仓</div>
+              <div class="tab"><div class="ico">🔔</div>盯盘</div>
+              <div class="tab on"><div class="ico">⚙</div>设置</div>
+            </div>
+          </section>
+
+          <section class="screen" data-screen="detail">
+            <div class="status-bar"><span>12:24</span><span>●●● 5G</span></div>
+            <div class="nav">
+              <button class="back" type="button" onclick="go(detailBack)">‹ 返回</button>
+              <div class="title">报告</div>
+            </div>
+            <div class="scroll">
+              <div class="detail" id="detail-body"></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <div class="phone-wrap">
+      <div class="phone-label"><span>B</span>值班行信息解剖</div>
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="notch"></div>
+          <div class="status-bar"><span>12:24</span><span>●●● 5G</span></div>
+          <div class="nav"><div class="title" style="margin-right:0">定时值班</div></div>
+          <div class="scroll" style="padding-bottom:20px">
+            <div class="task" style="outline: 2px dashed #a8a29e; outline-offset: 2px;">
+              <div class="task-top">
+                <div class="name">盘前简报</div>
+                <button class="toggle on" type="button"></button>
+              </div>
+              <div class="task-meta">
+                <span>每天 08:30</span>
+                <span>下次 明天 08:30</span>
+                <span class="pill ok">成功 · 3 小时前</span>
+              </div>
+              <div class="task-actions">
+                <button class="btn primary" type="button">立即运行</button>
+                <button class="btn link" type="button">查看报告 ›</button>
+              </div>
+            </div>
+            <div style="margin:16px; font-size:12px; color:var(--muted); text-align:left; line-height:1.7">
+              <div><b style="color:var(--ink)">Toggle</b> → <code>POST …/toggle</code></div>
+              <div><b style="color:var(--ink)">立即运行</b> → <code>POST …/run-now</code>（先标 running）</div>
+              <div><b style="color:var(--ink)">查看报告</b> → <code>last_report_id</code> 打开详情</div>
+              <div style="margin-top:8px">状态 pill：成功 / 失败 / 运行中 / 已跳过 / 未运行</div>
+            </div>
+            <div class="task">
+              <div class="task-top">
+                <div class="name">周度复盘</div>
+                <button class="toggle" type="button"></button>
+              </div>
+              <div class="task-meta">
+                <span>每周日 17:00</span>
+                <span class="pill off">已停用</span>
+              </div>
+            </div>
+            <div class="task">
+              <div class="task-top">
+                <div class="name">收盘体检</div>
+                <button class="toggle on" type="button"></button>
+              </div>
+              <div class="task-meta">
+                <span>每天 15:15</span>
+                <span class="pill skip">已跳过</span>
+              </div>
+              <div class="skip-hint">今日休市，到点将自动跳过</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const tasks = [
+    {
+      id: "sched_premarket_discovery",
+      name: "盘前机会发现",
+      schedule: "每天 08:20",
+      next: "明天 08:20",
+      enabled: true,
+      status: "ok",
+      statusText: "成功 · 4 小时前",
+      reportId: "rep_discovery_1",
+    },
+    {
+      id: "sched_premarket",
+      name: "盘前简报",
+      schedule: "每天 08:30",
+      next: "明天 08:30",
+      enabled: true,
+      status: "ok",
+      statusText: "成功 · 3 小时前",
+      reportId: "rep_premarket_1",
+    },
+    {
+      id: "sched_close",
+      name: "收盘体检",
+      schedule: "每天 15:15",
+      next: "今天 15:15",
+      enabled: true,
+      status: "skip",
+      statusText: "已跳过",
+      skipReason: "今日休市，到点将自动跳过",
+      reportId: null,
+    },
+    {
+      id: "sched_weekly_review",
+      name: "周度复盘",
+      schedule: "每周日 17:00",
+      next: "—",
+      enabled: false,
+      status: "off",
+      statusText: "已停用",
+      reportId: null,
+    },
+  ];
+
+  const reports = [
+    {
+      id: "rep_premarket_1",
+      title: "盘前简报 09-20",
+      type: "duty",
+      typeLabel: "值班简报",
+      at: "今天 08:32",
+      conclusion: "隔夜美股分化，自选偏弱；重点关注白酒权重与两融情绪，回避高位题材追涨。",
+      body: "<p>一句话结论：隔夜美股分化，自选偏弱；重点关注白酒权重。</p><h3>今日关注</h3><ul><li>600519 茅台：量能回落，观察 1450 支撑</li><li>北向净流入放缓</li><li>数据源：行业通道正常</li></ul><h3>例外</h3><ul><li>无高优盯盘未处理</li></ul><p style='margin-top:16px;color:#78716c;font-size:13px'>仅供研究参考，不构成投资建议。</p>",
+    },
+    {
+      id: "rep_discovery_1",
+      title: "盘前机会发现 09-20",
+      type: "duty",
+      typeLabel: "机会发现",
+      at: "今天 08:22",
+      conclusion: "轮动主线偏红利与部分消费；回避小盘炒作。候选 3 只，匹配普通风险档。",
+      body: "<p>一句话结论：红利 + 部分消费更匹配当前画像。</p><h3>机会</h3><ul><li>标的 A · 理由 · 普通档</li><li>标的 B · 理由 · 普通档</li></ul><h3>回避</h3><ul><li>高位题材连板</li></ul>",
+    },
+    {
+      id: "rep_research_1",
+      title: "贵州茅台深度研究",
+      type: "research",
+      typeLabel: "研究报告",
+      at: "昨天 21:10",
+      conclusion: "基本面稳健，估值处中枢；催化取决于批价与渠道库存。",
+      body: "<p>基本面稳健，估值处中枢。</p><h3>核心观点</h3><ul><li>批价与库存是近端变量</li><li>仓位建议以风控上限为准</li></ul>",
+    },
+  ];
+
+  let filter = "all";
+  let detailBack = "reports";
+
+  function go(name) {
+    document.querySelectorAll(".screen").forEach((el) => {
+      el.classList.toggle("on", el.dataset.screen === name);
+    });
+    if (name === "duty") renderDuty();
+    if (name === "reports") renderReports();
+  }
+
+  function toast(msg) {
+    const el = document.getElementById("toast");
+    el.textContent = msg;
+    el.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => el.classList.remove("show"), 1600);
+  }
+
+  function statusClass(s) {
+    return ({ ok: "ok", bad: "bad", busy: "busy", skip: "skip", off: "off" })[s] || "off";
+  }
+
+  function renderDuty() {
+    const root = document.getElementById("duty-list");
+    root.innerHTML = tasks.map((t) => `
+      <article class="task" data-id="${t.id}">
+        <div class="task-top">
+          <div class="name">${t.name}</div>
+          <button class="toggle ${t.enabled ? "on" : ""}" type="button"
+            onclick="toggleTask('${t.id}', this)" aria-label="启用"></button>
+        </div>
+        <div class="task-meta">
+          <span>${t.schedule}</span>
+          <span>下次 ${t.next}</span>
+          <span class="pill ${statusClass(t.status)}">${t.statusText}</span>
+        </div>
+        ${t.skipReason ? `<div class="skip-hint">${t.skipReason}</div>` : ""}
+        <div class="task-actions">
+          <button class="btn primary" type="button" onclick="runNow('${t.id}')">立即运行</button>
+          ${t.reportId
+            ? `<button class="btn link" type="button" onclick="openReport('${t.reportId}', 'duty')">查看报告 ›</button>`
+            : `<span style="font-size:12px;color:var(--faint);padding:8px 4px">暂无报告</span>`}
+        </div>
+      </article>
+    `).join("");
+  }
+
+  function toggleTask(id, btn) {
+    const t = tasks.find((x) => x.id === id);
+    if (!t) return;
+    t.enabled = !t.enabled;
+    btn.classList.toggle("on", t.enabled);
+    if (!t.enabled) {
+      t.status = "off";
+      t.statusText = "已停用";
+      t.next = "—";
+    } else {
+      t.status = "ok";
+      t.statusText = "已启用";
+      t.next = t.schedule.includes("15:15")
+        ? "今天 15:15"
+        : "明天 " + (t.schedule.split(" ").pop() || "");
+    }
+    toast(t.enabled ? `已启用「${t.name}」` : `已停用「${t.name}」`);
+    renderDuty();
+  }
+
+  function runNow(id) {
+    const t = tasks.find((x) => x.id === id);
+    if (!t) return;
+    t.status = "busy";
+    t.statusText = "运行中";
+    renderDuty();
+    toast(`已后台启动「${t.name}」`);
+    setTimeout(() => {
+      t.status = "ok";
+      t.statusText = "成功 · 刚刚";
+      t.reportId = t.reportId || ("rep_" + id);
+      renderDuty();
+      toast("运行完成，可查看报告");
+    }, 1400);
+  }
+
+  function setFilter(f) {
+    filter = f;
+    document.querySelectorAll("#report-seg button").forEach((b) => {
+      b.classList.toggle("on", b.dataset.filter === f);
+    });
+    renderReports();
+  }
+
+  function renderReports() {
+    const root = document.getElementById("report-list");
+    const items = reports.filter((r) => {
+      if (filter === "all") return true;
+      if (filter === "duty") return r.type === "duty";
+      return r.type === "research";
+    });
+    if (!items.length) {
+      root.innerHTML = `<div class="empty">暂无报告</div>`;
+      return;
+    }
+    root.innerHTML = items.map((r) => `
+      <button class="report-row" type="button" onclick="openReport('${r.id}', 'reports')">
+        <div class="rtitle">${r.title}</div>
+        <div class="rmeta">
+          <span class="tag ${r.type === "duty" ? (r.typeLabel.includes("机会") ? "disc" : "duty") : ""}">${r.typeLabel}</span>
+          <span>${r.at}</span>
+        </div>
+        <div class="concl">${r.conclusion}</div>
+      </button>
+    `).join("") + `<div style="text-align:center;padding:16px;color:var(--faint);font-size:12px">上拉加载更多（原型占位）</div>`;
+  }
+
+  function openReport(id, from) {
+    const r = reports.find((x) => x.id === id) || {
+      id,
+      title: "值班报告",
+      typeLabel: "值班简报",
+      at: "刚刚",
+      body: "<p>运行刚完成的占位正文。</p>",
+    };
+    detailBack = from || "reports";
+    document.getElementById("detail-body").innerHTML = `
+      <h2>${r.title}</h2>
+      <div class="meta">${r.typeLabel || ""} · ${r.at || ""}</div>
+      <div class="body">${r.body || r.conclusion || ""}</div>
+    `;
+    go("detail");
+  }
+
+  renderDuty();
+  renderReports();
+</script>
+</body>
+</html>

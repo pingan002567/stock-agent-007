@@ -720,9 +720,9 @@ final class ChatViewModel: ObservableObject {
                         var list = rowsBySession[item.sessionId] ?? []
                         list.append(.assistant(AssistantTurn(
                             id: turnId,
+                            runId: runId,
                             phase: .reasoning,
-                            isStreaming: true,
-                            runId: runId
+                            isStreaming: true
                         )))
                         rowsBySession[item.sessionId] = list
                         if currentSession?.sessionId == item.sessionId {
