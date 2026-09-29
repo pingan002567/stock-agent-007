@@ -1015,7 +1015,7 @@ class ReportService:
             market_review = {"degraded": True, "degraded_reason": str(exc)[:200]}
         task_name = str(options.get("task_name") or request.source_id)
         session = str(options.get("session") or "premarket")
-        if session not in {"premarket", "close", "weekly", "discovery"}:
+        if session not in {"premarket", "intraday", "close", "weekly", "discovery"}:
             session = "premarket"
         return {
             "source_id": request.source_id,
@@ -1054,6 +1054,7 @@ class ReportService:
         session_title = {
             "premarket": "盘前值班简报",
             "discovery": "盘前机会发现",
+            "intraday": "盘中值班报告",
             "close": "收盘值班简报",
             "weekly": "周度值班复盘",
         }.get(session, "值班简报")

@@ -59,6 +59,7 @@ final class ChatViewModel: ObservableObject {
     /// Matches desktop STUCK_IDLE_MS — show stuck dock before hard idle timeout.
     private static let stuckIdleSeconds: TimeInterval = 90
     private static let statusPollSeconds: TimeInterval = 5
+    private static let sessionsRefreshSeconds: TimeInterval = 30
 
     @Published var sessions: [CopilotSession] = []
     @Published var currentSession: CopilotSession?
@@ -92,6 +93,7 @@ final class ChatViewModel: ObservableObject {
     private var lastProgressAt: Date = .distantPast
     private var statusPollTask: Task<Void, Never>?
     private var stuckWatchTask: Task<Void, Never>?
+    private var sessionsRefreshTask: Task<Void, Never>?
     private var reattachAttemptsBySession: [String: Int] = [:]
     private var streamURLBySession: [String: URL] = [:]
     private let maxReattachAttempts = 5
@@ -213,6 +215,7 @@ final class ChatViewModel: ObservableObject {
             }
             await recoverInterruptedStreamsAfterRelaunch()
             wireReachabilityReattach()
+            startSessionsAutoRefresh()
             #if DEBUG
             let parserFailures = ChatParserSmoke.runAll()
             if !parserFailures.isEmpty {
@@ -225,9 +228,51 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Soft sync of the session drawer with the backend (no message reload unless current vanished).
+    func refreshSessions() async {
+        do {
+            let items = try await api.fetchSessions()
+            sessions = items
+            if let sid = currentSession?.sessionId {
+                if let updated = items.first(where: { $0.sessionId == sid }) {
+                    currentSession = updated
+                } else {
+                    // Current session deleted remotely — fall back without hard error.
+                    currentSession = items.first
+                    if let next = currentSession {
+                        try await presentSession(next.sessionId, preferCacheIfStreaming: true)
+                        await refreshUploads()
+                    } else {
+                        rows = []
+                        uploads = []
+                    }
+                }
+            }
+        } catch {
+            // Soft refresh: keep local list; auth failures still surface via noteAuthFailure.
+            noteAuthFailure(error)
+        }
+    }
+
+    private func startSessionsAutoRefresh() {
+        sessionsRefreshTask?.cancel()
+        sessionsRefreshTask = Task { @MainActor [weak self] in
+            while let self, !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(Self.sessionsRefreshSeconds * 1_000_000_000))
+                } catch {
+                    break
+                }
+                guard !Task.isCancelled else { break }
+                await self.refreshSessions()
+            }
+        }
+    }
+
     private func wireReachabilityReattach() {
         reachability.onBecameOnline = { [weak self] in
             Task { @MainActor in
+                await self?.refreshSessions()
                 await self?.reattachStreamingSessionsAfterOnline()
             }
         }
@@ -265,6 +310,7 @@ final class ChatViewModel: ObservableObject {
     }
 
     func handleAppBecameActive() async {
+        await refreshSessions()
         await recoverInterruptedStreamsAfterRelaunch()
         await refreshActiveRunStatus()
     }

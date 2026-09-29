@@ -898,7 +898,7 @@ struct SessionDrawerView: View {
                     Button("完成") { dismiss() }
                 }
             }
-            .task { await chat.bootstrap() }
+            .task { await chat.refreshSessions() }
             .confirmationDialog(
                 "删除此会话？",
                 isPresented: Binding(

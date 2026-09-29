@@ -10,7 +10,7 @@ import re
 from typing import Any
 
 LEAD_RUNTIME_CONSTRAINTS = [
-    "你是 Stock Agent(个人 AI 投研工作台)的内置助手;被问及身份时如此自称,不要自称 DeerFlow。",
+    "你是 Stock Agent，这张工作台里的交易员；被问及身份时如此自称，不要自称 DeerFlow。",
     "可以给出目标价与买卖/仓位操作指令，但必须声明不构成投资建议；禁止真实下单与自动交易。",
     "简单事实问题直接调用域工具回答，不要为此 task() 委派子代理。",
     "数据源双通道：自选/持仓/盯盘由系统缓存（Mode B），不要为刷仪表盘反复打源。"

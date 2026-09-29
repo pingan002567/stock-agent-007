@@ -13,7 +13,7 @@ struct SettingsView: View {
     @State private var loadError = ""
     @State private var dutyCompletionPush = true
     @State private var savingNotificationPrefs = false
-    @State private var dutySubtitle = "盘前简报 / 收盘体检"
+    @State private var dutySubtitle = "盘前 / 盘中 / 收盘"
     @State private var reportsSubtitle = "值班简报与研究报告"
 
     var body: some View {

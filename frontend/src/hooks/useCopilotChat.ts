@@ -418,6 +418,56 @@ function useCopilotChatState() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadSessions(); }, [loadSessions]);
 
+  // 自动同步会话列表：标签页回到前台 + 可见时定时拉取（覆盖值班任务/其他端新建）
+  useEffect(() => {
+    const SESSION_LIST_POLL_MS = 30_000;
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const refresh = () => {
+      void loadSessions();
+    };
+
+    const startPoll = () => {
+      if (timer != null) return;
+      timer = setInterval(() => {
+        if (document.visibilityState === "visible") refresh();
+      }, SESSION_LIST_POLL_MS);
+    };
+
+    const stopPoll = () => {
+      if (timer != null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        refresh();
+        startPoll();
+      } else {
+        stopPoll();
+      }
+    };
+
+    const onFocus = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+
+    const onOnline = () => refresh();
+
+    if (document.visibilityState === "visible") startPoll();
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onOnline);
+    return () => {
+      stopPoll();
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onOnline);
+    };
+  }, [loadSessions]);
+
   // Drop stale pending entries after refresh; live ones are resumed via visibility/online.
   useEffect(() => {
     for (const item of listPendingStreams()) {

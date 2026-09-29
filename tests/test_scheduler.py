@@ -23,6 +23,8 @@ def _dt(s: str) -> datetime:
 def test_infer_ops_session_and_cap_duty_authority():
     assert infer_ops_session({"task_id": "sched_premarket", "name": "盘前简报"}) == "premarket"
     assert infer_ops_session({"task_id": "sched_premarket_discovery", "name": "盘前机会发现"}) == "discovery"
+    assert infer_ops_session({"task_id": "sched_intraday", "name": "盘中报告"}) == "intraday"
+    assert infer_ops_session({"task_id": "x", "name": "午间复盘"}) == "intraday"
     assert infer_ops_session({"task_id": "x", "name": "收盘复评"}) == "close"
     assert infer_ops_session({"task_id": "sched_weekly_review", "name": "周度复盘"}) == "weekly"
     assert cap_duty_authority("A5") == AuthorityLevel.A3
@@ -57,13 +59,16 @@ def test_scheduled_tasks_api_roundtrip(tmp_path, monkeypatch):
     # 默认种子任务可见,含 next_run_at 派生字段
     listed = client.get("/api/scheduled-tasks").json()["items"]
     names = {t["task_id"] for t in listed}
-    assert {"sched_premarket_discovery", "sched_premarket", "sched_close", "sched_weekly_review"} <= names
+    assert {"sched_premarket_discovery", "sched_premarket", "sched_intraday", "sched_close", "sched_weekly_review"} <= names
     discovery = next(t for t in listed if t["task_id"] == "sched_premarket_discovery")
     premarket = next(t for t in listed if t["task_id"] == "sched_premarket")
+    intraday = next(t for t in listed if t["task_id"] == "sched_intraday")
     close = next(t for t in listed if t["task_id"] == "sched_close")
     weekly = next(t for t in listed if t["task_id"] == "sched_weekly_review")
     assert discovery["enabled"] is True and discovery["schedule"] == "daily@08:20"
     assert premarket["enabled"] is True and premarket["next_run_at"]
+    assert intraday["enabled"] is True and intraday["schedule"] == "daily@11:45"
+    assert "下午开盘" in intraday["prompt"]
     assert close["enabled"] is True and close["schedule"] == "daily@15:15"
     assert weekly["enabled"] is False
 
@@ -177,6 +182,7 @@ def test_completed_scheduled_task_skips_push_when_pref_disabled(tmp_path):
 
 def test_uses_cn_session_calendar_only_for_duty_or_explicit_cn():
     assert uses_cn_session_calendar({"task_id": "sched_premarket"}) is True
+    assert uses_cn_session_calendar({"task_id": "sched_intraday"}) is True
     assert uses_cn_session_calendar({"task_id": "sched_close", "calendar": "CN"}) is True
     assert uses_cn_session_calendar({"task_id": "sched_weekly_review"}) is False
     assert uses_cn_session_calendar({"task_id": "custom", "name": "收盘复评"}) is False
@@ -253,7 +259,41 @@ def test_sched_close_injected_when_missing_from_existing_config(tmp_path):
     listed = services.scheduler_service.list_tasks()
     assert any(item["task_id"] == "sched_close" for item in listed)
     assert any(item["task_id"] == "sched_premarket_discovery" for item in listed)
+    assert any(item["task_id"] == "sched_intraday" for item in listed)
     assert any(item["task_id"] == "sched_premarket" for item in listed)
+
+
+def test_sched_intraday_injected_and_persists_session(tmp_path):
+    from tests.test_api import make_client
+
+    client = make_client(tmp_path)
+    services = client.app.state.services
+    services.repo.set_config(
+        "scheduled_tasks",
+        {
+            "items": [
+                {
+                    "task_id": "sched_premarket",
+                    "name": "盘前简报",
+                    "prompt": "x",
+                    "schedule": "daily@08:30",
+                    "enabled": True,
+                    "page": "chat",
+                    "authority_level": "A3",
+                    "calendar": "CN",
+                }
+            ]
+        },
+    )
+    listed = {t["task_id"]: t for t in services.scheduler_service.list_tasks()}
+    assert listed["sched_intraday"]["schedule"] == "daily@11:45"
+    assert listed["sched_intraday"]["enabled"] is True
+
+    ran = client.post("/api/scheduled-tasks/sched_intraday/run-now").json()
+    assert ran["status"] == "completed"
+    assert ran.get("report_id")
+    report = client.get(f"/api/reports/{ran['report_id']}").json()
+    assert report["payload"]["session"] == "intraday"
 
 
 def test_legacy_default_prompts_upgraded_on_list(tmp_path):
@@ -305,6 +345,50 @@ def test_legacy_default_prompts_upgraded_on_list(tmp_path):
     assert listed["sched_close"]["prompt"] == "我自己改过的收盘文案"
     assert "集合竞价前" in listed["sched_premarket"]["prompt"]
     assert "不重复 08:20" in listed["sched_premarket"]["prompt"]
+    assert "熔断次数" in listed["sched_premarket"]["prompt"]
+    assert "哪条判断作废" in listed["sched_premarket"]["prompt"]
+
+
+def test_structured_default_prompts_upgrade_data_health_rule(tmp_path):
+    """Previous structured defaults (with verbose 数据健康) upgrade to the concise rule."""
+    from backend.app_services.scheduler_service import DEFAULT_TASKS
+    from tests.test_api import make_client
+
+    old_premarket = (
+        "【任务】今日盘前简报（A股交易日 08:30，集合竞价前）。只做自选/持仓+隔夜要闻，"
+        "不重复 08:20 机会发现已述的全市场机会清单。\n"
+        "【取数】自选/持仓/盯盘优先本地缓存；隔夜要闻与情报窗口＝上一交易日收盘后至今。\n"
+        "【输出】≤600 字\n"
+        "1. 隔夜要闻：≤5 条；每条含来源与对自选/持仓影响（利好/利空/中性）。\n"
+        "2. 今日重点标的：≤5 个；关注理由与关键价位；此刻无开盘价，不得编造。\n"
+        "3. 风险与日历：今日解禁/财报/停复牌、公司或监管公告、昨日已触发的盯盘规则。\n"
+        "4. 数据健康：本次降级/缺失字段。\n"
+        "【约束】只写例外与动作，不复述行情流水账。"
+    )
+    client = make_client(tmp_path)
+    services = client.app.state.services
+    services.repo.set_config(
+        "scheduled_tasks",
+        {
+            "items": [
+                {
+                    "task_id": "sched_premarket",
+                    "name": "盘前简报",
+                    "prompt": old_premarket,
+                    "schedule": "daily@08:30",
+                    "enabled": True,
+                    "page": "chat",
+                    "authority_level": "A3",
+                    "calendar": "CN",
+                },
+            ]
+        },
+    )
+    listed = {t["task_id"]: t for t in services.scheduler_service.list_tasks()}
+    seed = {t["task_id"]: t for t in DEFAULT_TASKS}
+    assert listed["sched_premarket"]["prompt"] == seed["sched_premarket"]["prompt"]
+    assert "哪条判断作废" in listed["sched_premarket"]["prompt"]
+    assert "本次降级/缺失字段" not in listed["sched_premarket"]["prompt"]
 
 
 def test_discovery_run_persists_session_and_overview_card(tmp_path):
