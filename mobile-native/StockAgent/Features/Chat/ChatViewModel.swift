@@ -1,0 +1,1393 @@
+import Foundation
+
+/// Survives process death so re-entry can offer retry after an interrupted reply.
+struct PendingStream: Codable, Equatable {
+    var sessionId: String
+    var runId: String?
+    var userText: String
+    var updatedAt: TimeInterval
+}
+
+enum PendingStreamStore {
+    private static let key = "stockagent.pendingStreams"
+
+    static func load() -> [PendingStream] {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let items = try? JSONDecoder().decode([PendingStream].self, from: data)
+        else { return [] }
+        return items
+    }
+
+    static func save(_ items: [PendingStream]) {
+        if items.isEmpty {
+            UserDefaults.standard.removeObject(forKey: key)
+            return
+        }
+        if let data = try? JSONEncoder().encode(items) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    static func upsert(_ item: PendingStream) {
+        var items = load().filter { $0.sessionId != item.sessionId }
+        items.append(item)
+        save(items)
+    }
+
+    static func remove(sessionId: String) {
+        save(load().filter { $0.sessionId != sessionId })
+    }
+}
+
+@MainActor
+final class ChatViewModel: ObservableObject {
+    struct RunLiveness: Equatable {
+        var lastAt: Date
+        var status: String
+        var phase: String
+        var currentTool: String?
+        var alive: Bool
+    }
+
+    struct WorkingDock: Equatable {
+        enum Kind: Equatable { case working, stuck }
+        var kind: Kind
+        var title: String
+        var detail: String
+    }
+
+    /// Matches desktop STUCK_IDLE_MS — show stuck dock before hard idle timeout.
+    private static let stuckIdleSeconds: TimeInterval = 90
+    private static let statusPollSeconds: TimeInterval = 5
+    private static let sessionsRefreshSeconds: TimeInterval = 30
+
+    @Published var sessions: [CopilotSession] = []
+    @Published var currentSession: CopilotSession?
+    @Published var rows: [ChatRow] = []
+    @Published var draft = ""
+    @Published var error = ""
+    @Published var notice = ""
+    @Published var drawerOpen = false
+    @Published var uploads: [SessionUpload] = []
+    @Published var uploadsSupported = true
+    @Published var uploadsBusy = false
+    @Published private(set) var streamingSessionIds: Set<String> = []
+    @Published private(set) var isLoadingOlder = false
+    @Published private(set) var hasMoreHistory = false
+    @Published var scrollTarget: ScrollTarget?
+    /// Symbol/page context for the next send (e.g. from stock detail).
+    @Published var composeContext: ComposeContext?
+    @Published var sendBlockedReason: String?
+    /// Backend-owned liveness for working vs stuck composer dock.
+    @Published private(set) var runLiveness: RunLiveness?
+    @Published private(set) var streamStuck = false
+
+    enum ScrollTarget: Equatable {
+        case bottom(id: String)
+        case pin(id: String)
+    }
+
+    private var rowsBySession: [String: [ChatRow]] = [:]
+    private var failedTextBySession: [String: String] = [:]
+    private var draftsBySession: [String: String] = [:]
+    private var lastProgressAt: Date = .distantPast
+    private var statusPollTask: Task<Void, Never>?
+    private var stuckWatchTask: Task<Void, Never>?
+    private var sessionsRefreshTask: Task<Void, Never>?
+    private var reattachAttemptsBySession: [String: Int] = [:]
+    private var streamURLBySession: [String: URL] = [:]
+    private let maxReattachAttempts = 5
+    private let api = APIClient.shared
+    private let pager = ChatHistoryPager()
+    private let streaming = ChatStreamingService()
+    private let reachability = NetworkReachability.shared
+
+    var sending: Bool {
+        guard let sid = currentSession?.sessionId else { return false }
+        return streamingSessionIds.contains(sid)
+    }
+
+    /// Composer dock copy when the current session is streaming.
+    var workingDock: WorkingDock? {
+        guard sending else { return nil }
+        if streamStuck {
+            return WorkingDock(
+                kind: .stuck,
+                title: "可能卡住了",
+                detail: "超过 90 秒没有服务端心跳。可点停止后重试，或继续等待。"
+            )
+        }
+        let live = runLiveness
+        if live?.phase == "tool", let tool = live?.currentTool, !tool.isEmpty {
+            return WorkingDock(
+                kind: .working,
+                title: "正在执行 \(ToolLabels.displayName(for: tool))…",
+                detail: "长工具调用中，心跳正常。"
+            )
+        }
+        if live?.phase == "awaiting_human" {
+            return WorkingDock(kind: .working, title: "等待你的回复", detail: "本轮已暂停在澄清步骤。")
+        }
+        if live?.phase == "llm" || live?.phase == "starting" {
+            return WorkingDock(kind: .working, title: "模型推理中…", detail: "连接正常，请稍候。")
+        }
+        if let phase = currentAssistantPhase, phase == .tools {
+            let running = currentRunningToolName
+            if let running, !running.isEmpty {
+                return WorkingDock(
+                    kind: .working,
+                    title: "正在执行 \(ToolLabels.displayName(for: running))…",
+                    detail: "长工具调用中，请稍候。"
+                )
+            }
+            return WorkingDock(kind: .working, title: "调用工具中…", detail: "连接正常，请稍候。")
+        }
+        return WorkingDock(kind: .working, title: "正在生成…", detail: "连接正常，请稍候。")
+    }
+
+    private var currentAssistantPhase: AssistantPhase? {
+        guard let sid = currentSession?.sessionId else { return nil }
+        let list = rowsBySession[sid] ?? rows
+        for row in list.reversed() {
+            if case .assistant(let turn) = row, turn.isStreaming { return turn.phase }
+        }
+        return nil
+    }
+
+    private var currentRunningToolName: String? {
+        guard let sid = currentSession?.sessionId else { return nil }
+        let list = rowsBySession[sid] ?? rows
+        for row in list.reversed() {
+            if case .assistant(let turn) = row {
+                return turn.tools.last(where: { $0.status == .running })?.name
+                    ?? turn.tools.last?.name
+            }
+        }
+        return nil
+    }
+
+    var title: String {
+        if let t = currentSession?.displayTitle, t != "未命名" { return t }
+        if case .user(let b) = rows.first(where: {
+            if case .user = $0 { return true }
+            return false
+        }) {
+            let clipped = String(b.text.prefix(24))
+            return clipped.isEmpty ? "Stock Agent" : clipped
+        }
+        return "Stock Agent"
+    }
+
+    var canRetry: Bool {
+        guard let sid = currentSession?.sessionId, !sending else { return false }
+        return failedTextBySession[sid] != nil
+    }
+
+    var canSend: Bool {
+        reachability.isOnline && reachability.authFailureMessage == nil && sendBlockedReason == nil
+    }
+
+    func isStreaming(sessionId: String) -> Bool {
+        streamingSessionIds.contains(sessionId)
+    }
+
+    func prepareCompose(page: String, symbol: String, draft prompt: String) {
+        composeContext = ComposeContext(page: page, symbol: symbol)
+        draft = prompt
+        if let sid = currentSession?.sessionId {
+            draftsBySession[sid] = prompt
+        }
+    }
+
+    func bootstrap() async {
+        error = ""
+        do {
+            sessions = try await api.fetchSessions()
+            if currentSession == nil {
+                currentSession = sessions.first
+            }
+            if let sid = currentSession?.sessionId {
+                try await presentSession(sid, preferCacheIfStreaming: true)
+                await refreshUploads()
+            } else {
+                rows = []
+                uploads = []
+            }
+            await recoverInterruptedStreamsAfterRelaunch()
+            wireReachabilityReattach()
+            startSessionsAutoRefresh()
+            #if DEBUG
+            let parserFailures = ChatParserSmoke.runAll()
+            if !parserFailures.isEmpty {
+                print("[ChatParserSmoke] failures: \(parserFailures.joined(separator: "; "))")
+            }
+            #endif
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+            noteAuthFailure(error)
+        }
+    }
+
+    /// Soft sync of the session drawer with the backend (no message reload unless current vanished).
+    func refreshSessions() async {
+        do {
+            let items = try await api.fetchSessions()
+            sessions = items
+            if let sid = currentSession?.sessionId {
+                if let updated = items.first(where: { $0.sessionId == sid }) {
+                    currentSession = updated
+                } else {
+                    // Current session deleted remotely — fall back without hard error.
+                    currentSession = items.first
+                    if let next = currentSession {
+                        try await presentSession(next.sessionId, preferCacheIfStreaming: true)
+                        await refreshUploads()
+                    } else {
+                        rows = []
+                        uploads = []
+                    }
+                }
+            }
+        } catch {
+            // Soft refresh: keep local list; auth failures still surface via noteAuthFailure.
+            noteAuthFailure(error)
+        }
+    }
+
+    private func startSessionsAutoRefresh() {
+        sessionsRefreshTask?.cancel()
+        sessionsRefreshTask = Task { @MainActor [weak self] in
+            while let self, !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(Self.sessionsRefreshSeconds * 1_000_000_000))
+                } catch {
+                    break
+                }
+                guard !Task.isCancelled else { break }
+                await self.refreshSessions()
+            }
+        }
+    }
+
+    private func wireReachabilityReattach() {
+        reachability.onBecameOnline = { [weak self] in
+            Task { @MainActor in
+                await self?.refreshSessions()
+                await self?.reattachStreamingSessionsAfterOnline()
+            }
+        }
+    }
+
+    private func reattachStreamingSessionsAfterOnline() async {
+        for sid in streamingSessionIds {
+            guard let turnId = streamingTurnId(sessionId: sid) else { continue }
+            let url: URL?
+            if let cached = streamURLBySession[sid] {
+                url = cached
+            } else if let runId = assistantTurnRunId(sessionId: sid) {
+                url = try? api.streamURL(sessionId: sid, runId: runId)
+            } else {
+                url = nil
+            }
+            guard let url else { continue }
+            await attemptStreamReattach(
+                sessionId: sid,
+                turnId: turnId,
+                url: url,
+                reason: "网络已恢复，正在重连…"
+            )
+        }
+    }
+
+    private func streamingTurnId(sessionId: String) -> String? {
+        let list = rowsBySession[sessionId] ?? rows
+        for row in list.reversed() {
+            if case .assistant(let turn) = row, turn.isStreaming || turn.phase != .final {
+                return turn.id
+            }
+        }
+        return nil
+    }
+
+    func handleAppBecameActive() async {
+        await refreshSessions()
+        await recoverInterruptedStreamsAfterRelaunch()
+        await refreshActiveRunStatus()
+    }
+
+    /// When returning to foreground while a turn looks streaming, ask backend if the run is still alive.
+    private func refreshActiveRunStatus() async {
+        guard let sid = currentSession?.sessionId,
+              streamingSessionIds.contains(sid) || streaming.isActive(sessionId: sid),
+              let runId = assistantTurnRunId(sessionId: sid)
+        else { return }
+        do {
+            let status = try await api.fetchRunStatus(sessionId: sid, runId: runId)
+            if status.alive {
+                noteLiveProgress(
+                    status: status.status,
+                    phase: status.phase ?? "llm",
+                    currentTool: status.currentTool,
+                    alive: true,
+                    forSession: sid
+                )
+                return
+            }
+            // Run finished while we were backgrounded — hydrate history and clear streaming flags.
+            cancelStream(sessionId: sid, finalizeTurn: false)
+            streamingSessionIds.remove(sid)
+            if let built = try? await reloadRows(sessionId: sid) {
+                rowsBySession[sid] = built
+                rows = built
+            }
+        } catch {
+            // Keep local stream; idle watchdog still owns true silence.
+        }
+    }
+
+    func openSession(_ session: CopilotSession) async {
+        guard session.sessionId != currentSession?.sessionId else {
+            drawerOpen = false
+            return
+        }
+        persistCurrentDraft()
+        persistCurrentRows()
+        currentSession = session
+        draft = draftsBySession[session.sessionId] ?? ""
+        drawerOpen = false
+        error = ""
+        do {
+            try await presentSession(session.sessionId, preferCacheIfStreaming: true)
+            await refreshUploads()
+            syncLivenessForVisibleSession()
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+            noteAuthFailure(error)
+        }
+    }
+
+    /// Deep-link from scheduled-task push: refresh list and open the duty session.
+    func openSessionById(_ sessionId: String) async {
+        let sid = sessionId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sid.isEmpty else { return }
+        do {
+            if sessions.isEmpty {
+                sessions = try await api.fetchSessions()
+            }
+            if let existing = sessions.first(where: { $0.sessionId == sid }) {
+                await openSession(existing)
+                return
+            }
+            sessions = try await api.fetchSessions()
+            if let existing = sessions.first(where: { $0.sessionId == sid }) {
+                await openSession(existing)
+            } else {
+                notice = "未找到对应会话，可在研究报告中查看值班简报。"
+            }
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+            noteAuthFailure(error)
+        }
+    }
+
+    func newSession() async {
+        error = ""
+        persistCurrentDraft()
+        persistCurrentRows()
+        do {
+            let session = try await api.createSession()
+            sessions.insert(session, at: 0)
+            currentSession = session
+            draft = ""
+            draftsBySession[session.sessionId] = ""
+            rows = []
+            rowsBySession[session.sessionId] = []
+            pager.resetEmpty(sessionId: session.sessionId)
+            loadedHistorySessions.insert(session.sessionId)
+            hasMoreHistory = false
+            isLoadingOlder = false
+            uploads = []
+            uploadsSupported = true
+            drawerOpen = false
+            clearLivenessUI()
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+            noteAuthFailure(error)
+        }
+    }
+
+    func deleteSession(_ session: CopilotSession) async {
+        let sid = session.sessionId
+        streaming.cancelLocal(sessionId: sid)
+        streamingSessionIds.remove(sid)
+        clearPending(sessionId: sid)
+        rowsBySession.removeValue(forKey: sid)
+        pager.remove(sessionId: sid)
+        failedTextBySession.removeValue(forKey: sid)
+        do {
+            try await api.deleteSession(id: sid)
+            sessions.removeAll { $0.sessionId == sid }
+            if currentSession?.sessionId == sid {
+                currentSession = sessions.first
+                if let next = currentSession?.sessionId {
+                    try await presentSession(next, preferCacheIfStreaming: true)
+                    await refreshUploads()
+                } else {
+                    rows = []
+                    uploads = []
+                }
+            }
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+            noteAuthFailure(error)
+        }
+    }
+
+    func renameSession(_ session: CopilotSession, title: String) async {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            let updated = try await api.renameSession(id: session.sessionId, title: trimmed)
+            if let idx = sessions.firstIndex(where: { $0.sessionId == session.sessionId }) {
+                sessions[idx] = updated
+            }
+            if currentSession?.sessionId == session.sessionId {
+                currentSession = updated
+            }
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    func send() async {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !sending, canSend else { return }
+        await sendText(text, humanInputResponse: nil)
+    }
+
+    func retryLastFailed() async {
+        guard let sid = currentSession?.sessionId,
+              let text = failedTextBySession[sid],
+              !sending,
+              canSend else { return }
+        await sendText(text, humanInputResponse: nil)
+    }
+
+    func submitClarification(response: [String: Any], displayText: String, for turnId: String) async {
+        guard let sid = currentSession?.sessionId, canSend, !sending else { return }
+        mutateAssistant(sessionId: sid, turnId: turnId) { turn in
+            turn.clarificationAnswered = true
+            turn.phase = .final
+        }
+        await sendText(displayText, humanInputResponse: response)
+    }
+
+    private func sendText(_ text: String, humanInputResponse: [String: Any]?) async {
+        error = ""
+        notice = ""
+        draft = ""
+        if let sid = currentSession?.sessionId {
+            draftsBySession[sid] = ""
+        }
+
+        let pendingUploads = uploads
+        uploads = []
+        let context = composeContext
+        composeContext = nil
+
+        do {
+            if currentSession == nil {
+                let session = try await api.createSession(title: String(text.prefix(24)))
+                sessions.insert(session, at: 0)
+                currentSession = session
+                rows = []
+                rowsBySession[session.sessionId] = []
+            }
+            guard let session = currentSession else { return }
+            let sessionId = session.sessionId
+            failedTextBySession.removeValue(forKey: sessionId)
+
+            var list = rowsBySession[sessionId] ?? rows
+            list.append(.user(UserBubble(
+                id: "local-user-\(UUID().uuidString)",
+                text: text,
+                attachmentNames: pendingUploads.map(\.filename)
+            )))
+            let streamId = "stream-\(UUID().uuidString)"
+            list.append(.assistant(AssistantTurn(
+                id: streamId,
+                phase: .reasoning,
+                isStreaming: true
+            )))
+            rowsBySession[sessionId] = list
+            if currentSession?.sessionId == sessionId {
+                rows = list
+            }
+
+            streamingSessionIds.insert(sessionId)
+
+            let run = try await api.sendMessage(
+                sessionId: sessionId,
+                message: text,
+                page: context?.page ?? "chat",
+                symbol: context?.symbol ?? "",
+                attachments: pendingUploads,
+                humanInputResponse: humanInputResponse
+            )
+            mutateAssistant(sessionId: sessionId, turnId: streamId) { $0.runId = run.runId }
+            PendingStreamStore.upsert(PendingStream(
+                sessionId: sessionId,
+                runId: run.runId,
+                userText: text,
+                updatedAt: Date().timeIntervalSince1970
+            ))
+            let url = try api.streamURL(sessionId: sessionId, runId: run.runId)
+            startStream(url: url, turnId: streamId, sessionId: sessionId)
+        } catch {
+            if uploads.isEmpty {
+                uploads = pendingUploads
+            }
+            if let sid = currentSession?.sessionId {
+                failedTextBySession[sid] = text
+                streamingSessionIds.remove(sid)
+                PendingStreamStore.remove(sessionId: sid)
+            }
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+            noteAuthFailure(error)
+            if let sid = currentSession?.sessionId {
+                mutateLastAssistant(sessionId: sid) { turn in
+                    turn.isStreaming = false
+                    turn.failed = true
+                    turn.phase = .error
+                    if turn.displayAnswer.isEmpty { turn.answerText = self.error }
+                }
+            }
+        }
+    }
+
+    /// Stop visible session: cancel server run first, then local SSE.
+    func stop() {
+        guard let sid = currentSession?.sessionId else { return }
+        let runId = assistantTurnRunId(sessionId: sid)
+        cancelStream(sessionId: sid, finalizeTurn: true)
+        if let runId {
+            Task {
+                do {
+                    try await api.cancelRun(sessionId: sid, runId: runId)
+                } catch {
+                    if self.notice.isEmpty {
+                        self.notice = "已本地停止；服务端取消失败，可稍后重试。"
+                    }
+                }
+            }
+        }
+    }
+
+    func refreshUploads() async {
+        guard let sid = currentSession?.sessionId else {
+            uploads = []
+            return
+        }
+        do {
+            let resp = try await api.listUploads(sessionId: sid)
+            uploadsSupported = resp.supported ?? true
+            uploads = resp.files ?? []
+        } catch {}
+    }
+
+    func uploadFiles(_ urls: [URL]) async {
+        guard let sid = currentSession?.sessionId else {
+            error = "请先创建或打开一个会话"
+            return
+        }
+        uploadsBusy = true
+        defer { uploadsBusy = false }
+        do {
+            for url in urls { _ = url.startAccessingSecurityScopedResource() }
+            defer { for url in urls { url.stopAccessingSecurityScopedResource() } }
+            let resp = try await api.uploadFiles(sessionId: sid, fileURLs: urls)
+            uploadsSupported = resp.supported ?? true
+            if uploadsSupported == false {
+                error = "当前运行时不支持附件上传"
+            }
+            await refreshUploads()
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    func deleteUpload(_ file: SessionUpload) async {
+        guard let sid = currentSession?.sessionId else { return }
+        do {
+            try await api.deleteUpload(sessionId: sid, filename: file.filename)
+            await refreshUploads()
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    // MARK: - Session presentation
+
+    private func persistCurrentRows() {
+        guard let sid = currentSession?.sessionId else { return }
+        rowsBySession[sid] = rows
+    }
+
+    private func presentSession(_ sessionId: String, preferCacheIfStreaming: Bool) async throws {
+        if preferCacheIfStreaming,
+           streamingSessionIds.contains(sessionId),
+           let cached = rowsBySession[sessionId] {
+            rows = cached
+            syncHistoryFlags(for: sessionId)
+            return
+        }
+        if let cached = rowsBySession[sessionId], streamingSessionIds.contains(sessionId) {
+            rows = cached
+            syncHistoryFlags(for: sessionId)
+            return
+        }
+        if let cached = rowsBySession[sessionId],
+           loadedHistorySessions.contains(sessionId),
+           !streamingSessionIds.contains(sessionId) {
+            rows = cached
+            syncHistoryFlags(for: sessionId)
+            if let lastId = cached.last?.id {
+                scrollTarget = .bottom(id: lastId)
+            }
+            return
+        }
+
+        let page = try await api.fetchMessagePage(
+            sessionId: sessionId,
+            limitTurns: pager.pageTurnLimit,
+            before: nil
+        )
+        let built = ChatHistoryBuilder.rows(from: page.items)
+        pager.adoptPage(sessionId: sessionId, hasMore: page.hasMore, nextBefore: page.nextBefore)
+        loadedHistorySessions.insert(sessionId)
+        if streamingSessionIds.contains(sessionId), let live = rowsBySession[sessionId] {
+            rows = live
+        } else {
+            rowsBySession[sessionId] = built
+            rows = built
+            if let lastId = built.last?.id {
+                scrollTarget = .bottom(id: lastId)
+            }
+        }
+        syncHistoryFlags(for: sessionId)
+    }
+
+    private var loadedHistorySessions: Set<String> = []
+
+    func loadOlderHistoryIfNeeded() async {
+        guard let sessionId = currentSession?.sessionId else { return }
+        guard pager.shouldAttemptLoad(
+            sessionId: sessionId,
+            rowCount: rows.count,
+            isStreaming: streamingSessionIds.contains(sessionId)
+        ) else {
+            syncHistoryFlags(for: sessionId)
+            return
+        }
+
+        let before = pager.cursor(for: sessionId).nextBefore
+        guard let before else { return }
+
+        pager.setLoading(true, sessionId: sessionId)
+        isLoadingOlder = true
+
+        let anchorId = rows.first?.id
+        do {
+            let page = try await api.fetchMessagePage(
+                sessionId: sessionId,
+                limitTurns: pager.pageTurnLimit,
+                before: before
+            )
+            let olderRows = ChatHistoryBuilder.rows(from: page.items)
+            var existing = rowsBySession[sessionId] ?? rows
+            existing = ChatHistoryBuilder.mergePrepend(older: olderRows, existing: existing)
+            rowsBySession[sessionId] = existing
+            if currentSession?.sessionId == sessionId {
+                rows = existing
+            }
+            pager.updateAfterLoad(sessionId: sessionId, hasMore: page.hasMore, nextBefore: page.nextBefore)
+            if let anchorId {
+                scrollTarget = .pin(id: anchorId)
+            }
+        } catch {
+            pager.setLoading(false, sessionId: sessionId)
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+        syncHistoryFlags(for: sessionId)
+    }
+
+    func consumeScrollTarget() {
+        scrollTarget = nil
+    }
+
+    private func syncHistoryFlags(for sessionId: String) {
+        let cursor = pager.cursor(for: sessionId)
+        if currentSession?.sessionId == sessionId {
+            hasMoreHistory = cursor.hasMore
+            isLoadingOlder = cursor.isLoadingOlder
+        }
+    }
+
+    // MARK: - Interrupt / relaunch recovery
+
+    private func recoverInterruptedStreamsAfterRelaunch() async {
+        let pending = PendingStreamStore.load()
+        guard !pending.isEmpty else { return }
+
+        var keep: [PendingStream] = []
+        for item in pending {
+            if streamingSessionIds.contains(item.sessionId) {
+                keep.append(item)
+                continue
+            }
+            await settleInterruptedPending(item)
+        }
+        PendingStreamStore.save(keep)
+    }
+
+    private func settleInterruptedPending(_ item: PendingStream) async {
+        // Prefer reattach / hydrate over cancel — cancel only when user taps stop.
+        if let runId = item.runId {
+            do {
+                let status = try await api.fetchRunStatus(sessionId: item.sessionId, runId: runId)
+                if status.alive {
+                    if currentSession?.sessionId != item.sessionId,
+                       let target = sessions.first(where: { $0.sessionId == item.sessionId }) {
+                        await openSession(target)
+                    }
+                    let turnId = streamingTurnId(sessionId: item.sessionId)
+                        ?? "stream-\(UUID().uuidString)"
+                    if assistantTurn(sessionId: item.sessionId, turnId: turnId) == nil {
+                        var list = rowsBySession[item.sessionId] ?? []
+                        list.append(.assistant(AssistantTurn(
+                            id: turnId,
+                            runId: runId,
+                            phase: .reasoning,
+                            isStreaming: true
+                        )))
+                        rowsBySession[item.sessionId] = list
+                        if currentSession?.sessionId == item.sessionId {
+                            rows = list
+                        }
+                    } else {
+                        mutateAssistant(sessionId: item.sessionId, turnId: turnId) {
+                            $0.runId = runId
+                            $0.isStreaming = true
+                            $0.failed = false
+                        }
+                    }
+                    if let url = try? api.streamURL(sessionId: item.sessionId, runId: runId) {
+                        notice = "正在恢复未完成的回答…"
+                        startStream(url: url, turnId: turnId, sessionId: item.sessionId)
+                        return
+                    }
+                }
+                // Finished while away — hydrate history, keep pending text for retry if empty.
+                if let built = try? await reloadRows(sessionId: item.sessionId) {
+                    rowsBySession[item.sessionId] = built
+                    if currentSession?.sessionId == item.sessionId {
+                        rows = built
+                    }
+                }
+                PendingStreamStore.remove(sessionId: item.sessionId)
+                let hasAnswer = (rowsBySession[item.sessionId] ?? []).contains {
+                    if case .assistant(let t) = $0 {
+                        return !t.displayAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    }
+                    return false
+                }
+                if !hasAnswer {
+                    failedTextBySession[item.sessionId] = item.userText
+                    if currentSession?.sessionId == item.sessionId {
+                        notice = streaming.fallbacks.interruptedExit
+                    }
+                }
+                return
+            } catch {
+                // Fall through to soft notice.
+            }
+        }
+
+        PendingStreamStore.remove(sessionId: item.sessionId)
+        failedTextBySession[item.sessionId] = item.userText
+        if currentSession?.sessionId == item.sessionId {
+            markLastAssistantInterrupted(sessionId: item.sessionId)
+            notice = streaming.fallbacks.interruptedExit
+        } else if notice.isEmpty {
+            let title = sessions.first(where: { $0.sessionId == item.sessionId })?.displayTitle ?? "另一会话"
+            notice = "「\(title)」上次回答可能中断，打开该会话后可重试或等待自动恢复。"
+        }
+    }
+
+    private func drainStreamQuietly(url: URL) async {
+        let client = SSEClient(session: api.makeSSESession())
+        let stream = await client.stream(url: url)
+        do {
+            for try await _ in stream {
+                if Task.isCancelled { break }
+            }
+        } catch {}
+    }
+
+    private func reloadRows(sessionId: String) async throws -> [ChatRow] {
+        let page = try await api.fetchMessagePage(
+            sessionId: sessionId,
+            limitTurns: pager.pageTurnLimit,
+            before: nil
+        )
+        let latest = ChatHistoryBuilder.rows(from: page.items)
+        let previous = rowsBySession[sessionId] ?? []
+        pager.preserveOlderCursor(
+            sessionId: sessionId,
+            fallbackHasMore: page.hasMore,
+            fallbackBefore: page.nextBefore
+        )
+        syncHistoryFlags(for: sessionId)
+
+        guard !previous.isEmpty, let firstLatest = latest.first else {
+            return latest
+        }
+        if let idx = previous.firstIndex(where: { $0.id == firstLatest.id }) {
+            return Array(previous.prefix(idx)) + latest
+        }
+        if case .user(let user) = firstLatest,
+           let idx = previous.lastIndex(where: {
+               if case .user(let priorUser) = $0 { return priorUser.text == user.text }
+               return false
+           }) {
+            return Array(previous.prefix(idx)) + latest
+        }
+        var merged = previous
+        let ids = Set(merged.map(\.id))
+        for row in latest where !ids.contains(row.id) {
+            merged.append(row)
+        }
+        return merged
+    }
+
+    private func markLastAssistantInterrupted(sessionId: String) {
+        mutateLastAssistant(sessionId: sessionId) { turn in
+            guard turn.displayAnswer.isEmpty || turn.failed else { return }
+            turn.isStreaming = false
+            turn.failed = true
+            turn.phase = .error
+            if turn.displayAnswer.isEmpty {
+                turn.answerText = streaming.fallbacks.interruptedExit
+            }
+        }
+    }
+
+    private func clearPending(sessionId: String) {
+        PendingStreamStore.remove(sessionId: sessionId)
+    }
+
+    // MARK: - Streaming
+
+    private func startStream(url: URL, turnId: String, sessionId: String) {
+        streamingSessionIds.insert(sessionId)
+        streamURLBySession[sessionId] = url
+        noteLiveProgress(
+            status: "running",
+            phase: "starting",
+            currentTool: nil,
+            alive: true,
+            forSession: sessionId
+        )
+        startStatusPolling(sessionId: sessionId)
+        startStuckWatch(sessionId: sessionId)
+        var settledByIdle = false
+        streaming.start(
+            url: url,
+            sessionId: sessionId,
+            turnId: turnId,
+            api: api,
+            onEvent: { [weak self] update in
+                self?.reattachAttemptsBySession[sessionId] = 0
+                self?.apply(update: update, sessionId: sessionId, turnId: turnId)
+            },
+            onTransportError: { [weak self] message in
+                guard let self else { return }
+                settledByIdle = true
+                Task { @MainActor in
+                    let recovered = await self.attemptStreamReattach(
+                        sessionId: sessionId,
+                        turnId: turnId,
+                        url: url,
+                        reason: message
+                    )
+                    if !recovered {
+                        self.failTurn(
+                            sessionId: sessionId,
+                            turnId: turnId,
+                            message: message.contains("重连")
+                                ? "回答超时：重连失败。请点重试，或检查远端连接。"
+                                : message,
+                            surfaceError: true
+                        )
+                        self.streamingSessionIds.remove(sessionId)
+                        self.clearLiveness(for: sessionId)
+                    }
+                }
+            },
+            onFinished: { [weak self] cancelled, transportError in
+                guard let self else { return }
+                // Transport errors are handled by reattach; don't settle as empty failure yet.
+                if transportError { return }
+                self.streamingSessionIds.remove(sessionId)
+                self.streamURLBySession.removeValue(forKey: sessionId)
+                self.clearLiveness(for: sessionId)
+                Task { @MainActor in
+                    if !cancelled, !settledByIdle {
+                        await self.settleStreamCompletion(sessionId: sessionId, turnId: turnId)
+                    }
+                    if !cancelled {
+                        if self.currentSession?.sessionId != sessionId {
+                            let title = self.sessions.first(where: { $0.sessionId == sessionId })?.displayTitle ?? "另一会话"
+                            self.notice = "「\(title)」的回答已完成"
+                        }
+                        if let sessions = try? await self.api.fetchSessions() {
+                            self.sessions = sessions
+                            if self.currentSession?.sessionId == sessionId,
+                               let updated = sessions.first(where: { $0.sessionId == sessionId }) {
+                                self.currentSession = updated
+                            }
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    /// Returns true when a new SSE subscription was started (or run already hydrated).
+    @discardableResult
+    private func attemptStreamReattach(
+        sessionId: String,
+        turnId: String,
+        url: URL,
+        reason: String
+    ) async -> Bool {
+        let attempt = (reattachAttemptsBySession[sessionId] ?? 0) + 1
+        reattachAttemptsBySession[sessionId] = attempt
+        guard attempt <= maxReattachAttempts else { return false }
+
+        if currentSession?.sessionId == sessionId {
+            notice = reason.contains("重连") || reason.contains("恢复")
+                ? reason
+                : "连接中断，正在重连（\(attempt)/\(maxReattachAttempts)）…"
+        }
+
+        let backoffNs = UInt64(min(8.0, pow(2.0, Double(attempt - 1)))) * 400_000_000
+        try? await Task.sleep(nanoseconds: backoffNs)
+
+        guard let runId = assistantTurn(sessionId: sessionId, turnId: turnId)?.runId
+                ?? assistantTurnRunId(sessionId: sessionId)
+        else {
+            return false
+        }
+
+        do {
+            let status = try await api.fetchRunStatus(sessionId: sessionId, runId: runId)
+            if status.alive {
+                mutateAssistant(sessionId: sessionId, turnId: turnId) {
+                    $0.isStreaming = true
+                    $0.failed = false
+                    if $0.phase == .error { $0.phase = .answering }
+                }
+                let resumeURL = (try? api.streamURL(sessionId: sessionId, runId: runId)) ?? url
+                startStream(url: resumeURL, turnId: turnId, sessionId: sessionId)
+                if currentSession?.sessionId == sessionId {
+                    notice = ""
+                }
+                return true
+            }
+            cancelStream(sessionId: sessionId, finalizeTurn: false)
+            if let built = try? await reloadRows(sessionId: sessionId) {
+                rowsBySession[sessionId] = built
+                if currentSession?.sessionId == sessionId {
+                    rows = built
+                }
+            }
+            await settleStreamCompletion(sessionId: sessionId, turnId: turnId)
+            if currentSession?.sessionId == sessionId {
+                notice = ""
+            }
+            return true
+        } catch {
+            if !reachability.isOnline {
+                return attempt < maxReattachAttempts
+            }
+            return false
+        }
+    }
+
+    private func settleStreamCompletion(sessionId: String, turnId: String) async {
+        guard var turn = assistantTurn(sessionId: sessionId, turnId: turnId) else { return }
+        if turn.failed || turn.phase == .error {
+            turn.isStreaming = false
+            replaceAssistant(sessionId: sessionId, turnId: turnId, turn)
+            clearPending(sessionId: sessionId)
+            return
+        }
+
+        if turn.awaitingClarification {
+            turn.isStreaming = false
+            turn.phase = .clarification
+            replaceAssistant(sessionId: sessionId, turnId: turnId, turn)
+            clearPending(sessionId: sessionId)
+            return
+        }
+
+        if !turn.displayAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            turn.isStreaming = false
+            turn.phase = .final
+            replaceAssistant(sessionId: sessionId, turnId: turnId, turn)
+            clearPending(sessionId: sessionId)
+            return
+        }
+
+        if let recovered = await recoverAnswerFromHistory(sessionId: sessionId, runId: turn.runId),
+           !recovered.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            turn.answerText = recovered
+            turn.isStreaming = false
+            turn.phase = .final
+            turn.failed = false
+            replaceAssistant(sessionId: sessionId, turnId: turnId, turn)
+            clearPending(sessionId: sessionId)
+            return
+        }
+
+        // History may have restored clarification without answer text.
+        if let built = try? await reloadRows(sessionId: sessionId) {
+            if let hist = built.reversed().compactMap({ row -> AssistantTurn? in
+                if case .assistant(let t) = row { return t }
+                return nil
+            }).first(where: { $0.runId == turn.runId || turn.runId == nil }),
+               hist.awaitingClarification {
+                turn.clarificationRequest = hist.clarificationRequest
+                turn.clarificationText = hist.clarificationText
+                turn.isStreaming = false
+                turn.phase = .clarification
+                replaceAssistant(sessionId: sessionId, turnId: turnId, turn)
+                clearPending(sessionId: sessionId)
+                return
+            }
+        }
+
+        failTurn(
+            sessionId: sessionId,
+            turnId: turnId,
+            message: streaming.fallbacks.emptyAnswer,
+            surfaceError: true
+        )
+    }
+
+    private func recoverAnswerFromHistory(sessionId: String, runId: String?) async -> String? {
+        guard let page = try? await api.fetchMessagePage(
+            sessionId: sessionId,
+            limitTurns: pager.pageTurnLimit,
+            before: nil
+        ) else { return nil }
+        let built = ChatHistoryBuilder.rows(from: page.items)
+        for row in built.reversed() {
+            guard case .assistant(let hist) = row else { continue }
+            if let runId, let histRun = hist.runId, histRun != runId { continue }
+            let text = hist.displayAnswer.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty { return hist.answerText }
+            if runId != nil { break }
+        }
+        return nil
+    }
+
+    private func failTurn(sessionId: String, turnId: String, message: String, surfaceError: Bool) {
+        if surfaceError, currentSession?.sessionId == sessionId {
+            error = message
+        }
+        mutateAssistant(sessionId: sessionId, turnId: turnId) { turn in
+            turn.isStreaming = false
+            turn.failed = true
+            turn.phase = .error
+            if turn.displayAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                turn.answerText = message
+            }
+        }
+        failedTextBySession[sessionId] = lastUserText(in: sessionId)
+        clearPending(sessionId: sessionId)
+        clearLiveness(for: sessionId)
+    }
+
+    private func cancelStream(sessionId: String, finalizeTurn: Bool) {
+        streaming.cancelLocal(sessionId: sessionId)
+        streamingSessionIds.remove(sessionId)
+        clearLiveness(for: sessionId)
+        guard finalizeTurn else { return }
+        mutateLastAssistant(sessionId: sessionId) { turn in
+            guard turn.isStreaming || turn.phase != .final else { return }
+            turn.isStreaming = false
+            if turn.displayAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                turn.failed = true
+                turn.phase = .error
+                if turn.answerText.isEmpty {
+                    turn.answerText = streaming.fallbacks.stopped
+                }
+                self.failedTextBySession[sessionId] = self.lastUserText(in: sessionId)
+            } else if turn.phase != .final && turn.phase != .error && turn.phase != .clarification {
+                turn.phase = .final
+            }
+        }
+        clearPending(sessionId: sessionId)
+    }
+
+    private func apply(update: StreamUpdate, sessionId: String, turnId: String) {
+        if case .liveness(let status, let phase, let tool, let alive) = update {
+            noteLiveProgress(
+                status: status,
+                phase: phase,
+                currentTool: tool,
+                alive: alive,
+                forSession: sessionId
+            )
+            return
+        }
+
+        // Content / tool events also prove forward progress.
+        noteLiveProgress(
+            status: "running",
+            phase: contentPhase(for: update),
+            currentTool: contentTool(for: update),
+            alive: true,
+            forSession: sessionId
+        )
+
+        mutateAssistant(sessionId: sessionId, turnId: turnId) { turn in
+            ChatStreamingService.apply(update, to: &turn)
+            switch update {
+            case .finalAnswer:
+                self.clearPending(sessionId: sessionId)
+            case .clarification:
+                self.clearPending(sessionId: sessionId)
+            case .error(let message):
+                if self.currentSession?.sessionId == sessionId, !message.contains("停止") {
+                    self.error = message
+                }
+                self.failedTextBySession[sessionId] = self.lastUserText(in: sessionId)
+                self.clearPending(sessionId: sessionId)
+            default:
+                break
+            }
+        }
+    }
+
+    private func contentPhase(for update: StreamUpdate) -> String {
+        switch update {
+        case .reasoning: return "llm"
+        case .toolCall, .toolResult: return "tool"
+        case .partialAnswer, .finalAnswer: return "llm"
+        case .clarification: return "awaiting_human"
+        default: return runLiveness?.phase ?? "llm"
+        }
+    }
+
+    private func contentTool(for update: StreamUpdate) -> String? {
+        switch update {
+        case .toolCall(_, let name): return name
+        case .toolResult: return nil
+        default: return runLiveness?.currentTool
+        }
+    }
+
+    private func persistCurrentDraft() {
+        guard let sid = currentSession?.sessionId else { return }
+        draftsBySession[sid] = draft
+    }
+
+    func rememberDraft(_ text: String, for sessionId: String) {
+        draftsBySession[sessionId] = text
+    }
+
+    private func noteLiveProgress(
+        status: String,
+        phase: String,
+        currentTool: String?,
+        alive: Bool,
+        forSession sessionId: String
+    ) {
+        lastProgressAt = Date()
+        streamStuck = false
+        guard currentSession?.sessionId == sessionId else { return }
+        runLiveness = RunLiveness(
+            lastAt: lastProgressAt,
+            status: status,
+            phase: phase,
+            currentTool: currentTool,
+            alive: alive
+        )
+    }
+
+    private func clearLiveness(for sessionId: String) {
+        if currentSession?.sessionId == sessionId {
+            clearLivenessUI()
+        }
+        // Keep pollers scoped to the active stream via task cancel on finish.
+        if !streamingSessionIds.contains(sessionId) {
+            stopWatchersIfIdle()
+        }
+    }
+
+    private func clearLivenessUI() {
+        runLiveness = nil
+        streamStuck = false
+        lastProgressAt = .distantPast
+        statusPollTask?.cancel()
+        statusPollTask = nil
+        stuckWatchTask?.cancel()
+        stuckWatchTask = nil
+    }
+
+    private func stopWatchersIfIdle() {
+        if streamingSessionIds.isEmpty {
+            statusPollTask?.cancel()
+            statusPollTask = nil
+            stuckWatchTask?.cancel()
+            stuckWatchTask = nil
+        }
+    }
+
+    private func syncLivenessForVisibleSession() {
+        guard let sid = currentSession?.sessionId, streamingSessionIds.contains(sid) else {
+            clearLivenessUI()
+            return
+        }
+        startStatusPolling(sessionId: sid)
+        startStuckWatch(sessionId: sid)
+    }
+
+    private func startStatusPolling(sessionId: String) {
+        statusPollTask?.cancel()
+        statusPollTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(Self.statusPollSeconds * 1_000_000_000))
+                guard let self, !Task.isCancelled else { return }
+                guard self.streamingSessionIds.contains(sessionId) else { return }
+                await self.pollRunStatus(sessionId: sessionId)
+            }
+        }
+    }
+
+    private func startStuckWatch(sessionId: String) {
+        stuckWatchTask?.cancel()
+        stuckWatchTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard let self, !Task.isCancelled else { return }
+                guard self.streamingSessionIds.contains(sessionId) else { return }
+                let idle = Date().timeIntervalSince(self.lastProgressAt)
+                if idle >= Self.stuckIdleSeconds {
+                    if self.currentSession?.sessionId == sessionId {
+                        self.streamStuck = true
+                    }
+                }
+            }
+        }
+    }
+
+    private func pollRunStatus(sessionId: String) async {
+        guard let runId = assistantTurnRunId(sessionId: sessionId) else { return }
+        do {
+            let status = try await api.fetchRunStatus(sessionId: sessionId, runId: runId)
+            guard streamingSessionIds.contains(sessionId) else { return }
+            if status.alive {
+                noteLiveProgress(
+                    status: status.status,
+                    phase: status.phase ?? "llm",
+                    currentTool: status.currentTool,
+                    alive: true,
+                    forSession: sessionId
+                )
+                return
+            }
+            // Finished while UI still streaming — hydrate and clear.
+            cancelStream(sessionId: sessionId, finalizeTurn: false)
+            if let built = try? await reloadRows(sessionId: sessionId) {
+                rowsBySession[sessionId] = built
+                if currentSession?.sessionId == sessionId {
+                    rows = built
+                }
+            }
+        } catch {
+            // Keep dock; silence alone will eventually mark stuck / idle-timeout.
+        }
+    }
+
+    private func noteAuthFailure(_ error: Error) {
+        let message = (error as? APIError)?.message ?? error.localizedDescription
+        if message.contains("401") || message.localizedCaseInsensitiveContains("unauthorized")
+            || message.contains("未授权") || message.contains("登录") {
+            reachability.reportUnauthorized()
+        }
+    }
+
+    private func assistantTurnRunId(sessionId: String) -> String? {
+        let list = rowsBySession[sessionId] ?? rows
+        for row in list.reversed() {
+            if case .assistant(let turn) = row, let runId = turn.runId {
+                return runId
+            }
+        }
+        return nil
+    }
+
+    private func assistantTurn(sessionId: String, turnId: String) -> AssistantTurn? {
+        let list = rowsBySession[sessionId] ?? []
+        guard let idx = list.firstIndex(where: { $0.id == turnId }),
+              case .assistant(let turn) = list[idx] else { return nil }
+        return turn
+    }
+
+    private func replaceAssistant(sessionId: String, turnId: String, _ turn: AssistantTurn) {
+        var list = rowsBySession[sessionId] ?? []
+        guard let idx = list.firstIndex(where: { $0.id == turnId }) else { return }
+        list[idx] = .assistant(turn)
+        rowsBySession[sessionId] = list
+        if currentSession?.sessionId == sessionId {
+            rows = list
+        }
+    }
+
+    private func mutateAssistant(sessionId: String, turnId: String, _ body: (inout AssistantTurn) -> Void) {
+        guard !sessionId.isEmpty else { return }
+        var list = rowsBySession[sessionId] ?? []
+        guard let idx = list.firstIndex(where: { $0.id == turnId }),
+              case .assistant(var turn) = list[idx] else { return }
+        body(&turn)
+        list[idx] = .assistant(turn)
+        rowsBySession[sessionId] = list
+        if currentSession?.sessionId == sessionId {
+            rows = list
+        }
+    }
+
+    private func mutateLastAssistant(sessionId: String, _ body: (inout AssistantTurn) -> Void) {
+        var list = rowsBySession[sessionId] ?? []
+        guard let idx = list.indices.last,
+              case .assistant(var turn) = list[idx] else { return }
+        body(&turn)
+        list[idx] = .assistant(turn)
+        rowsBySession[sessionId] = list
+        if currentSession?.sessionId == sessionId {
+            rows = list
+        }
+    }
+
+    private func lastUserText(in sessionId: String) -> String? {
+        let list = rowsBySession[sessionId] ?? []
+        for row in list.reversed() {
+            if case .user(let b) = row { return b.text }
+        }
+        return nil
+    }
+}

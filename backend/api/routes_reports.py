@@ -1,0 +1,128 @@
+from __future__ import annotations
+
+from io import BytesIO
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import Response, StreamingResponse
+
+from backend.api.deps import get_services
+from backend.bootstrap import AppServices
+from backend.schemas import ReportGenerateRequest, model_to_dict
+
+router = APIRouter(prefix="/api/reports", tags=["reports"])
+templates_router = APIRouter(prefix="/api/report-templates", tags=["reports"])
+
+
+@templates_router.get("")
+@router.get("/templates")
+def list_report_templates(request: Request, services: AppServices = Depends(get_services)):
+    return {"items": [model_to_dict(item) for item in services.report_service.list_templates()]}
+
+
+@router.get("")
+def list_reports(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=6, ge=1, le=100),
+    services: AppServices = Depends(get_services),
+):
+    all_items = services.report_service.list_reports()
+    total = len(all_items)
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    paginated_items = all_items[start_idx:end_idx]
+    return {
+        "items": [model_to_dict(item) for item in paginated_items],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size,
+    }
+
+
+@router.post("/generate")
+def generate_report(payload: ReportGenerateRequest, request: Request, services: AppServices = Depends(get_services)):
+    try:
+        report = services.report_service.generate(payload)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=404 if isinstance(exc, KeyError) else 400, detail=str(exc)) from exc
+    return model_to_dict(report)
+
+
+@router.get("/{report_id}")
+def get_report(report_id: str, request: Request, services: AppServices = Depends(get_services)):
+    try:
+        report = services.report_service.get_report(report_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="report not found")
+    return model_to_dict(report)
+
+
+@router.get("/{report_id}/quality")
+def get_report_quality(report_id: str, request: Request, services: AppServices = Depends(get_services)):
+    try:
+        return services.report_service.get_quality(report_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="report not found") from exc
+
+
+@router.post("/{report_id}/rerun-quality")
+def rerun_report_quality(report_id: str, request: Request, services: AppServices = Depends(get_services)):
+    try:
+        return services.report_service.rerun_quality(report_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="report not found") from exc
+
+
+@router.get("/{report_id}/export")
+def export_report(
+    report_id: str,
+    request: Request,
+    format: str = Query("markdown", description="Export format: markdown or pdf"),
+    services: AppServices = Depends(get_services),
+):
+    try:
+        if format == "pdf":
+            pdf_bytes = services.report_service.export_report_pdf(report_id)
+            return StreamingResponse(
+                BytesIO(pdf_bytes),
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="{report_id}.pdf"'},
+            )
+        if format == "pptx":
+            pptx_bytes = services.report_service.export_report_pptx(report_id)
+            return StreamingResponse(
+                BytesIO(pptx_bytes),
+                media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                headers={"Content-Disposition": f'attachment; filename="{report_id}.pptx"'},
+            )
+        if format == "audio":
+            try:
+                audio_bytes = services.report_service.export_report_audio(report_id)
+            except RuntimeError as exc:
+                raise HTTPException(status_code=501, detail=f"audio export not available: {exc}") from exc
+            return StreamingResponse(
+                BytesIO(audio_bytes),
+                media_type="audio/mp4",
+                headers={"Content-Disposition": f'inline; filename="{report_id}.m4a"'},
+            )
+        result = services.report_service.export_report(report_id)
+        report = services.report_service.get_report(report_id)
+        title = (getattr(report, "title", None) or report_id).strip() or report_id
+        disposition = (
+            f'attachment; filename="{report_id}.md"; '
+            f"filename*=UTF-8''{quote(title + '.md')}"
+        )
+        return Response(
+            content=result["content"],
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": disposition},
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="report not found") from exc
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=501,
+            detail=f"PDF export not available: missing dependency. Install with: uv sync --extra export",
+        ) from exc

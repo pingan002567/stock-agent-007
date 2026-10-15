@@ -1,0 +1,296 @@
+/* eslint-disable react-refresh/only-export-components */
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import type { Screen } from "@/types";
+
+export interface AppDataCache {
+  overview?: unknown;
+  monitorEvents?: unknown;
+  inboxSummary?: unknown;
+  inboxList?: unknown;
+  drafts?: unknown;
+  audit?: unknown;
+  health?: unknown;
+  runtimeMetrics?: unknown;
+  watchlist?: unknown;
+  holdings?: unknown;
+  holdingsRisk?: unknown;
+  preTradeReviews?: unknown;
+  paperOrders?: unknown;
+  journal?: unknown;
+  paperPortfolio?: unknown;
+  activePolicy?: unknown;
+  marketReview?: unknown;
+  marketSectors?: unknown;
+  marketTimeline?: unknown;
+  monitorRules?: unknown;
+  monitorStatus?: unknown;
+  strategies?: unknown;
+  tasks?: unknown;
+  reports?: unknown;
+  reportTemplates?: unknown;
+  settings?: unknown;
+  /** 个股研究数据（缓存当前 stock） */
+  stockContext?: unknown;
+  stockHistory?: unknown;
+  stockIntel?: unknown;
+  stockFinancial?: unknown;
+  stockFollowups?: unknown;
+}
+
+interface AppStateValue {
+  currentScreen: Screen;
+  setCurrentScreen: (s: Screen) => void;
+  currentScreenLabel: string;
+  stock: string;
+  setStock: (s: string) => void;
+  copilotStreaming: boolean;
+  setCopilotStreaming: (v: boolean) => void;
+  streamingReasoningText: string;
+  setStreamingReasoningText: Dispatch<SetStateAction<string>>;
+  copilotContextVersion: number;
+  refreshCopilotContext: () => void;
+  themeMode: ThemeMode;
+  setThemeMode: (mode: ThemeMode) => void;
+  darkMode: boolean;
+  globalLoading: boolean;
+  appDataCache: React.MutableRefObject<AppDataCache>;
+  refreshAll: () => Promise<void>;
+  lastRefreshTime: string | null;
+  setLastRefreshTime: (v: string | null) => void;
+}
+
+const AppStateContext = createContext<AppStateValue | null>(null);
+
+const screenLabels: Record<Screen, string> = {
+  chat: "对话",
+  overview: "总览",
+  watchlist: "自选",
+  holdings: "持仓",
+  research: "个股",
+  monitor: "盯盘",
+  strategies: "策略",
+  tasks: "任务",
+  reports: "报告",
+  settings: "设置",
+};
+
+// ── 主题：白天 / 夜晚 / 跟随系统 ──
+export type ThemeMode = "light" | "dark" | "system";
+
+const THEME_KEY = "stock-agent-theme";
+// jsdom（vitest）没有 matchMedia，兜底为常暗、不派发变化事件
+const systemDarkQuery: Pick<MediaQueryList, "matches" | "addEventListener" | "removeEventListener"> =
+  typeof window.matchMedia === "function"
+    ? window.matchMedia("(prefers-color-scheme: dark)")
+    : { matches: true, addEventListener: () => {}, removeEventListener: () => {} };
+
+function getInitialThemeMode(): ThemeMode {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === "light" || saved === "dark" || saved === "system") return saved;
+  } catch { /* ignore */ }
+  return "system";
+}
+
+function resolveDark(mode: ThemeMode): boolean {
+  return mode === "dark" || (mode === "system" && systemDarkQuery.matches);
+}
+
+function applyTheme(mode: ThemeMode) {
+  const dark = resolveDark(mode);
+  document.documentElement.classList.toggle("dark", dark);
+  document.documentElement.classList.toggle("light", !dark);
+}
+
+// 模块加载时立即应用（非 React 挂载后），防止启动闪错主题（TeamClaw §3.2）
+applyTheme(getInitialThemeMode());
+
+export function AppStateProvider({ children }: { children: ReactNode }) {
+  // 聊天会话中心：对话即首屏（doc/DESKTOP_APP_PLAN.md §3.4 迁移第 1 步）
+  const [currentScreen, setCurrentScreen] = useState<Screen>("chat");
+  const [stock, setStock] = useState("");
+  const [copilotStreaming, setCopilotStreaming] = useState(false);
+  const [streamingReasoningText, setStreamingReasoningText] = useState("");
+  const [themeMode, setThemeModeState] = useState<ThemeMode>(getInitialThemeMode);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [lastRefreshTime, setLastRefreshTime] = useState<string | null>(null);
+  const [copilotContextVersion, setCopilotContextVersion] = useState(0);
+  const appDataCache = useRef<AppDataCache>({});
+  const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pageRefreshSecondsRef = useRef(60);
+  const stockRef = useRef(stock);
+
+  useEffect(() => { stockRef.current = stock; }, [stock]);
+
+  useEffect(() => {
+    applyTheme(themeMode);
+    // 跟随系统：监听系统明暗变化实时切换
+    if (themeMode !== "system") return;
+    const onChange = () => applyTheme("system");
+    systemDarkQuery.addEventListener("change", onChange);
+    return () => systemDarkQuery.removeEventListener("change", onChange);
+  }, [themeMode]);
+
+  const setThemeMode = useCallback((mode: ThemeMode) => {
+    setThemeModeState(mode);
+    try { localStorage.setItem(THEME_KEY, mode); } catch { /* ignore */ }
+  }, []);
+
+  const refreshAll = useCallback(async () => {
+    const { apiGet } = await import("@/api/client");
+    const { fetchRuntimeMetrics } = await import("@/api/runtime");
+    const cache = appDataCache.current;
+
+    const stockSymbol = stockRef.current;
+
+    const [ov, me, ibs, ibl, dr, au, hc, metrics, wl, hld, hrk, prv, po, jn, pp, apol, mr, ms, mt, mrl, mst, str, tsk, rpt, rptt, stg, sctx, shist, sint, sfin, sfu] = await Promise.allSettled([
+      apiGet("/api/overview"),
+      apiGet<{ items: unknown[] }>("/api/monitor/events"),
+      apiGet("/api/review-inbox/summary"),
+      apiGet<{ items: unknown[] }>("/api/review-inbox"),
+      apiGet<{ items: unknown[] }>("/api/rebalance-drafts"),
+      apiGet<{ items: unknown[] }>("/api/audit"),
+      apiGet("/api/health"),
+      fetchRuntimeMetrics(),
+      apiGet("/api/watchlist"),
+      apiGet("/api/holdings"),
+      apiGet("/api/holdings/risk"),
+      apiGet<{ items: unknown[] }>("/api/pre-trade-reviews"),
+      apiGet<{ items: unknown[] }>("/api/paper-orders"),
+      apiGet<{ items: unknown[] }>("/api/decision-journal"),
+      apiGet("/api/paper-portfolio"),
+      apiGet("/api/risk-policies/active"),
+      apiGet("/api/market/review"),
+      apiGet("/api/market/sectors"),
+      apiGet("/api/market/timeline"),
+      apiGet<{ items: unknown[] }>("/api/monitor/rules"),
+      apiGet("/api/monitor/status"),
+      apiGet<{ items: unknown[] }>("/api/strategies"),
+      apiGet<{ items: unknown[] }>("/api/tasks"),
+      apiGet<{ items: unknown[] }>("/api/reports"),
+      apiGet<{ items: unknown[] }>("/api/report-templates"),
+      apiGet("/api/settings"),
+      // 个股研究数据（按当前 stock 预加载，stock 为空时跳过）
+      stockSymbol ? apiGet(`/api/stocks/${encodeURIComponent(stockSymbol)}/context`).catch(() => null) : Promise.resolve(null),
+      stockSymbol ? apiGet<{ items: unknown[] }>(`/api/stocks/${encodeURIComponent(stockSymbol)}/history`).catch((): { items: unknown[] } => ({ items: [] })) : Promise.resolve({ items: [] }),
+      stockSymbol ? apiGet<{ items: unknown[] }>(`/api/stocks/${encodeURIComponent(stockSymbol)}/intel`).catch((): { items: unknown[] } => ({ items: [] })) : Promise.resolve({ items: [] }),
+      stockSymbol ? apiGet<{ items: unknown[] }>(`/api/stocks/${encodeURIComponent(stockSymbol)}/financial`).catch((): { items: unknown[] } => ({ items: [] })) : Promise.resolve({ items: [] }),
+      apiGet<{ items: unknown[] }>("/api/portfolio/copilot/followups").catch((): { items: unknown[] } => ({ items: [{ text: "分析 AAPL 风险", icon: "🔍" }, { text: "生成调仓草案", icon: "📝" }, { text: "查看持仓风险", icon: "⚠️" }, { text: "运行策略回测", icon: "🧪" }] })),
+    ]);
+
+    if (ov.status === "fulfilled") cache.overview = ov.value;
+    if (me.status === "fulfilled") cache.monitorEvents = me.value;
+    if (ibs.status === "fulfilled") cache.inboxSummary = ibs.value;
+    if (ibl.status === "fulfilled") cache.inboxList = ibl.value;
+    if (dr.status === "fulfilled") cache.drafts = dr.value;
+    if (au.status === "fulfilled") cache.audit = au.value;
+    if (hc.status === "fulfilled") cache.health = hc.value;
+    if (metrics.status === "fulfilled") cache.runtimeMetrics = metrics.value;
+    if (wl.status === "fulfilled") cache.watchlist = wl.value;
+    if (hld.status === "fulfilled") cache.holdings = hld.value;
+    if (hrk.status === "fulfilled") cache.holdingsRisk = hrk.value;
+    if (prv.status === "fulfilled") cache.preTradeReviews = prv.value;
+    if (po.status === "fulfilled") cache.paperOrders = po.value;
+    if (jn.status === "fulfilled") cache.journal = jn.value;
+    if (pp.status === "fulfilled") cache.paperPortfolio = pp.value;
+    if (apol.status === "fulfilled") cache.activePolicy = apol.value;
+    if (mr.status === "fulfilled") cache.marketReview = mr.value;
+    if (ms.status === "fulfilled") cache.marketSectors = ms.value;
+    if (mt.status === "fulfilled") cache.marketTimeline = mt.value;
+    if (mrl.status === "fulfilled") cache.monitorRules = mrl.value;
+    if (mst.status === "fulfilled") cache.monitorStatus = mst.value;
+    if (str.status === "fulfilled") cache.strategies = str.value;
+    if (tsk.status === "fulfilled") cache.tasks = tsk.value;
+    if (rpt.status === "fulfilled") cache.reports = rpt.value;
+    if (rptt.status === "fulfilled") cache.reportTemplates = rptt.value;
+    if (stg.status === "fulfilled") {
+      cache.settings = stg.value;
+      const pageSeconds = (stg.value as { market_refresh?: { page_refresh_seconds?: number } } | null)?.market_refresh?.page_refresh_seconds;
+      if (typeof pageSeconds === "number" && pageSeconds >= 30) {
+        pageRefreshSecondsRef.current = pageSeconds;
+      }
+    }
+    if (sctx.status === "fulfilled") cache.stockContext = sctx.value;
+    if (shist.status === "fulfilled") cache.stockHistory = shist.value;
+    if (sint.status === "fulfilled") cache.stockIntel = sint.value;
+    if (sfin.status === "fulfilled") cache.stockFinancial = sfin.value;
+    if (sfu.status === "fulfilled") cache.stockFollowups = sfu.value;
+
+    setLastRefreshTime(new Date().toISOString());
+    setIsInitialized(true);
+  }, []);
+
+  // Trigger initial load once on mount — setState is intentional for initialization
+  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
+  useEffect(() => { void refreshAll(); }, []);
+
+  useEffect(() => {
+    const onWorkspaceChanged = () => { void refreshAll(); };
+    window.addEventListener("workspace-changed", onWorkspaceChanged);
+    return () => window.removeEventListener("workspace-changed", onWorkspaceChanged);
+  }, [refreshAll]);
+
+  // 页面轮询间隔来自设置「刷新频率」。只打本机接口，不打东财筹码/资金流。
+  useEffect(() => {
+    if (!isInitialized) return;
+    const arm = (seconds: number) => {
+      if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
+      pageRefreshSecondsRef.current = seconds;
+      refreshIntervalRef.current = setInterval(() => {
+        void refreshAll();
+      }, seconds * 1000);
+    };
+    arm(pageRefreshSecondsRef.current);
+    const onChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ page_refresh_seconds?: number }>).detail;
+      const seconds = detail?.page_refresh_seconds;
+      if (typeof seconds === "number" && seconds >= 30) arm(seconds);
+    };
+    window.addEventListener("market-refresh-changed", onChanged);
+    return () => {
+      window.removeEventListener("market-refresh-changed", onChanged);
+      if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
+    };
+  }, [isInitialized, refreshAll]);
+
+  const refreshCopilotContext = useCallback(() => {
+    setCopilotContextVersion((v) => v + 1);
+  }, []);
+
+  const globalLoading = useMemo(() => !isInitialized, [isInitialized]);
+  const currentScreenLabel = screenLabels[currentScreen];
+
+  return (
+    <AppStateContext.Provider
+      value={{
+        currentScreen,
+        setCurrentScreen,
+        currentScreenLabel,
+        stock,
+        setStock,
+        copilotStreaming,
+        setCopilotStreaming,
+        streamingReasoningText,
+        setStreamingReasoningText,
+        copilotContextVersion,
+        refreshCopilotContext,
+        themeMode,
+        setThemeMode,
+        darkMode: resolveDark(themeMode),
+        globalLoading,
+        appDataCache,
+        refreshAll,
+        lastRefreshTime,
+        setLastRefreshTime,
+      }}
+    >
+      {children}
+    </AppStateContext.Provider>
+  );
+}
+
+export function useAppState() {
+  const ctx = useContext(AppStateContext);
+  if (!ctx) throw new Error("useAppState must be used within AppStateProvider");
+  return ctx;
+}

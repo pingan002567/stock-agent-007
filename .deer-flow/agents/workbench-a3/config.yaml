@@ -1,0 +1,9 @@
+name: workbench-a3
+description: Workbench lead agent (authority A3)
+tool_groups:
+- a2-research
+- a3-risk
+- a4-planner
+- files
+- search
+- sandbox-exec

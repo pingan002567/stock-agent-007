@@ -1,0 +1,1238 @@
+from __future__ import annotations
+
+import pytest
+
+from backend.agent_runtime.tool_bridge import ToolSpec, WorkbenchToolBridge
+from backend.app_services.permission_guard import PermissionDenied
+from backend.bootstrap import create_services
+from backend.schemas import AuthorityLevel, PriceSnapshot, RebalanceDraftDecisionNoteRequest
+
+
+@pytest.fixture()
+def bridge(tmp_path):
+    services = create_services(db_path=tmp_path / "bridge.sqlite3", files_root=tmp_path / "files")
+    services.repo.seed_demo_portfolio()
+    bridge = WorkbenchToolBridge(
+        context_builder=services.context_builder,
+        repo=services.repo,
+        monitor_service=services.monitor_service,
+        strategy_service=services.strategy_service,
+        report_service=services.report_service,
+        permission_guard=services.permission_guard,
+        tool_execution_service=services.tool_execution_service,
+    )
+    bridge.bind_deerflow(lambda: services.copilot_service.deerflow)
+    bridge.bind_scheduler(lambda: services.scheduler_service)
+    return bridge
+
+
+def test_tool_bridge_registry_includes_default_tools_and_blocks_real_orders(bridge):
+    tools = {tool["name"]: tool for tool in bridge.list_tools()}
+
+    assert set(tools) == {
+        "add_watchlist_item",
+        "analyze_paper_performance",
+        "analyze_portfolio_risk",
+        "confirm_rebalance_draft",
+        "create_paper_portfolio_snapshot",
+        "create_pre_trade_review",
+
+        "delete_monitor_rule",
+        "dismiss_inbox_item",
+        "evaluate_monitor_rules",
+        "evaluate_policy_risk",
+        "generate_draft_order",
+        "generate_report",
+        "get_active_risk_policy",
+        "get_backtest_result",
+        "get_daily_history",
+        "get_industry_context",
+        "get_investor_profile",
+        "get_notification_prefs",
+        "list_data_sources",
+        "describe_data_capability",
+        "invoke_data_capability",
+        "get_market_structure",
+        "refresh_market_data",
+        "get_decision_journal_entry",
+        "get_monitor_events",
+        "get_monitor_rules",
+        "get_paper_portfolio",
+        "get_portfolio_snapshot",
+        "get_rebalance_draft",
+        "get_report_quality",
+        "get_stock_context",
+        "get_stock_financial",
+
+
+        "list_decision_journal",
+        "list_memory_facts",
+        "list_paper_orders",
+        "list_pre_trade_reviews",
+        "list_rebalance_drafts",
+        "list_report_templates",
+        "list_review_inbox",
+        "list_risk_policies",
+        "update_risk_policy",
+        "create_risk_policy",
+        "activate_risk_policy",
+        "list_scheduled_tasks",
+        "list_strategies",
+        "list_watchlist",
+        "mark_inbox_item_done",
+        "place_real_order",
+        "reject_rebalance_draft",
+        "remove_holding",
+        "remove_watchlist_item",
+        "run_scheduled_task_now",
+        "run_strategy_backtest",
+        "search_stock_intel",
+        "snooze_inbox_item",
+        "summarize_decision_outcomes",
+        "summarize_review_inbox",
+        "toggle_scheduled_task",
+        "set_available_cash",
+        "upsert_holding",
+        "upsert_memory_fact",
+        "upsert_monitor_rule",
+        "upsert_scheduled_task",
+        "update_investor_profile",
+        "update_notification_prefs",
+        "delete_memory_fact",
+        "clear_memory",
+        "list_skills",
+        "update_skill",
+        "list_mcp_servers",
+        "upsert_mcp_server",
+        "remove_mcp_server",
+    }
+    assert tools["get_stock_context"]["required_authority"] == "A2"
+    assert tools["get_investor_profile"]["required_authority"] == "A2"
+    assert tools["get_notification_prefs"]["required_authority"] == "A2"
+    assert tools["list_memory_facts"]["required_authority"] == "A2"
+    assert tools["update_investor_profile"]["required_authority"] == "A3"
+    assert tools["update_notification_prefs"]["required_authority"] == "A3"
+    assert tools["upsert_memory_fact"]["required_authority"] == "A3"
+    assert tools["delete_memory_fact"]["required_authority"] == "A3"
+    assert tools["clear_memory"]["required_authority"] == "A3"
+    assert tools["list_scheduled_tasks"]["required_authority"] == "A2"
+    assert tools["toggle_scheduled_task"]["required_authority"] == "A3"
+    assert tools["upsert_scheduled_task"]["required_authority"] == "A3"
+    assert tools["run_scheduled_task_now"]["required_authority"] == "A3"
+    assert tools["analyze_portfolio_risk"]["required_authority"] == "A3"
+    assert tools["generate_draft_order"]["required_authority"] == "A4"
+    assert tools["create_pre_trade_review"]["required_authority"] == "A4"
+    assert tools["list_pre_trade_reviews"]["required_authority"] == "A3"
+    assert tools["list_paper_orders"]["required_authority"] == "A3"
+    assert tools["get_paper_portfolio"]["required_authority"] == "A3"
+    assert tools["analyze_paper_performance"]["required_authority"] == "A3"
+    assert tools["create_paper_portfolio_snapshot"]["required_authority"] == "A3"
+    assert tools["list_decision_journal"]["required_authority"] == "A3"
+    assert tools["get_decision_journal_entry"]["required_authority"] == "A3"
+    assert tools["summarize_decision_outcomes"]["required_authority"] == "A3"
+    assert tools["run_strategy_backtest"]["required_authority"] == "A3"
+    assert tools["upsert_monitor_rule"]["required_authority"] == "A3"
+    assert tools["delete_monitor_rule"]["required_authority"] == "A3"
+    assert tools["place_real_order"]["enabled"] is False
+    assert tools["place_real_order"]["risk"] == "blocked"
+    assert "create_paper_order" not in tools
+
+
+def test_tool_bridge_lists_and_clears_watchlist(bridge):
+    bridge.repo.upsert_watchlist_item(
+        __import__("backend.schemas", fromlist=["WatchlistItem"]).WatchlistItem(
+            symbol="MSFT", name="Microsoft", group="观察池", monitored=True
+        )
+    )
+    listed = bridge.execute("list_watchlist", {}, AuthorityLevel.A2)
+    symbols = {item["symbol"] for item in listed["result"]["items"]}
+    assert "MSFT" in symbols
+
+    cleared = bridge.execute("remove_watchlist_item", {"clear_all": True}, AuthorityLevel.A2)
+    assert cleared["result"]["cleared"] is True
+    assert bridge.repo.list_watchlist() == []
+
+
+def test_tool_bridge_sets_and_clears_available_cash(bridge):
+    saved = bridge.execute("set_available_cash", {"amount": 2400}, AuthorityLevel.A3)
+    assert saved["result"]["available_cash"] == 2400
+    assert saved["execution_mode"] == "auto_safe"
+    assert saved["result"]["summary"]["available_cash"] == 2400
+
+    with pytest.raises(ValueError):
+        bridge.execute("set_available_cash", {"amount": -1}, AuthorityLevel.A3)
+    snap = bridge.execute("get_portfolio_snapshot", {}, AuthorityLevel.A3)
+    assert snap["result"]["available_cash"] == 2400
+
+    with pytest.raises(PermissionDenied):
+        bridge.execute("set_available_cash", {"amount": 1}, AuthorityLevel.A2)
+
+    cleared = bridge.execute("set_available_cash", {"clear": True}, AuthorityLevel.A3)
+    assert cleared["result"]["available_cash"] is None
+
+
+def test_tool_bridge_removes_holding_by_symbol_and_clear_all(bridge):
+    before = {item.symbol for item in bridge.repo.list_holdings()}
+    assert before
+
+    target = next(iter(before))
+    one = bridge.execute("remove_holding", {"symbol": target}, AuthorityLevel.A3)
+    assert one["result"]["deleted"] is True
+    assert target not in {item.symbol for item in bridge.repo.list_holdings()}
+
+    cleared = bridge.execute("remove_holding", {"clear_all": True}, AuthorityLevel.A4)
+    assert cleared["result"]["cleared"] is True
+    assert cleared["result"]["count"] >= 1
+    assert bridge.repo.list_holdings() == []
+
+
+def test_tool_bridge_monitor_rule_crud_with_partial_update_and_authority(bridge):
+    """盯盘规则写工具：创建（source=copilot、symbol 大写化）→ 部分更新保留
+    未传字段 → 删除；创建缺 rule_type / 删除不存在报错；A2 权限拦截。"""
+    created = bridge.execute(
+        "upsert_monitor_rule",
+        {"rule_type": "price_change_pct_gt", "symbol": "aapl", "threshold": 5, "severity": "high"},
+        AuthorityLevel.A4,
+    )["result"]
+    assert created["created"] is True
+    rule = created["rule"]
+    assert rule["symbol"] == "AAPL"
+    assert rule["source"] == "copilot"
+    rule_id = rule["rule_id"]
+
+    updated = bridge.execute(
+        "upsert_monitor_rule",
+        {"rule_id": rule_id, "enabled": False},
+        AuthorityLevel.A4,
+    )["result"]
+    assert updated["created"] is False
+    assert updated["rule"]["enabled"] is False
+    assert updated["rule"]["threshold"] == 5.0
+    assert updated["rule"]["severity"] == "high"
+
+    listed = bridge.execute("get_monitor_rules", {}, AuthorityLevel.A2)["result"]
+    assert any(item["rule_id"] == rule_id for item in listed["items"])
+
+    deleted = bridge.execute(
+        "delete_monitor_rule", {"rule_id": rule_id}, AuthorityLevel.A4
+    )["result"]
+    assert deleted == {"deleted": True, "rule_id": rule_id}
+
+    with pytest.raises(ValueError):
+        bridge.execute("delete_monitor_rule", {"rule_id": "nope"}, AuthorityLevel.A4)
+    with pytest.raises(ValueError):
+        bridge.execute("upsert_monitor_rule", {"symbol": "AAPL"}, AuthorityLevel.A4)
+    with pytest.raises(PermissionDenied):
+        bridge.execute(
+            "upsert_monitor_rule",
+            {"rule_type": "volume_spike", "symbol": "AAPL"},
+            AuthorityLevel.A2,
+        )
+
+
+def test_tool_bridge_scheduled_tasks_list_toggle_upsert_and_run_now(bridge, monkeypatch):
+    listed = bridge.execute("list_scheduled_tasks", {}, AuthorityLevel.A2)["result"]
+    assert listed["count"] >= 4
+    ids = {item["task_id"] for item in listed["items"]}
+    assert "sched_premarket" in ids
+
+    toggled = bridge.execute(
+        "toggle_scheduled_task",
+        {"task_id": "sched_weekly_review", "enabled": True},
+        AuthorityLevel.A3,
+    )["result"]
+    assert toggled["enabled"] is True
+    assert toggled["task_id"] == "sched_weekly_review"
+
+    updated = bridge.execute(
+        "upsert_scheduled_task",
+        {"task_id": "sched_premarket", "schedule": "daily@08:05"},
+        AuthorityLevel.A3,
+    )["result"]
+    assert updated["schedule"] == "daily@08:05"
+    assert "盘前" in updated["name"]
+
+    created = bridge.execute(
+        "upsert_scheduled_task",
+        {
+            "name": "测试值班",
+            "prompt": "写一句测试结论",
+            "schedule": "every@30m",
+            "enabled": False,
+        },
+        AuthorityLevel.A3,
+    )["result"]
+    assert created["task_id"].startswith("sched_")
+    assert created["enabled"] is False
+
+    started: list[str] = []
+
+    async def fake_run(task_id: str):
+        started.append(task_id)
+        return {"status": "completed", "run_id": "run_test", "report_id": None}
+
+    monkeypatch.setattr(bridge._scheduler(), "run_task_now", fake_run)
+    ran = bridge.execute(
+        "run_scheduled_task_now",
+        {"task_id": "sched_premarket"},
+        AuthorityLevel.A3,
+    )["result"]
+    assert ran["status"] == "started"
+    assert ran["task_id"] == "sched_premarket"
+
+    import time
+
+    for _ in range(50):
+        if started:
+            break
+        time.sleep(0.02)
+    assert started == ["sched_premarket"]
+
+    with pytest.raises(PermissionDenied):
+        bridge.execute(
+            "toggle_scheduled_task",
+            {"task_id": "sched_premarket", "enabled": False},
+            AuthorityLevel.A2,
+        )
+
+
+def test_tool_bridge_investor_profile_notification_prefs_and_memory(bridge):
+    profile = bridge.execute("get_investor_profile", {}, AuthorityLevel.A2)["result"]
+    assert profile["risk_level"] == "moderate"
+    assert profile["risk_level_label"] == "普通"
+
+    updated = bridge.execute(
+        "update_investor_profile",
+        {"risk_level": "conservative", "notes": "偏防御"},
+        AuthorityLevel.A3,
+    )["result"]
+    assert updated["risk_level"] == "conservative"
+    assert updated["notes"] == "偏防御"
+    assert updated["risk_level_label"] == "保守"
+
+    prefs = bridge.execute("get_notification_prefs", {}, AuthorityLevel.A2)["result"]
+    assert "duty_completion_push" in prefs
+    toggled = bridge.execute(
+        "update_notification_prefs",
+        {"duty_completion_push": False},
+        AuthorityLevel.A3,
+    )["result"]
+    assert toggled["duty_completion_push"] is False
+
+    memory = bridge.execute("list_memory_facts", {}, AuthorityLevel.A2)["result"]
+    # stub DeerFlow has no memory client
+    assert memory.get("supported") is False
+
+    class FakeMemory:
+        def __init__(self):
+            self.facts = [
+                {"id": "f1", "content": "不做短线", "category": "preference", "confidence": 0.8}
+            ]
+
+        def get_memory_status(self):
+            return {"config": {"enabled": True}, "data": {"facts": list(self.facts)}}
+
+        def create_memory_fact(self, content, category="context", confidence=0.5):
+            item = {
+                "id": f"f{len(self.facts) + 1}",
+                "content": content,
+                "category": category,
+                "confidence": confidence,
+            }
+            self.facts.append(item)
+            return {"fact": item}
+
+        def update_memory_fact(self, fact_id, content=None, category=None, confidence=None):
+            for item in self.facts:
+                if item["id"] == fact_id:
+                    if content is not None:
+                        item["content"] = content
+                    if category is not None:
+                        item["category"] = category
+                    if confidence is not None:
+                        item["confidence"] = confidence
+                    return {"fact": item}
+            return {"error": "not found"}
+
+        def delete_memory_fact(self, fact_id):
+            self.facts = [item for item in self.facts if item["id"] != fact_id]
+            return {"success": True, "fact_id": fact_id}
+
+        def clear_memory(self):
+            self.facts = []
+            return {"success": True}
+
+    fake = FakeMemory()
+    bridge._deerflow().client = fake
+
+    listed = bridge.execute("list_memory_facts", {}, AuthorityLevel.A2)["result"]
+    assert listed["supported"] is True
+    assert listed["count"] == 1
+
+    created = bridge.execute(
+        "upsert_memory_fact",
+        {"content": "只看 A 股", "category": "preference"},
+        AuthorityLevel.A3,
+    )["result"]
+    assert created["supported"] is True
+    assert created["fact"]["content"] == "只看 A 股"
+
+    patched = bridge.execute(
+        "upsert_memory_fact",
+        {"fact_id": "f1", "content": "不做日内交易"},
+        AuthorityLevel.A3,
+    )["result"]
+    assert patched["fact"]["content"] == "不做日内交易"
+
+    deleted = bridge.execute(
+        "delete_memory_fact", {"fact_id": "f1"}, AuthorityLevel.A3
+    )["result"]
+    assert deleted["success"] is True
+
+    with pytest.raises(ValueError, match="confirm"):
+        bridge.execute("clear_memory", {"confirm": False}, AuthorityLevel.A3)
+
+    cleared = bridge.execute("clear_memory", {"confirm": True}, AuthorityLevel.A3)["result"]
+    assert cleared["success"] is True
+    assert fake.facts == []
+
+    with pytest.raises(PermissionDenied):
+        bridge.execute(
+            "update_investor_profile",
+            {"risk_level": "aggressive"},
+            AuthorityLevel.A2,
+        )
+
+
+def test_tool_bridge_lists_and_summarizes_review_inbox_with_ledger(bridge):
+    created = bridge.execute("generate_draft_order", {"symbol": "AAPL", "target_weight_pct": 15}, AuthorityLevel.A4)
+    item_key = f"rebalance_draft:{created['result']['draft_id']}:pending"
+
+    listed = bridge.execute(
+        "list_review_inbox",
+        {"limit": 10},
+        AuthorityLevel.A3,
+        run_id="run_inbox",
+        task_id="task_inbox",
+        call_id="call_list_review_inbox",
+        source_mode="stub",
+    )
+    summary = bridge.execute(
+        "summarize_review_inbox",
+        {},
+        AuthorityLevel.A3,
+        run_id="run_inbox",
+        task_id="task_inbox",
+        call_id="call_summarize_review_inbox",
+        source_mode="stub",
+    )
+
+    assert any(item["item_key"] == item_key for item in listed["result"]["items"])
+    assert summary["result"]["open_count"] >= 1
+    executions = bridge.repo.list_tool_executions(task_id="task_inbox")
+    assert [(item.tool, item.domain, item.status) for item in executions] == [
+        ("list_review_inbox", "review-inbox", "succeeded"),
+        ("summarize_review_inbox", "review-inbox", "succeeded"),
+    ]
+
+
+def test_tool_bridge_executes_stock_context_history_intel_and_portfolio_tools(bridge):
+    context = bridge.execute("get_stock_context", {"symbol": "AAPL"}, AuthorityLevel.A4)
+    assert context["tool"] == "get_stock_context"
+    assert context["result"]["symbol"] == "AAPL"
+    assert context["evidence_refs"] == ["stock_context", "provider_router"]
+
+    history = bridge.execute("get_daily_history", {"symbol": "AAPL", "days": 3}, AuthorityLevel.A4)
+    assert history["result"]["symbol"] == "AAPL"
+    assert len(history["result"]["items"]) == 3
+
+    intel = bridge.execute("search_stock_intel", {"symbol": "AAPL"}, AuthorityLevel.A4)
+    assert intel["result"]["items"]
+
+    portfolio = bridge.execute("get_portfolio_snapshot", {}, AuthorityLevel.A4)
+    assert portfolio["result"]["positions"] >= 1
+
+
+def test_tool_bridge_analyzes_risk_and_generates_draft_order_without_auto_trade(bridge):
+    risk = bridge.execute("analyze_portfolio_risk", {}, AuthorityLevel.A4)
+    assert any(item["symbol"] == "AAPL" for item in risk["result"]["risks"])
+    assert risk["result"]["risk_policy_ref"]["policy_id"] == "default-conservative"
+
+    draft = bridge.execute("generate_draft_order", {"symbol": "AAPL", "target_weight_pct": 15}, AuthorityLevel.A4)
+    order = draft["result"]["draft_order"]
+    assert draft["tool"] == "generate_draft_order"
+    assert draft["result"]["draft_id"].startswith("draft_")
+    assert draft["result"]["draft_status"] == "pending_user_confirmation"
+    assert order["symbol"] == "AAPL"
+    assert order["auto_trade"] is False
+    assert order["status"] == "pending_user_confirmation"
+    assert "draft_order_guard:auto_trade_false" in draft["evidence_refs"]
+    saved = bridge.repo.get_rebalance_draft(draft["result"]["draft_id"])
+    assert saved is not None
+    assert saved.symbol == "AAPL"
+
+
+def test_tool_bridge_lists_and_reads_active_risk_policies_with_ledger(bridge):
+    active = bridge.execute(
+        "get_active_risk_policy",
+        {},
+        AuthorityLevel.A2,
+        run_id="run_policy",
+        task_id="task_policy",
+        call_id="call_active_policy",
+        source_mode="stub",
+    )
+    listed = bridge.execute(
+        "list_risk_policies",
+        {},
+        AuthorityLevel.A2,
+        run_id="run_policy",
+        task_id="task_policy",
+        call_id="call_list_policies",
+        source_mode="stub",
+    )
+    evaluated = bridge.execute(
+        "evaluate_policy_risk",
+        {},
+        AuthorityLevel.A4,
+        run_id="run_policy",
+        task_id="task_policy",
+        call_id="call_eval_policy",
+        source_mode="stub",
+    )
+
+    assert active["result"]["policy_id"] == "default-conservative"
+    assert listed["result"]["items"][0]["policy_id"] == "default-conservative"
+    assert evaluated["result"]["risk_policy_ref"]["policy_id"] == "default-conservative"
+
+    executions = bridge.repo.list_tool_executions(task_id="task_policy")
+    assert [(item.tool, item.domain, item.status) for item in executions] == [
+        ("get_active_risk_policy", "risk", "succeeded"),
+        ("list_risk_policies", "risk", "succeeded"),
+        ("evaluate_policy_risk", "risk", "succeeded"),
+    ]
+
+
+def test_tool_bridge_updates_creates_and_activates_risk_policy(bridge):
+    updated = bridge.execute(
+        "update_risk_policy",
+        {
+            "single_position_max_weight_pct": 18,
+            "etf_max_weight_pct": 80,
+            "single_position_max_loss_pct_of_nav": 2.5,
+        },
+        AuthorityLevel.A3,
+        run_id="run_policy_write",
+        task_id="task_policy_write",
+        call_id="call_update_policy",
+        source_mode="stub",
+    )
+    assert updated["result"]["policy_id"] == "default-conservative"
+    assert updated["result"]["policy"]["rules"]["single_position_max_weight_pct"] == 18
+    assert updated["result"]["policy"]["rules"]["etf_max_weight_pct"] == 80
+    assert updated["result"]["version"] >= 2
+
+    created = bridge.execute(
+        "create_risk_policy",
+        {
+            "name": "均衡型",
+            "single_position_max_weight_pct": 20,
+            "sector_max_weight_pct": 40,
+            "activate": False,
+        },
+        AuthorityLevel.A3,
+        run_id="run_policy_write",
+        task_id="task_policy_write",
+        call_id="call_create_policy",
+        source_mode="stub",
+    )
+    new_id = created["result"]["policy_id"]
+    assert new_id
+    assert created["result"]["is_active"] is False
+    assert created["result"]["policy"]["rules"]["single_position_max_weight_pct"] == 20
+
+    activated = bridge.execute(
+        "activate_risk_policy",
+        {"policy_id": new_id},
+        AuthorityLevel.A3,
+        run_id="run_policy_write",
+        task_id="task_policy_write",
+        call_id="call_activate_policy",
+        source_mode="stub",
+    )
+    assert activated["result"]["policy_id"] == new_id
+    assert activated["result"]["is_active"] is True
+    active = bridge.risk_policy_service.get_active_policy()
+    assert active.policy_id == new_id
+
+
+def test_tool_bridge_lists_and_gets_rebalance_drafts_with_a4(bridge):
+    created = bridge.execute("generate_draft_order", {"symbol": "AAPL", "target_weight_pct": 15}, AuthorityLevel.A4)
+    draft_id = created["result"]["draft_id"]
+    stale = bridge.execute("generate_draft_order", {"symbol": "AAPL", "target_weight_pct": 13}, AuthorityLevel.A4)
+    stale_id = stale["result"]["draft_id"]
+    stale_draft = bridge.repo.get_rebalance_draft(stale_id)
+    stale_draft.valid_until = "2000-01-01T00:00:00+00:00"
+    stale_draft.updated_at = "2000-01-01T00:00:00+00:00"
+    bridge.repo.save_rebalance_draft(stale_draft)
+
+    listed = bridge.execute(
+        "list_rebalance_drafts",
+        {"symbol": "AAPL", "limit": 10},
+        AuthorityLevel.A4,
+        run_id="run_draft",
+        task_id="task_draft",
+        call_id="call_list_drafts",
+        source_mode="stub",
+    )
+    assert listed["result"]["count"] >= 1
+    assert any(item["draft_id"] == draft_id for item in listed["result"]["items"])
+
+    expired = bridge.execute(
+        "list_rebalance_drafts",
+        {"symbol": "AAPL", "status": "expired", "limit": 10},
+        AuthorityLevel.A4,
+        run_id="run_draft",
+        task_id="task_draft",
+        call_id="call_list_expired_drafts",
+        source_mode="stub",
+    )
+    assert any(item["draft_id"] == stale_id and item["status"] == "expired" for item in expired["result"]["items"])
+
+    pending = bridge.execute(
+        "list_rebalance_drafts",
+        {"symbol": "AAPL", "status": "pending_user_confirmation", "limit": 10},
+        AuthorityLevel.A4,
+        run_id="run_draft",
+        task_id="task_draft",
+        call_id="call_list_pending_drafts",
+        source_mode="stub",
+    )
+    assert all(item["draft_id"] != stale_id for item in pending["result"]["items"])
+    assert all(item["status"] == "pending_user_confirmation" for item in pending["result"]["items"])
+
+    loaded = bridge.execute(
+        "get_rebalance_draft",
+        {"draft_id": draft_id},
+        AuthorityLevel.A4,
+        run_id="run_draft",
+        task_id="task_draft",
+        call_id="call_get_draft",
+        source_mode="embedded",
+    )
+    assert loaded["result"]["draft_id"] == draft_id
+    assert loaded["result"]["status"] == "pending_user_confirmation"
+
+    executions = bridge.repo.list_tool_executions(task_id="task_draft")
+    assert [(item.tool, item.status, item.domain) for item in executions] == [
+        ("list_rebalance_drafts", "succeeded", "planner"),
+        ("list_rebalance_drafts", "succeeded", "planner"),
+        ("list_rebalance_drafts", "succeeded", "planner"),
+        ("get_rebalance_draft", "succeeded", "planner"),
+    ]
+
+
+def test_tool_bridge_creates_and_lists_pre_trade_reviews_and_paper_orders(bridge):
+    created = bridge.execute("generate_draft_order", {"symbol": "HK00700", "target_weight_pct": 8}, AuthorityLevel.A4)
+    draft_id = created["result"]["draft_id"]
+    bridge.rebalance_draft_service.confirm(draft_id, RebalanceDraftDecisionNoteRequest(note="review-ready"))
+
+    review = bridge.execute(
+        "create_pre_trade_review",
+        {"draft_id": draft_id},
+        AuthorityLevel.A4,
+        run_id="run_review",
+        task_id="task_review",
+        call_id="call_create_review",
+        source_mode="stub",
+    )
+    assert review["result"]["review_id"].startswith("review_")
+    assert review["result"]["status"] in {"passed", "warning"}
+    assert review["result"]["execution_guard"]["auto_trade"] is False
+
+    listed_reviews = bridge.execute(
+        "list_pre_trade_reviews",
+        {"draft_id": draft_id},
+        AuthorityLevel.A3,
+        run_id="run_review",
+        task_id="task_review",
+        call_id="call_list_reviews",
+        source_mode="stub",
+    )
+    assert listed_reviews["result"]["count"] == 1
+    assert listed_reviews["result"]["items"][0]["review_id"] == review["result"]["review_id"]
+
+    saved_order = bridge.paper_trading_service.create(review["result"]["review_id"], source_mode="http")
+    listed_orders = bridge.execute(
+        "list_paper_orders",
+        {"review_id": review["result"]["review_id"]},
+        AuthorityLevel.A3,
+        run_id="run_review",
+        task_id="task_review",
+        call_id="call_list_orders",
+        source_mode="stub",
+    )
+    assert listed_orders["result"]["count"] == 1
+    assert listed_orders["result"]["items"][0]["order_id"] == saved_order.order_id
+
+    executions = bridge.repo.list_tool_executions(task_id="task_review")
+    assert [(item.tool, item.domain, item.status) for item in executions] == [
+        ("create_pre_trade_review", "planner", "succeeded"),
+        ("list_pre_trade_reviews", "planner", "succeeded"),
+        ("list_paper_orders", "execution", "succeeded"),
+    ]
+
+
+def test_tool_bridge_create_pre_trade_review_requires_confirmed_draft_id_and_records_failed_ledger(bridge):
+    created = bridge.execute("generate_draft_order", {"symbol": "AAPL", "target_weight_pct": 15}, AuthorityLevel.A4)
+    draft_id = created["result"]["draft_id"]
+
+    # 现行为（P1 综合指令）：不带 draft_id 时自动解析最近一张已确认草案；
+    # 没有已确认草案则报错提示先确认。
+    with pytest.raises(ValueError, match="no confirmed drafts"):
+        bridge.execute(
+            "create_pre_trade_review",
+            {"symbol": "AAPL"},
+            AuthorityLevel.A4,
+            run_id="run_review_guard",
+            task_id="task_review_guard",
+            call_id="call_review_missing_draft_id",
+            source_mode="stub",
+        )
+
+    with pytest.raises(ValueError, match="confirmed_no_execution"):
+        bridge.execute(
+            "create_pre_trade_review",
+            {"draft_id": draft_id},
+            AuthorityLevel.A4,
+            run_id="run_review_guard",
+            task_id="task_review_guard",
+            call_id="call_review_pending_draft",
+            source_mode="stub",
+        )
+
+    executions = bridge.repo.list_tool_executions(task_id="task_review_guard")
+    assert [(item.tool, item.status, item.error) for item in executions] == [
+        (
+            "create_pre_trade_review",
+            "failed",
+            "no confirmed drafts found; confirm a draft first before creating a review",
+        ),
+        (
+            "create_pre_trade_review",
+            "failed",
+            "draft must be confirmed_no_execution before review, current=pending_user_confirmation",
+        ),
+    ]
+
+
+def test_tool_bridge_reads_paper_portfolio_and_creates_snapshot_with_ledger(bridge, monkeypatch):
+    holdings = bridge.repo.list_holdings()
+    prices = {
+        item.symbol: round(item.market_value / item.quantity, 6) if item.quantity > 0 else 0.0
+        for item in holdings
+    }
+    monkeypatch.setattr(
+        "backend.app_services.paper_portfolio_service.provider_router.get_quote",
+        lambda symbol: PriceSnapshot(
+            last=prices[symbol.upper()],
+            change_pct=0.0,
+            updated_at="2026-05-13T08:00:00+00:00",
+            source="mock_adapter",
+            degraded=False,
+            degraded_reason=None,
+        ),
+    )
+
+    portfolio = bridge.execute(
+        "get_paper_portfolio",
+        {},
+        AuthorityLevel.A3,
+        run_id="run_paper",
+        task_id="task_paper",
+        call_id="call_paper_portfolio",
+        source_mode="stub",
+    )
+    performance = bridge.execute(
+        "analyze_paper_performance",
+        {},
+        AuthorityLevel.A3,
+        run_id="run_paper",
+        task_id="task_paper",
+        call_id="call_paper_performance",
+        source_mode="stub",
+    )
+    snapshot = bridge.execute(
+        "create_paper_portfolio_snapshot",
+        {},
+        AuthorityLevel.A3,
+        run_id="run_paper",
+        task_id="task_paper",
+        call_id="call_paper_snapshot",
+        source_mode="stub",
+    )
+
+    assert portfolio["result"]["summary"]["baseline_id"].startswith("baseline_")
+    assert performance["result"]["since_baseline"]["initial_equity"] > 0
+    assert snapshot["result"]["snapshot_id"].startswith("paper_snapshot_")
+    assert snapshot["result"]["payload"]["positions"]
+
+    executions = bridge.repo.list_tool_executions(task_id="task_paper")
+    assert [(item.tool, item.domain, item.status) for item in executions] == [
+        ("get_paper_portfolio", "paper-portfolio", "succeeded"),
+        ("analyze_paper_performance", "paper-portfolio", "succeeded"),
+        ("create_paper_portfolio_snapshot", "paper-portfolio", "succeeded"),
+    ]
+
+
+def test_tool_bridge_lists_and_summarizes_decision_journal_with_ledger(bridge, monkeypatch):
+    monkeypatch.setattr(
+        "backend.app_services.pre_trade_review_service.provider_router.get_quote",
+        lambda symbol: PriceSnapshot(
+            last=386.8,
+            change_pct=0.3,
+            updated_at="2026-05-13T08:00:00+00:00",
+            source="mock_adapter",
+            degraded=False,
+            degraded_reason=None,
+        ),
+    )
+    holdings = bridge.repo.list_holdings()
+    prices = {
+        item.symbol: round(item.market_value / item.quantity, 6) if item.quantity > 0 else 0.0
+        for item in holdings
+    }
+    monkeypatch.setattr(
+        "backend.app_services.paper_portfolio_service.provider_router.get_quote",
+        lambda symbol: PriceSnapshot(
+            last=prices[symbol.upper()],
+            change_pct=0.0,
+            updated_at="2026-05-13T08:00:00+00:00",
+            source="mock_adapter",
+            degraded=False,
+            degraded_reason=None,
+        ),
+    )
+
+    draft = bridge.rebalance_draft_service.create({"symbol": "AAPL", "target_weight_pct": 15}, source_mode="http")
+    bridge.rebalance_draft_service.confirm(draft.draft_id, RebalanceDraftDecisionNoteRequest(note="ready"))
+    review = bridge.pre_trade_review_service.create(draft_id=draft.draft_id, strict_status=True)
+    bridge.paper_trading_service.create(review.review_id, source_mode="http")
+    entry = bridge.repo.get_decision_journal_entry_by_decision_id(draft.decision_id)
+    assert entry is not None
+    snapshot = bridge.paper_portfolio_service.create_snapshot(source_mode="http")
+    bridge.decision_journal_service.link_snapshot(entry.entry_id, snapshot.snapshot_id)
+
+    listed = bridge.execute(
+        "list_decision_journal",
+        {"symbol": "AAPL", "limit": 10},
+        AuthorityLevel.A3,
+        run_id="run_journal",
+        task_id="task_journal",
+        call_id="call_list_journal",
+        source_mode="stub",
+    )
+    loaded = bridge.execute(
+        "get_decision_journal_entry",
+        {"entry_id": entry.entry_id},
+        AuthorityLevel.A3,
+        run_id="run_journal",
+        task_id="task_journal",
+        call_id="call_get_journal",
+        source_mode="stub",
+    )
+    summary = bridge.execute(
+        "summarize_decision_outcomes",
+        {"symbol": "AAPL"},
+        AuthorityLevel.A3,
+        run_id="run_journal",
+        task_id="task_journal",
+        call_id="call_summary_journal",
+        source_mode="stub",
+    )
+
+    assert listed["result"]["count"] == 1
+    assert listed["result"]["items"][0]["entry_id"] == entry.entry_id
+    assert loaded["result"]["entry_id"] == entry.entry_id
+    assert loaded["result"]["chain"]["paper_order"]["review_id"] == review.review_id
+    assert summary["result"]["paper_tracked_count"] == 1
+
+    executions = bridge.repo.list_tool_executions(task_id="task_journal")
+    assert [(item.tool, item.domain, item.status) for item in executions] == [
+        ("list_decision_journal", "decision-journal", "succeeded"),
+        ("get_decision_journal_entry", "decision-journal", "succeeded"),
+        ("summarize_decision_outcomes", "decision-journal", "succeeded"),
+    ]
+
+
+def test_tool_bridge_lists_strategies_runs_backtests_and_reads_results(bridge):
+    listed = bridge.execute("list_strategies", {}, AuthorityLevel.A2)
+    assert listed["result"]["items"][0]["strategy_id"] == "concentration-control"
+
+    run = bridge.execute(
+        "run_strategy_backtest",
+        {"strategy_id": "concentration-control", "period": {"days": 14}, "universe": ["AAPL"]},
+        AuthorityLevel.A4,
+        run_id="run_strategy",
+        task_id="task_strategy",
+        call_id="call_backtest",
+        source_mode="stub",
+    )
+    assert run["result"]["strategy_id"] == "concentration-control"
+    assert run["result"]["execution_guard"]["auto_trade"] is False
+
+    loaded = bridge.execute(
+        "get_backtest_result",
+        {"run_id": run["result"]["run_id"]},
+        AuthorityLevel.A2,
+        run_id="run_strategy",
+        task_id="task_strategy",
+        call_id="call_get_backtest",
+        source_mode="embedded",
+    )
+    assert loaded["result"]["run_id"] == run["result"]["run_id"]
+
+    executions = bridge.repo.list_tool_executions(task_id="task_strategy")
+    assert [(item.tool, item.domain, item.status) for item in executions] == [
+        ("run_strategy_backtest", "strategy", "succeeded"),
+        ("get_backtest_result", "strategy", "succeeded"),
+    ]
+
+
+def test_tool_bridge_lists_report_templates_generates_report_and_reads_quality(bridge):
+    templates = bridge.execute(
+        "list_report_templates",
+        {},
+        AuthorityLevel.A2,
+        run_id="run_report",
+        task_id="task_report",
+        call_id="call_templates",
+        source_mode="stub",
+    )
+    assert {item["report_type"] for item in templates["result"]["items"]} == {
+        "stock_research",
+        "monitor_review",
+        "strategy_backtest",
+        "paper_portfolio_review",
+        "ops_briefing",
+    }
+
+    report = bridge.execute(
+        "generate_report",
+        {"report_type": "stock_research", "source_type": "stock", "source_id": "AAPL"},
+        AuthorityLevel.A2,
+        run_id="run_report",
+        task_id="task_report",
+        call_id="call_generate_report",
+        source_mode="stub",
+    )
+    assert report["result"]["report_type"] == "stock_research"
+    assert report["result"]["quality_status"] in {"passed", "warning"}
+
+    quality = bridge.execute(
+        "get_report_quality",
+        {"report_id": report["result"]["report_id"]},
+        AuthorityLevel.A2,
+        run_id="run_report",
+        task_id="task_report",
+        call_id="call_report_quality",
+        source_mode="stub",
+    )
+    assert quality["result"]["report_id"] == report["result"]["report_id"]
+    assert quality["result"]["latest"]["status"] == report["result"]["quality_status"]
+
+    executions = bridge.repo.list_tool_executions(task_id="task_report")
+    assert [(item.tool, item.domain, item.status) for item in executions] == [
+        ("list_report_templates", "report", "succeeded"),
+        ("generate_report", "report", "succeeded"),
+        ("get_report_quality", "report", "succeeded"),
+    ]
+
+
+def test_tool_bridge_generate_report_rejects_template_report_type_mismatch_and_records_failed_ledger(bridge):
+    with pytest.raises(ValueError) as exc:
+        bridge.execute(
+            "generate_report",
+            {
+                "report_type": "monitor_review",
+                "source_type": "stock",
+                "source_id": "AAPL",
+                "template_id": "stock_research_default",
+            },
+            AuthorityLevel.A2,
+            run_id="run_report_mismatch",
+            task_id="task_report_mismatch",
+            call_id="call_report_mismatch",
+            source_mode="stub",
+        )
+    assert "template/report_type mismatch" in str(exc.value)
+
+    executions = bridge.repo.list_tool_executions(task_id="task_report_mismatch")
+    assert [(item.tool, item.domain, item.status, item.call_id) for item in executions] == [
+        ("generate_report", "report", "failed", "call_report_mismatch")
+    ]
+    assert "template/report_type mismatch" in executions[0].error
+
+
+def test_tool_bridge_blocks_insufficient_authority_and_real_orders(bridge):
+    with pytest.raises(PermissionDenied):
+        bridge.execute("generate_draft_order", {"symbol": "AAPL", "target_weight_pct": 15}, AuthorityLevel.A3)
+
+    with pytest.raises(PermissionDenied):
+        bridge.execute("list_rebalance_drafts", {}, AuthorityLevel.A3, task_id="task_draft_block")
+
+    with pytest.raises(PermissionDenied) as exc:
+        bridge.execute("place_real_order", {"symbol": "AAPL", "quantity": 1}, AuthorityLevel.A5)
+    assert "real order execution is disabled" in str(exc.value)
+
+    blocked = bridge.repo.list_tool_executions(task_id="task_draft_block")
+    assert [(item.tool, item.status, item.domain) for item in blocked] == [
+        ("list_rebalance_drafts", "blocked", "planner")
+    ]
+
+
+def test_tool_bridge_records_tool_execution_outcomes_and_skips_unknown_tools(bridge):
+    bridge.tool_execution_service.summary_limit = 18
+    bridge._handlers["search_stock_intel"] = lambda arguments: {"blob": "x" * 80}
+
+    bridge.execute(
+        "search_stock_intel",
+        {"symbol": "AAPL"},
+        AuthorityLevel.A4,
+        run_id="run_1",
+        task_id="task_1",
+        call_id="call_success",
+        source_mode="stub",
+    )
+
+    with pytest.raises(PermissionDenied):
+        bridge.execute(
+            "place_real_order",
+            {"symbol": "AAPL", "quantity": 1},
+            AuthorityLevel.A5,
+            run_id="run_1",
+            task_id="task_1",
+            call_id="call_blocked",
+            source_mode="embedded",
+        )
+
+    original_spec = bridge._specs["search_stock_intel"]
+    bridge._specs["failing_tool"] = ToolSpec(
+        "failing_tool",
+        original_spec.domain,
+        original_spec.required_authority,
+        original_spec.risk,
+        original_spec.enabled,
+        original_spec.input_schema,
+        original_spec.evidence_refs,
+    )
+    bridge._handlers["failing_tool"] = lambda arguments: (_ for _ in ()).throw(RuntimeError("boom"))
+    with pytest.raises(RuntimeError):
+        bridge.execute(
+            "failing_tool",
+            {"symbol": "AAPL"},
+            AuthorityLevel.A4,
+            run_id="run_1",
+            task_id="task_1",
+            call_id="call_failed",
+            source_mode="embedded",
+        )
+
+    with pytest.raises(KeyError):
+        bridge.execute("missing_tool", {}, AuthorityLevel.A4, task_id="task_1")
+
+    executions = bridge.repo.list_tool_executions(task_id="task_1")
+    assert [(item.tool, item.status, item.call_id, item.source_mode) for item in executions] == [
+        ("search_stock_intel", "succeeded", "call_success", "stub"),
+        ("place_real_order", "blocked", "call_blocked", "embedded"),
+        ("failing_tool", "failed", "call_failed", "embedded"),
+    ]
+    assert executions[0].run_id == "run_1"
+    assert executions[0].domain == "intel"
+    assert executions[0].authority_level == "A2"
+    assert executions[0].arguments == {"symbol": "AAPL"}
+    assert executions[0].result_summary.endswith("…")
+    assert len(executions[0].result_summary) == 18
+    assert executions[1].domain == "execution"
+    assert executions[1].arguments == {"symbol": "AAPL", "quantity": 1}
+    assert executions[1].error and "real order execution is disabled" in executions[1].error
+    assert executions[2].error == "boom"
+
+
+def test_tool_bridge_executes_monitor_tools_and_records_monitor_ledger(bridge):
+    bridge.repo.save_monitor_status(
+        bridge.monitor_service.get_status().model_copy(update={"status": "running"})
+    )
+    bridge.monitor_service.upsert_rule({"symbol": "AAPL", "rule": "single_position_weight > 15%"})
+
+    events = bridge.execute(
+        "get_monitor_events",
+        {"limit": 5},
+        AuthorityLevel.A2,
+        run_id="run_monitor",
+        task_id="task_monitor",
+        call_id="call_monitor_events",
+        source_mode="stub",
+    )
+    rules = bridge.execute(
+        "get_monitor_rules",
+        {},
+        AuthorityLevel.A2,
+        run_id="run_monitor",
+        task_id="task_monitor",
+        call_id="call_monitor_rules",
+        source_mode="stub",
+    )
+    evaluation = bridge.execute(
+        "evaluate_monitor_rules",
+        {"source": "tool", "force": True},
+        AuthorityLevel.A2,
+        run_id="run_monitor",
+        task_id="task_monitor",
+        call_id="call_monitor_eval",
+        source_mode="stub",
+    )
+
+    assert events["tool"] == "get_monitor_events"
+    assert "items" in events["result"]
+    assert rules["result"]["items"]
+    assert evaluation["result"]["created"] >= 1
+
+    executions = bridge.repo.list_tool_executions(task_id="task_monitor")
+    assert [(item.tool, item.domain, item.status) for item in executions] == [
+        ("get_monitor_events", "monitor", "succeeded"),
+        ("get_monitor_rules", "monitor", "succeeded"),
+        ("evaluate_monitor_rules", "monitor", "succeeded"),
+    ]
+
+
+def test_tool_bridge_monitor_events_explanation_matches_returned_event(bridge):
+    fallback = bridge.execute(
+        "get_monitor_events",
+        {"symbol": "HK00700", "limit": 1, "include_explanation": True},
+        AuthorityLevel.A2,
+    )
+    assert fallback["result"]["items"][0]["symbol"] == "HK00700"
+    assert fallback["result"]["explanation"]["event"]["event_id"] == fallback["result"]["items"][0]["event_id"]
+
+    bridge.monitor_service.upsert_rule({"symbol": "AAPL", "rule": "single_position_weight > 15%"})
+    bridge.monitor_service.evaluate_once(source="manual")
+
+    miss = bridge.execute(
+        "get_monitor_events",
+        {"symbol": "MSFT", "limit": 1, "include_explanation": True},
+        AuthorityLevel.A2,
+    )
+    assert miss["result"]["items"] == []
+    assert miss["result"]["explanation"]["event"] is None
+
+    hit = bridge.execute(
+        "get_monitor_events",
+        {"symbol": "AAPL", "limit": 1, "include_explanation": True},
+        AuthorityLevel.A2,
+    )
+    assert hit["result"]["items"][0]["symbol"] == "AAPL"
+    assert hit["result"]["explanation"]["event"]["event_id"] == hit["result"]["items"][0]["event_id"]
+
+
+def test_tool_bridge_industry_context_degrades_cleanly_and_computes_percentiles(bridge, monkeypatch):
+    """get_industry_context：US 票明确降级提示 web_search；离线成分股失败降级；
+    注入假数据时正确计算行业内排名/分位/Top10。"""
+    from backend.stock_domain import industry_tools
+
+    # Force empty network/fallback so "offline" stays degraded under seed data.
+    monkeypatch.setattr(industry_tools, "_boards_from_ths", lambda: [])
+    monkeypatch.setattr(industry_tools, "_boards_from_master", lambda: [])
+    monkeypatch.setattr(industry_tools, "_constituents_from_master", lambda industry: [])
+    industry_tools._BOARDS_CACHE.clear()
+    industry_tools._CONS_CACHE.clear()
+
+    us = bridge.execute("get_industry_context", {"symbol": "AAPL"}, AuthorityLevel.A2)["result"]
+    assert us["degraded"] is True
+    assert "web_search" in us["reason"]
+
+    offline = bridge.execute("get_industry_context", {"symbol": "600519"}, AuthorityLevel.A2)["result"]
+    assert offline["degraded"] is True
+
+    fake_cons = [
+        {"symbol": "600519", "name": "贵州茅台", "price": 1500.0, "change_pct": 1.0,
+         "turnover_pct": 0.5, "pe": 22.0, "pb": 8.0, "cap_est": 1.9e12},
+        {"symbol": "000858", "name": "五粮液", "price": 130.0, "change_pct": -0.5,
+         "turnover_pct": 0.8, "pe": 15.0, "pb": 4.0, "cap_est": 5.0e11},
+        {"symbol": "000596", "name": "古井贡酒", "price": 160.0, "change_pct": 0.2,
+         "turnover_pct": 1.1, "pe": 18.0, "pb": 5.0, "cap_est": 8.0e10},
+    ]
+    fake_boards = [{"industry": "白酒", "board_code": "BK0001", "rank": 3.0,
+                    "change_pct": 0.8, "turnover_pct": 0.9, "total_market_cap": 3.0e12}]
+    monkeypatch.setattr(industry_tools, "_cached_boards", lambda: fake_boards)
+    monkeypatch.setattr(industry_tools, "_cached_constituents", lambda industry: fake_cons)
+
+    ctx = bridge.execute("get_industry_context", {"symbol": "600519"}, AuthorityLevel.A2)["result"]
+    assert ctx["degraded"] is False
+    assert ctx["industry"] == "白酒"
+    assert ctx["company_count"] == 3
+    assert ctx["valuation"]["pe_median"] == 18.0
+    assert ctx["target"]["cap_rank"] == 1
+    assert ctx["target"]["cap_rank_total"] == 3
+    assert ctx["target"]["pe_percentile"] == 100.0
+    assert [c["symbol"] for c in ctx["top_constituents"]] == ["600519", "000858", "000596"]
+
+    by_industry = bridge.execute(
+        "get_industry_context", {"industry": "白酒"}, AuthorityLevel.A2
+    )["result"]
+    assert by_industry["degraded"] is False
+    assert "target" not in by_industry
+
+
+def test_tool_bridge_market_structure_hk_has_no_chip_ratios(bridge, monkeypatch):
+    from backend.stock_domain import market_structure
+
+    monkeypatch.setattr(
+        market_structure,
+        "get_daily_history",
+        lambda *a, **k: {
+            "items": [
+                {
+                    "date": f"2026-01-{i + 1:02d}",
+                    "open": 10 + i,
+                    "high": 10.5 + i,
+                    "low": 9.5 + i,
+                    "close": 10 + i,
+                    "volume": 1000,
+                }
+                for i in range(20)
+            ],
+            "source": "akshare",
+        },
+    )
+    monkeypatch.setattr(market_structure, "_snapshot_block", lambda *a, **k: {"degraded": True, "reason": "test"})
+    result = bridge.execute("get_market_structure", {"symbol": "HK00700"}, AuthorityLevel.A2)["result"]
+    assert result["chip"]["degraded"] is True
+    assert "profit_ratio" not in result["chip"]
+    assert result["technical"]["ma5"] is not None
+
+
+def test_tool_bridge_sanitizes_mcp_env_secrets():
+    cleaned = WorkbenchToolBridge._sanitize_mcp_servers(
+        {"demo": {"enabled": True, "command": "npx", "env": {"API_KEY": "secret-value"}}}
+    )
+    assert cleaned["demo"]["env"]["API_KEY"] == "***"
+    assert cleaned["demo"]["command"] == "npx"
+
+
+def test_tool_bridge_list_skills_and_mcp_via_deerflow(bridge):
+    skills = bridge.execute("list_skills", {}, AuthorityLevel.A2)["result"]
+    assert "supported" in skills
+    # stub mode: unsupported; embedded/direct: skills list
+    if skills.get("supported"):
+        assert "skills" in skills
+    else:
+        assert "error" in skills
+
+    mcp = bridge.execute("list_mcp_servers", {}, AuthorityLevel.A2)["result"]
+    assert "supported" in mcp
+    if mcp.get("supported"):
+        assert "mcp_servers" in mcp
+        for server in (mcp["mcp_servers"] or {}).values():
+            if isinstance(server, dict) and isinstance(server.get("env"), dict):
+                assert all(v == "***" for v in server["env"].values())

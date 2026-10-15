@@ -1,0 +1,89 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Node.js
+node_modules/
+frontend/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# System
+.DS_Store
+Thumbs.db
+
+# Data
+data/
+*.sqlite3
+*.db
+
+# Logs
+log/
+*.log
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Project specific
+.omx/
+.omo/
+.playwright-mcp/
+.sisyphus/
+.ac360/
+.opencode/
+.deer-flow/users/
+.deer-flow/.retrieval/
+.deer-flow/.skills_view.projection.lock
+.deer-flow/skills_view/
+*.sqlite3-shm
+*.sqlite3-wal
+*.png
+# Tauri 桌面图标：构建与部署归档需要
+!desktop/src-tauri/icons/**/*.png
+ui-mockup.html
+chat-init-snapshot.md
+
+# CI/CD
+.github/workflows/
+
+# Config (may contain secrets)
+config.json
+opencode.json
+
+# Environment examples
+.env.example
+
+# Temporary files
+*.tmp
+*.bak
+test_research_page.py
+
+# Local UI/reference clones (not vendored)
+_ref/
+
+# Capacitor iOS (legacy — removed; use mobile-native/)
+# mobile/ios/App/Pods/
+# mobile/ios/App/App/public/
+# mobile/ios/DerivedData/
+
+# Native SwiftUI
+mobile-native/**/DerivedData/
+mobile-native/**/build/
+**/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+
+# Keep iOS app icons even though *.png is ignored
+!mobile-native/**/AppIcon.appiconset/*.png

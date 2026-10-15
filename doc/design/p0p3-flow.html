@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>研究如何变成值班 · P0–P3 流程</title>
+<style>
+:root {
+  --canvas: #1e1e1e;
+  --sidebar: #252526;
+  --surface: #2d2d2d;
+  --surface-2: #333;
+  --ink: #e4e4e4;
+  --ink-2: #ccc;
+  --muted: #9d9d9d;
+  --faint: #6e6e6e;
+  --line: rgba(255,255,255,.08);
+  --blue: #0078d4;
+  --blue-soft: rgba(0,120,212,.16);
+  --green: #3fb950;
+  --green-soft: rgba(63,185,80,.14);
+  --red: #f85149;
+  --red-soft: rgba(248,81,73,.14);
+  --amber: #d29922;
+  --amber-soft: rgba(210,153,34,.16);
+  --sans: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--canvas); color: var(--ink); font-family: var(--sans); }
+body {
+  min-height: 100%;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(0,120,212,.12), transparent 55%),
+    radial-gradient(900px 500px at 100% 110%, rgba(63,185,80,.06), transparent 50%),
+    var(--canvas);
+}
+.grain {
+  pointer-events: none; position: fixed; inset: 0; z-index: 8; opacity: .04;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+.app { max-width: 1180px; margin: 0 auto; padding: 28px 24px 40px; position: relative; z-index: 1; }
+
+.top {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 22px;
+}
+.kicker { color: var(--blue); font: 600 11px/1 var(--mono); letter-spacing: .18em; text-transform: uppercase; }
+h1 { margin: 8px 0 0; font-size: 28px; font-weight: 650; letter-spacing: -.02em; }
+.lede { margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; max-width: 46em; }
+.controls { display: flex; gap: 8px; align-items: center; }
+.btn {
+  appearance: none; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  height: 32px; padding: 0 12px; border-radius: 6px; font: 600 12px/1 var(--sans); cursor: pointer;
+}
+.btn:hover { border-color: rgba(255,255,255,.16); }
+.btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+.clock { font: 500 12px/1 var(--mono); color: var(--muted); min-width: 4.5em; text-align: right; }
+
+.stage-wrap {
+  display: grid; grid-template-columns: 220px 1fr; gap: 18px; align-items: stretch;
+}
+.chapters {
+  background: var(--sidebar); border: 1px solid var(--line); border-radius: 12px; padding: 10px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.chap { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 8px; cursor: pointer; color: var(--muted); }
+.chap:hover { background: rgba(255,255,255,.04); }
+.chap.on { background: var(--blue-soft); color: var(--ink); }
+.chap .n { font: 600 11px/1 var(--mono); width: 18px; color: var(--faint); padding-top: 3px; }
+.chap.on .n { color: var(--blue); }
+.chap .t { font-size: 12px; font-weight: 600; }
+.chap .d { font-size: 11px; color: var(--faint); margin-top: 2px; }
+.group { font: 600 10px/1 var(--mono); letter-spacing: .14em; color: var(--faint); padding: 10px 10px 6px; text-transform: uppercase; }
+
+.stage {
+  position: relative; min-height: 430px; background: var(--sidebar);
+  border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+}
+.scene { position: absolute; inset: 0; padding: 22px 24px 18px; opacity: 0; pointer-events: none; visibility: hidden; transform: translateY(8px); transition: opacity .45s ease, transform .45s ease, visibility 0s .45s; }
+.scene.on { opacity: 1; pointer-events: auto; visibility: visible; transform: none; transition: opacity .45s ease, transform .45s ease, visibility 0s; }
+.scene-title { font-size: 18px; font-weight: 650; margin: 0 0 6px; }
+.scene-cap { color: var(--muted); font-size: 13px; line-height: 1.65; margin: 0 0 16px; max-width: 52em; }
+
+.row { display: flex; gap: 10px; flex-wrap: wrap; }
+.chip {
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+  border-radius: 999px; padding: 7px 12px; font-size: 12px; font-weight: 600;
+  opacity: .35; transform: translateY(6px); transition: .35s ease;
+}
+.chip.show { opacity: 1; transform: none; }
+.chip.hot { border-color: rgba(0,120,212,.45); background: var(--blue-soft); color: #fff; box-shadow: 0 0 0 1px rgba(0,120,212,.2); }
+
+.panel {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+}
+.panel h3 { margin: 0 0 8px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.kv { display: grid; grid-template-columns: 88px 1fr; gap: 6px 10px; font-size: 12px; }
+.kv b { color: var(--faint); font-weight: 500; }
+.tag { display: inline-flex; align-items: center; gap: 6px; font: 600 11px/1 var(--mono); padding: 4px 8px; border-radius: 999px; }
+.tag.ok { background: var(--green-soft); color: var(--green); }
+.tag.warn { background: var(--amber-soft); color: var(--amber); }
+.tag.bad { background: var(--red-soft); color: var(--red); }
+.tag.demo { background: var(--blue-soft); color: #8dc7f0; }
+
+.stocks { display: flex; gap: 8px; }
+.stock {
+  flex: 1; min-width: 120px; background: var(--canvas); border: 1px solid var(--line); border-radius: 8px; padding: 10px;
+  opacity: 0; transform: scale(.96); animation: pop .45s ease forwards;
+}
+.stock .sy { font: 600 12px/1 var(--mono); color: var(--blue); }
+.stock .nm { margin-top: 6px; font-size: 13px; font-weight: 650; }
+.stock .why { margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+
+@keyframes pop { to { opacity: 1; transform: none; } }
+@keyframes dash { to { stroke-dashoffset: 0; } }
+@keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(0,120,212,.08); } }
+@keyframes fly { from { transform: translateX(-12px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes dim { to { opacity: .28; filter: grayscale(.4); } }
+
+.dots { display: flex; flex-wrap: wrap; gap: 6px; max-width: 520px; }
+.dot {
+  width: 28px; height: 28px; border-radius: 6px; background: var(--surface-2); color: var(--muted);
+  font: 600 9px/28px var(--mono); text-align: center; border: 1px solid var(--line);
+}
+.dot.focus { background: var(--blue-soft); color: #fff; border-color: rgba(0,120,212,.4); animation: pulse 1.4s ease infinite; }
+.dot.rest { animation: dim .6s ease forwards; }
+
+.table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.table th { text-align: left; color: var(--faint); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.table td { padding: 8px; border-bottom: 1px solid var(--line); }
+.banner { font-size: 12px; color: var(--muted); background: rgba(0,120,212,.08); border: 1px solid rgba(0,120,212,.18); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }
+
+.guard {
+  margin-top: 14px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  color: var(--faint); font-size: 11px;
+}
+.guard i { font-style: normal; color: var(--red); font-family: var(--mono); font-weight: 600; }
+
+.thread {
+  margin-top: 18px; background: var(--sidebar); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px 10px;
+}
+.thread svg { display: block; width: 100%; height: 72px; }
+.node-lab { display: flex; justify-content: space-between; font-size: 10px; color: var(--faint); padding: 0 2px; }
+.node-lab span.on { color: var(--ink); font-weight: 650; }
+
+.toast {
+  position: absolute; right: 18px; bottom: 16px; background: #1a1a1a; border: 1px solid rgba(248,81,73,.35);
+  color: var(--ink); border-radius: 10px; padding: 10px 12px; width: 240px; font-size: 12px;
+  transform: translateY(16px); opacity: 0; transition: .35s ease; box-shadow: 0 10px 30px rgba(0,0,0,.35);
+}
+.toast.show { transform: none; opacity: 1; }
+.toast b { display: block; color: var(--red); margin-bottom: 4px; }
+
+.hint { margin-top: 10px; color: var(--faint); font-size: 11px; }
+@media (max-width: 860px) {
+  .stage-wrap { grid-template-columns: 1fr; }
+  .chapters { flex-direction: row; overflow: auto; }
+  .group { display: none; }
+  .chap { min-width: 140px; }
+  h1 { font-size: 22px; }
+}
+</style>
+</head>
+<body>
+<div class="grain"></div>
+<div class="app">
+  <header class="top">
+    <div>
+      <div class="kicker">P0 · P1 · P2 · P3</div>
+      <h1>研究如何变成值班</h1>
+      <p class="lede">白天你按漏斗把标的送进自选/持仓；收盘机器只读这个宇宙，写成简报。中间不断线，也不下单。</p>
+    </div>
+    <div class="controls">
+      <button class="btn" id="prev" type="button">上一拍</button>
+      <button class="btn primary" id="play" type="button">暂停</button>
+      <button class="btn" id="next" type="button">下一拍</button>
+      <span class="clock" id="clock">01 / 12</span>
+    </div>
+  </header>
+
+  <div class="stage-wrap">
+    <nav class="chapters" id="chapters"></nav>
+    <div class="stage" id="stage">
+      <section class="scene on" data-i="0">
+        <p class="scene-title">先认清两张台</p>
+        <p class="scene-cap">L1 是人开的研究台：圈候选、体检、深研、进自选。L2 是半自动值班：15:15 收盘体检，只写简报，不交易。自选+持仓是中间那根线。</p>
+        <div class="row">
+          <div class="panel" style="flex:1;min-width:220px;animation:fly .5s ease">
+            <h3>L1 研究台 · 人</h3>
+            <div class="kv">
+              <b>入口</b><span>对话空态 / 个股空态</span>
+              <b>动作</b><span>圈候选 → 体检 → 深研 → 进自选</span>
+              <b>产物</b><span>观察池、真仓、研究报告</span>
+            </div>
+          </div>
+          <div class="panel" style="flex:1;min-width:220px;animation:fly .5s ease .12s both">
+            <h3>L2 值班台 · 机器</h3>
+            <div class="kv">
+              <b>入口</b><span>收盘体检 每天 15:15</span>
+              <b>动作</b><span>读持仓宇宙 → 落盘简报</span>
+              <b>产物</b><span>今日简报、待办、失败推送</span>
+            </div>
+          </div>
+        </div>
+        <div class="guard">红线 <i>execution_guard.auto_trade = false</i> · 值班权限封顶 A3 · 禁止自动下单</div>
+      </section>
+
+      <section class="scene" data-i="1">
+        <p class="scene-title">打开对话，漏斗已经写在空态上</p>
+        <p class="scene-cap">不再丢一句「你想问什么」。四步芯片就是研究路径：点哪一步，Copilot 就按哪一步干活。</p>
+        <div class="panel">
+          <h3>对话空态</h3>
+          <div style="font-weight:650;margin-bottom:8px">按漏斗做研究</div>
+          <div class="row" id="funnel-chips">
+            <span class="chip">1. 圈候选</span>
+            <span class="chip">2. 体检</span>
+            <span class="chip">3. 深研</span>
+            <span class="chip">4. 进自选</span>
+          </div>
+        </div>
+        <div class="guard">个股页没选标的时，同一漏斗 + 茅台 / 腾讯 / AAPL 示例按钮</div>
+      </section>
+
+      <section class="scene" data-i="2">
+        <p class="scene-title">1. 圈候选：先收窄，再花钱深拉</p>
+        <p class="scene-cap">从自选和常见热门里只圈 3 只。说得出「为什么」，数字必须是拉到的。这一步的产出，就是后面值班要盯的宇宙的种子。</p>
+        <div class="stocks">
+          <div class="stock" style="animation-delay:.05s"><div class="sy">600519</div><div class="nm">贵州茅台</div><div class="why">权重高、A 股可看抛压结构</div></div>
+          <div class="stock" style="animation-delay:.18s"><div class="sy">HK00700</div><div class="nm">腾讯控股</div><div class="why">港股：深研时禁止写获利盘</div></div>
+          <div class="stock" style="animation-delay:.3s"><div class="sy">AAPL</div><div class="nm">Apple</div><div class="why">美股同规则，结构看量价不看套牢比</div></div>
+        </div>
+      </section>
+
+      <section class="scene" data-i="3">
+        <p class="scene-title">2. 体检：每个数字带来源</p>
+        <p class="scene-cap">盈利、负债、PE/PB 相对位置。拉不到就写「未验证」，不编。体检过关的，才配进深研。</p>
+        <div class="panel">
+          <h3>600519 · 财务体检卡</h3>
+          <div class="kv">
+            <b>结论</b><span>质量高、估值不便宜 · 数字来自财务报表工具</span>
+            <b>ROE</b><span>已验证 · 来源 financials</span>
+            <b>PE 分位</b><span>已验证 · 来源 valuation</span>
+            <b>缺口</b><span class="tag warn">未验证项保持空白，不补假数</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="scene" data-i="4">
+        <p class="scene-title">3. 深研：必须看市场结构</p>
+        <p class="scene-cap">投资论点、三情景、正反论据。A 股可以谈抛压/套牢；港股/美股禁止写获利或套牢比例——没有 CYQ 就不要装有。</p>
+        <div class="row">
+          <div class="panel" style="flex:1">
+            <h3>A 股 600519</h3>
+            <div class="kv">
+              <b>结构</b><span>调用 get_market_structure</span>
+              <b>可写</b><span>抛压、套牢、成本区</span>
+            </div>
+          </div>
+          <div class="panel" style="flex:1">
+            <h3>港美 HK00700 / AAPL</h3>
+            <div class="kv">
+              <b>结构</b><span>量价与事件，不编 CYQ</span>
+              <b>禁止</b><span class="tag bad">profit_ratio / trapped_ratio</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="scene" data-i="5">
+        <p class="scene-title">4. 进自选：线在这里交给晚上</p>
+        <p class="scene-cap">结论站得住，才提醒你加入观察池，并写一句该盯什么。不自动下单。自选+持仓，就是 L2 值班的全部宇宙。</p>
+        <div class="panel">
+          <h3>交接</h3>
+          <div class="kv">
+            <b>人</b><span>把 600519 加入自选，备注「盯估值分位与成交」</span>
+            <b>机器</b><span>收盘只读自选+持仓，不扫全市场</span>
+            <b>不下单</b><span class="tag bad">place_real_order 关闭</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="scene" data-i="6">
+        <p class="scene-title">先认清示例仓，再换成你的真仓</p>
+        <p class="scene-cap">首次种子是茅台 / 腾讯 / AAPL，带「示例」标记。一键清空不影响自选。导入真仓后，演示旗标关掉，值班才读你的仓。</p>
+        <div class="panel">
+          <div class="banner">当前是首次种子示例仓（茅台 / 腾讯 / AAPL），权重仅供演示，不是你的真仓。</div>
+          <table class="table">
+            <thead><tr><th>股票</th><th>标记</th><th>权重</th></tr></thead>
+            <tbody>
+              <tr><td>贵州茅台 600519</td><td><span class="tag demo">示例</span></td><td>14.2%</td></tr>
+              <tr><td>腾讯控股 HK00700</td><td><span class="tag demo">示例</span></td><td>11.8%</td></tr>
+              <tr><td>Apple AAPL</td><td><span class="tag demo">示例</span></td><td>18.6%</td></tr>
+            </tbody>
+          </table>
+          <div style="margin-top:10px"><span class="chip show hot">清空示例持仓</span></div>
+        </div>
+      </section>
+
+      <section class="scene" data-i="7">
+        <p class="scene-title">15:15 收盘体检：机器接手同一宇宙</p>
+        <p class="scene-cap">默认开启。Copilot 只做研究、必须拉快照/事件/待办。系统在跑完后自己落盘值班简报，不指望模型去点「生成报告」。</p>
+        <div class="panel">
+          <table class="table">
+            <thead><tr><th>任务</th><th>周期</th><th>上次</th><th></th></tr></thead>
+            <tbody>
+              <tr><td>盘前简报</td><td>每天 08:30</td><td>成功</td><td></td></tr>
+              <tr style="background:var(--blue-soft)"><td>收盘体检</td><td>每天 15:15</td><td><span class="tag ok">成功</span></td><td>报告</td></tr>
+              <tr><td>周度复盘</td><td>每周日 17:00</td><td>未运行 · 默认关</td><td></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="guard">权限封顶 A3 · 提示词禁止 generate_report · 简报类型 ops_briefing</div>
+      </section>
+
+      <section class="scene" data-i="8">
+        <p class="scene-title">休市就跳过，不写假简报</p>
+        <p class="scene-cap">盘前/收盘跟 A 股日历：周末和国庆不跑。周度周日仍跑。任务页显示「已跳过 / 今日休市」。立即运行不受日历限制，方便你补看。</p>
+        <div class="row">
+          <div class="panel" style="flex:1">
+            <h3>2026-10-01 国庆</h3>
+            <div class="kv">
+              <b>收盘体检</b><span class="tag warn">已跳过 · 休市</span>
+              <b>简报</b><span>不落盘</span>
+            </div>
+          </div>
+          <div class="panel" style="flex:1">
+            <h3>周日 周度复盘</h3>
+            <div class="kv">
+              <b>日历</b><span>不跟 A 股休市</span>
+              <b>产物</b><span>仍进报告库</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="scene" data-i="9">
+        <p class="scene-title">宇宙大于 15 只：只深拉 Top 8</p>
+        <p class="scene-cap">持仓按权重大、再拼自选。超过 15 只时，简报只展开 Top 8，其余一行涨跌。值班不会被名单撑爆，也不会假装逐只深研过。</p>
+        <div class="dots" id="dots"></div>
+        <div class="guard" style="margin-top:12px">亮的 8 只 = 深拉 · 暗的 = 一行带过 · 简报里会写「共 N 只，仅深拉 Top 8」</div>
+      </section>
+
+      <section class="scene" data-i="10">
+        <p class="scene-title">失败不断线：待办 + IM</p>
+        <p class="scene-cap">Copilot 跑崩，仍然落一张降级简报，例外进复核箱。失败推到已有 IM 通道，和盯盘告警同一个出口。你早上看总览就能看见。</p>
+        <div class="row">
+          <div class="panel" style="flex:1">
+            <h3>总览</h3>
+            <div class="kv">
+              <b>今日简报</b><span class="tag warn">降级 · 1 条例外</span>
+              <b>待办</b><span class="tag bad">scheduled_task_failed</span>
+            </div>
+          </div>
+          <div class="panel" style="flex:1">
+            <h3>推送</h3>
+            <div class="kv">
+              <b>标题</b><span>值班失败 · 收盘体检</span>
+              <b>通道</b><span>channel_notifier.push</span>
+            </div>
+          </div>
+        </div>
+        <div class="toast" id="toast"><b>值班失败 · 收盘体检</b>timeout after 900s</div>
+      </section>
+
+      <section class="scene" data-i="11">
+        <p class="scene-title">早上看总览：线已经收在「今日简报」</p>
+        <p class="scene-cap">点简报进报告库。待办进盯盘复核。白天漏斗产出的宇宙，晚上变成一页可复核的研究工件。到这里，文字流程才算串上。</p>
+        <div class="panel" style="animation:pulse 1.8s ease infinite">
+          <h3>今日简报</h3>
+          <div style="font-weight:650;margin-bottom:6px">收盘值班简报 · 收盘体检</div>
+          <div style="color:var(--muted);font-size:13px;line-height:1.6">持仓集中度仍偏茅台；港股腾讯未写获利盘；无自动交易。例外 0。</div>
+        </div>
+        <div class="guard">研究态闭环：漏斗 → 宇宙 → 值班 → 简报 → 待办。下一步仍是人，不是单。</div>
+      </section>
+    </div>
+  </div>
+
+  <div class="thread">
+    <svg viewBox="0 0 1100 72" preserveAspectRatio="none" aria-hidden="true">
+      <path id="wire" pathLength="100" d="M20 36 C 120 36, 140 36, 180 36 S 280 12, 340 12 S 430 36, 500 36 S 590 60, 660 60 S 760 36, 920 36 S 1020 36, 1080 36" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="2"/>
+      <path id="wire-on" pathLength="100" d="M20 36 C 120 36, 140 36, 180 36 S 280 12, 340 12 S 430 36, 500 36 S 590 60, 660 60 S 760 36, 920 36 S 1020 36, 1080 36" fill="none" stroke="#0078d4" stroke-width="2.4" stroke-linecap="round" stroke-dasharray="100" stroke-dashoffset="100"/>
+      <g id="beads" fill="#6e6e6e"></g>
+    </svg>
+    <div class="node-lab" id="labs"></div>
+  </div>
+  <p class="hint">空格播放/暂停 · ← → 换拍 · 点左侧章节可跳转。文件：doc/design/p0p3-flow.html</p>
+</div>
+<script>
+const CHAPTERS = [
+  { g: "L1 研究台", t: "两张台", d: "人 / 机器" },
+  { g: "L1 研究台", t: "空态漏斗", d: "四步芯片" },
+  { g: "L1 研究台", t: "圈候选", d: "3 只种子" },
+  { g: "L1 研究台", t: "体检", d: "数字带来源" },
+  { g: "L1 研究台", t: "深研", d: "市场结构" },
+  { g: "L1 研究台", t: "进自选", d: "交给晚上" },
+  { g: "交接", t: "示例仓", d: "可识别可清空" },
+  { g: "L2 值班台", t: "收盘 15:15", d: "落盘简报" },
+  { g: "L2 值班台", t: "休市跳过", d: "不编假数" },
+  { g: "L2 值班台", t: "Top 8", d: ">15 只深拉" },
+  { g: "L2 值班台", t: "失败推送", d: "待办 + IM" },
+  { g: "收口", t: "今日简报", d: "总览看见" },
+];
+const LABELS = ["两张台","漏斗","圈候选","体检","深研","自选","示例仓","收盘","休市","Top8","失败","简报"];
+const N = CHAPTERS.length;
+let i = 0, playing = true, timer = null;
+
+const nav = document.getElementById("chapters");
+let lastG = "";
+CHAPTERS.forEach((c, idx) => {
+  if (c.g !== lastG) {
+    const g = document.createElement("div");
+    g.className = "group";
+    g.textContent = c.g;
+    nav.appendChild(g);
+    lastG = c.g;
+  }
+  const el = document.createElement("div");
+  el.className = "chap" + (idx === 0 ? " on" : "");
+  el.innerHTML = `<span class="n">${String(idx+1).padStart(2,"0")}</span><span><div class="t">${c.t}</div><div class="d">${c.d}</div></span>`;
+  el.onclick = () => go(idx, true);
+  nav.appendChild(el);
+});
+
+const beads = document.getElementById("beads");
+const labs = document.getElementById("labs");
+const xs = [20,110,200,300,400,500,600,700,800,900,1000,1080];
+const ys = [36,36,36,18,16,36,58,52,36,36,36,36];
+xs.forEach((x, idx) => {
+  const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  c.setAttribute("cx", x);
+  c.setAttribute("cy", ys[idx]);
+  c.setAttribute("r", 5);
+  c.dataset.i = idx;
+  beads.appendChild(c);
+  const s = document.createElement("span");
+  s.textContent = LABELS[idx];
+  labs.appendChild(s);
+});
+
+function renderDots() {
+  const box = document.getElementById("dots");
+  if (box.dataset.ready) return;
+  const names = ["茅台","腾讯","AAPL","宁德","美团","台积电","招商","五粮液","...","...","...","...","...","...","...","...","...","...","...","..."];
+  names.forEach((n, idx) => {
+    const d = document.createElement("div");
+    d.className = "dot" + (idx < 8 ? " focus" : " rest");
+    d.textContent = idx < 8 ? n.slice(0,2) : (idx+1);
+    box.appendChild(d);
+  });
+  box.dataset.ready = "1";
+}
+
+function enter(idx) {
+  const scene = document.querySelector(`.scene[data-i="${idx}"]`);
+  if (idx === 1) {
+    scene.querySelectorAll(".chip").forEach((el, k) => {
+      el.classList.remove("show","hot");
+      setTimeout(() => { el.classList.add("show"); if (k === 0) el.classList.add("hot"); }, 80 + k * 140);
+    });
+  }
+  if (idx === 9) renderDots();
+  const toast = document.getElementById("toast");
+  toast.classList.toggle("show", idx === 10);
+}
+
+function go(n, user) {
+  i = (n + N) % N;
+  document.querySelectorAll(".scene").forEach((el) => el.classList.toggle("on", Number(el.dataset.i) === i));
+  document.querySelectorAll(".chap").forEach((el, idx) => el.classList.toggle("on", idx === i));
+  document.querySelectorAll("#labs span").forEach((el, idx) => el.classList.toggle("on", idx === i));
+  document.querySelectorAll("#beads circle").forEach((el, idx) => {
+    el.setAttribute("fill", idx <= i ? "#0078d4" : "#6e6e6e");
+    el.setAttribute("r", idx === i ? 7 : 5);
+  });
+  const on = document.getElementById("wire-on");
+  on.style.strokeDashoffset = String(100 - (100 * (i + 1) / N));
+  document.getElementById("clock").textContent = String(i+1).padStart(2,"0") + " / " + String(N).padStart(2,"0");
+  enter(i);
+  if (user) restart();
+}
+
+function tick() { go(i + 1); }
+function restart() {
+  clearInterval(timer);
+  if (playing) timer = setInterval(tick, 4800);
+}
+function toggle() {
+  playing = !playing;
+  document.getElementById("play").textContent = playing ? "暂停" : "播放";
+  restart();
+}
+
+document.getElementById("play").onclick = toggle;
+document.getElementById("prev").onclick = () => go(i - 1, true);
+document.getElementById("next").onclick = () => go(i + 1, true);
+document.addEventListener("keydown", (e) => {
+  if (e.code === "Space") { e.preventDefault(); toggle(); }
+  if (e.key === "ArrowRight") go(i + 1, true);
+  if (e.key === "ArrowLeft") go(i - 1, true);
+});
+
+go(0);
+restart();
+</script>
+</body>
+</html>

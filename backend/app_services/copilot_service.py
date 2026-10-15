@@ -1,0 +1,2064 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import time
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, AsyncIterator, Dict, Optional
+from uuid import uuid4
+
+from backend.agent_runtime import skill_specs
+from backend.agent_runtime.prompt_envelope import scheduled_task_session_title
+from backend.agent_runtime.deerflow_client import DeerFlowClientAdapter
+from backend.agent_runtime.human_input import (
+    build_human_input_request,
+    extract_human_input_from_tool_result,
+    normalize_human_input_response,
+)
+from backend.agent_runtime.disclaimer import RESEARCH_DISCLAIMER
+from backend.agent_runtime.result_normalizer import ResultNormalizer
+from backend.agent_runtime.skill_registry import SkillRegistry
+from backend.app_services.audit_service import AuditService
+from backend.app_services.context_builder import ContextBuilder
+from backend.app_services.copilot_context_builder import CopilotContextBuilder
+from backend.app_services.permission_guard import PermissionGuard
+from backend.app_services.runtime_observer import RuntimeObserver
+from backend.app_services.task_service import TaskService
+from backend.persistence.repositories import WorkbenchRepository
+from backend.schemas import (
+    CopilotRunLog,
+    AuthorityLevel,
+    CopilotMessage,
+    CopilotRequest,
+    CopilotRun,
+    CopilotSession,
+    CopilotSessionCreateRequest,
+    CopilotSessionMessageRequest,
+    CopilotSessionUpdateRequest,
+    SSEEvent,
+    model_to_dict,
+    now_iso,
+)
+
+
+from backend.app_services.copilot_cost import _estimate_cost
+from backend.app_services.copilot_errors import (
+    categorize_error,
+    classify_outcome,
+    error_hint,
+    user_facing_error,
+)
+from backend.app_services.copilot_session_state import (
+    MAX_SESSION_STATES,
+    SessionStateData,
+    TurnSummary,
+)
+
+
+def _normalize_message_attachments(raw: list[Any] | None) -> list[dict[str, Any]]:
+    """Keep basename-only attachment records for the user message bubble."""
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw or []:
+        if isinstance(item, dict):
+            filename = str(item.get("filename") or "")
+            size = int(item.get("size") or 0)
+            markdown_file = item.get("markdown_file")
+        else:
+            filename = str(getattr(item, "filename", "") or "")
+            size = int(getattr(item, "size", 0) or 0)
+            markdown_file = getattr(item, "markdown_file", None)
+        safe = Path(filename).name
+        if not filename or safe != filename or filename in {".", ".."}:
+            continue
+        if "/" in filename or "\\" in filename or filename in seen:
+            continue
+        seen.add(filename)
+        record: dict[str, Any] = {"filename": filename, "size": max(size, 0)}
+        md_name = Path(str(markdown_file)).name if markdown_file else ""
+        if md_name and md_name == str(markdown_file):
+            record["markdown_file"] = md_name
+        records.append(record)
+    return records
+
+
+# Live run statuses the UI may treat as "still working".
+_ALIVE_RUN_STATUSES = frozenset({"queued", "running", "waiting_human", "cancelling"})
+_UNSET = object()
+
+
+@dataclass
+class CopilotRunState:
+    request: CopilotRequest
+    session_id: str
+    message_id: str
+    task_id: str
+    intent: str
+    skill: str
+    skill_trace: list[dict[str, Any]]
+    status: str = "queued"
+    phase: str = "starting"
+    current_tool: str | None = None
+    last_event_at: str = field(default_factory=now_iso)
+    last_event_type: str | None = None
+    started_at: str = field(default_factory=now_iso)
+    updated_at: str = field(default_factory=now_iso)
+    # Fan-out: agent runs in a background task; SSE clients subscribe.
+    producer_task: asyncio.Task | None = field(default=None, repr=False)
+    producer_done: bool = False
+    live_buffer: list[SSEEvent] = field(default_factory=list, repr=False)
+    subscribers: list[asyncio.Queue] = field(default_factory=list, repr=False)
+    subscriber_lock: asyncio.Lock | None = field(default=None, repr=False)
+
+
+class CopilotService:
+    def __init__(
+        self,
+        *,
+        repo: WorkbenchRepository,
+        context_builder: ContextBuilder,
+        copilot_context_builder: CopilotContextBuilder,
+        permission_guard: PermissionGuard,
+        task_service: TaskService,
+        audit_service: AuditService,
+        deerflow: DeerFlowClientAdapter,
+        skill_registry: SkillRegistry,
+        result_normalizer: ResultNormalizer,
+        runtime_observer: RuntimeObserver,
+    ) -> None:
+        self.repo = repo
+        self.context_builder = context_builder
+        self.copilot_context_builder = copilot_context_builder
+        self.permission_guard = permission_guard
+        self.task_service = task_service
+        self.audit_service = audit_service
+        self.deerflow = deerflow
+        self.skill_registry = skill_registry
+        self.result_normalizer = result_normalizer
+        self.runtime_observer = runtime_observer
+        self._runs: Dict[str, CopilotRunState] = {}
+        # Last known snapshot after a run leaves `_runs` (completed / cancelled / failed).
+        self._run_status_cache: Dict[str, dict[str, Any]] = {}
+        self._session_states: dict[str, SessionStateData] = {}
+        self._cancelled_runs: set[str] = set()
+        self.llm_provider_service = None
+
+    def reconnect_runtime(self) -> dict[str, Any]:
+        """Re-initialize DeerFlowClientAdapter from persisted runtime_config.
+
+        Called after settings change so the runtime transitions from stub to
+        embedded without a server restart.
+        """
+        from backend.config.credentials import effective_runtime_config
+
+        runtime_config = effective_runtime_config(self.repo)
+        new_adapter = DeerFlowClientAdapter.from_env(
+            tool_bridge=self.deerflow.tool_bridge,
+            runtime_config=runtime_config,
+        )
+        self.deerflow = new_adapter
+        status = new_adapter.status().to_dict()
+        self.audit_service.record(
+            f"runtime reconnected: mode={status['mode']} active={status['active_client']} degraded={status['degraded']}",
+            "runtime",
+        )
+        return status
+
+    def _reconnect_with_slot(self, slot: dict[str, Any]) -> dict[str, Any]:
+        """按显式连接槽重建 DeerFlow（会话级模型切换；勿走 effective_runtime_config 覆盖 env）。"""
+        runtime_config = {
+            k: slot[k]
+            for k in ("api_key", "base_url", "model_name", "provider_id")
+            if slot.get(k)
+        }
+        new_adapter = DeerFlowClientAdapter.from_env(
+            tool_bridge=self.deerflow.tool_bridge,
+            runtime_config=runtime_config,
+        )
+        self.deerflow = new_adapter
+        return new_adapter.status().to_dict()
+
+    def _session_model_ref(self, session_id: str) -> str | None:
+        session = self.repo.get_copilot_session(session_id)
+        if session and session.default_model:
+            ref = str(session.default_model).strip()
+            if ref:
+                return ref
+        from backend.config.credentials import effective_runtime_config, load_llm_credentials
+
+        merged = effective_runtime_config(self.repo)
+        ws = merged.get("default_model")
+        if ws:
+            return str(ws)
+        data = load_llm_credentials()
+        raw = data.get("default_model")
+        return str(raw).strip() if raw else None
+
+    def _resolve_session_slot(self, session_id: str) -> dict[str, Any]:
+        from backend.config.credentials import load_llm_credentials, resolve_slot
+
+        ref = self._session_model_ref(session_id)
+        return resolve_slot(load_llm_credentials(), ref)
+
+    @asynccontextmanager
+    async def _temporary_llm_slot(self, slot: dict[str, Any]):
+        """单用户桌面场景：按会话模型临时切换 DeerFlow 连接槽。"""
+        env_keys = (
+            "OPENAI_API_KEY",
+            "OPENAI_BASE_URL",
+            "WORKBENCH_AI_MODEL",
+            "WORKBENCH_AI_API_KEY",
+            "WORKBENCH_AI_BASE_URL",
+        )
+        saved = {k: os.environ.get(k) for k in env_keys}
+        saved_model = getattr(self.deerflow, "model_name", None)
+        use_full_reconnect = bool(slot.get("api_key") and slot.get("base_url"))
+        try:
+            if use_full_reconnect:
+                if slot.get("api_key"):
+                    os.environ["OPENAI_API_KEY"] = str(slot["api_key"])
+                    os.environ["WORKBENCH_AI_API_KEY"] = str(slot["api_key"])
+                if slot.get("base_url"):
+                    os.environ["OPENAI_BASE_URL"] = str(slot["base_url"])
+                    os.environ["WORKBENCH_AI_BASE_URL"] = str(slot["base_url"])
+                if slot.get("model_name"):
+                    os.environ["WORKBENCH_AI_MODEL"] = str(slot["model_name"])
+                self._reconnect_with_slot(slot)
+            elif slot.get("model_name"):
+                if slot.get("api_key") and slot.get("base_url"):
+                    self._reconnect_with_slot(slot)
+                else:
+                    self.deerflow.model_name = str(slot["model_name"])
+            yield slot
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            if use_full_reconnect or (slot.get("model_name") and slot.get("api_key") and slot.get("base_url")):
+                self.reconnect_runtime()
+            elif slot.get("model_name") and saved_model is not None:
+                self.deerflow.model_name = saved_model
+
+    def test_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Quick model connectivity test against configured endpoint."""
+        import logging
+
+        logger = logging.getLogger("copilot_service")
+        api_key = payload.get("api_key")
+        base_url = payload.get("base_url") or ""
+        model_name = payload.get("model_name") or self.deerflow.model_name or "gpt-4o"
+        extra_headers = payload.get("headers") if isinstance(payload.get("headers"), dict) else {}
+        allow_empty_key = bool(payload.get("allow_empty_key"))
+        if not api_key and not allow_empty_key:
+            return {
+                "ok": False,
+                "error": "API Key 未配置。请在设置页连接提供商。",
+                "model": model_name,
+                "base_url": base_url or "default",
+            }
+        try:
+            import httpx
+
+            url = (
+                f"{base_url.rstrip('/')}/chat/completions"
+                if base_url
+                else "https://api.openai.com/v1/chat/completions"
+            )
+            transport = httpx.HTTPTransport(proxy=None)
+            headers = {
+                "Content-Type": "application/json",
+                **{str(k): str(v) for k, v in extra_headers.items() if k and v is not None},
+            }
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            with httpx.Client(transport=transport, timeout=30) as client:
+                resp = client.post(
+                    url,
+                    headers=headers,
+                    json={
+                        "model": model_name,
+                        "messages": [{"role": "user", "content": "ping"}],
+                        # Reasoning/thinking models spend tokens on the hidden trace;
+                        # a tiny cap (e.g. 5) makes them return HTTP 400. Keep it small
+                        # but large enough to clear the reasoning budget.
+                        "max_tokens": 256,
+                    },
+                )
+                if resp.status_code >= 400:
+                    # Surface the upstream error body — a bare "HTTP 400" hides the
+                    # real reason (bad model name, unsupported param, quota, etc.).
+                    detail = resp.text.strip()
+                    try:
+                        body = resp.json()
+                        detail = (
+                            (body.get("error") or {}).get("message")
+                            if isinstance(body.get("error"), dict)
+                            else body.get("error") or body.get("message") or detail
+                        )
+                    except Exception:
+                        pass
+                    logger.warning(
+                        "connection test HTTP %s: model=%s detail=%s",
+                        resp.status_code, model_name, detail,
+                    )
+                    return {
+                        "ok": False,
+                        "error": f"HTTP {resp.status_code}: {str(detail)[:500]}",
+                        "model": model_name,
+                        "base_url": base_url or "default",
+                    }
+                data = resp.json()
+            logger.info(
+                "connection test OK: model=%s base_url=%s",
+                model_name,
+                base_url or "openai",
+            )
+            return {
+                "ok": True,
+                "model": data.get("model", model_name),
+                "base_url": base_url or "https://api.openai.com/v1",
+                "latency_ms": round(resp.elapsed.total_seconds() * 1000),
+            }
+        except Exception as exc:
+            logger.warning("connection test failed: %s", exc)
+            return {
+                "ok": False,
+                "error": str(exc),
+                "model": model_name,
+                "base_url": base_url or "default",
+            }
+
+    def _get_previous_tool_calls(self, session_id: str, current_run_id: str) -> list[dict[str, str]]:
+        """Get tool calls from the previous run in the same session."""
+        messages = self.repo.list_copilot_messages(session_id=session_id)
+        
+        runs: dict[str, list[CopilotMessage]] = {}
+        for msg in messages:
+            if msg.run_id:
+                runs.setdefault(msg.run_id, []).append(msg)
+        
+        run_ids_ordered = sorted(
+            runs.keys(),
+            key=lambda rid: min(m.created_at for m in runs[rid]),
+        )
+        
+        previous_run_id = None
+        for rid in reversed(run_ids_ordered):
+            if rid != current_run_id:
+                previous_run_id = rid
+                break
+        
+        if not previous_run_id:
+            return []
+        
+        tool_calls_map: dict[str, dict[str, str]] = {}
+        for msg in runs[previous_run_id]:
+            if msg.kind == 'tool_call':
+                payload = json.loads(msg.payload) if isinstance(msg.payload, str) else msg.payload
+                tool_name = payload.get('tool', '')
+                if tool_name:
+                    tool_calls_map[tool_name] = {
+                        'tool': tool_name,
+                        'called_at': msg.created_at,
+                    }
+            elif msg.kind == 'tool_result':
+                payload = json.loads(msg.payload) if isinstance(msg.payload, str) else msg.payload
+                tool_name = payload.get('tool', '')
+                if tool_name in tool_calls_map:
+                    result = payload.get('result', '')
+                    result_str = str(result)
+                    result_summary = result_str[:200] + '...' if len(result_str) > 200 else result_str
+                    tool_calls_map[tool_name]['result_summary'] = result_summary
+        
+        return list(tool_calls_map.values())
+
+    def list_sessions(self) -> list[CopilotSession]:
+        return self.repo.list_copilot_sessions(limit=100)
+
+    def create_session(self, payload: CopilotSessionCreateRequest) -> CopilotSession:
+        created_at = now_iso()
+        title = (payload.title or "").strip() or self._derive_title(
+            anchor_symbol=payload.anchor_symbol, message=None
+        )
+        session = CopilotSession(
+            session_id=f"session_{uuid4().hex[:12]}",
+            title=title,
+            current_page=payload.current_page,
+            anchor_symbol=payload.anchor_symbol,
+            authority_level=payload.authority_level,
+            default_model=(payload.default_model or "").strip() or None,
+            created_at=created_at,
+            updated_at=created_at,
+            last_message_at=None,
+        )
+        if session.default_model:
+            self._validate_session_model_ref(session.default_model)
+        return self.repo.save_copilot_session(session)
+
+    def get_session(self, session_id: str) -> CopilotSession:
+        session = self.repo.get_copilot_session(session_id)
+        if not session:
+            raise KeyError(session_id)
+        return session
+
+    def update_session(
+        self, session_id: str, payload: CopilotSessionUpdateRequest
+    ) -> CopilotSession:
+        session = self.get_session(session_id)
+        if payload.title is not None:
+            session.title = payload.title.strip()
+        if payload.default_model is not None:
+            ref = payload.default_model.strip()
+            if ref:
+                self._validate_session_model_ref(ref)
+                session.default_model = ref
+            else:
+                session.default_model = None
+        session.updated_at = now_iso()
+        return self.repo.save_copilot_session(session)
+
+    def _validate_session_model_ref(self, default_model: str) -> None:
+        from backend.app_services.llm_provider_service import LlmProviderError, LlmProviderService
+
+        svc = self.llm_provider_service or LlmProviderService(repo=self.repo)
+        try:
+            svc.assert_connected_model(default_model)
+        except LlmProviderError as exc:
+            raise ValueError(str(exc)) from exc
+
+    def delete_session(self, session_id: str) -> None:
+        self.get_session(session_id)
+        self.repo.delete_copilot_session(session_id)
+
+    def list_messages(
+        self, session_id: str, *, run_id: str | None = None
+    ) -> list[CopilotMessage]:
+        self.get_session(session_id)
+        return self.repo.list_copilot_messages(session_id=session_id, run_id=run_id)
+
+    def list_messages_page(
+        self,
+        session_id: str,
+        *,
+        limit_turns: int,
+        before: str | None = None,
+    ) -> dict[str, Any]:
+        self.get_session(session_id)
+        items, has_more, next_before = self.repo.list_copilot_messages_page(
+            session_id=session_id,
+            limit_turns=limit_turns,
+            before_message_id=before,
+        )
+        return {
+            "items": items,
+            "has_more": has_more,
+            "next_before": next_before,
+        }
+
+    def has_run(self, run_id: str, session_id: str | None = None) -> bool:
+        if run_id in self._runs:
+            state = self._runs[run_id]
+            return session_id is None or state.session_id == session_id
+        if self.repo.get_task_by_run_id(
+            run_id
+        ) and self.repo.get_copilot_user_message_by_run_id(run_id):
+            if session_id is None:
+                return True
+            message = self.repo.get_copilot_user_message_by_run_id(run_id)
+            return bool(message and message.session_id == session_id)
+        return False
+
+    def cancel_run(self, run_id: str, session_id: str | None = None) -> dict[str, Any]:
+        """Request cooperative cancellation of an in-flight stream_run.
+
+        Idempotent: finished / unknown runs return ``not_running`` without error
+        so clients can always call stop safely.
+        """
+        if session_id is not None:
+            self.get_session(session_id)
+        active = run_id in self._runs and (
+            session_id is None or self._runs[run_id].session_id == session_id
+        )
+        if not active:
+            return {"status": "not_running", "run_id": run_id}
+        state = self._runs[run_id]
+        self._touch_run(
+            run_id,
+            state,
+            status="cancelling",
+            phase="finishing",
+            event_type="cancel",
+        )
+        self._cancelled_runs.add(run_id)
+        return {"status": "cancelling", "run_id": run_id, **self.progress_payload(run_id)}
+
+    def get_run_status(self, run_id: str, session_id: str | None = None) -> dict[str, Any]:
+        """Return live (or last-known) run liveness for UI docks / reconnect."""
+        if session_id is not None:
+            self.get_session(session_id)
+        state = self._runs.get(run_id)
+        if state is not None:
+            if session_id is not None and state.session_id != session_id:
+                raise KeyError(run_id)
+            return self._snapshot_run(run_id, state)
+        cached = self._run_status_cache.get(run_id)
+        if cached is not None:
+            if session_id is not None and cached.get("session_id") != session_id:
+                raise KeyError(run_id)
+            return {**cached, "alive": False}
+        if self.has_run(run_id, session_id=session_id):
+            return self._persisted_run_progress(run_id, session_id=session_id)
+        raise KeyError(run_id)
+
+    def progress_payload(self, run_id: str) -> dict[str, Any]:
+        """SSE heartbeat / progress body for an in-memory (or cached) run."""
+        state = self._runs.get(run_id)
+        if state is not None:
+            return self._snapshot_run(run_id, state)
+        cached = self._run_status_cache.get(run_id)
+        if cached is not None:
+            return {**cached, "alive": False}
+        if self.has_run(run_id):
+            # Covers the race where to_sse heartbeats before stream_run rehydrates
+            # ``_runs`` after a process-local clear / reattach.
+            return self._persisted_run_progress(run_id)
+        return {
+            "run_id": run_id,
+            "status": "not_running",
+            "phase": "finishing",
+            "current_tool": None,
+            "alive": False,
+        }
+
+    def _persisted_run_progress(
+        self, run_id: str, session_id: str | None = None
+    ) -> dict[str, Any]:
+        """Status from SQLite when the run is not in the in-memory fan-out map."""
+        message = self.repo.get_copilot_user_message_by_run_id(run_id)
+        task = self.repo.get_task_by_run_id(run_id)
+        persisted = [
+            item
+            for item in self.repo.list_copilot_run_messages(run_id)
+            if item.role != "user"
+        ]
+        has_final = any(item.kind == "final_answer" for item in persisted)
+        base = {
+            "run_id": run_id,
+            "session_id": (message.session_id if message else session_id),
+            "task_id": (task.task_id if task else (message.task_id if message else None)),
+            "current_tool": None,
+            "last_event_at": None,
+            "last_event_type": None,
+        }
+        if has_final:
+            return {**base, "status": "completed", "phase": "finishing", "alive": False}
+        if persisted:
+            # Partial history + no live producer → orphan (clients hydrate / retry).
+            return {**base, "status": "not_running", "phase": "finishing", "alive": False}
+        # User message only: producer can still be started on subscribe/reattach.
+        return {**base, "status": "starting", "phase": "thinking", "alive": True}
+
+    def _snapshot_run(self, run_id: str, state: CopilotRunState) -> dict[str, Any]:
+        snap = {
+            "run_id": run_id,
+            "session_id": state.session_id,
+            "task_id": state.task_id,
+            "status": state.status,
+            "phase": state.phase,
+            "current_tool": state.current_tool,
+            "last_event_at": state.last_event_at,
+            "last_event_type": state.last_event_type,
+            "started_at": state.started_at,
+            "updated_at": state.updated_at,
+            "alive": state.status in _ALIVE_RUN_STATUSES,
+        }
+        self._run_status_cache[run_id] = snap
+        return snap
+
+    def _touch_run(
+        self,
+        run_id: str,
+        state: CopilotRunState,
+        *,
+        status: str | None = None,
+        phase: str | None = None,
+        current_tool: Any = _UNSET,
+        event_type: str | None = None,
+    ) -> dict[str, Any]:
+        if status is not None:
+            state.status = status
+        if phase is not None:
+            state.phase = phase
+        if current_tool is not _UNSET:
+            state.current_tool = current_tool  # type: ignore[assignment]
+        if event_type is not None:
+            state.last_event_type = event_type
+        ts = now_iso()
+        state.last_event_at = ts
+        state.updated_at = ts
+        return self._snapshot_run(run_id, state)
+
+    def _apply_event_liveness(
+        self,
+        run_id: str,
+        state: CopilotRunState,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> bool:
+        """Update live phase from a stream event. Returns True if phase/tool changed."""
+        prev_phase = state.phase
+        prev_tool = state.current_tool
+        if event_type == "tool_call":
+            tool = str(payload.get("tool") or "") or None
+            self._touch_run(
+                run_id,
+                state,
+                status="running",
+                phase="tool",
+                current_tool=tool,
+                event_type=event_type,
+            )
+        elif event_type == "tool_result":
+            self._touch_run(
+                run_id,
+                state,
+                status="running",
+                phase="llm",
+                current_tool=None,
+                event_type=event_type,
+            )
+        elif event_type == "clarification":
+            self._touch_run(
+                run_id,
+                state,
+                status="waiting_human",
+                phase="awaiting_human",
+                current_tool=None,
+                event_type=event_type,
+            )
+        elif event_type in ("reasoning", "partial_answer", "skill_trace", "title"):
+            self._touch_run(
+                run_id,
+                state,
+                status="running" if state.status != "cancelling" else "cancelling",
+                phase="llm" if state.phase != "tool" else state.phase,
+                event_type=event_type,
+            )
+        elif event_type == "final":
+            self._touch_run(
+                run_id,
+                state,
+                status="completed",
+                phase="finishing",
+                current_tool=None,
+                event_type=event_type,
+            )
+        elif event_type == "error":
+            stage = str(payload.get("stage") or "")
+            if stage == "user_cancel":
+                self._touch_run(
+                    run_id,
+                    state,
+                    status="cancelled",
+                    phase="finishing",
+                    current_tool=None,
+                    event_type=event_type,
+                )
+            else:
+                self._touch_run(
+                    run_id,
+                    state,
+                    status="failed",
+                    phase="finishing",
+                    current_tool=None,
+                    event_type=event_type,
+                )
+        else:
+            self._touch_run(run_id, state, event_type=event_type)
+        return state.phase != prev_phase or state.current_tool != prev_tool
+
+    def _is_run_cancelled(self, run_id: str) -> bool:
+        return run_id in self._cancelled_runs
+
+    def _emit_cancelled_events(
+        self,
+        *,
+        run_id: str,
+        task_id: str,
+        state: CopilotRunState,
+        start_time: float,
+    ) -> list[SSEEvent]:
+        error_event = SSEEvent(
+            run_id=run_id,
+            task_id=task_id,
+            type="error",
+            payload={
+                "stage": "user_cancel",
+                "error": "用户已停止生成本轮回答",
+                "authority_level": state.request.authority_level.value,
+            },
+        )
+        final_payload = self.result_normalizer.normalize_final(
+            {
+                "conclusion": "已停止生成。",
+                "confidence": "low",
+                "counter_reasons": ["用户主动停止"],
+                "evidence_refs": ["user_cancel"],
+                "next_actions": ["如需继续请重新发送或点重试。"],
+                "disclaimer": RESEARCH_DISCLAIMER,
+            }
+        )
+        final_event = SSEEvent(
+            run_id=run_id,
+            task_id=task_id,
+            type="final",
+            payload=final_payload,
+        )
+        self._persist_stream_event(state, error_event)
+        self._persist_stream_event(state, final_event)
+        self._update_task_step(task_id, "user_cancelled", 100, status="cancelled")
+        self._upsert_run_log(
+            run_id,
+            status="cancelled",
+            error_category="user_cancel",
+            runtime_error="user cancelled",
+            latency_ms=(time.monotonic() - start_time) * 1000,
+        )
+        return [error_event, final_event]
+
+    def create_session_run(
+        self, session_id: str, payload: CopilotSessionMessageRequest
+    ) -> CopilotRun:
+        session = self.get_session(session_id)
+        request = CopilotRequest(
+            message=payload.message,
+            page=payload.page or session.current_page,
+            symbol=payload.symbol or session.anchor_symbol,
+            authority_level=payload.authority_level or session.authority_level,
+            session_id=session_id,
+            client_message_id=payload.client_message_id,
+            attachments=_normalize_message_attachments(payload.attachments),
+            human_input_response=normalize_human_input_response(payload.human_input_response),
+        )
+        return self.create_run(request)
+
+    def create_run(self, request: CopilotRequest) -> CopilotRun:
+        session = self._ensure_session(request)
+        run_id = f"run_{uuid4().hex[:10]}"
+        skill_trace: list[dict[str, Any]] = []
+        title = self._derive_title(anchor_symbol=request.symbol, message=request.message)
+        task = self.task_service.create(
+            title=f"Copilot: {title}",
+            source="lead-agent",
+            current_step="accepted",
+            run_id=run_id,
+            skill_trace=skill_trace,
+        )
+        message_id = f"message_{uuid4().hex[:12]}"
+        user_payload: dict[str, Any] = {
+            "request": {
+                "page": request.page,
+                "symbol": request.symbol,
+                "authority_level": request.authority_level.value,
+            },
+            "intent": "copilot",
+            "skill": "lead-agent",
+            "skills": [],
+        }
+        attachments = _normalize_message_attachments(request.attachments)
+        if attachments:
+            user_payload["attachments"] = attachments
+        human_input_response = normalize_human_input_response(request.human_input_response)
+        if human_input_response:
+            user_payload["human_input_response"] = human_input_response
+            # Keep normalized copy on the request for stream injection
+            request.human_input_response = human_input_response
+        self.repo.save_copilot_message(
+            CopilotMessage(
+                message_id=message_id,
+                session_id=session.session_id,
+                role="user",
+                kind="user_message",
+                text=request.message,
+                page=request.page,
+                symbol=request.symbol,
+                run_id=run_id,
+                task_id=task.task_id,
+                client_message_id=request.client_message_id,
+                payload=user_payload,
+            )
+        )
+        session = self._refresh_session_title(session, request)
+        self._runs[run_id] = CopilotRunState(
+            request=request,
+            session_id=session.session_id,
+            message_id=message_id,
+            task_id=task.task_id,
+            intent="copilot",
+            skill="lead-agent",
+            skill_trace=skill_trace,
+        )
+        self.audit_service.record(
+            "Copilot run created",
+            f"lead-agent page={request.page} symbol={request.symbol or '-'}",
+            request.authority_level,
+        )
+        runtime_status = self.deerflow.status().to_dict()
+        run_slot = self._resolve_session_slot(session.session_id)
+        self.runtime_observer.save_copilot_run_log(
+            CopilotRunLog(
+                run_id=run_id,
+                session_id=session.session_id,
+                task_id=task.task_id,
+                mode=runtime_status["mode"],
+                active_client=runtime_status["active_client"],
+                model_name=run_slot.get("model_name") or runtime_status["model_name"],
+                status="running",
+                tool_call_count=0,
+                started_at=now_iso(),
+                payload={
+                    "intent": "copilot",
+                    "skill": "lead-agent",
+                    "page": request.page,
+                    "symbol": request.symbol,
+                },
+            )
+        )
+        return CopilotRun(
+            run_id=run_id,
+            task_id=task.task_id,
+            intent="copilot",
+            skill="lead-agent",
+            skills=[],
+            session_id=session.session_id,
+            message_id=message_id,
+        )
+
+    async def stream_run(
+        self,
+        run_id: str,
+        task_id: Optional[str] = None,
+        session_id: str | None = None,
+    ) -> AsyncIterator[SSEEvent]:
+        """Subscribe to a run's SSE fan-out (replay + live tail).
+
+        Agent execution is owned by a background producer task so HTTP disconnect
+        does not cancel the run. Re-opening the same ``run_id`` reattaches.
+        """
+        persisted_messages = self.repo.list_copilot_run_messages(run_id)
+        persisted_events = [item for item in persisted_messages if item.role != "user"]
+        if any(item.kind == "final_answer" for item in persisted_events):
+            for item in persisted_events:
+                yield self._message_to_event(item)
+            return
+
+        state = self._runs.get(run_id)
+        if state is None:
+            if persisted_events:
+                # Orphan: partial history, no live producer — do not re-execute tools.
+                async for event in self._emit_orphan_stream_terminal(
+                    run_id, task_id=task_id, session_id=session_id, persisted=persisted_events
+                ):
+                    yield event
+                return
+            recovered = self._recover_run_state(run_id, session_id)
+            if not recovered:
+                raise KeyError(run_id)
+            self._runs[run_id] = recovered
+            state = recovered
+
+        self._ensure_run_producer(run_id, task_id=task_id, session_id=session_id)
+        state = self._runs.get(run_id) or state
+
+        if state.subscriber_lock is None:
+            state.subscriber_lock = asyncio.Lock()
+        queue: asyncio.Queue[SSEEvent | None] = asyncio.Queue()
+        async with state.subscriber_lock:
+            if state.producer_done:
+                snapshot = list(state.live_buffer)
+                attached = False
+            else:
+                state.subscribers.append(queue)
+                snapshot = list(state.live_buffer)
+                attached = True
+
+        for event in snapshot:
+            yield event
+
+        if not attached:
+            # Producer finished between ensure and subscribe — drain any DB finals.
+            if not any(ev.type == "final" for ev in snapshot):
+                persisted_after = [
+                    item
+                    for item in self.repo.list_copilot_run_messages(run_id)
+                    if item.role != "user"
+                ]
+                seen = {(ev.type, id(ev)) for ev in snapshot}
+                for item in persisted_after:
+                    ev = self._message_to_event(item)
+                    if (ev.type, id(ev)) not in seen:
+                        yield ev
+            return
+
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item
+        finally:
+            live = self._runs.get(run_id)
+            if live is not None:
+                try:
+                    live.subscribers.remove(queue)
+                except ValueError:
+                    pass
+
+    async def _emit_orphan_stream_terminal(
+        self,
+        run_id: str,
+        *,
+        task_id: Optional[str],
+        session_id: str | None,
+        persisted: list[Any],
+    ) -> AsyncIterator[SSEEvent]:
+        recovered_state = self._recover_run_state(run_id, session_id)
+        if not recovered_state:
+            raise KeyError(run_id)
+        for item in persisted:
+            yield self._message_to_event(item)
+        resolved_task_id = task_id or recovered_state.task_id
+        error_event = SSEEvent(
+            run_id=run_id,
+            task_id=resolved_task_id,
+            type="error",
+            payload={
+                "stage": "stream_orphan",
+                "error": "copilot run is no longer running; partial output was preserved",
+                "authority_level": recovered_state.request.authority_level.value,
+            },
+        )
+        final_payload = self.result_normalizer.normalize_final(
+            {
+                "conclusion": "本次回答已中断且服务端进程内已无活跃执行。可点重试开启新的一轮。",
+                "confidence": "low",
+                "counter_reasons": ["检测到部分 SSE 事件但缺少 final_answer，且无活跃 producer。"],
+                "evidence_refs": ["copilot_message", "stream_orphan"],
+                "next_actions": ["重新发送消息以创建新的 run_id。"],
+                "disclaimer": RESEARCH_DISCLAIMER,
+            }
+        )
+        final_event = SSEEvent(
+            run_id=run_id,
+            task_id=resolved_task_id,
+            type="final",
+            payload=final_payload,
+        )
+        # Persist only if not already terminal in DB.
+        if not any(item.kind == "final_answer" for item in persisted):
+            self._persist_stream_event(recovered_state, error_event)
+            self._persist_stream_event(recovered_state, final_event)
+            self._update_task_step(
+                resolved_task_id, "stream_orphan_stopped", 100, status="failed"
+            )
+            self._upsert_run_log(
+                run_id,
+                status="failed",
+                error_category="stream_orphan",
+                runtime_error=str(error_event.payload.get("error") or ""),
+            )
+        yield error_event
+        yield final_event
+
+    def _ensure_run_producer(
+        self,
+        run_id: str,
+        *,
+        task_id: Optional[str] = None,
+        session_id: str | None = None,
+    ) -> None:
+        state = self._runs.get(run_id)
+        if state is None:
+            raise KeyError(run_id)
+        if state.producer_done:
+            return
+        task = state.producer_task
+        if task is not None and not task.done():
+            return
+        state.producer_task = asyncio.create_task(
+            self._run_producer_task(run_id, task_id=task_id, session_id=session_id),
+            name=f"copilot-run-{run_id}",
+        )
+
+    async def _run_producer_task(
+        self,
+        run_id: str,
+        *,
+        task_id: Optional[str] = None,
+        session_id: str | None = None,
+    ) -> None:
+        try:
+            async for event in self._drive_agent_stream(
+                run_id, task_id=task_id, session_id=session_id
+            ):
+                self._publish_run_event(run_id, event)
+        except Exception:
+            # _drive_agent_stream already emits error/final on most failures;
+            # unexpected escapes still finalize subscribers.
+            pass
+        finally:
+            self._complete_run_producer(run_id)
+
+    def _publish_run_event(self, run_id: str, event: SSEEvent) -> None:
+        state = self._runs.get(run_id)
+        if state is None:
+            return
+        state.live_buffer.append(event)
+        for queue in list(state.subscribers):
+            try:
+                queue.put_nowait(event)
+            except Exception:
+                pass
+
+    def _complete_run_producer(self, run_id: str) -> None:
+        state = self._runs.get(run_id)
+        if state is None:
+            return
+        state.producer_done = True
+        for queue in list(state.subscribers):
+            try:
+                queue.put_nowait(None)
+            except Exception:
+                pass
+        state.subscribers.clear()
+        if state.status in _ALIVE_RUN_STATUSES:
+            terminal = (
+                "cancelled" if self._is_run_cancelled(run_id) else "completed"
+            )
+            self._touch_run(
+                run_id,
+                state,
+                status=terminal,
+                phase="finishing",
+                current_tool=None,
+                event_type="stream_end",
+            )
+        else:
+            self._snapshot_run(run_id, state)
+        self._cancelled_runs.discard(run_id)
+        self._runs.pop(run_id, None)
+
+    async def _drive_agent_stream(
+        self,
+        run_id: str,
+        task_id: Optional[str] = None,
+        session_id: str | None = None,
+    ) -> AsyncIterator[SSEEvent]:
+        _start_time = time.monotonic()
+        state = self._runs.get(run_id) or self._recover_run_state(run_id, session_id)
+        if not state:
+            raise KeyError(run_id)
+        if run_id not in self._runs:
+            self._runs[run_id] = state
+
+        request = state.request
+        # UI chips (symbol relation) still use the builder. The model only sees
+        # page/symbol/authority in <workbench_context>; checkpoint is conversation truth.
+        context = await asyncio.to_thread(
+            self.copilot_context_builder.build,
+            page=request.page,
+            symbol=request.symbol,
+        )
+        runtime_context = {
+            "page": request.page,
+            "symbol": request.symbol,
+            "_authority_level": request.authority_level.value,
+        }
+        resolved_task_id = task_id or state.task_id
+        # 按工具名捕获最近一次有意义的结果，供 final 阶段回填。
+        # 单一累加器替代散落的硬编码 if 块（见 _capture_tool_result）。
+        captured: Dict[str, Dict[str, Any] | None] = {
+            "report": None,
+            "draft": None,
+            "review": None,
+        }
+        tool_call_events: list[dict[str, Any]] = []
+        tool_result_events: list[dict[str, Any]] = []
+        delegated_calls: dict[str, str] = {}  # task 工具 call_id → 委派技能名
+        final_seen = False
+        # ask_clarification：ClarificationMiddleware 把反问以同名 ToolMessage 落进
+        # 流后直接终止本轮（用户下一条消息即回答）。捕获它以便发专用 clarification SSE。
+        # 不再把问题正文塞进 final.conclusion（避免与 Human Input Card 重复 + 信心度/引用）。
+        clarification_payload: Dict[str, Any] | None = None
+        # call_id → ask_clarification tool args (harness 2.1 has no artifact.human_input)
+        clarification_args_by_call: dict[str, dict[str, Any]] = {}
+
+        self._update_task_step(resolved_task_id, "accepted", 20)
+        self._touch_run(
+            run_id,
+            state,
+            status="running",
+            phase="llm",
+            current_tool=None,
+            event_type="stream_start",
+        )
+
+        try:
+            run_slot = self._resolve_session_slot(state.session_id)
+            async with self._temporary_llm_slot(run_slot):
+                async for event in self.deerflow.stream(
+                    run_id=run_id,
+                    task_id=resolved_task_id,
+                    skill=state.skill,
+                    message=request.message,
+                    context=runtime_context,
+                    skill_trace=state.skill_trace,
+                    history=[],
+                    session_id=state.session_id,
+                    subagent_enabled=skill_specs.subagent_supported(),
+                    plan_mode=skill_specs.plan_mode_supported(),
+                    model_name=run_slot.get("model_name"),
+                    attachments=list(request.attachments or []),
+                    human_input_response=normalize_human_input_response(
+                        getattr(request, "human_input_response", None)
+                    ),
+                    ):
+                    if self._is_run_cancelled(run_id):
+                        for cancelled in self._emit_cancelled_events(
+                            run_id=run_id,
+                            task_id=resolved_task_id,
+                            state=state,
+                            start_time=_start_time,
+                        ):
+                            self._apply_event_liveness(
+                                run_id,
+                                state,
+                                cancelled.type,
+                                cancelled.payload if isinstance(cancelled.payload, dict) else {},
+                            )
+                            yield cancelled
+                        break
+                    payload = event["payload"]
+                    self._capture_tool_result(event, captured)
+                    # 实际委派观测：task 工具调用/回执 → skill_trace 行状态推进 + 增量 SSE
+                    observed_sse = self._observe_delegation(
+                        state, event, run_id, resolved_task_id, delegated_calls
+                    )
+                    if observed_sse:
+                        yield observed_sse
+                    if (
+                        event["type"] == "tool_call"
+                        and str(payload.get("tool") or "") == "ask_clarification"
+                    ):
+                        call_id = str(payload.get("call_id") or "")
+                        raw_args = payload.get("arguments")
+                        if isinstance(raw_args, str):
+                            try:
+                                raw_args = json.loads(raw_args)
+                            except (TypeError, ValueError):
+                                raw_args = {}
+                        if call_id and isinstance(raw_args, dict):
+                            clarification_args_by_call[call_id] = raw_args
+                    if (
+                        event["type"] == "tool_result"
+                        and str(payload.get("tool") or "") == "ask_clarification"
+                    ):
+                        call_id = str(payload.get("call_id") or "")
+                        clarification_payload = extract_human_input_from_tool_result(payload)
+                        if clarification_payload is None:
+                            clarification_payload = build_human_input_request(
+                                args=clarification_args_by_call.get(call_id),
+                                call_id=call_id or None,
+                                formatted_result=str(payload.get("result") or ""),
+                            )
+                        clarification_sse = SSEEvent(
+                            run_id=run_id,
+                            task_id=resolved_task_id,
+                            type="clarification",
+                            payload=clarification_payload,
+                        )
+                        self._persist_stream_event(state, clarification_sse)
+                        if self._apply_event_liveness(
+                            run_id, state, "clarification", clarification_payload or {}
+                        ):
+                            yield SSEEvent(
+                                run_id=run_id,
+                                task_id=resolved_task_id,
+                                type="progress",
+                                payload=self.progress_payload(run_id),
+                            )
+                        yield clarification_sse
+                    if event["type"] == "final":
+                        last_report_result = captured["report"]
+                        last_draft_result = captured["draft"]
+                        last_review_result = captured["review"]
+                        try:
+                            payload = self.result_normalizer.normalize_final(payload)
+                            payload["skill_trace"] = state.skill_trace
+                            payload.setdefault(
+                                "evidence_refs",
+                                self._evidence_refs(
+                                    state.skill_trace, context, tool_call_events
+                                ),
+                            )
+                            if clarification_payload:
+                                payload["clarification"] = clarification_payload
+                                # 反问轮次只保留 Human Input Card：丢掉模型开场白 /
+                                # 占位 conclusion 与信心度、引用，避免再冒一张 final 气泡。
+                                payload["conclusion"] = ""
+                                payload["confidence"] = None
+                                payload["evidence_refs"] = []
+                                payload["disclaimer"] = None
+                            if last_report_result:
+                                self.copilot_context_builder._cache.invalidate(
+                                    "reports_summary"
+                                )
+                                payload.setdefault(
+                                    "report_id", last_report_result.get("report_id")
+                                )
+                                payload.setdefault(
+                                    "quality_status",
+                                    last_report_result.get("quality_status"),
+                                )
+                                payload.setdefault(
+                                    "evidence_refs",
+                                    last_report_result.get("evidence_refs")
+                                    or payload.get("evidence_refs"),
+                                )
+                                payload.setdefault(
+                                    "valid_until", last_report_result.get("valid_until")
+                                )
+                                payload["disclaimer"] = (
+                                    last_report_result.get("disclaimer")
+                                    or payload["disclaimer"]
+                                )
+                                if last_report_result.get("candidate_actions"):
+                                    payload["execution_guard"] = {
+                                        **(last_report_result.get("execution_guard") or {}),
+                                        "auto_trade": False,
+                                    }
+                            trade_like_tools = {
+                                "generate_draft_order",
+                                "run_strategy_backtest",
+                                "confirm_rebalance_draft",
+                                "place_real_order",
+                            }
+                            if last_draft_result or last_review_result or any(
+                                str(item.get("tool") or "") in trade_like_tools
+                                for item in tool_call_events
+                            ):
+                                payload["execution_guard"] = {
+                                    "research_only": True,
+                                    "auto_trade": False,
+                                    "status": "real_order_disabled",
+                                    "reason": "V1 只提供研究结论与拟单草案，真实交易保持关闭。",
+                                }
+                            if last_draft_result:
+                                self.copilot_context_builder._cache.invalidate(
+                                    "holdings_summary"
+                                )
+                                self.copilot_context_builder._cache.invalidate(
+                                    "inbox_summary"
+                                )
+                                payload["draft_id"] = last_draft_result.get("draft_id")
+                                payload["draft_status"] = last_draft_result.get(
+                                    "draft_status"
+                                ) or last_draft_result.get("status")
+                                if last_draft_result.get("status") == "needs_confirmation":
+                                    payload.setdefault("next_actions", []).append(
+                                        "在调仓页显式创建或确认草案。"
+                                    )
+                            if last_review_result:
+                                self.copilot_context_builder._cache.invalidate(
+                                    "holdings_summary"
+                                )
+                                self.copilot_context_builder._cache.invalidate(
+                                    "inbox_summary"
+                                )
+                                payload["review_id"] = last_review_result.get("review_id")
+                                payload["review_status"] = last_review_result.get("status")
+                                payload["status"] = last_review_result.get("status")
+                                payload["blockers"] = list(
+                                    last_review_result.get("blocker_codes") or []
+                                )
+                                payload["blocker_codes"] = list(
+                                    last_review_result.get("blocker_codes") or []
+                                )
+                                payload["execution_guard"] = last_review_result.get(
+                                    "execution_guard"
+                                ) or payload.get("execution_guard")
+                                if last_review_result.get("status") == "needs_confirmation":
+                                    payload.setdefault("next_actions", []).append(
+                                        "在审查页显式发起 pre-trade review。"
+                                    )
+                            self._update_task_step(
+                                resolved_task_id, "final", 100, status="done"
+                            )
+                            usage = payload.get("usage") or {}
+                            _usage_in = usage.get("input_tokens") or usage.get("prompt_tokens") or 0
+                            _usage_out = (
+                                usage.get("output_tokens") or usage.get("completion_tokens") or 0
+                            )
+                            if _usage_in or _usage_out:
+                                payload.setdefault("model_name", self.deerflow.model_name)
+                                payload.setdefault(
+                                    "cost_estimate",
+                                    _estimate_cost(
+                                        _usage_in, _usage_out, self.deerflow.model_name
+                                    ),
+                                )
+                            self._upsert_run_log(
+                                run_id,
+                                status="completed",
+                                tool_call_count=len(
+                                    [
+                                        item
+                                        for item in self.repo.list_copilot_run_messages(
+                                            run_id
+                                        )
+                                        if item.kind == "tool_call"
+                                    ]
+                                ),
+                                usage_input_tokens=usage.get("input_tokens"),
+                                usage_output_tokens=usage.get("output_tokens")
+                                or usage.get("completion_tokens"),
+                                latency_ms=(time.monotonic() - _start_time) * 1000,
+                            )
+                        except Exception as exc:
+                            payload = self.result_normalizer.normalize_final(
+                                payload
+                                if isinstance(payload, dict)
+                                else {"conclusion": "AI 最终收口已降级。"}
+                            )
+                            payload.setdefault("counter_reasons", []).append(
+                                f"final enrichment degraded: {type(exc).__name__}"
+                            )
+                            payload.setdefault("skill_trace", state.skill_trace)
+                            payload.setdefault(
+                                "evidence_refs",
+                                self._evidence_refs(
+                                    state.skill_trace, context, tool_call_events
+                                ),
+                            )
+                    sse_event = SSEEvent(
+                        run_id=run_id,
+                        task_id=resolved_task_id,
+                        type=event["type"],
+                        payload=payload,
+                    )
+                    if event["type"] == "tool_call":
+                        tool_call_events.append(payload)
+                    elif event["type"] == "tool_result":
+                        tool_result_events.append(payload)
+                    # Handle final events - skip empty ones, keep the one with content.
+                    # Clarification rounds intentionally have empty conclusion; still emit
+                    # final so the client closes the stream and history marks the run done.
+                    if event["type"] == "final":
+                        conclusion = str(payload.get("conclusion") or "")
+                        if not conclusion and not clarification_payload:
+                            # Skip empty final events
+                            continue
+                        if final_seen:
+                            # Already have a final with content, skip
+                            continue
+                        final_seen = True
+                    # title 是瞬态事件（会话标题已由前端 title listener 更新），落库会
+                    # 走 _serialize_event 的兜底分支变成一条空 final_answer——既污染
+                    # 历史，又会让断流恢复的「已收口」判定（any final_answer）误判。
+                    if event["type"] not in ("reasoning", "partial_answer", "skill_trace", "title"):
+                        self._persist_stream_event(state, sse_event)
+                    if self._apply_event_liveness(run_id, state, event["type"], payload if isinstance(payload, dict) else {}):
+                        yield SSEEvent(
+                            run_id=run_id,
+                            task_id=resolved_task_id,
+                            type="progress",
+                            payload=self.progress_payload(run_id),
+                        )
+                    yield sse_event
+                    if event["type"] in ("final", "error"):
+                        pass
+        except Exception as exc:
+            error_sse = SSEEvent(
+                run_id=run_id,
+                task_id=resolved_task_id,
+                type="error",
+                payload={
+                    "stage": "stream_run",
+                    "error": user_facing_error(str(exc)),
+                    "authority_level": request.authority_level.value,
+                },
+            )
+            self._persist_stream_event(state, error_sse)
+            yield error_sse
+            fallback_payload = self.result_normalizer.normalize_final(
+                {
+                    "conclusion": f"AI 流处理异常中断：{user_facing_error(str(exc))}",
+                    "confidence": "low",
+                    "counter_reasons": [f"未预期异常：{type(exc).__name__}"],
+                    "disclaimer": RESEARCH_DISCLAIMER,
+                }
+            )
+            final_sse = SSEEvent(
+                run_id=run_id,
+                task_id=resolved_task_id,
+                type="final",
+                payload=fallback_payload,
+            )
+            self._persist_stream_event(state, final_sse)
+            yield final_sse
+            self._update_task_step(
+                resolved_task_id, "stream_crashed", 100, status="failed"
+            )
+            self._upsert_run_log(
+                run_id,
+                status="failed",
+                error_category=categorize_error(exc),
+                runtime_error=str(exc),
+                latency_ms=(time.monotonic() - _start_time) * 1000,
+            )
+            self._touch_run(
+                run_id,
+                state,
+                status="failed",
+                phase="finishing",
+                current_tool=None,
+                event_type="error",
+            )
+
+    @staticmethod
+    def _capture_tool_result(
+        event: dict[str, Any], captured: dict[str, dict[str, Any] | None]
+    ) -> None:
+        """Record the latest meaningful tool_result into ``captured`` for final enrichment.
+
+        Replaces three hardcoded per-tool if-blocks in stream_run. Behavior is
+        preserved exactly: report is only captured when not pending confirmation;
+        draft/review are captured whenever the result is a dict.
+        """
+        if event.get("type") != "tool_result":
+            return
+        payload = event.get("payload") or {}
+        result = payload.get("result")
+        # direct/embedded 模式下 ToolMessage 内容是 JSON 字符串(stub 才是 dict):
+        # 不解析就会漏捕 draft/report/review,final 富化(draft_id 等)全部失效
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except ValueError:
+                return
+        if not isinstance(result, dict):
+            return
+        tool = payload.get("tool")
+        if tool == "generate_report":
+            if result.get("status") != "needs_confirmation":
+                captured["report"] = result
+        elif tool in ("generate_draft_order", "confirm_rebalance_draft"):
+            captured["draft"] = result
+        elif tool == "create_pre_trade_review":
+            captured["review"] = result
+
+    def _ensure_session(self, request: CopilotRequest) -> CopilotSession:
+        if request.session_id:
+            session = self.repo.get_copilot_session(request.session_id)
+            if not session:
+                raise KeyError(request.session_id)
+            return session
+        return self.create_session(
+            CopilotSessionCreateRequest(
+                title=self._derive_title(
+                    anchor_symbol=request.symbol, message=request.message
+                ),
+                current_page=request.page,
+                anchor_symbol=request.symbol,
+                authority_level=request.authority_level,
+            )
+        )
+
+    def _refresh_session_title(
+        self, session: CopilotSession, request: CopilotRequest
+    ) -> CopilotSession:
+        derived = self._derive_title(
+            anchor_symbol=request.symbol, message=request.message
+        )
+        if session.title and session.title != "新会话":
+            return session
+        updated = session.model_copy(
+            update={
+                "title": derived,
+                "current_page": request.page,
+                "anchor_symbol": request.symbol or session.anchor_symbol,
+                "authority_level": request.authority_level,
+                "updated_at": now_iso(),
+            }
+        )
+        return self.repo.save_copilot_session(updated)
+
+    def _recover_run_state(
+        self, run_id: str, session_id: str | None
+    ) -> CopilotRunState | None:
+        user_message = self.repo.get_copilot_user_message_by_run_id(run_id)
+        task = self.repo.get_task_by_run_id(run_id)
+        if not user_message or not task:
+            return None
+        if session_id and user_message.session_id != session_id:
+            return None
+        session = self.repo.get_copilot_session(user_message.session_id)
+        if not session:
+            return None
+        request = CopilotRequest(
+            message=user_message.text,
+            page=(user_message.payload.get("request") or {}).get("page")
+            or user_message.page
+            or session.current_page,
+            symbol=(user_message.payload.get("request") or {}).get("symbol")
+            or user_message.symbol
+            or session.anchor_symbol,
+            authority_level=AuthorityLevel(
+                (user_message.payload.get("request") or {}).get("authority_level")
+                or session.authority_level
+            ),
+            session_id=session.session_id,
+            client_message_id=user_message.client_message_id,
+            attachments=_normalize_message_attachments(user_message.payload.get("attachments")),
+            human_input_response=normalize_human_input_response(
+                user_message.payload.get("human_input_response")
+            ),
+        )
+        intent_name = str(user_message.payload.get("intent") or "") or "copilot"
+        skill_name = str(user_message.payload.get("skill") or "") or "lead-agent"
+        skill_trace = list(task.skill_trace or [])
+        return CopilotRunState(
+            request=request,
+            session_id=session.session_id,
+            message_id=user_message.message_id,
+            task_id=task.task_id,
+            intent=intent_name,
+            skill=skill_name,
+            skill_trace=skill_trace,
+        )
+
+    def _persist_stream_event(self, state: CopilotRunState, event: SSEEvent) -> None:
+        role, kind, text, payload = self._serialize_event(event.type, event.payload)
+        self.repo.save_copilot_message(
+            CopilotMessage(
+                message_id=f"message_{uuid4().hex[:12]}",
+                session_id=state.session_id,
+                role=role,
+                kind=kind,
+                text=text,
+                page=state.request.page,
+                symbol=state.request.symbol,
+                run_id=event.run_id,
+                task_id=event.task_id,
+                payload=payload,
+                created_at=event.created_at,
+            )
+        )
+
+    def _message_to_event(self, message: CopilotMessage) -> SSEEvent:
+        return SSEEvent(
+            run_id=message.run_id or "run_none",
+            task_id=message.task_id or "task_none",
+            type=self._event_type_for_kind(message.kind),
+            payload=message.payload,
+            created_at=message.created_at,
+        )
+
+    def _serialize_event(
+        self, event_type: str, payload: dict[str, Any]
+    ) -> tuple[str, str, str, dict[str, Any]]:
+        if event_type == "skill_trace":
+            data = {
+                "phase": payload.get("phase"),
+                "items": payload.get("items") or [],
+                "note": payload.get("note"),
+            }
+            return "system", "skill_trace", payload.get("note") or "skill trace", data
+        if event_type == "tool_call":
+            args = payload.get("arguments") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except ValueError:
+                    args = {}
+            if not isinstance(args, dict):
+                args = {}
+            preview = {
+                key: value
+                for key, value in args.items()
+                if key
+                in {
+                    "symbol",
+                    "report_type",
+                    "source_type",
+                    "source_id",
+                    "strategy_id",
+                    "limit",
+                    "priority",
+                    "status",
+                }
+            }
+            tool_name = str(payload.get("tool") or "")
+            task_meta: dict[str, Any] | None = None
+            if tool_name == "task":
+                prompt = str(args.get("prompt") or "")
+                task_meta = {
+                    "subagent_type": str(args.get("subagent_type") or ""),
+                    "description": str(args.get("description") or ""),
+                    "prompt": prompt[:800] if len(prompt) > 800 else prompt,
+                }
+                for key in ("subagent_type", "description"):
+                    val = task_meta.get(key)
+                    if val:
+                        preview[key] = val
+            data = {
+                "tool": payload.get("tool"),
+                "call_id": payload.get("call_id"),
+                "authority_level": payload.get("authority_level"),
+                "argument_keys": sorted(args.keys()),
+                "arguments_preview": preview,
+            }
+            if task_meta:
+                data["task_meta"] = task_meta
+            return (
+                "assistant",
+                "tool_call",
+                str(payload.get("tool") or "tool_call"),
+                data,
+            )
+        if event_type == "tool_result":
+            result = payload.get("result")
+            data = {
+                "tool": payload.get("tool"),
+                "call_id": payload.get("call_id"),
+                "execution_mode": payload.get("execution_mode"),
+                "risk": payload.get("risk"),
+                "result_preview": self._tool_result_preview(
+                    str(payload.get("tool") or ""), result
+                ),
+            }
+            return (
+                "tool",
+                "tool_result",
+                str(payload.get("tool") or "tool_result"),
+                data,
+            )
+        if event_type == "partial_answer":
+            data = {"text": payload.get("text", "")}
+            return "assistant", "partial_answer", data["text"], data
+        if event_type == "reasoning":
+            data = {
+                "text": payload.get("text"),
+                "phase": payload.get("phase"),
+                "status": payload.get("status"),
+                "latest_text": payload.get("latest_text"),
+            }
+            return (
+                "system",
+                "reasoning",
+                data.get("text") or data.get("phase") or "reasoning",
+                data,
+            )
+        if event_type == "clarification":
+            # 不落成 final_answer：断流恢复用 final_answer 判定本轮是否收口，
+            # 反问事件混进去会误判（且产生一条空壳回答）。
+            # 透传 DeerFlow-native human_input_request 字段（含 legacy question/call_id）。
+            data = dict(payload) if isinstance(payload, dict) else {}
+            data.setdefault("question", payload.get("question") if isinstance(payload, dict) else None)
+            data.setdefault("call_id", payload.get("call_id") if isinstance(payload, dict) else None)
+            return (
+                "assistant",
+                "clarification",
+                str((payload or {}).get("question") or ""),
+                data,
+            )
+        if event_type == "error":
+            data = {
+                "tool": payload.get("tool"),
+                "call_id": payload.get("call_id"),
+                "error": payload.get("error"),
+                "authority_level": payload.get("authority_level"),
+                "stage": payload.get("stage"),
+            }
+            return "system", "error", str(payload.get("error") or "error"), data
+        data = {
+            "conclusion": payload.get("conclusion"),
+            "confidence": payload.get("confidence"),
+            "disclaimer": payload.get("disclaimer"),
+            "evidence_refs": payload.get("evidence_refs")
+            or payload.get("tool_evidence_refs")
+            or [],
+            "report_id": payload.get("report_id"),
+            "quality_status": payload.get("quality_status"),
+            "draft_id": payload.get("draft_id"),
+            "draft_status": payload.get("draft_status"),
+            "review_id": payload.get("review_id"),
+            "review_status": payload.get("review_status"),
+            "blocker_codes": payload.get("blocker_codes") or [],
+            "next_actions": payload.get("next_actions") or [],
+        }
+        if payload.get("clarification"):
+            data["clarification"] = payload.get("clarification")
+        return (
+            "assistant",
+            "final_answer",
+            str(payload.get("conclusion") or ""),
+            data,
+        )
+
+    def _tool_result_preview(self, tool: str, result: Any) -> dict[str, Any]:
+        if not isinstance(result, dict):
+            return {"value": result}
+        if result.get("status") == "needs_confirmation":
+            return {
+                "status": result.get("status"),
+                "reason": result.get("reason"),
+                "next_action": result.get("next_action"),
+            }
+        preview_keys = {
+            "run_id",
+            "strategy_id",
+            "report_id",
+            "quality_status",
+            "valid_until",
+            "draft_id",
+            "draft_status",
+            "review_id",
+            "status",
+            "summary",
+            "open_count",
+            "high_count",
+            "overdue_count",
+            "snoozed_count",
+            "snapshot_id",
+            "market_value",
+            "cash_estimate",
+            "equity_estimate",
+            "pnl_estimate",
+            "risk_count",
+        }
+        preview = {key: value for key, value in result.items() if key in preview_keys}
+        if tool == "generate_report":
+            preview["candidate_action_count"] = len(
+                result.get("candidate_actions") or []
+            )
+        return preview
+
+    def _event_type_for_kind(self, kind: str) -> str:
+        return {
+            "skill_trace": "skill_trace",
+            "tool_call": "tool_call",
+            "tool_result": "tool_result",
+            "partial_answer": "partial_answer",
+            "reasoning": "reasoning",
+            "clarification": "clarification",
+            "error": "error",
+            "final_answer": "final",
+        }.get(kind, "reasoning")
+
+    def _derive_title(self, *, anchor_symbol: str | None, message: str | None) -> str:
+        scheduled = scheduled_task_session_title(message)
+        if scheduled:
+            return scheduled
+        if message:
+            trimmed = message.strip()
+            if trimmed:
+                return trimmed[:24]
+        if anchor_symbol:
+            return f"{anchor_symbol.upper()} 会话"
+        return "新会话"
+
+    def _build_turn_summary(
+        self,
+        *,
+        intent: str,
+        user_message: str,
+        tool_call_events: list[dict[str, Any]],
+        tool_result_events: list[dict[str, Any]],
+        final_payload: dict[str, Any] | None,
+        error_payload: dict[str, Any] | None,
+    ) -> TurnSummary:
+        outcome = classify_outcome(error_payload)
+        hint = error_hint(error_payload) if error_payload else None
+        state_changes = self._extract_state_changes(tool_call_events, tool_result_events)
+        summary = self._build_summary_text(outcome, tool_result_events, hint)
+        return TurnSummary(
+            question=user_message[:100],
+            intent=intent,
+            outcome=outcome,
+            summary=summary,
+            state_changes=state_changes,
+            error_hint=hint,
+        )
+
+    @staticmethod
+    def _build_summary_text(
+        outcome: str,
+        tool_results: list[dict[str, Any]],
+        error_hint: str | None,
+    ) -> str:
+        parts: list[str] = []
+        for t in tool_results:
+            tool_name = t.get("tool", "")
+            if tool_name == "generate_draft_order":
+                preview = t.get("result_preview") or {}
+                draft_id = preview.get("draft_id", "")
+                parts.append(f"生成了草案 {draft_id}" if draft_id else "生成了草案")
+            elif tool_name == "confirm_rebalance_draft":
+                parts.append("确认了草案")
+            elif tool_name == "create_pre_trade_review":
+                preview = t.get("result_preview") or {}
+                review_id = preview.get("review_id", "")
+                parts.append(f"创建了审查 {review_id}" if review_id else "创建了交易前审查")
+            elif tool_name == "generate_report":
+                preview = t.get("result_preview") or {}
+                report_id = preview.get("report_id", "")
+                parts.append(f"生成了报告 {report_id}" if report_id else "生成了报告")
+        if outcome != "success" and error_hint:
+            hints: dict[str, str] = {
+                "DRAFT_NOT_CONFIRMED": "草案需先在持仓页确认后才能审查",
+                "MISSING_DRAFT_ID": "请先生成草案再操作",
+                "DRAFT_ALREADY_CONFIRMED": "草案已是已确认状态，无需重复操作",
+                "DRAFT_EXPIRED": "草案已过期，需要重新生成",
+                "PERMISSION_DENIED": "权限不足，该操作仅限页面显式触发",
+            }
+            parts.append(hints.get(error_hint, "操作未完成"))
+        elif outcome != "success":
+            parts.append("操作未完成")
+        return "。".join(parts) if parts else "无具体操作。"
+
+    @staticmethod
+    def _extract_state_changes(
+        tool_calls: list[dict[str, Any]],
+        tool_results: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        result_by_call = {
+            r.get("call_id", ""): r
+            for r in tool_results
+            if r.get("call_id")
+        }
+        state: dict[str, list[dict[str, Any]]] = {
+            "generated_drafts": [],
+            "confirmed_drafts": [],
+            "created_reviews": [],
+            "generated_reports": [],
+        }
+        for tc in tool_calls:
+            tool = tc.get("tool", "")
+            args = tc.get("arguments_preview") or {}
+            call_id = tc.get("call_id", "")
+            tr = result_by_call.get(call_id, {})
+            preview = tr.get("result_preview") or {}
+            if tool == "generate_draft_order":
+                draft_id = preview.get("draft_id") or ""
+                symbol = args.get("symbol") or tr.get("symbol") or ""
+                state["generated_drafts"].append({"id": draft_id, "symbol": symbol})
+            elif tool == "confirm_rebalance_draft":
+                draft_id = preview.get("draft_id") or args.get("draft_id") or ""
+                state["confirmed_drafts"].append({"id": draft_id})
+            elif tool == "create_pre_trade_review":
+                review_id = preview.get("review_id") or ""
+                draft_id = preview.get("draft_id") or args.get("draft_id") or ""
+                state["created_reviews"].append({"id": review_id, "draft_id": draft_id})
+            elif tool == "generate_report":
+                report_id = preview.get("report_id") or ""
+                state["generated_reports"].append({"id": report_id})
+        return state
+
+    def _get_or_create_session_state(self, session_id: str) -> SessionStateData:
+        # session_state 只是内存里的轮次记忆。原实现的 dict 只增不删，单进程长跑会无限膨胀。
+        # 这里做 LRU 上限淘汰：命中则移到末尾，新建超限则丢弃最久未用的会话。
+        state = self._session_states.pop(session_id, None)
+        if state is None:
+            state = SessionStateData(active_drafts={}, active_reviews={})
+            while len(self._session_states) >= MAX_SESSION_STATES:
+                self._session_states.pop(next(iter(self._session_states)))
+        self._session_states[session_id] = state
+        return state
+
+    def _update_session_state(self, session_id: str, turn: TurnSummary) -> None:
+        state = self._get_or_create_session_state(session_id)
+        state.apply_turn(turn)
+
+    def _observe_delegation(
+        self,
+        state: CopilotRunState,
+        event: dict[str, Any],
+        run_id: str,
+        task_id: str,
+        delegated_calls: dict[str, str],
+    ) -> SSEEvent | None:
+        """Record observed ``task()`` delegations onto skill_trace (projection only)."""
+        etype = event["type"]
+        payload = event["payload"]
+        if etype == "tool_call" and str(payload.get("tool") or "") == "task":
+            args = payload.get("arguments") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except ValueError:
+                    args = {}
+            skill = str(args.get("subagent_type") or "") if isinstance(args, dict) else ""
+            call_id = str(payload.get("call_id") or "")
+            if not skill or not call_id:
+                return None
+            delegated_calls[call_id] = skill
+            row = next((r for r in state.skill_trace if r.get("skill") == skill), None)
+            labels = skill_specs.skill_labels()
+            authority = skill_specs.skill_authority()
+            if row is None:
+                state.skill_trace.append({
+                    "step": len(state.skill_trace) + 1,
+                    "skill": skill,
+                    "label": labels.get(skill, skill),
+                    "authority_level": authority.get(skill, "?"),
+                    "status": "delegated",
+                    "purpose": self._skill_purpose(skill),
+                    "handoff": None,
+                    "blocked_reason": None,
+                })
+            elif row.get("status") in ("available", "required", None, ""):
+                row["status"] = "delegated"
+            return self._skill_trace_sse(state, run_id, task_id)
+        if etype == "tool_result":
+            skill = delegated_calls.get(str(payload.get("call_id") or ""))
+            if not skill:
+                return None
+            row = next(
+                (r for r in state.skill_trace
+                 if r.get("skill") == skill and r.get("status") == "delegated"),
+                None,
+            )
+            if row is None:
+                return None
+            row["status"] = "done"
+            return self._skill_trace_sse(state, run_id, task_id)
+        return None
+
+    def _skill_trace_sse(
+        self, state: CopilotRunState, run_id: str, task_id: str
+    ) -> SSEEvent:
+        return SSEEvent(
+            run_id=run_id,
+            task_id=task_id,
+            type="skill_trace",
+            payload={
+                "phase": "observed",
+                "items": state.skill_trace,
+                "note": "实际委派进度（由 task 工具事件推进）。",
+            },
+        )
+
+    def _skill_purpose(self, skill_name: str) -> str:
+        purposes = {
+            "stock-researcher": "读取个股上下文、行情、历史和情报证据",
+            "valuation-analyst": "基于财报做盈利/偿债/估值倍数与财务健康分析",
+            "catalyst-tracker": "从情报/公告提炼带时点的事件驱动催化剂",
+            "stock-monitor": "解释盯盘事件和规则触发原因",
+            "risk-officer": "评估持仓集中度和组合风险",
+            "strategy-analyst": "读取策略库并执行只读回测，输出策略快照和研究结论",
+            "rebalance-planner": "生成调仓方案和拟单草案，不执行真实交易",
+            "report-writer": "汇总结论、证据、反对理由和风险提示",
+            "execution-agent-disabled": "V1 真实交易执行关闭，仅保留阻断占位",
+        }
+        # Fall back to the skill's label so newly-added skills never KeyError here.
+        return purposes.get(skill_name) or self.skill_registry.skills.get(
+            skill_name, type("S", (), {"label": skill_name})
+        ).label
+
+    def _evidence_refs(
+        self,
+        skill_trace: list[dict[str, Any]],
+        context: Dict[str, Any],
+        tool_call_events: list[dict[str, Any]] | None = None,
+    ) -> list[str]:
+        refs = ["skill_registry", "lead-agent"]
+        if context:
+            refs.extend(["copilot_context_builder", "provider_router"])
+        tools = {
+            str(item.get("tool") or "")
+            for item in (tool_call_events or [])
+        }
+        observed = {str(item.get("skill") or "") for item in skill_trace}
+        if "risk-officer" in observed or "evaluate_policy_risk" in tools:
+            refs.append("portfolio_risk")
+        if "strategy-analyst" in observed or "run_strategy_backtest" in tools:
+            refs.extend(["strategy_spec", "backtest_run", "research_only"])
+        if "rebalance-planner" in observed or "generate_draft_order" in tools:
+            refs.extend(
+                [
+                    "draft_order_guard:auto_trade_false",
+                    "auto_trade_false",
+                    "pre_trade_review",
+                ]
+            )
+        return refs
+
+    def _update_task_step(
+        self, task_id: str, current_step: str, progress: int, status: str | None = None
+    ) -> None:
+        try:
+            self.task_service.update(
+                task_id, status=status, progress=progress, current_step=current_step
+            )
+        except KeyError:
+            return
+
+    def _upsert_run_log(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        error_category: str | None = None,
+        runtime_error: str | None = None,
+        tool_call_count: int | None = None,
+        usage_input_tokens: int | None = None,
+        usage_output_tokens: int | None = None,
+        cost: float | None = None,
+        latency_ms: float | None = None,
+    ) -> None:
+        existing = self.runtime_observer.get_copilot_run_log(run_id)
+        if not existing:
+            return
+        cost_val = cost if cost is not None else existing.cost
+        if cost_val is None and (
+            usage_input_tokens is not None or existing.usage_input_tokens is not None
+        ):
+            inp = (
+                usage_input_tokens
+                if usage_input_tokens is not None
+                else existing.usage_input_tokens
+            )
+            out = (
+                usage_output_tokens
+                if usage_output_tokens is not None
+                else existing.usage_output_tokens
+            )
+            cost_val = _estimate_cost(inp or 0, out or 0, existing.model_name)
+        updated = existing.model_copy(
+            update={
+                "status": status,
+                "error_category": error_category,
+                "runtime_error": runtime_error,
+                "tool_call_count": tool_call_count
+                if tool_call_count is not None
+                else existing.tool_call_count,
+                "usage_input_tokens": usage_input_tokens
+                if usage_input_tokens is not None
+                else existing.usage_input_tokens,
+                "usage_output_tokens": usage_output_tokens
+                if usage_output_tokens is not None
+                else existing.usage_output_tokens,
+                "cost": cost_val,
+                "latency_ms": latency_ms
+                if latency_ms is not None
+                else existing.latency_ms,
+                "updated_at": now_iso(),
+            }
+        )
+        self.runtime_observer.save_copilot_run_log(updated)

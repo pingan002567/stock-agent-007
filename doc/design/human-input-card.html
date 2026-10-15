@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>原型 · 澄清轮排版（一张气泡）</title>
+  <style>
+    :root {
+      --canvas: #f5f5f5;
+      --surface: #ffffff;
+      --ink: #1f1f1f;
+      --ink-2: #333;
+      --muted: #616161;
+      --faint: #8a8a8a;
+      --line: rgba(0,0,0,.08);
+      --line-soft: rgba(0,0,0,.05);
+      --blue: #0078d4;
+      --blue-soft: rgba(0,120,212,.10);
+      --green: #1a7f37;
+      --amber: #9a6700;
+      --selected: rgba(0,0,0,.04);
+      --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+      --sans: "PingFang SC", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Microsoft YaHei", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      font-family: var(--sans);
+      font-size: 13px;
+      color: var(--ink);
+      background: #e8e8e8;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .shell {
+      width: min(980px, 100%);
+      height: min(820px, 94vh);
+      background: var(--canvas);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: 44px 1fr;
+      box-shadow: 0 12px 40px rgba(0,0,0,.12);
+    }
+    .top {
+      background: #fff;
+      border-bottom: 1px solid var(--line-soft);
+      display: flex; align-items: center; gap: 10px;
+      padding: 0 16px;
+      font-weight: 650;
+    }
+    .top .tabs { margin-left: auto; display: flex; gap: 6px; }
+    .tabs button {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .tabs button.on {
+      border-color: color-mix(in srgb, var(--blue) 40%, var(--line));
+      color: var(--blue);
+      background: var(--blue-soft);
+    }
+
+    .body {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 280px;
+      min-height: 0;
+    }
+    .chat {
+      display: flex; flex-direction: column;
+      min-width: 0; background: #fff;
+    }
+    .messages {
+      flex: 1; overflow: auto;
+      padding: 18px 22px 12px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .composer {
+      border-top: 1px solid var(--line-soft);
+      padding: 12px 16px 14px;
+      background: #fff;
+    }
+    .composer-box {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 10px 12px;
+      background: #fafafa;
+    }
+    .composer-box textarea {
+      width: 100%; border: 0; outline: none; resize: none;
+      background: transparent; font: inherit; color: var(--ink);
+      min-height: 40px;
+    }
+    .composer-bar {
+      display: flex; align-items: center; gap: 8px; margin-top: 6px;
+    }
+    .pill {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .send {
+      margin-left: auto;
+      width: 32px; height: 32px; border: 0; border-radius: 8px;
+      background: var(--blue); color: #fff; cursor: pointer;
+      display: grid; place-items: center;
+    }
+
+    .msg {
+      border: 1px solid var(--line-soft);
+      background: #f7f7f7;
+      border-radius: 12px;
+      padding: 12px 14px;
+    }
+    .msg-label {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; color: var(--muted); margin-bottom: 8px;
+    }
+    .ai-disc {
+      width: 18px; height: 18px; border-radius: 50%;
+      background: var(--blue-soft); color: var(--blue);
+      display: grid; place-items: center; font-size: 10px;
+    }
+    .msg-time { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--faint); }
+
+    .user-bubble {
+      align-self: flex-end;
+      max-width: 78%;
+      background: var(--blue-soft);
+      border: 1px solid color-mix(in srgb, var(--blue) 20%, transparent);
+      border-radius: 12px;
+      padding: 10px 12px;
+      color: var(--ink);
+    }
+
+    .tool-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 10px; border-radius: 8px;
+      background: #eee; color: var(--muted); font-size: 12px;
+      margin: 0 0 10px;
+    }
+    .tool-row code { font-family: var(--mono); font-size: 11px; }
+    .ok { margin-left: auto; color: var(--green); }
+    .meta-row { display: flex; gap: 10px; margin-top: 10px; font-size: 12px; color: var(--muted); }
+    .conf { color: var(--amber); }
+
+    /* Human Input Card */
+    .hic {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 12px;
+      padding: 12px 14px;
+      box-shadow: 0 1px 2px rgba(0,0,0,.04);
+    }
+    .hic-kicker {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 11px; color: var(--faint); font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .hic-kicker .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: color-mix(in srgb, var(--blue) 55%, var(--faint));
+    }
+    .hic-context {
+      font-size: 12.5px; color: var(--muted); line-height: 1.55; margin-bottom: 8px;
+    }
+    .hic-q {
+      font-size: 13.5px; color: var(--ink); font-weight: 550; line-height: 1.55;
+    }
+    .hic-options { display: grid; gap: 8px; margin-top: 12px; }
+    .hic-opt {
+      text-align: left;
+      border: 1px solid var(--line);
+      background: #fafafa;
+      border-radius: 10px;
+      padding: 10px 12px;
+      cursor: pointer;
+      color: var(--ink-2);
+      transition: border-color .15s, background .15s;
+    }
+    .hic-opt:hover {
+      border-color: color-mix(in srgb, var(--blue) 45%, var(--line));
+      background: var(--blue-soft);
+    }
+    .hic-opt.selected {
+      border-color: color-mix(in srgb, var(--blue) 55%, var(--line));
+      background: var(--blue-soft);
+    }
+    .hic-opt .n {
+      font-family: var(--mono); font-size: 11px; color: var(--faint); margin-right: 6px;
+    }
+    .hic-other {
+      margin-top: 12px;
+      border-top: 1px dashed var(--line);
+      padding-top: 10px;
+    }
+    .hic-other summary {
+      cursor: pointer; color: var(--muted); font-size: 12px; list-style: none;
+    }
+    .hic-other summary::-webkit-details-marker { display: none; }
+    .hic-other textarea {
+      margin-top: 8px; width: 100%;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font: inherit; resize: vertical; min-height: 52px;
+      background: #fafafa;
+    }
+    .hic-actions {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; margin-top: 8px;
+    }
+    .hic-hint { font-size: 11px; color: var(--faint); }
+    .btn-primary {
+      border: 0; border-radius: 8px; padding: 6px 14px;
+      background: var(--blue); color: #fff; font-weight: 600; cursor: pointer;
+    }
+    .btn-primary:disabled { opacity: .4; cursor: default; }
+    .hic.answered { opacity: .95; }
+    .hic-answered {
+      margin-top: 10px; padding: 8px 10px; border-radius: 8px;
+      background: var(--selected); color: var(--muted); font-size: 12.5px;
+    }
+
+    /* Bad (screenshot) card */
+    .bad-body { color: var(--ink-2); line-height: 1.6; white-space: pre-wrap; }
+    .callout {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: #fff3f0;
+      border: 1px solid #f0d0c8;
+      color: #8a3b2b;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .spec {
+      border-left: 1px solid var(--line-soft);
+      background: #fafafa;
+      padding: 14px 12px;
+      overflow: auto;
+      font-size: 12.5px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    .spec h2 {
+      margin: 0 0 8px;
+      font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+      color: var(--faint); font-family: var(--mono);
+    }
+    .spec-card {
+      background: #fff; border: 1px solid var(--line-soft);
+      border-radius: 8px; padding: 10px; margin: 8px 0;
+    }
+    .spec-card strong { display: block; color: var(--ink); margin-bottom: 4px; }
+    .x { color: #c0392b; }
+    .v { color: var(--green); }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="top">
+      澄清轮排版原型
+      <div class="tabs">
+        <button type="button" class="on" data-view="good">目标：一张气泡</button>
+        <button type="button" data-view="bad">现状：两张气泡（截图）</button>
+      </div>
+    </div>
+    <div class="body">
+      <main class="chat">
+        <!-- ═══ 目标 ═══ -->
+        <div class="messages" id="view-good">
+          <div class="user-bubble">一个一个问使用 ask_clarification</div>
+
+          <div class="msg">
+            <div class="msg-label">
+              <span class="ai-disc">✓</span>
+              AI Copilot
+              <span class="msg-time">17:46</span>
+            </div>
+
+            <!-- 过程：工具行在上 -->
+            <div class="tool-row">
+              <span>↩</span>
+              <span>反问澄清</span>
+              <code>ask_clarification</code>
+              <span class="ok">✓</span>
+            </div>
+
+            <!-- 一张可交互卡：不再另起 final 气泡 -->
+            <div class="hic" id="card">
+              <div class="hic-kicker"><span class="dot"></span>需要你的补充信息</div>
+              <div class="hic-context">
+                你的选择会决定后续分析的深度与形式（偏决策 / 偏学习 / 偏成稿）。先确认这一个，我再问下一个。
+              </div>
+              <div class="hic-q">
+                这份 A 股板块分析主要用来做什么？
+              </div>
+              <div class="hic-options" id="opts"></div>
+              <details class="hic-other">
+                <summary>或输入其它回答…</summary>
+                <textarea id="other" placeholder="自由补充…"></textarea>
+                <div class="hic-actions">
+                  <span class="hic-hint">Enter 提交 · Shift+Enter 换行</span>
+                  <button type="button" class="btn-primary" id="submitOther">提交</button>
+                </div>
+              </details>
+              <div class="hic-hint" style="margin-top:8px">也可在下方主输入框直接回复</div>
+            </div>
+          </div>
+
+          <div class="user-bubble hidden" id="userAnswer"></div>
+          <div class="msg hidden" id="afterAnswer">
+            <div class="msg-label">
+              <span class="ai-disc">✓</span>
+              AI Copilot
+              <span class="msg-time">17:47</span>
+            </div>
+            <div style="color:var(--ink-2); line-height:1.6">
+              好，按「配置决策」继续：第 2 个问题我会再单独问一次…
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ 现状（截图复现） ═══ -->
+        <div class="messages hidden" id="view-bad">
+          <div class="user-bubble">一个一个问使用 ask_clarification</div>
+
+          <!-- 气泡 1：只有卡，没有工具行 -->
+          <div class="msg">
+            <div class="msg-label">
+              <span class="ai-disc">✓</span>
+              AI Copilot
+              <span class="msg-time">17:46:04</span>
+            </div>
+            <div class="hic">
+              <div class="hic-kicker"><span class="dot"></span>需要你的补充信息</div>
+              <div class="hic-context">
+                你的选择会决定后续分析的深度与形式…
+              </div>
+              <div class="hic-q">第 1 个问题：这份 A股板块分析主要用来做什么？</div>
+              <div class="bad-body" style="margin-top:10px; color:var(--muted)">
+1. 配置决策
+2. 研究学习
+3. 落成正式报告</div>
+            </div>
+            <div class="callout">问题①：澄清卡单独成泡，工具行不在这里</div>
+          </div>
+
+          <!-- 气泡 2：工具 + 开场白 + 信心度/引用 -->
+          <div class="msg">
+            <div class="msg-label">
+              <span class="ai-disc">✓</span>
+              AI Copilot
+              <span class="msg-time">17:46:04</span>
+            </div>
+            <div class="tool-row">
+              <span>↩</span>
+              <span>反问澄清</span>
+              <code>ask_clarification</code>
+              <span class="ok">✓</span>
+            </div>
+            <div class="bad-body">好，那我一次只问一个，按顺序来。第 1 个问题：</div>
+            <div class="meta-row">
+              <span class="conf">● 信心度 中</span>
+              <span>▶ 引用来源 4</span>
+            </div>
+            <div class="callout">
+              问题②：同轮又落了一条 final（开场白 + 信心度/引用），和上面的卡重复、顺序也反了
+            </div>
+          </div>
+        </div>
+
+        <div class="composer">
+          <div class="composer-box">
+            <textarea placeholder="输入追问，或描述你想做的事…" rows="2"></textarea>
+            <div class="composer-bar">
+              <span class="pill">+</span>
+              <span class="pill">DS · V4 Flash ▾</span>
+              <button class="send" type="button" title="发送">↑</button>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <aside class="spec">
+        <h2>对照说明</h2>
+        <div class="spec-card">
+          <strong class="x">截图为什么两张泡</strong>
+          同一次 run 落了两条消息：<br/>
+          1) <code>clarification</code> → 上面的卡<br/>
+          2) <code>final_answer</code> → 开场白 + 工具行 + 信心度<br/>
+          列表按消息渲染 → 两张 AI 气泡；工具挂在 final 上 → 看起来「卡在上、工具在下」。
+        </div>
+        <div class="spec-card">
+          <strong class="v">目标排版</strong>
+          · 同一轮只留<strong>一张</strong> AI 气泡<br/>
+          · 上：工具行 <code>ask_clarification</code><br/>
+          · 下：可点选项的 Human Input Card<br/>
+          · 丢掉开场白 final / 信心度 / 引用<br/>
+          · 点选项即提交，卡变「已回答」
+        </div>
+        <div class="spec-card">
+          <strong>文件</strong>
+          <code>doc/design/human-input-card.html</code><br/>
+          Tab 切换目标 / 现状；目标页可点选项演示。
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    const OPTIONS = [
+      "配置决策",
+      "研究学习",
+      "落成正式报告",
+    ];
+
+    const opts = document.getElementById("opts");
+    OPTIONS.forEach((label, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "hic-opt";
+      b.innerHTML = `<span class="n">${i + 1}.</span>${label}`;
+      b.addEventListener("click", () => answer(label, b));
+      opts.appendChild(b);
+    });
+
+    function answer(text, btn) {
+      opts.querySelectorAll(".hic-opt").forEach((el) => el.classList.remove("selected"));
+      if (btn) btn.classList.add("selected");
+      const card = document.getElementById("card");
+      card.classList.add("answered");
+      opts.querySelectorAll("button").forEach((el) => { el.disabled = true; });
+      document.getElementById("submitOther").disabled = true;
+      let done = card.querySelector(".hic-answered");
+      if (!done) {
+        done = document.createElement("div");
+        done.className = "hic-answered";
+        card.appendChild(done);
+      }
+      done.textContent = "已回答：" + text;
+      const ua = document.getElementById("userAnswer");
+      ua.textContent = text;
+      ua.classList.remove("hidden");
+      document.getElementById("afterAnswer").classList.remove("hidden");
+    }
+
+    document.getElementById("submitOther").addEventListener("click", () => {
+      const v = document.getElementById("other").value.trim();
+      if (!v) return;
+      answer(v, null);
+    });
+
+    document.querySelectorAll(".tabs button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tabs button").forEach((b) => b.classList.remove("on"));
+        btn.classList.add("on");
+        const view = btn.dataset.view;
+        document.getElementById("view-good").classList.toggle("hidden", view !== "good");
+        document.getElementById("view-bad").classList.toggle("hidden", view !== "bad");
+      });
+    });
+  </script>
+</body>
+</html>
