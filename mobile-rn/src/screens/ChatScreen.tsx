@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   FlatList,
   ImageBackground,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -68,6 +69,12 @@ export default function ChatScreen() {
 
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
+  /**
+   * Android + edge-to-edge（targetSdk 36）下系统不再因键盘 resize 窗口，
+   * adjustResize 失效、KeyboardAvoidingView 又不生效，所以自己按键盘高度把输入条抬起来。
+   * 输入条底部原本与屏幕底相距一个 tab 栏高度，所以抬升量 = 键盘高度 - tab 栏高度。
+   */
+  const [kbHeight, setKbHeight] = useState(0);
   const [pendingUploads, setPendingUploads] = useState<SessionUpload[]>([]);
   const [uploading, setUploading] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
@@ -81,6 +88,23 @@ export default function ChatScreen() {
     void useChat.getState().recoverOnForeground();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const show = Keyboard.addListener('keyboardDidShow', (e) =>
+      setKbHeight(e.endCoordinates?.height ?? 0)
+    );
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKbHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
+  // 键盘弹出后把最新消息顶到可见处
+  useEffect(() => {
+    if (kbHeight > 0) listRef.current?.scrollToEnd({ animated: true });
+  }, [kbHeight]);
 
   // 30s 会话列表自动刷新
   useEffect(() => {
@@ -317,7 +341,14 @@ export default function ChatScreen() {
         </View>
       ) : null}
 
-      <View style={styles.composerWrap}>
+      <View
+        style={[
+          styles.composerWrap,
+          Platform.OS === 'android' && kbHeight > 0
+            ? { paddingBottom: Math.max(8, kbHeight - tabBarHeight) }
+            : null,
+        ]}
+      >
         <View style={styles.composerPill}>
           <Pressable
             style={styles.pillIcon}
