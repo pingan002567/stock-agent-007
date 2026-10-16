@@ -39,7 +39,7 @@ export type TabParamList = {
 export type RootStackParamList = {
   Main: NavigatorScreenParams<TabParamList> | undefined;
   StockDetail: { symbol: string; name?: string };
-  TurnDetail: { turnId: string };
+  TurnDetail: { turnId: string; initialTab?: 'answer' | 'tools' | 'reasoning' };
   MonitorEventDetail: { eventId: string };
   ReportDetail: { reportId: string };
   Reports: undefined;

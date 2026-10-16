@@ -183,7 +183,7 @@ export default function ChatScreen() {
             userText={item.userText}
             onRetry={() => void useChat.getState().retryTurn(item.id)}
             onReplyClarification={(resp) => void useChat.getState().replyClarification(resp)}
-            onOpenDetail={(tid) => navigation.navigate('TurnDetail', { turnId: tid })}
+            onOpenDetail={(tid, tab) => navigation.navigate('TurnDetail', { turnId: tid, initialTab: tab })}
           />
         </View>
       ) : null}

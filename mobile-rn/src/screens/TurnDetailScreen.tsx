@@ -21,7 +21,7 @@ export default function TurnDetailScreen() {
     if (!s.currentSessionId) return undefined;
     return (s.turnsBySession[s.currentSessionId] ?? []).find((t) => t.id === turnId);
   });
-  const [tab, setTab] = useState<Tab>('answer');
+  const [tab, setTab] = useState<Tab>(route.params?.initialTab ?? 'answer');
   const [expandedTool, setExpandedTool] = useState<string | null>(null);
 
   if (!turn?.assistant) return <ErrorState message="未找到该轮回答" />;

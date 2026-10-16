@@ -12,7 +12,7 @@ interface Props {
   userText: string;
   onRetry?: () => void;
   onReplyClarification?: (response: Record<string, unknown>) => void;
-  onOpenDetail?: (turnId: string) => void;
+  onOpenDetail?: (turnId: string, tab?: 'answer' | 'tools' | 'reasoning') => void;
 }
 
 const PHASE_LABEL: Record<AssistantState['phase'], string> = {
@@ -31,7 +31,7 @@ export function AssistantBubble({ assistant, turnId, userText, onRetry, onReplyC
   const styles = useThemedStyles(baseStyles);
   const [showReasoning, setShowReasoning] = useState(false);
   const [showSkill, setShowSkill] = useState(false);
-  const [expandedTool, setExpandedTool] = useState<string | null>(null);
+  const [toolsExpanded, setToolsExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const streaming = assistant.streaming;
@@ -39,6 +39,7 @@ export function AssistantBubble({ assistant, turnId, userText, onRetry, onReplyC
   const lineCount = answer.split('\n').length;
   const isLong = answer.length > COLLAPSE_CHARS || lineCount > COLLAPSE_LINES;
   const runningTools = assistant.tools.filter((t) => t.status === 'running').length;
+  const doneTools = assistant.tools.filter((t) => t.status === 'done').length;
   const phaseLabel = streaming
     ? assistant.phase === 'tools' && runningTools > 0
       ? `调用工具…（${runningTools} 个运行中）`
@@ -77,7 +78,9 @@ export function AssistantBubble({ assistant, turnId, userText, onRetry, onReplyC
 
       {assistant.skillTrace.length > 0 ? (
         <Pressable style={styles.collapse} onPress={() => setShowSkill((v) => !v)}>
-          <Text style={styles.collapseText}>{showSkill ? '▾ 技能执行' : `▸ 技能执行 · ${assistant.skillTrace.length} 步`}</Text>
+          <Text style={styles.collapseText}>
+            {showSkill ? '⌃' : '⌄'} 技能链路 · {assistant.skillTrace.length}
+          </Text>
           {showSkill
             ? assistant.skillTrace.map((s, i) => (
                 <Text key={i} style={styles.skillLine}>
@@ -92,25 +95,30 @@ export function AssistantBubble({ assistant, turnId, userText, onRetry, onReplyC
 
       {assistant.tools.length > 0 ? (
         <View style={styles.tools}>
-          <Text style={styles.toolCount}>
-            工具 {assistant.tools.filter((t) => t.status === 'done').length}/{assistant.tools.length}
-          </Text>
-          {assistant.tools.map((t) => (
-            <Pressable
-              key={t.id}
-              style={styles.toolChip}
-              onPress={() => setExpandedTool((cur) => (cur === t.id ? null : t.id))}
-            >
-              <Text style={styles.toolName}>
-                {t.status === 'running' ? '⏳' : '✓'} {toolLabel(t.name)}
-              </Text>
-              {expandedTool === t.id ? (
-                <Text style={styles.toolPreview} selectable>
-                  {t.resultPreview || '暂无结果预览'}
-                </Text>
-              ) : null}
-            </Pressable>
-          ))}
+          {/* 工具调用 · N：默认折叠（对齐 iOS toolsCollapsedSection） */}
+          <Pressable style={styles.toolHeader} onPress={() => setToolsExpanded((v) => !v)}>
+            <Text style={styles.toolHeaderText}>🔧 工具调用 · {assistant.tools.length}</Text>
+            <View style={styles.toolDots}>
+              {runningTools > 0 ? <Text style={styles.toolRunning}>{runningTools} 进行中</Text> : null}
+              {doneTools > 0 ? <Text style={styles.toolDone}>{doneTools} 完成</Text> : null}
+            </View>
+            <Text style={styles.chevron}>{toolsExpanded ? '⌃' : '⌄'}</Text>
+          </Pressable>
+
+          {toolsExpanded
+            ? assistant.tools.map((t) => (
+                <Pressable
+                  key={t.id}
+                  style={[styles.toolChip, t.status === 'running' && styles.toolChipRunning]}
+                  onPress={() => onOpenDetail?.(turnId, 'tools')}
+                >
+                  <Text style={styles.toolName}>
+                    {t.status === 'running' ? '⏳' : '✓'} {toolLabel(t.name)}
+                  </Text>
+                  <Text style={styles.toolDetail}>详情 ›</Text>
+                </Pressable>
+              ))
+            : null}
         </View>
       ) : null}
 
@@ -241,7 +249,32 @@ const baseStyles = StyleSheet.create({
   skillLine: { fontSize: 12, color: '#555', marginTop: 3 },
   tools: { marginBottom: 6 },
   toolCount: { fontSize: 11, color: '#8E8E93', marginBottom: 4 },
-  toolChip: { backgroundColor: '#e8eef4', borderRadius: 6, padding: 6, marginBottom: 4 },
+  toolHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#e9ecf1',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 6,
+  },
+  toolHeaderText: { fontSize: 12, fontWeight: '600', color: '#333' },
+  toolDots: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginRight: 6 },
+  toolRunning: { fontSize: 11, color: '#007AFF' },
+  toolDone: { fontSize: 11, color: '#34C759' },
+  chevron: { fontSize: 12, color: '#8E8E93' },
+  toolDetail: { fontSize: 11, color: '#8E8E93', marginLeft: 8 },
+  toolChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#e8eef4',
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 4,
+  },
+  toolChipRunning: { backgroundColor: '#dbeafe' },
   toolName: { fontSize: 12, color: '#334' },
   toolPreview: { fontSize: 11, color: '#667', marginTop: 4 },
   collapsedAnswer: { fontSize: 15, lineHeight: 22 },
