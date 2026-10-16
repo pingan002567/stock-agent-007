@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { fetchCostSummary, fetchSettings } from '../api/client';
 import { ErrorState } from '../components/ErrorState';
@@ -27,6 +28,7 @@ const SCHEME_LABEL: Record<string, string> = {
 
 export default function SettingsScreen() {
   const t = useTokens();
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { baseURL, token, health, reprobeHealth, disconnect } = useConnection();
   const scheme = useTheme((s) => s.scheme);
@@ -67,7 +69,7 @@ export default function SettingsScreen() {
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: t.pageBg }]}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 20 }]}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
     >
       {error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
@@ -198,7 +200,7 @@ export default function SettingsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  content: { paddingTop: 20, paddingBottom: 40 },
+  content: { paddingBottom: 40 },
   actions: { paddingHorizontal: 16, marginTop: 4 },
   disconnectBtn: { borderWidth: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   disconnectText: { fontWeight: '600', fontSize: 15 },
