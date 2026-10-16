@@ -175,26 +175,39 @@ export default function MonitorScreen() {
 
   return (
     <View style={styles.container}>
+      {/* 两行头部：一行标题+主操作，一行次操作。原先 6 个元素挤一行会溢出 */}
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <Text style={styles.title}>盯盘</Text>
-        {unreadCount > 0 ? <Text style={styles.unreadBadge}>{unreadCount} 未读</Text> : null}
-        {unreadCount > 0 ? (
+        <View style={styles.headerTop}>
+          <Text style={styles.title}>盯盘</Text>
+          {unreadCount > 0 ? <Text style={styles.unreadBadge}>{unreadCount} 未读</Text> : null}
+          <View style={styles.spacer} />
           <Pressable
-            onPress={() => useMonitorUnread.getState().markAllRead(events.map((e) => e.event_id))}
+            style={[styles.primaryBtn, status?.status === 'running' && styles.primaryBtnPaused]}
+            onPress={() => void toggle()}
             hitSlop={6}
           >
-            <Text style={styles.link}>全部已读</Text>
+            <Text style={styles.primaryBtnText}>
+              {status?.status === 'running' ? '⏸  暂停' : '▶  启动'}
+            </Text>
           </Pressable>
-        ) : null}
-        <Pressable onPress={() => void toggle()} hitSlop={6}>
-          <Text style={styles.link}>{status?.status === 'running' ? '⏸ 暂停' : '▶ 启动'}</Text>
-        </Pressable>
-        <Pressable onPress={() => void evaluate()} hitSlop={6}>
-          <Text style={styles.link}>立即评估</Text>
-        </Pressable>
-        <Pressable onPress={openRules} hitSlop={6}>
-          <Text style={styles.link}>＋规则</Text>
-        </Pressable>
+        </View>
+
+        <View style={styles.headerActions}>
+          <Pressable onPress={() => void evaluate()} disabled={loading} hitSlop={6}>
+            <Text style={[styles.link, loading && styles.linkDisabled]}>立即评估</Text>
+          </Pressable>
+          <Pressable onPress={openRules} hitSlop={6}>
+            <Text style={styles.link}>＋ 规则</Text>
+          </Pressable>
+          {unreadCount > 0 ? (
+            <Pressable
+              onPress={() => useMonitorUnread.getState().markAllRead(events.map((e) => e.event_id))}
+              hitSlop={6}
+            >
+              <Text style={styles.link}>全部已读</Text>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
 
       {error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
@@ -300,8 +313,20 @@ export default function MonitorScreen() {
 
 const baseStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingBottom: 12 },
-  title: { fontSize: 20, fontWeight: '700', marginRight: 'auto' },
+  header: { paddingHorizontal: 16, paddingBottom: 10 },
+  headerTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 20, marginTop: 10 },
+  spacer: { flex: 1 },
+  title: { fontSize: 20, fontWeight: '700' },
+  primaryBtn: {
+    backgroundColor: '#007AFF',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  primaryBtnPaused: { backgroundColor: '#8E8E93' },
+  primaryBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  linkDisabled: { opacity: 0.4 },
   unreadBadge: { color: '#FF3B30', fontSize: 13, fontWeight: '600' },
   link: { color: '#007AFF', fontSize: 13 },
   del: { color: '#c0392b', fontSize: 13 },
