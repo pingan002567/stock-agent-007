@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { relativeTime } from '../lib/format';
 import type { CopilotSession } from '../types';
@@ -30,7 +30,18 @@ export function SessionDrawer({
   const styles = useThemedStyles(baseStyles);
   const [query, setQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
+  // 打开抽屉的那一次触摸可能穿透到遮罩，导致刚展开就被关掉
+  const [ready, setReady] = useState(false);
   const [renameValue, setRenameValue] = useState('');
+
+  useEffect(() => {
+    if (!visible) {
+      setReady(false);
+      return;
+    }
+    const t = setTimeout(() => setReady(true), 350);
+    return () => clearTimeout(t);
+  }, [visible]);
 
   const q = query.trim().toLowerCase();
   const filtered = sessions.filter((s) => (s.title ?? '').toLowerCase().includes(q) || s.session_id.toLowerCase().includes(q));
@@ -53,7 +64,9 @@ export function SessionDrawer({
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose} transparent>
-      <View style={styles.backdrop}>
+      <View style={styles.root}>
+        {/* 点击上方空白处收起会话列表 */}
+        <Pressable style={styles.backdrop} onPress={() => ready && onClose()} />
         <View style={styles.sheet}>
           <View style={styles.header}>
             <Text style={styles.title}>对话</Text>
@@ -126,7 +139,9 @@ export function SessionDrawer({
 }
 
 const baseStyles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'flex-end' },
+  root: { flex: 1, justifyContent: 'flex-end' },
+  // 与弹层同级、铺满整屏；点它（即弹层上方的空白）收起
+  backdrop: { ...{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }, backgroundColor: 'rgba(0,0,0,0.35)' },
   sheet: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, height: '85%', padding: 16 },
   header: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   title: { fontSize: 18, fontWeight: '700', flex: 1 },

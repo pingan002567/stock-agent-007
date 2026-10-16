@@ -232,8 +232,9 @@ export default function MonitorScreen() {
       {status?.last_error ? <Text style={styles.error}>最近错误：{status.last_error}</Text> : null}
 
       <Modal visible={showAdd} transparent animationType="slide" onRequestClose={() => setShowAdd(false)}>
-        <Pressable style={styles.sheetBackdrop} onPress={() => sheetReady && setShowAdd(false)}>
-          <Pressable style={styles.sheet} onStartShouldSetResponder={() => true} onPress={() => {}}>
+        <View style={styles.sheetRoot}>
+          <Pressable style={styles.sheetBackdrop} onPress={() => sheetReady && setShowAdd(false)} />
+          <View style={styles.sheet}>
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>新建盯盘规则</Text>
             <View style={styles.addPanel}>
@@ -255,8 +256,8 @@ export default function MonitorScreen() {
             </Pressable>
             </View>
             </View>
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
 
       {rules.length > 0 ? (
@@ -343,7 +344,8 @@ const baseStyles = StyleSheet.create({
   del: { color: '#c0392b', fontSize: 13 },
   swipeAction: { backgroundColor: '#FF3B30', justifyContent: 'center', paddingHorizontal: 22 },
   swipeActionText: { color: '#fff', fontWeight: '700' },
-  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
+  sheetRoot: { flex: 1, justifyContent: 'flex-end' },
+  sheetBackdrop: { ...{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }, backgroundColor: 'rgba(0,0,0,0.35)' },
   sheet: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingBottom: 24 },
   sheetHandle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: '#ccc', marginTop: 8 },
   sheetTitle: { fontSize: 16, fontWeight: '700', paddingHorizontal: 16, paddingTop: 12 },
