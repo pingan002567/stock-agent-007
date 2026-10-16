@@ -48,6 +48,9 @@ export default function MonitorScreen() {
   const [threshold, setThreshold] = useState('3');
   const [severity, setSeverity] = useState('medium');
   const pageRef = useRef(1);
+  // Modal 刚挂载时，打开它的那一次触摸可能穿透到遮罩 → 弹窗被自己关掉。
+  // 用一个短暂就绪窗口挡掉这段时间的点击。
+  const [sheetReady, setSheetReady] = useState(false);
 
   const seen = useMonitorUnread((s) => s.seen);
   const unreadCount = useMonitorUnread((s) => s.unreadCount);
@@ -78,6 +81,15 @@ export default function MonitorScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!showAdd) {
+      setSheetReady(false);
+      return;
+    }
+    const t = setTimeout(() => setSheetReady(true), 350);
+    return () => clearTimeout(t);
+  }, [showAdd]);
 
   const loadMore = async () => {
     if (loadingMore || loading || events.length >= total) return;
@@ -199,14 +211,13 @@ export default function MonitorScreen() {
           <Pressable onPress={openRules} hitSlop={6}>
             <Text style={styles.link}>＋ 规则</Text>
           </Pressable>
-          {unreadCount > 0 ? (
-            <Pressable
-              onPress={() => useMonitorUnread.getState().markAllRead(events.map((e) => e.event_id))}
-              hitSlop={6}
-            >
-              <Text style={styles.link}>全部已读</Text>
-            </Pressable>
-          ) : null}
+          <Pressable
+            onPress={() => useMonitorUnread.getState().markAllRead(events.map((e) => e.event_id))}
+            disabled={unreadCount === 0}
+            hitSlop={6}
+          >
+            <Text style={[styles.link, unreadCount === 0 && styles.linkDisabled]}>全部已读</Text>
+          </Pressable>
         </View>
       </View>
 
@@ -221,8 +232,8 @@ export default function MonitorScreen() {
       {status?.last_error ? <Text style={styles.error}>最近错误：{status.last_error}</Text> : null}
 
       <Modal visible={showAdd} transparent animationType="slide" onRequestClose={() => setShowAdd(false)}>
-        <Pressable style={styles.sheetBackdrop} onPress={() => setShowAdd(false)}>
-          <Pressable style={styles.sheet} onPress={() => {}}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => sheetReady && setShowAdd(false)}>
+          <Pressable style={styles.sheet} onStartShouldSetResponder={() => true} onPress={() => {}}>
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>新建盯盘规则</Text>
             <View style={styles.addPanel}>
