@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Stock Agent · 盯盘页优化原型</title>
+<style>
+  :root{
+    --accent:#5C4033;
+    --page-bg:#f2f2f7; --group-bg:#ffffff; --sep:#e5e5ea;
+    --text:#111111; --sub:#8E8E93; --danger:#FF3B30; --ok:#34C759; --warn:#FF9500;
+    --chev:#C7C7CC;
+  }
+  body.dark{
+    --page-bg:#000000; --group-bg:#1C1C1E; --sep:#2C2C2E;
+    --text:#ffffff; --sub:#98989E; --chev:#5A5A5E;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+    background:#e9eaee;min-height:100vh;padding:28px 16px;color:#111;
+    display:flex;gap:32px;justify-content:center;align-items:flex-start;flex-wrap:wrap}
+  body.dark{background:#141416;color:#fff}
+
+  .panel{width:262px;background:#fff;border-radius:16px;padding:18px;box-shadow:0 8px 30px rgba(0,0,0,.08)}
+  body.dark .panel{background:#1C1C1E;box-shadow:none;border:1px solid #2C2C2E}
+  .panel h1{font-size:15px;margin:0 0 4px}
+  .panel p{font-size:12px;color:#8E8E93;margin:0 0 14px;line-height:1.6}
+  .panel h2{font-size:11px;color:#8E8E93;margin:16px 0 8px;font-weight:600;letter-spacing:.04em}
+  .swatches{display:flex;flex-wrap:wrap;gap:8px}
+  .sw{width:28px;height:28px;border-radius:14px;border:2px solid transparent;cursor:pointer}
+  .sw.on{border-color:#111}
+  body.dark .sw.on{border-color:#fff}
+  .row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;font-size:13px}
+  .switch{width:44px;height:26px;border-radius:13px;background:#d1d1d6;position:relative;cursor:pointer;transition:.18s;flex:0 0 44px}
+  .switch.on{background:var(--accent)}
+  .switch i{position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:10px;background:#fff;transition:.18s;display:block}
+  .switch.on i{left:21px}
+  .btn{display:block;width:100%;padding:10px;border-radius:10px;border:1px solid var(--sep);background:transparent;
+       color:inherit;font-size:13px;cursor:pointer;margin-top:8px;font-family:inherit}
+  .btn:hover{background:rgba(127,127,127,.08)}
+  .note{font-size:11px;color:#8E8E93;line-height:1.75;margin-top:12px}
+
+  .phone{width:390px;height:800px;background:var(--page-bg);border-radius:38px;overflow:hidden;position:relative;
+         box-shadow:0 20px 60px rgba(0,0,0,.22);display:flex;flex-direction:column;color:var(--text)}
+  .statusbar{height:30px;flex:0 0 30px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-size:11px;font-weight:600;opacity:.85}
+
+  /* 浅灰岛 */
+  .headerwrap{padding:0 10px 8px}
+  .island{display:flex;align-items:center;gap:8px;background:var(--sep);border-radius:26px;padding:6px 14px;min-height:50px}
+  .island .ti{font-size:17px;font-weight:700}
+  .island .ub{font-size:12px;font-weight:600;color:var(--danger)}
+  .island .sp{flex:1}
+  .pbtn{display:flex;align-items:center;gap:4px;border:none;border-radius:18px;padding:8px 14px;font-size:13px;
+        font-weight:600;cursor:pointer;font-family:inherit;background:var(--accent);color:#fff}
+  .pbtn.paused{background:var(--sub);color:#fff}
+  .cbtn{width:38px;height:38px;border-radius:19px;border:none;background:var(--group-bg);color:var(--text);
+        display:flex;align-items:center;justify-content:center;cursor:pointer}
+
+  .scroll{flex:1;overflow-y:auto;padding:6px 0 24px}
+  .scroll::-webkit-scrollbar{width:0}
+  .gt{font-size:12.5px;color:var(--sub);margin:0 0 7px 30px;letter-spacing:.3px}
+  .group{margin:0 0 22px}
+  .gbody{margin:0 16px;background:var(--group-bg);border-radius:12px;overflow:hidden}
+  .r{display:flex;align-items:center;gap:10px;min-height:48px;padding:0 16px;color:var(--text);
+     border-bottom:1px solid var(--sep);font-size:15px}
+  .r:last-child{border-bottom:none}
+  .r.tap{cursor:pointer}
+  .r.tap:active{background:rgba(127,127,127,.08)}
+  .r .ic{width:22px;display:flex;justify-content:center;color:var(--sub);flex:0 0 22px}
+  .r .lb{flex:1}
+  .r .vl{font-size:14px;color:var(--sub);max-width:55%}
+  .r .cv{color:var(--chev);display:flex}
+  .r .txt{flex:1;padding:12px 0;font-size:12.5px;line-height:19px;color:var(--sub)}
+  .r.wrap{min-height:56px;padding-top:6px;padding-bottom:6px}
+  .r .stext{flex:1;padding-right:12px}
+  .r .stext .h{font-size:11.5px;color:var(--sub);margin-top:3px;line-height:16px}
+  .sw2{width:46px;height:28px;border-radius:14px;background:#d1d1d6;position:relative;cursor:pointer;transition:.18s;flex:0 0 46px}
+  .sw2.on{background:var(--accent)}
+  .sw2 i{position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:11px;background:#fff;transition:.18s;display:block}
+  .sw2.on i{left:21px}
+
+  /* 筛选 */
+  .filters{display:flex;gap:8px;margin:0 16px 12px}
+  .fb{flex:1;border:1px solid var(--sep);border-radius:9px;padding:8px 0;text-align:center;font-size:12.5px;
+      color:var(--sub);cursor:pointer;background:transparent;font-family:inherit}
+  .fb.on{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent)}
+
+  /* 事件卡 */
+  .ecard{display:flex;align-items:center;gap:8px;margin:0 16px 8px;background:var(--group-bg);border-radius:12px;
+         padding:12px 14px;cursor:pointer}
+  .ecard:active{background:rgba(127,127,127,.07)}
+  .ebody{flex:1}
+  .etop{display:flex;align-items:center;gap:8px}
+  .pill{border-radius:8px;padding:2px 8px;font-size:11px;font-weight:700;text-transform:uppercase}
+  .pill.high{background:rgba(255,59,48,.14);color:var(--danger)}
+  .pill.medium{background:rgba(255,149,0,.16);color:#B26A00}
+  .pill.low{background:rgba(52,199,89,.16);color:#1B7A34}
+  body.dark .pill.medium{color:#FFB340}
+  body.dark .pill.low{color:#4CD964}
+  .esym{font-size:14px;font-weight:700}
+  .etitle{flex:1;font-size:14px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .etitle.unread{font-weight:700}
+  .dot{width:8px;height:8px;border-radius:4px;background:var(--danger);flex:0 0 8px}
+  .emeta{font-size:11.5px;color:var(--sub);margin-top:5px;line-height:16px;
+         display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .empty{text-align:center;padding:50px 32px;color:var(--sub)}
+  .empty .et{font-size:14px;color:var(--text)}
+  .empty .eh{font-size:12px;margin-top:6px;line-height:18px}
+
+  /* 规则卡 + 左滑删除 */
+  .swipe-wrap{position:relative;margin:0 16px 10px;border-radius:12px;overflow:hidden}
+  .swipe-del{position:absolute;top:0;right:0;bottom:0;width:88px;background:var(--danger);color:#fff;border:none;
+             font-size:14px;font-weight:700;cursor:pointer;font-family:inherit}
+  .swipe-card{position:relative;display:flex;align-items:center;gap:10px;background:var(--group-bg);
+              padding:12px 14px;transition:transform .18s ease;touch-action:pan-y}
+  .swipe-card.dragging{transition:none}
+  .rcard-body{flex:1;min-width:0}
+  .rtop{display:flex;align-items:center;gap:8px}
+  .rtitle{font-size:15px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .rtrig{font-size:11.5px;color:var(--sub);margin-top:5px;line-height:16px}
+  .summary{font-size:12.5px;color:var(--sub);margin:0 16px 10px}
+  .addbtn{display:flex;align-items:center;justify-content:center;gap:6px;margin:6px 16px 0;border:none;
+          border-radius:12px;background:var(--accent);color:#fff;padding:14px 0;font-size:15px;font-weight:600;
+          cursor:pointer;font-family:inherit;width:calc(100% - 32px)}
+
+  /* 弹层 */
+  .overlay{position:absolute;inset:0;z-index:20;display:none}
+  .overlay.show{display:block}
+  .ov-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.35)}
+  .sheet{position:absolute;left:0;right:0;bottom:0;background:var(--page-bg);border-radius:20px 20px 0 0;
+         padding:8px 0 28px;animation:up .22s ease}
+  @keyframes up{from{transform:translateY(30px);opacity:.6}to{transform:none;opacity:1}}
+  .grab{width:38px;height:4px;border-radius:2px;background:var(--sep);margin:6px auto 10px}
+  .sh-title{font-size:12.5px;color:var(--sub);text-align:center;padding:0 20px 10px}
+  .mi{display:flex;align-items:center;gap:12px;padding:14px 22px;font-size:15px;cursor:pointer;color:var(--text)}
+  .mi:active{background:var(--group-bg)}
+  .mi.dis{opacity:.4;cursor:not-allowed}
+  .mi .mtext{flex:1}
+  .mi .mh{font-size:11.5px;color:var(--sub);margin-top:2px}
+  .form{padding:0 20px}
+  .form label{display:block;font-size:12px;color:var(--sub);margin:12px 0 6px}
+  .form input{width:100%;border:1px solid var(--sep);border-radius:10px;background:transparent;color:var(--text);
+              padding:10px 12px;font-size:15px;outline:none;font-family:inherit}
+  .segs{display:flex;gap:8px}
+  .segs button{flex:1;border:1px solid var(--sep);border-radius:9px;background:transparent;color:var(--sub);
+               padding:9px 0;font-size:13px;cursor:pointer;font-family:inherit}
+  .segs button.on{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent)}
+  .submit{width:100%;border:none;border-radius:12px;background:var(--accent);color:#fff;padding:14px 0;
+          font-size:15px;font-weight:600;margin:20px 0 0;cursor:pointer;font-family:inherit}
+
+  /* 事件详情 */
+  .dsec{font-size:12.5px;color:var(--sub);margin:16px 16px 6px}
+  .dcard{margin:0 16px;background:var(--group-bg);border-radius:12px;padding:14px;font-size:13.5px;line-height:20px}
+  .dhead{display:flex;align-items:center;justify-content:space-between;margin:6px 16px 0}
+  .dtitle{font-size:17px;font-weight:700;margin:10px 16px 0}
+  .mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+  .fbrow{display:flex;gap:10px;margin:8px 16px 0}
+  .fbbtn{flex:1;border:1px solid var(--sep);border-radius:10px;background:transparent;color:var(--text);
+         padding:11px 0;font-size:14px;cursor:pointer;font-family:inherit}
+  .fbbtn.on{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent)}
+
+  .navbar{flex:0 0 46px;display:flex;align-items:center;gap:6px;padding:0 10px}
+  .navbar .back{width:34px;height:34px;border-radius:17px;background:var(--group-bg);display:flex;align-items:center;
+                justify-content:center;cursor:pointer;color:var(--accent);flex:0 0 34px;border:none}
+  .navbar .title{flex:1;text-align:center;font-size:16px;font-weight:600}
+  .navbar .spacer{width:34px;flex:0 0 34px}
+
+  .tabbar{flex:0 0 56px;display:flex;border-top:1px solid var(--sep);background:var(--page-bg)}
+  .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:10px;color:var(--sub);position:relative}
+  .tab.on{color:var(--accent);font-weight:600}
+  .tab .nd{position:absolute;top:7px;margin-left:12px;width:7px;height:7px;border-radius:4px;background:var(--danger)}
+  .homebar{flex:0 0 18px;display:flex;align-items:center;justify-content:center;background:var(--page-bg)}
+  .homebar i{width:110px;height:4px;border-radius:2px;background:var(--text);opacity:.28;display:block}
+  .toast{position:absolute;left:50%;bottom:110px;transform:translateX(-50%);background:rgba(0,0,0,.82);color:#fff;
+         font-size:12.5px;padding:8px 14px;border-radius:10px;z-index:60;opacity:0;transition:.2s;pointer-events:none}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+
+<div class="panel">
+  <h1>盯盘页优化原型</h1>
+  <p>浅灰岛头部 + 运行状态分组 + 规则子页 + 事件筛选。规则卡支持<b>真实左滑删除</b>（鼠标拖拽）。</p>
+
+  <h2>主题色</h2>
+  <div class="swatches" id="swatches"></div>
+
+  <h2>状态</h2>
+  <div class="row"><span>深色模式</span><div class="switch" id="swDark"><i></i></div></div>
+  <div class="row"><span>盯盘运行中</span><div class="switch on" id="swRun"><i></i></div></div>
+  <div class="row"><span>最近错误</span><div class="switch" id="swErr"><i></i></div></div>
+
+  <h2>演示</h2>
+  <button class="btn" id="btnNewEvent">模拟一条新事件（high）</button>
+  <button class="btn" id="btnGoRules">进入规则页</button>
+
+  <div class="note">
+    可交互：<br>
+    · 岛屿右侧 [启动/暂停] 直接切换；⋮ 弹菜单<br>
+    · 「运行状态」分组里的开关也能启停<br>
+    · 点「盯盘规则 ›」进子页 → <b>左滑规则卡删除</b>、底部新建规则<br>
+    · 筛选：全部 / 未读 / 高优先级（计数实时）<br>
+    · 点事件卡 → 事件详情（概要/触发规则/证据/建议动作/反馈）
+  </div>
+</div>
+
+<div class="phone">
+  <div class="statusbar"><span>18:26</span><span style="font-size:10px">●●● ᯤ 5G ▮88%</span></div>
+  <div class="navbar" id="navbar"></div>
+  <div id="island"></div>
+  <div class="scroll" id="view"></div>
+  <div class="tabbar">
+    <div class="tab"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 4h16v12H7l-3 3z"/></svg>对话</div>
+    <div class="tab"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="m12 3 2.7 5.7 6.3.9-4.6 4.4 1.1 6.2L12 17.3 6.5 20.2l1.1-6.2L3 9.6l6.3-.9z"/></svg>自选</div>
+    <div class="tab"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5h8v2"/></svg>持仓</div>
+    <div class="tab on"><span class="nd" id="tabDot"></span><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="2"/><path d="M5 12a7 7 0 0 1 14 0M2 12a10 10 0 0 1 20 0"/></svg>盯盘</div>
+    <div class="tab"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>设置</div>
+  </div>
+  <div class="homebar"><i></i></div>
+
+  <div class="overlay" id="ovMenu">
+    <div class="ov-backdrop" data-close></div>
+    <div class="sheet">
+      <div class="grab"></div>
+      <div class="sh-title">盯盘</div>
+      <div class="mi" data-act="evaluate"><span id="i1"></span><span class="mtext">立即评估一次<div class="mh">不强推，按冷却策略执行</div></span></div>
+      <div class="mi" data-act="nav:Rules"><span id="i2"></span><span class="mtext">新建规则</span></div>
+      <div class="mi" data-act="markRead" id="miRead"><span id="i3"></span><span class="mtext">全部标为已读<div class="mh" id="mhRead"></div></span></div>
+      <div class="mi" data-act="toggleRun"><span id="i4"></span><span class="mtext" id="mtRun">暂停盯盘</span></div>
+      <div class="mi" data-act="nav:Rules"><span id="i5"></span><span class="mtext">管理规则<div class="mh" id="mhRules"></div></span></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="ovAdd">
+    <div class="ov-backdrop" data-close></div>
+    <div class="sheet">
+      <div class="grab"></div>
+      <div class="sh-title">新建盯盘规则</div>
+      <div class="form">
+        <label>股票代码</label>
+        <input id="fSym" placeholder="例如 600519" value="" />
+        <label>涨跌幅阈值（%）</label>
+        <input id="fThr" placeholder="3" value="3" />
+        <label>级别</label>
+        <div class="segs" id="fSev">
+          <button data-sev="high">high</button>
+          <button data-sev="medium" class="on">medium</button>
+          <button data-sev="low">low</button>
+        </div>
+        <button class="submit" data-act="saveRule">保存规则</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+/* ================= 图标 ================= */
+const S = (p, w) => `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+  stroke-width="${w||1.8}" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const IC = {
+  pause: S('<rect x="7" y="5" width="3.6" height="14" rx="1.2" fill="currentColor" stroke="none"/><rect x="13.4" y="5" width="3.6" height="14" rx="1.2" fill="currentColor" stroke="none"/>'),
+  play:  S('<path d="M8 5.5l11 6.5-11 6.5z" fill="currentColor" stroke="none"/>'),
+  dots:  S('<circle cx="12" cy="5" r="1.9" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.9" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.9" fill="currentColor" stroke="none"/>'),
+  opts:  S('<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2.2"/><circle cx="10" cy="17" r="2.2"/>'),
+  refresh:S('<path d="M20.5 12a8.5 8.5 0 1 1-2.9-6.4"/><path d="M20.5 3.5V9h-5.5"/>'),
+  addc:  S('<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>'),
+  done:  S('<path d="M4 12.5l5 5L20 6.5"/>'),
+  fwd:   S('<path d="M9 6l6 6-6 6"/>', 2),
+  back:  S('<path d="M15 6l-6 6 6 6"/>', 2),
+  plus:  S('<path d="M12 5v14M5 12h14"/>', 2.2),
+};
+
+/* ================= 数据 ================= */
+const PRESETS = [
+  ['#5C4033','柴犬棕'],['#007AFF','系统蓝'],['#0A7C6B','青绿'],['#E85D04','橙红'],
+  ['#4F46E5','靛蓝'],['#E11D48','玫红'],['#2F6B3A','墨绿'],['#475569','石板'],
+];
+let EVENTS = [
+  {id:'e1', sev:'high',   sym:'600519', title:'跌超 3% 触发', read:false, t:'3 分钟前', msg:'现价 1634.00，较昨收 -3.12%，量能放大 1.6 倍',
+   trig:'price_change_pct_lt · threshold -3 · severity high', src:'盯盘轮询',
+   evidence:['600519 现价 1634.00 / 昨收 1686.60','跌幅 -3.12%，成交量 4.8 万手（1.6× 20 日均量）','主力净流出 1.2 亿'],
+   actions:['检查是否触发你的止损纪律','在对话中发起一次个股分析','把该股加入重点观察']},
+  {id:'e2', sev:'medium', sym:'000963', title:'连续 3 日下跌', read:false, t:'26 分钟前', msg:'近 3 日累计 -4.8%，跌破 20 日均线',
+   trig:'consecutive_down_days ≥ 3 · severity medium', src:'盯盘轮询',
+   evidence:['10-14 -1.2% / 10-15 -1.9% / 10-16 -1.8%','收盘 26.25，20 日均线 26.94'],
+   actions:['核对持仓成本与浮亏','评估是否需要减仓']},
+  {id:'e3', sev:'high',   sym:'002467', title:'跌破成本价', read:false, t:'1 小时前', msg:'现价 4.61 低于成本 4.87，浮亏 -5.34%',
+   trig:'price_below_cost · severity high', src:'持仓联动',
+   evidence:['成本 4.87 / 现价 4.61','持仓 500 股，浮亏 -130 元'],
+   actions:['重新评估该标的逻辑是否成立']},
+  {id:'e4', sev:'low',    sym:'—',      title:'盘前简报已生成', read:true,  t:'6 小时前', msg:'定时值班完成，报告已入库',
+   trig:'scheduled_task_completed', src:'定时任务',
+   evidence:['任务：盘前简报 10-16 08:30','产出：报告 report_a1b2c3'],
+   actions:['打开报告查看']},
+  {id:'e5', sev:'medium', sym:'600519', title:'放量上穿 5 日均线', read:true,  t:'昨天', msg:'成交量 1.8× 20 日均量，收盘站上 5 日均线',
+   trig:'volume_breakout + ma5_cross', src:'盯盘轮询', evidence:['收盘 1686.60','成交量 5.4 万手'], actions:['观察能否站稳']},
+  {id:'e6', sev:'low',    sym:'—',      title:'数据源降级提示', read:true,  t:'昨天', msg:'tushare 积分不足，已自动回落 eastmoney',
+   trig:'provider_degraded', src:'系统', evidence:['tushare 返回积分不足','已切换 eastmoney'], actions:['检查数据源配置']},
+];
+let RULES = [
+  {id:'r1', sev:'high',   title:'贵州茅台 跌超 3%', trig:'price_change_pct_lt · 600519 · 阈值 -3', on:true},
+  {id:'r2', sev:'medium', title:'华东医药 连跌 3 日', trig:'consecutive_down_days · 000963 · ≥3', on:true},
+  {id:'r3', sev:'high',   title:'持仓跌破成本', trig:'price_below_cost · 全部持仓', on:true},
+  {id:'r4', sev:'medium', title:'二六三 放量异动', trig:'volume_ratio_gt · 002467 · 1.8', on:false},
+  {id:'r5', sev:'low',    title:'盘前简报完成', trig:'scheduled_task_completed · 盘前简报', on:true},
+];
+
+const state = {
+  accent:'#5C4033', dark:false, running:true, lastError:false,
+  lastCheck:'3 分钟前', interval:60,
+  filter:'all', stack:['Monitor'], current:null,
+  addSev:'medium', feedback:null,
+};
+
+/* ================= 工具 ================= */
+const $ = s => document.querySelector(s);
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(t){ const el=$('#toast'); el.textContent=t; el.classList.add('show'); clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('show'),1500); }
+function applyTheme(){ document.documentElement.style.setProperty('--accent', state.accent); document.body.classList.toggle('dark', state.dark); }
+function push(r){ state.stack.push(r); render(); }
+function back(){ if(state.stack.length>1){ state.stack.pop(); render(); } }
+const unread = () => EVENTS.filter(e => !e.read).length;
+const highCount = () => EVENTS.filter(e => e.sev === 'high').length;
+
+function group(title, body, footer){
+  return `<div class="group">${title?`<div class="gt">${esc(title)}</div>`:''}
+    <div class="gbody">${body}</div>${footer?`<div class="gt" style="margin:7px 30px 0;font-size:11.5px;line-height:16px">${esc(footer)}</div>`:''}</div>`;
+}
+function row(o){
+  const cls=['r']; if(o.tap) cls.push('tap'); if(o.wrap) cls.push('wrap');
+  return `<div class="${cls.join(' ')}"${o.act?` data-act="${o.act}"`:''}>
+    ${o.icon?`<span class="ic">${o.icon}</span>`:''}
+    ${o.text?`<span class="txt">${esc(o.text)}</span>`:`<span class="lb">${esc(o.label)}</span>`}
+    ${o.value?`<span class="vl">${esc(o.value)}</span>`:''}
+    ${o.tap?`<span class="cv">${IC.fwd}</span>`:''}
+  </div>`;
+}
+function swRow(o){
+  return `<div class="r wrap"><span class="stext"><div>${esc(o.label)}</div>
+    ${o.hint?`<div class="h">${esc(o.hint)}</div>`:''}</span>
+    <div class="sw2 ${o.on?'on':''}" data-act="${o.act}"><i></i></div></div>`;
+}
+const pillCls = sev => ['high','medium','low'].includes(sev) ? sev : 'medium';
+
+/* ================= 视图 ================= */
+function viewMonitor(){
+  const u = unread();
+  const list = EVENTS.filter(e => state.filter==='all' ? true : state.filter==='unread' ? !e.read : e.sev==='high');
+  let h = '';
+  h += group('运行状态',
+    swRow({label:'盯盘运行中', hint: state.running ? '按间隔轮询规则，命中即产生事件' : '已暂停，不会再产生新事件',
+           on: state.running, act:'toggleRun'}) +
+    row({label:'上次检查', value: state.lastCheck}) +
+    row({label:'检查间隔', value: `${state.interval} 秒`}) +
+    (state.lastError ? row({text:'⚠️ tushare 积分不足，已回落 eastmoney'}) : '')
+  );
+  h += group('规则', row({icon:IC.opts, label:'盯盘规则',
+    value: RULES.length ? `${RULES.length} 条 · ${RULES.filter(r=>r.on).length} 启用` : '还未配置',
+    tap:true, act:'nav:Rules'}));
+  h += `<div class="filters">
+    <button class="fb ${state.filter==='all'?'on':''}" data-act="filter:all">全部 ${EVENTS.length}</button>
+    <button class="fb ${state.filter==='unread'?'on':''}" data-act="filter:unread">未读 ${u}</button>
+    <button class="fb ${state.filter==='high'?'on':''}" data-act="filter:high">高优先级 ${highCount()}</button>
+  </div>`;
+  if(list.length === 0){
+    h += `<div class="empty"><div class="et">${state.filter==='all'?'暂无盯盘事件':'该筛选下没有事件'}</div>
+      <div class="eh">${RULES.length===0?'先配置一条规则，命中后会在这里显示。':'规则命中后会在这里显示。'}</div></div>`;
+  } else {
+    h += list.map(e => `<div class="ecard" data-act="open:${e.id}">
+      <div class="ebody">
+        <div class="etop">
+          <span class="pill ${pillCls(e.sev)}">${e.sev}</span>
+          ${e.sym!=='—'?`<span class="esym">${esc(e.sym)}</span>`:''}
+          <span class="etitle ${e.read?'':'unread'}">${esc(e.title)}</span>
+          ${e.read?'':'<span class="dot"></span>'}
+        </div>
+        <div class="emeta">${esc(e.t)} · ${esc(e.msg)}</div>
+      </div>
+      <span class="cv" style="color:var(--chev)">${IC.fwd}</span>
+    </div>`).join('');
+  }
+  return h;
+}
+
+function viewRules(){
+  let h = `<div class="summary">共 ${RULES.length} 条 · ${RULES.filter(r=>r.on).length} 条启用</div>`;
+  if(RULES.length === 0){
+    h += `<div class="empty"><div class="et">还没有盯盘规则</div>
+      <div class="eh">点下面的按钮加一条，例如「600519 跌超 3%」。</div></div>`;
+  } else {
+    h += RULES.map(r => `<div class="swipe-wrap" data-rid="${r.id}">
+      <button class="swipe-del" data-act="delRule:${r.id}">删除</button>
+      <div class="swipe-card">
+        <div class="rcard-body">
+          <div class="rtop">
+            <span class="pill ${pillCls(r.sev)}">${r.sev}</span>
+            <span class="rtitle">${esc(r.title)}</span>
+          </div>
+          <div class="rtrig">${esc(r.trig)}</div>
+        </div>
+        <div class="sw2 ${r.on?'on':''}" data-act="ruleToggle:${r.id}"><i></i></div>
+      </div>
+    </div>`).join('');
+  }
+  h += `<button class="addbtn" data-act="addRule">${IC.plus}新建规则</button>`;
+  return h;
+}
+
+function viewEventDetail(){
+  const e = EVENTS.find(x => x.id === state.current);
+  if(!e) return `<div class="empty"><div class="et">未找到该事件</div></div>`;
+  let h = `<div class="dhead"><span class="pill ${pillCls(e.sev)}">${e.sev}</span><span style="font-size:12px;color:var(--sub)">${esc(e.t)}</span></div>
+    <div class="dtitle">${esc(e.sym!=='—'? e.sym+' · '+e.title : e.title)}</div>`;
+  h += `<div class="dsec">概要</div><div class="dcard">${esc(e.msg)}</div>`;
+  h += `<div class="dsec">触发规则</div><div class="dcard mono">${esc(e.trig)}</div>`;
+  h += `<div class="dsec">来源</div><div class="dcard">${esc(e.src)}</div>`;
+  h += `<div class="dsec">证据</div>` + e.evidence.map(x=>`<div class="dcard" style="margin-bottom:8px">${esc(x)}</div>`).join('');
+  h += `<div class="dsec">建议动作</div><div class="dcard">` + e.actions.map(a=>`· ${esc(a)}`).join('<br>') + `</div>`;
+  h += `<div class="dsec">这条事件有用吗？</div>
+    <div class="fbrow">
+      <button class="fbbtn ${state.feedback==='y'?'on':''}" data-act="fb:y">有用</button>
+      <button class="fbbtn ${state.feedback==='n'?'on':''}" data-act="fb:n">没用</button>
+    </div><div style="height:30px"></div>`;
+  return h;
+}
+
+const VIEWS = { Monitor: viewMonitor, Rules: viewRules, EventDetail: viewEventDetail };
+const TITLES = { Monitor:'盯盘', Rules:'盯盘规则', EventDetail:'事件详情' };
+
+/* ================= 渲染 ================= */
+function render(){
+  const cur = state.stack[state.stack.length-1];
+  if(cur === 'Monitor'){
+    $('#navbar').innerHTML = '';
+  } else {
+    $('#navbar').innerHTML = `<button class="back" data-act="back">${IC.back}</button>
+      <div class="title">${TITLES[cur]}</div><div class="spacer"></div>`;
+  }
+  // 盯盘主页：岛屿头部由 view 之外的固定区渲染
+  const island = `<div class="headerwrap">
+    <div class="island">
+      <span class="ti">盯盘</span>
+      ${unread()>0?`<span class="ub">${unread()} 未读</span>`:''}
+      <span class="sp"></span>
+      <button class="pbtn ${state.running?'':'paused'}" data-act="toggleRun">
+        ${state.running?IC.pause:IC.play}<span style="margin-left:4px">${state.running?'暂停':'启动'}</span></button>
+      <button class="cbtn" data-act="menu">${IC.dots}</button>
+    </div></div>`;
+  // 岛屿固定在滚动区之外（与真机一致，不会跟着滚）
+  $('#island').innerHTML = cur === 'Monitor' ? island : '';
+  $('#view').innerHTML = VIEWS[cur]();
+  $('#tabDot').style.display = unread() > 0 ? 'block' : 'none';
+  refreshMenu();
+  applyTheme();
+}
+
+function refreshMenu(){
+  $('#i1').innerHTML = IC.refresh;
+  $('#i2').innerHTML = IC.addc;
+  $('#i3').innerHTML = IC.done;
+  $('#i4').innerHTML = state.running ? IC.pause : IC.play;
+  $('#i5').innerHTML = IC.opts;
+  $('#mtRun').textContent = state.running ? '暂停盯盘' : '启动盯盘';
+  $('#mhRead').textContent = unread() > 0 ? `${unread()} 条未读` : '暂无未读';
+  $('#mhRules').textContent = RULES.length ? `${RULES.length} 条` : '暂无规则';
+  $('#miRead').classList.toggle('dis', unread() === 0);
+}
+
+/* ================= 交互 ================= */
+function closeOverlays(){ document.querySelectorAll('.overlay').forEach(o => o.classList.remove('show')); }
+document.querySelectorAll('[data-close]').forEach(el => el.onclick = closeOverlays);
+$('#ovMenu').addEventListener('click', e => {
+  const el = e.target.closest('[data-act]'); if(!el) return;
+  const act = el.dataset.act;
+  if(el.classList.contains('dis')) return;
+  closeOverlays();
+  if(act === 'evaluate') return toast('已评估一次（未命中新规则）');
+  if(act === 'nav:Rules') return push('Rules');
+  if(act === 'markRead'){ EVENTS = EVENTS.map(x => ({...x, read:true})); render(); return toast('已全部标为已读'); }
+  if(act === 'toggleRun') return toggleRun();
+});
+$('#fSev').addEventListener('click', e => {
+  const b = e.target.closest('[data-sev]'); if(!b) return;
+  state.addSev = b.dataset.sev;
+  [...$('#fSev').children].forEach(c => c.classList.toggle('on', c.dataset.sev === state.addSev));
+});
+
+function toggleRun(){
+  state.running = !state.running;
+  $('#swRun').classList.toggle('on', state.running);
+  toast(state.running ? '盯盘已启动' : '盯盘已暂停');
+  render();
+}
+
+$('#view').addEventListener('click', e => {
+  const el = e.target.closest('[data-act]'); if(!el) return;
+  const act = el.dataset.act;
+
+  // 左滑删除按钮
+  if(act.startsWith('delRule:')){
+    const id = act.slice(8);
+    RULES = RULES.filter(r => r.id !== id);
+    render(); return toast('已删除规则');
+  }
+  // 规则卡上的开关：阻止冒泡到滑块
+  if(act.startsWith('ruleToggle:')){
+    const id = act.slice(11);
+    RULES = RULES.map(r => r.id===id ? {...r, on:!r.on} : r);
+    return render();
+  }
+  if(act === 'addRule'){ $('#ovAdd').classList.add('show'); return; }
+  if(act === 'saveRule'){
+    const sym = ($('#fSym').value || '').trim();
+    if(!sym){ toast('请填写股票代码'); return; }
+    const thr = ($('#fThr').value || '3').trim();
+    RULES.unshift({id:'r'+Date.now(), sev:state.addSev, title:`${sym} 涨跌幅`,
+      trig:`price_change_pct_gt · ${sym} · 阈值 ${thr}`, on:true});
+    closeOverlays(); render(); return toast('已保存规则');
+  }
+  if(act === 'back') return back();
+  if(act.startsWith('nav:')) return push(act.slice(4));
+  if(act === 'menu'){ closeOverlays(); $('#ovMenu').classList.add('show'); return; }
+  if(act === 'toggleRun') return toggleRun();
+  if(act.startsWith('filter:')){ state.filter = act.slice(7); return render(); }
+  if(act.startsWith('open:')){ state.current = act.slice(5); state.feedback=null; return push('EventDetail'); }
+  if(act.startsWith('fb:')){ state.feedback = act.slice(3); render(); return toast('已记录反馈'); }
+});
+
+/* ---- 左滑删除（pointer 拖拽） ---- */
+let drag = null;
+$('#view').addEventListener('pointerdown', e => {
+  const card = e.target.closest('.swipe-card'); if(!card) return;
+  if(e.target.closest('[data-act^="ruleToggle"]')) return;
+  drag = { wrap: card.parentElement, card, startX: e.clientX, dx: 0, moved: false };
+});
+document.addEventListener('pointermove', e => {
+  if(!drag) return;
+  const dx = Math.min(0, Math.max(-88, e.clientX - drag.startX));
+  if(Math.abs(dx) > 4) drag.moved = true;
+  drag.dx = dx;
+  drag.card.classList.add('dragging');
+  drag.card.style.transform = `translateX(${dx}px)`;
+});
+document.addEventListener('pointerup', () => {
+  if(!drag) return;
+  const open = drag.dx < -44;
+  drag.card.classList.remove('dragging');
+  drag.card.style.transform = `translateX(${open ? -88 : 0}px)`;
+  drag.card.dataset.open = open ? '1' : '';
+  drag = null;
+});
+document.addEventListener('pointercancel', () => { if(drag){ drag.card.classList.remove('dragging'); drag = null; } });
+
+/* ================= 控制面板 ================= */
+$('#swatches').innerHTML = PRESETS.map(([hex,name]) =>
+  `<div class="sw ${hex===state.accent?'on':''}" data-hex="${hex}" title="${name}" style="background:${hex}"></div>`).join('');
+$('#swatches').addEventListener('click', e => {
+  const el = e.target.closest('[data-hex]'); if(!el) return;
+  state.accent = el.dataset.hex;
+  [...$('#swatches').children].forEach(c => c.classList.toggle('on', c.dataset.hex === state.accent));
+  render();
+});
+$('#swDark').onclick = () => { state.dark = !state.dark; $('#swDark').classList.toggle('on', state.dark); render(); };
+$('#swRun').onclick = () => toggleRun();
+$('#swErr').onclick = () => { state.lastError = !state.lastError; $('#swErr').classList.toggle('on', state.lastError); render(); };
+$('#btnNewEvent').onclick = () => {
+  EVENTS.unshift({id:'e'+Date.now(), sev:'high', sym:'300750', title:'放量突破前高', read:false, t:'刚刚',
+    msg:'现价 214.80，突破 20 日高点，成交量 2.1× 均量',
+    trig:'price_break_high + volume_ratio_gt · 2.1', src:'盯盘轮询',
+    evidence:['现价 214.80 / 20 日高点 213.60','成交量 2.1× 20 日均量'], actions:['评估是否加入自选']});
+  render(); toast('已新增一条 high 事件');
+};
+$('#btnGoRules').onclick = () => { state.stack = ['Monitor','Rules']; render(); };
+
+render();
+</script>
+</body>
+</html>

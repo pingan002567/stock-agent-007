@@ -21,6 +21,11 @@ export interface Quote {
   change_pct?: number;
   source?: string;
   degraded?: boolean;
+  degraded_reason?: string | null;
+  /** 行情过期（缓存太旧） */
+  stale?: boolean;
+  from_cache?: boolean;
+  channel?: string;
   updated_at?: string;
   [key: string]: unknown;
 }
