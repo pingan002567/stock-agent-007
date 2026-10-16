@@ -189,10 +189,21 @@ class TushareMarketDataProvider:
             raise ProviderError(f"tushare only covers CN/HK markets: {normalized}")
         pro = self._api()
         # Try daily_basic for most recent trading day
+        # 注意：不传 trade_date 时 tushare 返回该标的的全部历史，且默认「最新在前」，
+        # 直接 tail(1) 取到的是最老的一行（曾导致 002467 显示 41.49、实际约 5.2，
+        # 000963 显示 21.65、实际约 26）。与 get_history 保持一致：
+        # 限定日期范围 + 按 trade_date 升序后再取最后一行。
+        end = datetime.now(timezone.utc).strftime("%Y%m%d")
+        start = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y%m%d")
         try:
             df = pro.daily_basic(
-                ts_code=_ts_code(normalized, stock), fields="close,pct_chg"
+                ts_code=_ts_code(normalized, stock),
+                start_date=start,
+                end_date=end,
+                fields="trade_date,close,pct_chg",
             )
+            if hasattr(df, "sort_values"):
+                df = df.sort_values("trade_date")
             row = _frame_tail(df, 1)
             if row:
                 r = row[0]
