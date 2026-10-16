@@ -57,6 +57,8 @@ log/
 !mobile-rn/assets/*.png
 ui-mockup.html
 chat-init-snapshot.md
+# 评审用的可交互 HTML 原型（不纳入版本管理）
+doc/prototypes/
 
 # CI/CD
 .github/workflows/
