@@ -1,22 +1,24 @@
 import { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { SafeAreaView } from 'react-native';
 import { useConnection } from './src/store/connection';
+import { useTheme } from './src/store/theme';
 import ConnectScreen from './src/screens/ConnectScreen';
-import ChatScreen from './src/screens/ChatScreen';
+import { RootNavigator } from './src/navigation';
 
 export default function App() {
   const status = useConnection((s) => s.status);
   const hydrate = useConnection((s) => s.hydrate);
+  const hydrateTheme = useTheme((s) => s.hydrate);
 
   useEffect(() => {
     hydrate();
-  }, [hydrate]);
+    hydrateTheme();
+  }, [hydrate, hydrateTheme]);
 
   return (
-    <SafeAreaView style={{ flex: 1 }}>
+    <>
       <StatusBar style="auto" />
-      {status === 'connected' ? <ChatScreen /> : <ConnectScreen />}
-    </SafeAreaView>
+      {status === 'connected' ? <RootNavigator /> : <ConnectScreen />}
+    </>
   );
 }
