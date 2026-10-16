@@ -10,17 +10,22 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { StyleSheet, useColorScheme } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import AppearanceScreen from './screens/AppearanceScreen';
 import ChatScreen from './screens/ChatScreen';
 import DataSourcesScreen from './screens/DataSourcesScreen';
 import HoldingsScreen from './screens/HoldingsScreen';
+import InvestorProfileScreen from './screens/InvestorProfileScreen';
+import MarketRefreshScreen from './screens/MarketRefreshScreen';
 import ModelServiceScreen from './screens/ModelServiceScreen';
 import MonitorEventDetailScreen from './screens/MonitorEventDetailScreen';
 import MonitorScreen from './screens/MonitorScreen';
 import ReportDetailScreen from './screens/ReportDetailScreen';
+import PushSettingsScreen from './screens/PushSettingsScreen';
 import ReportsScreen from './screens/ReportsScreen';
 import RuntimeScreen from './screens/RuntimeScreen';
 import ScheduledTasksScreen from './screens/ScheduledTasksScreen';
 import SettingsScreen from './screens/SettingsScreen';
+import SkillsScreen from './screens/SkillsScreen';
 import StockDetailScreen from './screens/StockDetailScreen';
 import StrategyScreen from './screens/StrategyScreen';
 import TurnDetailScreen from './screens/TurnDetailScreen';
@@ -48,6 +53,11 @@ export type RootStackParamList = {
   DataSources: undefined;
   Runtime: undefined;
   ModelService: undefined;
+  Appearance: undefined;
+  MarketRefresh: undefined;
+  InvestorProfile: undefined;
+  PushSettings: undefined;
+  Skills: undefined;
 };
 
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
@@ -128,6 +138,11 @@ const linking = {
       DataSources: 'datasources',
       Runtime: 'runtime',
       ModelService: 'models',
+      Appearance: 'appearance',
+      MarketRefresh: 'market-refresh',
+      InvestorProfile: 'profile',
+      PushSettings: 'push',
+      Skills: 'skills',
     },
   },
 };
@@ -198,6 +213,11 @@ export function RootNavigator() {
         <Stack.Screen name="DataSources" component={DataSourcesScreen} options={{ title: '行情数据源' }} />
         <Stack.Screen name="Runtime" component={RuntimeScreen} options={{ title: '运行状态' }} />
         <Stack.Screen name="ModelService" component={ModelServiceScreen} options={{ title: '模型服务' }} />
+        <Stack.Screen name="Appearance" component={AppearanceScreen} options={{ title: '外观与主题' }} />
+        <Stack.Screen name="MarketRefresh" component={MarketRefreshScreen} options={{ title: '刷新频率' }} />
+        <Stack.Screen name="InvestorProfile" component={InvestorProfileScreen} options={{ title: '投资者画像' }} />
+        <Stack.Screen name="PushSettings" component={PushSettingsScreen} options={{ title: '推送设置' }} />
+        <Stack.Screen name="Skills" component={SkillsScreen} options={{ title: 'AI 技能' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

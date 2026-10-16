@@ -14,6 +14,10 @@ export interface Tokens {
   danger: string;
   input: string;
   bubble: string;
+  /** 设置类页面：灰底 + 白色分组（与 iOS/ChatGPT 一致） */
+  pageBg: string;
+  groupBg: string;
+  sep: string;
 }
 
 /**
@@ -39,6 +43,9 @@ export function useTokens(): Tokens {
       danger: '#FF3B30',
       input: dark ? '#1C1C1E' : '#ffffff',
       bubble: dark ? '#0B3D91' : accent,
+      pageBg: dark ? '#000000' : '#f2f2f7',
+      groupBg: dark ? '#1C1C1E' : '#ffffff',
+      sep: dark ? '#2C2C2E' : '#e5e5ea',
     }),
     [accent, dark]
   );
