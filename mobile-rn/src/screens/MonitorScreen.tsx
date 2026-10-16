@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Modal, Pressable, RefreshControl, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
+import { Sheet } from '../components/Sheet';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -48,9 +49,6 @@ export default function MonitorScreen() {
   const [threshold, setThreshold] = useState('3');
   const [severity, setSeverity] = useState('medium');
   const pageRef = useRef(1);
-  // Modal 刚挂载时，打开它的那一次触摸可能穿透到遮罩 → 弹窗被自己关掉。
-  // 用一个短暂就绪窗口挡掉这段时间的点击。
-  const [sheetReady, setSheetReady] = useState(false);
 
   const seen = useMonitorUnread((s) => s.seen);
   const unreadCount = useMonitorUnread((s) => s.unreadCount);
@@ -82,14 +80,6 @@ export default function MonitorScreen() {
     void load();
   }, [load]);
 
-  useEffect(() => {
-    if (!showAdd) {
-      setSheetReady(false);
-      return;
-    }
-    const t = setTimeout(() => setSheetReady(true), 350);
-    return () => clearTimeout(t);
-  }, [showAdd]);
 
   const loadMore = async () => {
     if (loadingMore || loading || events.length >= total) return;
@@ -231,13 +221,9 @@ export default function MonitorScreen() {
       </View>
       {status?.last_error ? <Text style={styles.error}>最近错误：{status.last_error}</Text> : null}
 
-      <Modal visible={showAdd} transparent animationType="slide" onRequestClose={() => setShowAdd(false)}>
-        <View style={styles.sheetRoot}>
-          <Pressable style={styles.sheetBackdrop} onPress={() => sheetReady && setShowAdd(false)} />
-          <View style={styles.sheet}>
-            <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>新建盯盘规则</Text>
-            <View style={styles.addPanel}>
+      <Sheet visible={showAdd} onClose={() => setShowAdd(false)}>
+        <Text style={styles.sheetTitle}>新建盯盘规则</Text>
+        <View style={styles.addPanel}>
           <TextInput style={styles.input} placeholder="股票代码" value={sym} onChangeText={setSym} autoCapitalize="none" />
           <TextInput style={styles.input} placeholder="涨跌幅阈值 %" value={threshold} onChangeText={setThreshold} keyboardType="numeric" />
           <View style={styles.sevRow}>
@@ -254,11 +240,9 @@ export default function MonitorScreen() {
             <Pressable style={styles.cancelBtn} onPress={() => setShowAdd(false)}>
               <Text style={styles.cancelText}>关闭</Text>
             </Pressable>
-            </View>
-            </View>
           </View>
         </View>
-      </Modal>
+      </Sheet>
 
       {rules.length > 0 ? (
         <View style={styles.rules}>
@@ -344,10 +328,7 @@ const baseStyles = StyleSheet.create({
   del: { color: '#c0392b', fontSize: 13 },
   swipeAction: { backgroundColor: '#FF3B30', justifyContent: 'center', paddingHorizontal: 22 },
   swipeActionText: { color: '#fff', fontWeight: '700' },
-  sheetRoot: { flex: 1, justifyContent: 'flex-end' },
   sheetBackdrop: { ...{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }, backgroundColor: 'rgba(0,0,0,0.35)' },
-  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingBottom: 24 },
-  sheetHandle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: '#ccc', marginTop: 8 },
   sheetTitle: { fontSize: 16, fontWeight: '700', paddingHorizontal: 16, paddingTop: 12 },
   error: { color: '#c0392b', fontSize: 12, paddingHorizontal: 16, paddingBottom: 6 },
   statusRow: { paddingHorizontal: 16, paddingBottom: 6 },

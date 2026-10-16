@@ -451,13 +451,16 @@ export const useChat = create<ChatState>((set, get) => {
 
       const turnId = `rn-turn-${Date.now()}`;
       const userText = text || (humanInputResponse?.value as string) || '';
-      const turn: Turn = { id: turnId, userText, assistant: newAssistant() };
+      const turn: Turn = { id: turnId, userText, assistant: newAssistant(), sendState: 'pending' };
       turn.assistant!.streaming = true;
       patchTurns(sessionId, (turns) => [...turns, turn]);
       set((st) => ({ activeStreams: { ...st.activeStreams, [sessionId]: turnId }, error: null, notice: '' }));
 
       try {
         const run = await sendMessage(baseURL, token, sessionId, text, attachments, humanInputResponse, context);
+        patchTurns(sessionId, (turns) =>
+          turns.map((x) => (x.id === turnId ? { ...x, sendState: 'sent' } : x))
+        );
         const ctl = ctlOf(sessionId);
         ctl.runId = run.run_id;
         ctl.turnId = turnId;
@@ -465,6 +468,9 @@ export const useChat = create<ChatState>((set, get) => {
         await savePending({ sessionId, runId: run.run_id, turnId, userText, updatedAt: Date.now() });
         await attemptStream(sessionId, run.run_id, turnId);
       } catch (e) {
+        patchTurns(sessionId, (turns) =>
+          turns.map((x) => (x.id === turnId ? { ...x, sendState: 'failed' } : x))
+        );
         failStream(sessionId, turnId, e instanceof Error ? e.message : String(e));
       }
     },

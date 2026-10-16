@@ -429,6 +429,8 @@ export interface Turn {
   id: string;
   userText: string;
   assistant: AssistantState | null;
+  /** 用户消息的发送状态（历史消息为 undefined=已发送） */
+  sendState?: 'pending' | 'sent' | 'failed';
 }
 
 export function emptyAssistant(): AssistantState {

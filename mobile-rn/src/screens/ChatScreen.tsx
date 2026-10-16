@@ -24,15 +24,15 @@ import { deleteUpload, listUploads, uploadFiles } from '../api/client';
 import { AssistantBubble } from '../components/AssistantBubble';
 import { EmptyState, ErrorStrip } from '../components/ErrorState';
 import { SessionDrawer } from '../components/SessionDrawer';
+import { Sheet } from '../components/Sheet';
 import { STARTER_PROMPTS } from '../lib/toolLabels';
 import type { RootStackParamList } from '../navigation';
-import { useTokens } from '../lib/tokens';
+import { useThemedStyles, useTokens } from '../lib/tokens';
 import { useAppearance } from '../store/appearance';
 import { useChat } from '../store/chat';
 import { useConnection } from '../store/connection';
 import { usePrefill } from '../store/prefill';
 import type { SessionUpload, Turn } from '../types';
-import { useThemedStyles } from '../lib/tokens';
 
 const SESSION_REFRESH_MS = 30_000;
 
@@ -67,6 +67,7 @@ export default function ChatScreen() {
   const dim = useAppearance((s) => s.dim);
 
   const [drawerVisible, setDrawerVisible] = useState(false);
+  const [menuVisible, setMenuVisible] = useState(false);
   const [pendingUploads, setPendingUploads] = useState<SessionUpload[]>([]);
   const [uploading, setUploading] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
@@ -178,6 +179,12 @@ export default function ChatScreen() {
           </Text>
         </View>
       </View>
+      {item.sendState === 'pending' ? <Text style={styles.sendStatus}>等待发送</Text> : null}
+      {item.sendState === 'failed' ? (
+        <Pressable onPress={() => void useChat.getState().retryTurn(item.id)}>
+          <Text style={[styles.sendStatus, styles.sendStatusFailed]}>发送失败 · 点击重试</Text>
+        </Pressable>
+      ) : null}
       {item.assistant ? (
         <View style={styles.assistantRow}>
           <AssistantBubble
@@ -236,16 +243,26 @@ export default function ChatScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? tabBarHeight : 0}
     >
-      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
-        <Pressable style={styles.iconBtn} onPress={() => setDrawerVisible(true)} hitSlop={6}>
-          <Ionicons name="menu" size={20} color={t.text} />
-        </Pressable>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {currentTitle}
-        </Text>
-        <Pressable style={styles.pillBtn} onPress={disconnect} hitSlop={6}>
-          <Text style={styles.pillBtnText}>断开</Text>
-        </Pressable>
+      {/* 浅灰岛头部：左 ☰ / 中标题 / 右 ✎新建 + ⋮更多 */}
+      <View style={[styles.headerWrap, { paddingTop: insets.top + 8 }]}>
+        <View style={styles.island}>
+          <Pressable style={styles.circleBtn} onPress={() => setDrawerVisible(true)} hitSlop={4}>
+            <Ionicons name="menu" size={20} color={t.text} />
+          </Pressable>
+          <Text style={styles.islandTitle} numberOfLines={1}>
+            {currentTitle}
+          </Text>
+          <Pressable
+            style={styles.circleBtn}
+            onPress={() => void useChat.getState().newSession()}
+            hitSlop={4}
+          >
+            <Ionicons name="create-outline" size={19} color={t.text} />
+          </Pressable>
+          <Pressable style={styles.circleBtn} onPress={() => setMenuVisible(true)} hitSlop={4}>
+            <Ionicons name="ellipsis-vertical" size={19} color={t.text} />
+          </Pressable>
+        </View>
       </View>
 
       {!online ? (
@@ -342,6 +359,46 @@ export default function ChatScreen() {
         </View>
       </View>
 
+      {/* ⋮ 更多 */}
+      <Sheet visible={menuVisible} onClose={() => setMenuVisible(false)}>
+        <Text style={styles.sheetTitle} numberOfLines={1}>
+          {currentTitle}
+        </Text>
+        <MenuItem
+          icon="add-circle-outline"
+          label="新建对话"
+          onPress={() => {
+            setMenuVisible(false);
+            void useChat.getState().newSession();
+          }}
+        />
+        <MenuItem
+          icon="albums-outline"
+          label="管理对话（重命名 / 删除）"
+          onPress={() => {
+            setMenuVisible(false);
+            setDrawerVisible(true);
+          }}
+        />
+        <MenuItem
+          icon="refresh-outline"
+          label="重新探测连接"
+          onPress={() => {
+            setMenuVisible(false);
+            void useConnection.getState().reprobeHealth();
+          }}
+        />
+        <MenuItem
+          icon="log-out-outline"
+          label="断开连接"
+          danger
+          onPress={() => {
+            setMenuVisible(false);
+            disconnect();
+          }}
+        />
+      </Sheet>
+
       <SessionDrawer
         visible={drawerVisible}
         onClose={() => setDrawerVisible(false)}
@@ -363,21 +420,65 @@ export default function ChatScreen() {
   );
 }
 
+function MenuItem({
+  icon,
+  label,
+  onPress,
+  danger,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+  danger?: boolean;
+}) {
+  const styles = useThemedStyles(baseStyles);
+  return (
+    <Pressable style={styles.menuItem} onPress={onPress}>
+      <Ionicons name={icon} size={20} color={danger ? '#FF3B30' : '#333'} />
+      <Text style={[styles.menuLabel, danger && styles.menuLabelDanger]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 const baseStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   bg: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingBottom: 8, gap: 8 },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  headerWrap: { paddingHorizontal: 10, paddingBottom: 6 },
+  island: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#f2f2f7',
+    borderRadius: 26,
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    gap: 4,
+  },
+  circleBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pillBtn: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, backgroundColor: '#f2f2f7' },
-  pillBtnText: { fontSize: 13, color: '#007AFF', fontWeight: '500' },
-  menu: { fontSize: 20, color: '#007AFF', marginRight: 12 },
+  islandTitle: { flex: 1, fontSize: 14, fontWeight: '600', textAlign: 'center', color: '#111' },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 22,
+    paddingVertical: 14,
+  },
+  menuLabel: { fontSize: 15, color: '#111' },
+  menuLabelDanger: { color: '#FF3B30' },
+  sheetTitle: {
+    fontSize: 13,
+    color: '#8E8E93',
+    textAlign: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
   headerTitle: { flex: 1, fontSize: 16, fontWeight: '600', textAlign: 'center' },
   disconnect: { color: '#007AFF', fontSize: 14 },
   notice: { backgroundColor: '#007AFF15', color: '#007AFF', fontSize: 12, paddingHorizontal: 14, paddingVertical: 6 },
@@ -386,6 +487,8 @@ const baseStyles = StyleSheet.create({
   userRow: { alignItems: 'flex-end', marginBottom: 6 },
   userBubble: { backgroundColor: '#007AFF', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10, maxWidth: '85%' },
   userText: { color: '#fff', fontSize: 15, lineHeight: 21 },
+  sendStatus: { textAlign: 'right', fontSize: 11, color: '#8E8E93', marginTop: 4 },
+  sendStatusFailed: { color: '#FF3B30' },
   assistantRow: { alignItems: 'flex-start' },
   loadEarlier: { alignSelf: 'center', paddingVertical: 10 },
   loadEarlierText: { color: '#007AFF', fontSize: 13 },
