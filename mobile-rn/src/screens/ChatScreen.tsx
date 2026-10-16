@@ -17,6 +17,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNetInfo } from '@react-native-community/netinfo';
 import { deleteUpload, listUploads, uploadFiles } from '../api/client';
@@ -25,6 +26,7 @@ import { EmptyState, ErrorStrip } from '../components/ErrorState';
 import { SessionDrawer } from '../components/SessionDrawer';
 import { STARTER_PROMPTS } from '../lib/toolLabels';
 import type { RootStackParamList } from '../navigation';
+import { useTokens } from '../lib/tokens';
 import { useAppearance } from '../store/appearance';
 import { useChat } from '../store/chat';
 import { useConnection } from '../store/connection';
@@ -42,6 +44,7 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const tabBarHeight = useBottomTabBarHeight();
+  const t = useTokens();
   const { disconnect } = useConnection();
   const net = useNetInfo();
   const online = net.isConnected !== false;
@@ -233,20 +236,32 @@ export default function ChatScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? tabBarHeight : 0}
     >
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <Pressable onPress={() => setDrawerVisible(true)} hitSlop={8}>
-          <Text style={styles.menu}>☰</Text>
+      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
+        <Pressable style={styles.iconBtn} onPress={() => setDrawerVisible(true)} hitSlop={6}>
+          <Ionicons name="menu" size={20} color={t.text} />
         </Pressable>
         <Text style={styles.headerTitle} numberOfLines={1}>
           {currentTitle}
         </Text>
-        <Pressable onPress={disconnect} hitSlop={8}>
-          <Text style={styles.disconnect}>断开</Text>
+        <Pressable style={styles.pillBtn} onPress={disconnect} hitSlop={6}>
+          <Text style={styles.pillBtnText}>断开</Text>
         </Pressable>
       </View>
 
-      {!online ? <ErrorStrip message="网络不可用，恢复后可继续发送" /> : null}
-      <ErrorStrip message={chatError ?? ''} onDismiss={() => useChat.getState().setError(null)} />
+      {!online ? (
+        <ErrorStrip
+          message="你似乎已离线。请重新连接以发送消息。"
+          onRetry={() => {
+            void useConnection.getState().reprobeHealth();
+            void useChat.getState().recoverOnForeground();
+          }}
+        />
+      ) : null}
+      <ErrorStrip
+        message={chatError ?? ''}
+        onRetry={() => void useChat.getState().recoverOnForeground()}
+        onDismiss={() => useChat.getState().setError(null)}
+      />
       {notice ? (
         <Pressable onPress={() => useChat.getState().clearNotice()}>
           <Text style={styles.notice}>{notice}</Text>
@@ -285,31 +300,46 @@ export default function ChatScreen() {
         </View>
       ) : null}
 
-      <View style={styles.composer}>
-        <Pressable style={styles.attachBtn} onPress={() => void pickAndUpload()} disabled={uploading || !online}>
-          {uploading ? <ActivityIndicator size="small" /> : <Text style={styles.attachText}>＋</Text>}
-        </Pressable>
-        <TextInput
-          style={styles.input}
-          value={draft}
-          onChangeText={(t) => currentSessionId && useChat.getState().rememberDraft(currentSessionId, t)}
-          placeholder={online ? '问 Stock Agent…' : '网络不可用，暂不可发送'}
-          multiline
-          editable={online}
-        />
-        {busy ? (
-          <Pressable style={styles.sendBtn} onPress={() => useChat.getState().stop()}>
-            <Text style={styles.sendText}>停止</Text>
-          </Pressable>
-        ) : (
+      <View style={styles.composerWrap}>
+        <View style={styles.composerPill}>
           <Pressable
-            style={[styles.sendBtn, (!draft.trim() || !online) && styles.sendDisabled]}
-            onPress={() => void send()}
-            disabled={!draft.trim() || !online}
+            style={styles.pillIcon}
+            onPress={() => void pickAndUpload()}
+            disabled={uploading || !online}
+            hitSlop={4}
           >
-            <Text style={styles.sendText}>发送</Text>
+            {uploading ? (
+              <ActivityIndicator size="small" />
+            ) : (
+              <Ionicons name="add" size={24} color={online ? t.sub : t.border} />
+            )}
           </Pressable>
-        )}
+
+          <TextInput
+            style={styles.pillInput}
+            value={draft}
+            onChangeText={(v) => currentSessionId && useChat.getState().rememberDraft(currentSessionId, v)}
+            placeholder={online ? '问 Stock Agent…' : '网络不可用，暂不可发送'}
+            placeholderTextColor={t.sub}
+            multiline
+            editable={online}
+          />
+
+          {busy ? (
+            <Pressable style={styles.sendCircle} onPress={() => useChat.getState().stop()} hitSlop={4}>
+              <Ionicons name="stop" size={18} color="#fff" />
+            </Pressable>
+          ) : (
+            <Pressable
+              style={[styles.sendCircle, (!draft.trim() || !online) && styles.sendCircleDisabled]}
+              onPress={() => void send()}
+              disabled={!draft.trim() || !online}
+              hitSlop={4}
+            >
+              <Ionicons name="arrow-up" size={20} color={!draft.trim() || !online ? t.sub : '#fff'} />
+            </Pressable>
+          )}
+        </View>
       </View>
 
       <SessionDrawer
@@ -336,14 +366,17 @@ export default function ChatScreen() {
 const baseStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   bg: { flex: 1 },
-  header: {
-    flexDirection: 'row',
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingBottom: 8, gap: 8 },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f2f2f7',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    justifyContent: 'center',
   },
+  pillBtn: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, backgroundColor: '#f2f2f7' },
+  pillBtnText: { fontSize: 13, color: '#007AFF', fontWeight: '500' },
   menu: { fontSize: 20, color: '#007AFF', marginRight: 12 },
   headerTitle: { flex: 1, fontSize: 16, fontWeight: '600', textAlign: 'center' },
   disconnect: { color: '#007AFF', fontSize: 14 },
@@ -351,7 +384,7 @@ const baseStyles = StyleSheet.create({
   listContent: { padding: 16, flexGrow: 1 },
   turn: { marginBottom: 16 },
   userRow: { alignItems: 'flex-end', marginBottom: 6 },
-  userBubble: { backgroundColor: '#007AFF', borderRadius: 12, padding: 10, maxWidth: '85%' },
+  userBubble: { backgroundColor: '#007AFF', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10, maxWidth: '85%' },
   userText: { color: '#fff', fontSize: 15, lineHeight: 21 },
   assistantRow: { alignItems: 'flex-start' },
   loadEarlier: { alignSelf: 'center', paddingVertical: 10 },
@@ -384,7 +417,31 @@ const baseStyles = StyleSheet.create({
   dockStuck: { backgroundColor: '#FF950022' },
   dockTitle: { fontSize: 12, fontWeight: '600', color: '#333' },
   dockDetail: { fontSize: 11, color: '#666' },
-  composer: { flexDirection: 'row', alignItems: 'flex-end', padding: 8, borderTopWidth: 1, borderTopColor: '#eee' },
+  composerWrap: { paddingHorizontal: 12, paddingTop: 6, paddingBottom: 8 },
+  composerPill: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    backgroundColor: '#f7f7f9',
+    borderRadius: 26,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#e5e5ea',
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+    minHeight: 50,
+  },
+  pillIcon: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
+  pillInput: { flex: 1, fontSize: 15, maxHeight: 120, paddingVertical: 10, paddingHorizontal: 2 },
+  sendCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 2,
+  },
+  sendCircleDisabled: { backgroundColor: '#e5e5ea' },
+  composer: { flexDirection: 'row', alignItems: 'flex-end', padding: 8 },
   attachBtn: {
     width: 36,
     height: 36,
