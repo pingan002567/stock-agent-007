@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform, useColorScheme } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import NetInfo from '@react-native-community/netinfo';
 import * as Notifications from 'expo-notifications';
+import * as NavigationBar from 'expo-navigation-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { setAuthFailureHandler } from './src/api/client';
@@ -25,6 +26,9 @@ export default function App() {
   const hydrateAppearance = useAppearance((s) => s.hydrate);
   const hydrateUnread = useMonitorUnread((s) => s.hydrate);
   const hydratePush = usePush((s) => s.hydrate);
+  const scheme = useTheme((s) => s.scheme);
+  const systemScheme = useColorScheme();
+  const dark = scheme === 'dark' || (scheme === 'system' && systemScheme === 'dark');
 
   useEffect(() => {
     hydrate();
@@ -58,6 +62,19 @@ export default function App() {
     }, 60_000);
     return () => clearInterval(timer);
   }, []);
+
+  // 底部系统栏（Android 导航栏）：edge-to-edge 下背景透明，
+  // 只需保证系统图标与 App 明暗对比一致，否则浅色背景下会看不清
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    try {
+      // SDK 57 的 API：'light' = 浅色图标（配深色背景），'dark' = 深色图标（配浅色背景）
+      // edge-to-edge 下导航栏背景透明，由底部 Tab 栏的底色透出，只需同步图标明暗
+      NavigationBar.setStyle(dark ? 'light' : 'dark');
+    } catch {
+      /* 部分 ROM 不支持，忽略 */
+    }
+  }, [dark]);
 
   // 401/403 → 暴露「令牌失效」到横幅
   useEffect(() => {

@@ -8,7 +8,8 @@ import {
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, useColorScheme } from 'react-native';
+import { StyleSheet, useColorScheme } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import ChatScreen from './screens/ChatScreen';
 import DataSourcesScreen from './screens/DataSourcesScreen';
 import HoldingsScreen from './screens/HoldingsScreen';
@@ -131,30 +132,46 @@ const linking = {
   },
 };
 
-function tabIcon(emoji: string) {
-  return ({ color }: { color: string }) => <Text style={{ color, fontSize: 18 }}>{emoji}</Text>;
+type IoniconName = keyof typeof Ionicons.glyphMap;
+
+/** 选中=实心 / 未选中=描边，贴近 iOS Tab 规范；线条颜色跟随主题色 */
+function tabIcon(active: IoniconName, inactive: IoniconName) {
+  return ({ color, focused, size }: { color: string; focused: boolean; size: number }) => (
+    <Ionicons name={focused ? active : inactive} size={size ?? 23} color={color} />
+  );
 }
+
+const tabBarStyle = { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e5e5ea' } as const;
 
 function MainTabs() {
   const accent = useTheme((s) => s.accentHex);
   const unread = useMonitorUnread((s) => s.unreadCount);
   return (
-    <Tabs.Navigator screenOptions={{ headerShown: false, tabBarActiveTintColor: accent }}>
-      <Tabs.Screen name="Chat" component={ChatScreen} options={{ title: '对话', tabBarIcon: tabIcon('💬') }} />
-      <Tabs.Screen name="Watchlist" component={WatchlistScreen} options={{ title: '自选', tabBarIcon: tabIcon('⭐') }} />
-      <Tabs.Screen name="Holdings" component={HoldingsScreen} options={{ title: '持仓', tabBarIcon: tabIcon('💼') }} />
+    <Tabs.Navigator
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: accent,
+        tabBarInactiveTintColor: '#8E8E93',
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
+        tabBarStyle: tabBarStyle,
+        tabBarItemStyle: { paddingTop: 4 },
+      }}
+    >
+      <Tabs.Screen name="Chat" component={ChatScreen} options={{ title: '对话', tabBarIcon: tabIcon('chatbubbles', 'chatbubbles-outline') }} />
+      <Tabs.Screen name="Watchlist" component={WatchlistScreen} options={{ title: '自选', tabBarIcon: tabIcon('star', 'star-outline') }} />
+      <Tabs.Screen name="Holdings" component={HoldingsScreen} options={{ title: '持仓', tabBarIcon: tabIcon('briefcase', 'briefcase-outline') }} />
       <Tabs.Screen
         name="Monitor"
         component={MonitorScreen}
         options={{
           title: '盯盘',
-          tabBarIcon: tabIcon('📡'),
+          tabBarIcon: tabIcon('radio', 'radio-outline'),
           // 空字符串 = 小红点（对齐 iOS .badge(Text(verbatim: ""))）
           tabBarBadge: unread > 0 ? '' : undefined,
           tabBarBadgeStyle: { backgroundColor: '#FF3B30', minWidth: 10, maxHeight: 10 },
         }}
       />
-      <Tabs.Screen name="Settings" component={SettingsScreen} options={{ title: '设置', tabBarIcon: tabIcon('⚙️') }} />
+      <Tabs.Screen name="Settings" component={SettingsScreen} options={{ title: '设置', tabBarIcon: tabIcon('settings', 'settings-outline') }} />
     </Tabs.Navigator>
   );
 }

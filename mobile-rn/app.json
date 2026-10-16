@@ -39,7 +39,8 @@
       "./plugins/with-network-security.js",
       "expo-secure-store",
       "expo-sharing",
-      "expo-background-task"
+      "expo-background-task",
+      "expo-font"
     ]
   }
 }
