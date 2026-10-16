@@ -34,6 +34,9 @@ import { useThemedStyles } from '../lib/tokens';
 
 const SESSION_REFRESH_MS = 30_000;
 
+// 稳定引用：selector 里绝不能返回新建的 []，否则 useSyncExternalStore 会判定快照变化而无限重渲染
+const EMPTY_TURNS: Turn[] = [];
+
 export default function ChatScreen() {
   const styles = useThemedStyles(baseStyles);
   const insets = useSafeAreaInsets();
@@ -43,9 +46,16 @@ export default function ChatScreen() {
   const net = useNetInfo();
   const online = net.isConnected !== false;
 
-  const chat = useChat();
   const currentSessionId = useChat((s) => s.currentSessionId);
-  const turns = useChat((s) => (s.currentSessionId ? s.turnsBySession[s.currentSessionId] ?? [] : []));
+  const sessions = useChat((s) => s.sessions);
+  const activeStreams = useChat((s) => s.activeStreams);
+  const loadingMore = useChat((s) => s.loadingMore);
+  const loadingHistory = useChat((s) => s.loadingHistory);
+  const chatError = useChat((s) => s.error);
+  const notice = useChat((s) => s.notice);
+  // selector 只返回已存在的数组或 undefined（两者引用都稳定），空值在外部兜底
+  const turnsRaw = useChat((s) => (s.currentSessionId ? s.turnsBySession[s.currentSessionId] : undefined));
+  const turns = turnsRaw ?? EMPTY_TURNS;
   const busy = useChat((s) => (s.currentSessionId ? !!s.activeStreams[s.currentSessionId] : false));
   const history = useChat((s) => (s.currentSessionId ? s.history[s.currentSessionId] : undefined));
   const draft = useChat((s) => (s.currentSessionId ? s.drafts[s.currentSessionId] ?? '' : ''));
@@ -62,9 +72,9 @@ export default function ChatScreen() {
 
   // 初始加载：会话列表 + 草稿 + 断线遗留的流（前台恢复）
   useEffect(() => {
-    void chat.loadSessions();
-    void chat.hydrate();
-    void chat.recoverOnForeground();
+    void useChat.getState().loadSessions();
+    void useChat.getState().hydrate();
+    void useChat.getState().recoverOnForeground();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -86,8 +96,8 @@ export default function ChatScreen() {
   }, []);
 
   const currentTitle = useMemo(
-    () => chat.sessions.find((s) => s.session_id === currentSessionId)?.title ?? '对话',
-    [chat.sessions, currentSessionId]
+    () => sessions.find((s) => s.session_id === currentSessionId)?.title ?? '对话',
+    [sessions, currentSessionId]
   );
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -153,7 +163,7 @@ export default function ChatScreen() {
     setAtBottom(true);
     const ctx = askContextRef.current;
     askContextRef.current = undefined;
-    await chat.send(value, uploads, undefined, ctx);
+    await useChat.getState().send(value, uploads, undefined, ctx);
   };
 
   const renderTurn = ({ item }: { item: Turn }) => (
@@ -194,14 +204,14 @@ export default function ChatScreen() {
       ListHeaderComponent={
         history?.hasMore ? (
           <Pressable style={styles.loadEarlier} onPress={() => void useChat.getState().loadEarlier()}>
-            {chat.loadingMore ? <ActivityIndicator size="small" /> : <Text style={styles.loadEarlierText}>上滑加载更早的消息</Text>}
+            {loadingMore ? <ActivityIndicator size="small" /> : <Text style={styles.loadEarlierText}>上滑加载更早的消息</Text>}
           </Pressable>
         ) : turns.length > 0 ? (
           <Text style={styles.noMore}>没有更多了</Text>
         ) : null
       }
       ListEmptyComponent={
-        chat.loadingHistory ? (
+        loadingHistory ? (
           <ActivityIndicator style={{ marginTop: 40 }} />
         ) : (
           <View style={styles.starters}>
@@ -236,10 +246,10 @@ export default function ChatScreen() {
       </View>
 
       {!online ? <ErrorStrip message="网络不可用，恢复后可继续发送" /> : null}
-      <ErrorStrip message={chat.error ?? ''} onDismiss={() => chat.setError(null)} />
-      {chat.notice ? (
-        <Pressable onPress={chat.clearNotice}>
-          <Text style={styles.notice}>{chat.notice}</Text>
+      <ErrorStrip message={chatError ?? ''} onDismiss={() => useChat.getState().setError(null)} />
+      {notice ? (
+        <Pressable onPress={() => useChat.getState().clearNotice()}>
+          <Text style={styles.notice}>{notice}</Text>
         </Pressable>
       ) : null}
 
@@ -288,7 +298,7 @@ export default function ChatScreen() {
           editable={online}
         />
         {busy ? (
-          <Pressable style={styles.sendBtn} onPress={() => chat.stop()}>
+          <Pressable style={styles.sendBtn} onPress={() => useChat.getState().stop()}>
             <Text style={styles.sendText}>停止</Text>
           </Pressable>
         ) : (
@@ -305,9 +315,9 @@ export default function ChatScreen() {
       <SessionDrawer
         visible={drawerVisible}
         onClose={() => setDrawerVisible(false)}
-        sessions={chat.sessions}
+        sessions={sessions}
         currentSessionId={currentSessionId}
-        activeStreams={chat.activeStreams}
+        activeStreams={activeStreams}
         onNew={() => {
           void useChat.getState().newSession();
           setDrawerVisible(false);
