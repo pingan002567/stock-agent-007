@@ -18,6 +18,7 @@ import InvestorProfileScreen from './screens/InvestorProfileScreen';
 import MarketRefreshScreen from './screens/MarketRefreshScreen';
 import ModelServiceScreen from './screens/ModelServiceScreen';
 import MonitorEventDetailScreen from './screens/MonitorEventDetailScreen';
+import MonitorRulesScreen from './screens/MonitorRulesScreen';
 import MonitorScreen from './screens/MonitorScreen';
 import ReportDetailScreen from './screens/ReportDetailScreen';
 import PushSettingsScreen from './screens/PushSettingsScreen';
@@ -46,6 +47,7 @@ export type RootStackParamList = {
   StockDetail: { symbol: string; name?: string };
   TurnDetail: { turnId: string; initialTab?: 'answer' | 'tools' | 'reasoning' };
   MonitorEventDetail: { eventId: string };
+  MonitorRules: undefined;
   ReportDetail: { reportId: string };
   Reports: undefined;
   ScheduledTasks: undefined;
@@ -131,6 +133,7 @@ const linking = {
       StockDetail: 'stock/:symbol',
       TurnDetail: 'turn/:turnId',
       MonitorEventDetail: 'event/:eventId',
+      MonitorRules: 'monitor-rules',
       ReportDetail: 'report/:reportId',
       Reports: 'reports',
       ScheduledTasks: 'tasks',
@@ -206,6 +209,7 @@ export function RootNavigator() {
         <Stack.Screen name="StockDetail" component={StockDetailScreen} options={{ title: '标的详情' }} />
         <Stack.Screen name="TurnDetail" component={TurnDetailScreen} options={{ title: '回答详情' }} />
         <Stack.Screen name="MonitorEventDetail" component={MonitorEventDetailScreen} options={{ title: '事件详情' }} />
+        <Stack.Screen name="MonitorRules" component={MonitorRulesScreen} options={{ title: '盯盘规则' }} />
         <Stack.Screen name="ReportDetail" component={ReportDetailScreen} options={{ title: '报告' }} />
         <Stack.Screen name="Reports" component={ReportsScreen} options={{ title: '研究报告' }} />
         <Stack.Screen name="ScheduledTasks" component={ScheduledTasksScreen} options={{ title: '定时任务' }} />

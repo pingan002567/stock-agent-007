@@ -1,57 +1,53 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
-import { Swipeable } from 'react-native-gesture-handler';
-import { Sheet } from '../components/Sheet';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  deleteMonitorRule,
   evaluateMonitorOnce,
   fetchMonitorEvents,
   fetchMonitorRules,
   fetchMonitorStatus,
   pauseMonitor,
   startMonitor,
-  upsertMonitorRule,
 } from '../api/client';
 import { ErrorState } from '../components/ErrorState';
+import { SettingsGroup, SettingsNote, SettingsRow, SettingsSwitchRow } from '../components/SettingsList';
+import { Sheet } from '../components/Sheet';
 import { severityColor } from '../lib/colors';
 import { relativeTime } from '../lib/format';
+import { useThemedStyles, useTokens } from '../lib/tokens';
 import type { RootStackParamList } from '../navigation';
 import { useConnection } from '../store/connection';
 import { useMonitorUnread } from '../store/monitorUnread';
 import type { MonitorEvent, MonitorRule, MonitorStatus } from '../types';
 import { stashMonitorEvent } from './MonitorEventDetailScreen';
-import { useThemedStyles } from '../lib/tokens';
 
 const PAGE_SIZE = 30;
-
-type Nav = NativeStackNavigationProp<RootStackParamList>;
+type Filter = 'all' | 'unread' | 'high';
 
 export default function MonitorScreen() {
+  const t = useTokens();
   const styles = useThemedStyles(baseStyles);
   const insets = useSafeAreaInsets();
-  const navigation = useNavigation<Nav>();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { baseURL, token } = useConnection();
 
   const [status, setStatus] = useState<MonitorStatus | null>(null);
   const [rules, setRules] = useState<MonitorRule[]>([]);
   const [events, setEvents] = useState<MonitorEvent[]>([]);
-  const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [showAdd, setShowAdd] = useState(false);
-  const [sym, setSym] = useState('');
-  const [threshold, setThreshold] = useState('3');
-  const [severity, setSeverity] = useState('medium');
+  const [filter, setFilter] = useState<Filter>('all');
+  const [menuVisible, setMenuVisible] = useState(false);
   const pageRef = useRef(1);
 
   const seen = useMonitorUnread((s) => s.seen);
   const unreadCount = useMonitorUnread((s) => s.unreadCount);
+  const seenSet = new Set(seen);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,7 +61,6 @@ export default function MonitorScreen() {
       setStatus(s);
       setRules(r);
       setEvents(e.items);
-      setPage(1);
       pageRef.current = 1;
       setTotal(e.total ?? e.items.length);
       useMonitorUnread.getState().refreshFromEventIds(e.items.map((x) => x.event_id));
@@ -80,7 +75,6 @@ export default function MonitorScreen() {
     void load();
   }, [load]);
 
-
   const loadMore = async () => {
     if (loadingMore || loading || events.length >= total) return;
     setLoadingMore(true);
@@ -92,7 +86,6 @@ export default function MonitorScreen() {
         return [...prev, ...e.items.filter((x) => !ids.has(x.event_id))];
       });
       pageRef.current = next;
-      setPage(next);
       useMonitorUnread.getState().refreshFromEventIds(e.items.map((x) => x.event_id));
     } catch {
       /* 分页失败不打断已有列表 */
@@ -101,9 +94,11 @@ export default function MonitorScreen() {
     }
   };
 
-  const toggle = async () => {
+  const running = status?.status === 'running';
+
+  const toggleRunning = async () => {
     try {
-      if (status?.status === 'running') await pauseMonitor(baseURL, token);
+      if (running) await pauseMonitor(baseURL, token);
       else await startMonitor(baseURL, token);
       await load();
     } catch (e) {
@@ -121,250 +116,299 @@ export default function MonitorScreen() {
     }
   };
 
-  const addRule = async () => {
-    if (!sym.trim()) return;
-    try {
-      await upsertMonitorRule(baseURL, token, {
-        rule_type: 'price_change_pct_gt',
-        title: `${sym.trim()} 涨跌幅`,
-        symbol: sym.trim(),
-        threshold: Number(threshold),
-        severity,
-        enabled: true,
-        source: 'android',
-      });
-      setShowAdd(false);
-      setSym('');
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const toggleRule = async (r: MonitorRule) => {
-    if (!r.rule_id) return;
-    setBusyId(r.rule_id);
-    try {
-      await upsertMonitorRule(baseURL, token, { ...r, rule_id: r.rule_id, enabled: !r.enabled });
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const removeRule = async (id?: string) => {
-    if (!id) return;
-    setBusyId(id);
-    try {
-      await deleteMonitorRule(baseURL, token, id);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusyId(null);
-    }
-  };
-
   const openEvent = (e: MonitorEvent) => {
     stashMonitorEvent(e);
     navigation.navigate('MonitorEventDetail', { eventId: e.event_id });
   };
 
-  const openRules = () => setShowAdd((v) => !v);
-  const unreadSet = new Set(seen);
+  const markAllRead = () => useMonitorUnread.getState().markAllRead(events.map((e) => e.event_id));
+
+  const highCount = events.filter((e) => String(e.severity ?? '').toLowerCase() === 'high').length;
+  const enabledRules = rules.filter((r) => r.enabled).length;
+
+  const filtered = events.filter((e) => {
+    if (filter === 'unread') return !seenSet.has(e.event_id);
+    if (filter === 'high') return String(e.severity ?? '').toLowerCase() === 'high';
+    return true;
+  });
+
+  const FILTERS: { id: Filter; label: string; count: number }[] = [
+    { id: 'all', label: '全部', count: events.length },
+    { id: 'unread', label: '未读', count: unreadCount },
+    { id: 'high', label: '高优先级', count: highCount },
+  ];
 
   return (
-    <View style={styles.container}>
-      {/* 两行头部：一行标题+主操作，一行次操作。原先 6 个元素挤一行会溢出 */}
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <View style={styles.headerTop}>
-          <Text style={styles.title}>盯盘</Text>
-          {unreadCount > 0 ? <Text style={styles.unreadBadge}>{unreadCount} 未读</Text> : null}
+    <View style={[styles.container, { backgroundColor: t.pageBg }]}>
+      {/* 浅灰岛头部（与对话页一致） */}
+      <View style={[styles.headerWrap, { paddingTop: insets.top + 8 }]}>
+        <View style={[styles.island, { backgroundColor: t.cardAlt }]}>
+          <Text style={[styles.islandTitle, { color: t.text }]}>盯盘</Text>
+          {unreadCount > 0 ? <Text style={[styles.unreadBadge, { color: t.danger }]}>{unreadCount} 未读</Text> : null}
           <View style={styles.spacer} />
           <Pressable
-            style={[styles.primaryBtn, status?.status === 'running' && styles.primaryBtnPaused]}
-            onPress={() => void toggle()}
-            hitSlop={6}
+            style={[styles.primaryBtn, { backgroundColor: running ? t.sep : t.accent }]}
+            onPress={() => void toggleRunning()}
+            hitSlop={4}
           >
-            <Text style={styles.primaryBtnText}>
-              {status?.status === 'running' ? '⏸  暂停' : '▶  启动'}
+            <Ionicons name={running ? 'pause' : 'play'} size={14} color={running ? t.text : '#fff'} />
+            <Text style={[styles.primaryText, { color: running ? t.text : '#fff' }]}>
+              {running ? '暂停' : '启动'}
             </Text>
           </Pressable>
-        </View>
-
-        <View style={styles.headerActions}>
-          <Pressable onPress={() => void evaluate()} disabled={loading} hitSlop={6}>
-            <Text style={[styles.link, loading && styles.linkDisabled]}>立即评估</Text>
-          </Pressable>
-          <Pressable onPress={openRules} hitSlop={6}>
-            <Text style={styles.link}>＋ 规则</Text>
-          </Pressable>
           <Pressable
-            onPress={() => useMonitorUnread.getState().markAllRead(events.map((e) => e.event_id))}
-            disabled={unreadCount === 0}
-            hitSlop={6}
+            style={[styles.circleBtn, { backgroundColor: t.groupBg }]}
+            onPress={() => setMenuVisible(true)}
+            hitSlop={4}
           >
-            <Text style={[styles.link, unreadCount === 0 && styles.linkDisabled]}>全部已读</Text>
+            <Ionicons name="ellipsis-vertical" size={18} color={t.text} />
           </Pressable>
         </View>
       </View>
 
       {error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
 
-      <View style={styles.statusRow}>
-        <Text style={styles.statusText}>
-          状态 {status?.status ?? '—'}
-          {status?.last_checked_at ? ` · 上次检查 ${relativeTime(status.last_checked_at)}` : ''}
-        </Text>
-      </View>
-      {status?.last_error ? <Text style={styles.error}>最近错误：{status.last_error}</Text> : null}
-
-      <Sheet visible={showAdd} onClose={() => setShowAdd(false)}>
-        <Text style={styles.sheetTitle}>新建盯盘规则</Text>
-        <View style={styles.addPanel}>
-          <TextInput style={styles.input} placeholder="股票代码" value={sym} onChangeText={setSym} autoCapitalize="none" />
-          <TextInput style={styles.input} placeholder="涨跌幅阈值 %" value={threshold} onChangeText={setThreshold} keyboardType="numeric" />
-          <View style={styles.sevRow}>
-            {['high', 'medium', 'low'].map((s) => (
-              <Pressable key={s} style={[styles.sevBtn, severity === s && styles.sevActive]} onPress={() => setSeverity(s)}>
-                <Text style={[styles.sevText, severity === s && styles.sevTextActive]}>{s}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <View style={styles.addRow}>
-            <Pressable style={styles.addBtn} onPress={() => void addRule()}>
-              <Text style={styles.addBtnText}>保存规则</Text>
-            </Pressable>
-            <Pressable style={styles.cancelBtn} onPress={() => setShowAdd(false)}>
-              <Text style={styles.cancelText}>关闭</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Sheet>
-
-      {rules.length > 0 ? (
-        <View style={styles.rules}>
-          {rules.map((r) => (
-            <Swipeable
-              key={r.rule_id}
-              overshootRight={false}
-              renderRightActions={() => (
-                <Pressable style={styles.swipeAction} onPress={() => void removeRule(r.rule_id)}>
-                  <Text style={styles.swipeActionText}>删除</Text>
-                </Pressable>
-              )}
-            >
-              <View style={styles.ruleRow}>
-                <View style={styles.ruleBody}>
-                  <Text style={styles.ruleText}>
-                    {r.title ?? r.symbol} · {r.rule_type}
-                  </Text>
-                  {r.trigger_rule ? <Text style={styles.ruleTrigger}>{r.trigger_rule}</Text> : null}
-                </View>
-                {busyId === r.rule_id ? <ActivityIndicator size="small" /> : <Switch value={r.enabled ?? true} onValueChange={() => void toggleRule(r)} />}
-              </View>
-            </Swipeable>
-          ))}
-        </View>
-      ) : null}
-
       <FlatList
-        data={events}
+        data={filtered}
         keyExtractor={(e) => e.event_id}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
+        contentContainerStyle={styles.listContent}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} tintColor={t.accent} />}
         onEndReached={() => void loadMore()}
         onEndReachedThreshold={0.4}
+        ListHeaderComponent={
+          <View>
+            <SettingsGroup title="运行状态">
+              <SettingsSwitchRow
+                label="盯盘运行中"
+                hint={running ? '按间隔轮询规则，命中即产生事件' : '已暂停，不会再产生新事件'}
+                value={running}
+                onChange={() => void toggleRunning()}
+              />
+              <SettingsRow label="上次检查" value={status?.last_checked_at ? relativeTime(status.last_checked_at) : '—'} />
+              <SettingsRow
+                label="检查间隔"
+                value={status?.interval_seconds != null ? `${status.interval_seconds} 秒` : '—'}
+                last={!status?.last_error}
+              />
+              {status?.last_error ? <SettingsNote>⚠️ {status.last_error}</SettingsNote> : null}
+            </SettingsGroup>
+
+            <SettingsGroup title="规则">
+              <SettingsRow
+                icon="options-outline"
+                label="盯盘规则"
+                value={rules.length ? `${rules.length} 条 · ${enabledRules} 启用` : '还未配置'}
+                onPress={() => navigation.navigate('MonitorRules')}
+                last
+              />
+            </SettingsGroup>
+
+            <View style={styles.filters}>
+              {FILTERS.map((f) => {
+                const on = filter === f.id;
+                return (
+                  <Pressable
+                    key={f.id}
+                    style={[styles.filter, { borderColor: on ? t.accent : t.sep, backgroundColor: on ? t.cardAlt : 'transparent' }]}
+                    onPress={() => setFilter(f.id)}
+                  >
+                    <Text style={[styles.filterText, { color: on ? t.accent : t.sub }]}>
+                      {f.label}
+                      {f.count > 0 ? ` ${f.count}` : ''}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        }
         ListEmptyComponent={
-          loading ? <ActivityIndicator style={{ marginTop: 40 }} /> : <Text style={styles.muted}>暂无盯盘事件</Text>
+          loading ? (
+            <ActivityIndicator style={{ marginTop: 40 }} />
+          ) : (
+            <View style={styles.empty}>
+              <Text style={[styles.emptyText, { color: t.sub }]}>
+                {filter === 'all' ? '暂无盯盘事件' : '该筛选下没有事件'}
+              </Text>
+              <Text style={[styles.emptyHint, { color: t.sub }]}>
+                {rules.length === 0 ? '先配置一条规则，命中后会在这里显示。' : '规则命中后会在这里显示。'}
+              </Text>
+            </View>
+          )
         }
         ListFooterComponent={
-          loadingMore ? <ActivityIndicator style={{ marginVertical: 16 }} /> : page > 1 && events.length >= total ? <Text style={styles.muted}>没有更多了</Text> : null
+          loadingMore ? (
+            <ActivityIndicator style={{ marginVertical: 16 }} />
+          ) : pageRef.current > 1 && events.length >= total ? (
+            <Text style={[styles.footer, { color: t.sub }]}>没有更多了</Text>
+          ) : null
         }
         renderItem={({ item }) => {
-          const unread = !unreadSet.has(item.event_id);
+          const unread = !seenSet.has(item.event_id);
           return (
-            <Pressable style={styles.event} onPress={() => openEvent(item)}>
-              <View style={styles.eventHead}>
-                <View style={[styles.pill, { backgroundColor: `${severityColor(item.severity)}22` }]}>
-                  <Text style={[styles.pillText, { color: severityColor(item.severity) }]}>{item.severity ?? 'medium'}</Text>
+            <Pressable style={[styles.eventRow, { backgroundColor: t.groupBg }]} onPress={() => openEvent(item)}>
+              <View style={styles.eventBody}>
+                <View style={styles.eventTop}>
+                  <View style={[styles.pill, { backgroundColor: `${severityColor(item.severity)}22` }]}>
+                    <Text style={[styles.pillText, { color: severityColor(item.severity) }]}>
+                      {String(item.severity ?? 'medium')}
+                    </Text>
+                  </View>
+                  {item.symbol ? <Text style={[styles.eventSymbol, { color: t.text }]}>{item.symbol}</Text> : null}
+                  <Text
+                    style={[styles.eventTitle, { color: t.text }, unread && styles.eventTitleUnread]}
+                    numberOfLines={1}
+                  >
+                    {item.title ?? '事件'}
+                  </Text>
+                  {unread ? <View style={[styles.dot, { backgroundColor: t.danger }]} /> : null}
                 </View>
-                <Text style={styles.eventSymbol}>{item.symbol}</Text>
-                <Text style={[styles.eventTitle, unread && styles.eventTitleUnread]} numberOfLines={1}>
-                  {item.title}
+                <Text style={[styles.eventMeta, { color: t.sub }]} numberOfLines={2}>
+                  {relativeTime(item.triggered_at)}
+                  {item.message ? ` · ${item.message}` : ''}
                 </Text>
-                {unread ? <View style={styles.dot} /> : null}
               </View>
-              <Text style={styles.eventMeta}>
-                {relativeTime(item.triggered_at)} · {item.message?.slice(0, 40) ?? ''}
-              </Text>
+              <Ionicons name="chevron-forward" size={16} color="#C7C7CC" />
             </Pressable>
           );
         }}
       />
+
+      {/* ⋮ 更多 */}
+      <Sheet visible={menuVisible} onClose={() => setMenuVisible(false)}>
+        <Text style={[styles.sheetTitle, { color: t.sub }]}>盯盘</Text>
+        <MenuItem
+          icon="refresh-outline"
+          label="立即评估一次"
+          hint={loading ? '进行中…' : '不强推，按冷却策略执行'}
+          disabled={loading}
+          onPress={() => {
+            setMenuVisible(false);
+            void evaluate();
+          }}
+        />
+        <MenuItem
+          icon="add-circle-outline"
+          label="新建规则"
+          onPress={() => {
+            setMenuVisible(false);
+            navigation.navigate('MonitorRules');
+          }}
+        />
+        <MenuItem
+          icon="checkmark-done-outline"
+          label="全部标为已读"
+          hint={unreadCount > 0 ? `${unreadCount} 条未读` : '暂无未读'}
+          disabled={unreadCount === 0}
+          onPress={() => {
+            setMenuVisible(false);
+            markAllRead();
+          }}
+        />
+        <MenuItem
+          icon={running ? 'pause-circle-outline' : 'play-circle-outline'}
+          label={running ? '暂停盯盘' : '启动盯盘'}
+          onPress={() => {
+            setMenuVisible(false);
+            void toggleRunning();
+          }}
+        />
+        <MenuItem
+          icon="options-outline"
+          label="管理规则"
+          hint={rules.length ? `${rules.length} 条` : '暂无规则'}
+          onPress={() => {
+            setMenuVisible(false);
+            navigation.navigate('MonitorRules');
+          }}
+        />
+      </Sheet>
     </View>
   );
 }
 
+function MenuItem({
+  icon,
+  label,
+  hint,
+  onPress,
+  disabled,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  hint?: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
+  const t = useTokens();
+  const styles = useThemedStyles(baseStyles);
+  return (
+    <Pressable style={[styles.menuItem, disabled && styles.menuDisabled]} onPress={onPress} disabled={disabled}>
+      <Ionicons name={icon} size={20} color={t.text} />
+      <View style={styles.menuText}>
+        <Text style={[styles.menuLabel, { color: t.text }]}>{label}</Text>
+        {hint ? <Text style={[styles.menuHint, { color: t.sub }]}>{hint}</Text> : null}
+      </View>
+    </Pressable>
+  );
+}
+
 const baseStyles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  header: { paddingHorizontal: 16, paddingBottom: 10 },
-  headerTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 20, marginTop: 10 },
-  spacer: { flex: 1 },
-  title: { fontSize: 20, fontWeight: '700' },
-  primaryBtn: {
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-  },
-  primaryBtnPaused: { backgroundColor: '#8E8E93' },
-  primaryBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
-  linkDisabled: { opacity: 0.4 },
-  unreadBadge: { color: '#FF3B30', fontSize: 13, fontWeight: '600' },
-  link: { color: '#007AFF', fontSize: 13 },
-  del: { color: '#c0392b', fontSize: 13 },
-  swipeAction: { backgroundColor: '#FF3B30', justifyContent: 'center', paddingHorizontal: 22 },
-  swipeActionText: { color: '#fff', fontWeight: '700' },
-  sheetBackdrop: { ...{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }, backgroundColor: 'rgba(0,0,0,0.35)' },
-  sheetTitle: { fontSize: 16, fontWeight: '700', paddingHorizontal: 16, paddingTop: 12 },
-  error: { color: '#c0392b', fontSize: 12, paddingHorizontal: 16, paddingBottom: 6 },
-  statusRow: { paddingHorizontal: 16, paddingBottom: 6 },
-  statusText: { fontSize: 12, color: '#8E8E93' },
-  addPanel: { paddingHorizontal: 16, paddingBottom: 8 },
-  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, fontSize: 14, marginBottom: 8 },
-  sevRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
-  sevBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#ddd' },
-  sevActive: { borderColor: '#007AFF', backgroundColor: '#eef4ff' },
-  sevText: { color: '#666', fontSize: 13 },
-  sevTextActive: { color: '#007AFF' },
-  addRow: { flexDirection: 'row', gap: 10 },
-  addBtn: { flex: 1, backgroundColor: '#007AFF', borderRadius: 8, padding: 12, alignItems: 'center' },
-  addBtnText: { color: '#fff', fontWeight: '600' },
-  cancelBtn: { paddingHorizontal: 18, justifyContent: 'center' },
-  cancelText: { color: '#666' },
-  rules: { paddingHorizontal: 16, paddingBottom: 8 },
-  ruleRow: {
+  container: { flex: 1 },
+  headerWrap: { paddingHorizontal: 10, paddingBottom: 8 },
+  island: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#eee',
+    gap: 8,
+    borderRadius: 26,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    minHeight: 50,
   },
-  ruleBody: { flex: 1 },
-  ruleText: { fontSize: 13 },
-  ruleTrigger: { fontSize: 11, color: '#999', fontFamily: 'Menlo', marginTop: 2 },
-  event: { paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee' },
-  eventHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  islandTitle: { fontSize: 17, fontWeight: '700' },
+  unreadBadge: { fontSize: 12, fontWeight: '600' },
+  spacer: { flex: 1 },
+  primaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  primaryText: { fontSize: 13, fontWeight: '600' },
+  circleBtn: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  listContent: { paddingBottom: 30 },
+  filters: { flexDirection: 'row', gap: 8, marginHorizontal: 16, marginBottom: 12 },
+  filter: { flex: 1, borderWidth: 1, borderRadius: 9, paddingVertical: 8, alignItems: 'center' },
+  filterText: { fontSize: 12.5 },
+  eventRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  eventBody: { flex: 1 },
+  eventTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   pill: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
   pillText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
-  eventSymbol: { fontWeight: '700', fontSize: 14 },
-  eventTitle: { flex: 1, fontSize: 13 },
+  eventSymbol: { fontSize: 14, fontWeight: '700' },
+  eventTitle: { flex: 1, fontSize: 14 },
   eventTitleUnread: { fontWeight: '700' },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF3B30' },
-  eventMeta: { fontSize: 11, color: '#999', marginTop: 4 },
-  muted: { color: '#999', textAlign: 'center', marginVertical: 16 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  eventMeta: { fontSize: 11.5, marginTop: 5, lineHeight: 16 },
+  empty: { alignItems: 'center', paddingVertical: 50, paddingHorizontal: 32 },
+  emptyText: { fontSize: 14 },
+  emptyHint: { fontSize: 12, marginTop: 6, textAlign: 'center', lineHeight: 18 },
+  footer: { textAlign: 'center', fontSize: 12, marginVertical: 16 },
+  sheetTitle: { fontSize: 12.5, textAlign: 'center', paddingTop: 8, paddingBottom: 10 },
+  menuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 22, paddingVertical: 14 },
+  menuDisabled: { opacity: 0.4 },
+  menuText: { flex: 1 },
+  menuLabel: { fontSize: 15 },
+  menuHint: { fontSize: 11.5, marginTop: 2 },
 });
