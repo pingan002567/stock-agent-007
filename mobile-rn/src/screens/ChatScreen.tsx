@@ -195,20 +195,8 @@ export default function ChatScreen() {
   };
 
   const renderTurn = ({ item }: { item: Turn }) => (
-    <View style={styles.turn}>
-      <View style={styles.userRow}>
-        <View style={styles.userBubble}>
-          <Text style={styles.userText} selectable>
-            {item.userText}
-          </Text>
-        </View>
-      </View>
-      {item.sendState === 'pending' ? <Text style={styles.sendStatus}>等待发送</Text> : null}
-      {item.sendState === 'failed' ? (
-        <Pressable onPress={() => void useChat.getState().retryTurn(item.id)}>
-          <Text style={[styles.sendStatus, styles.sendStatusFailed]}>发送失败 · 点击重试</Text>
-        </Pressable>
-      ) : null}
+    <View>
+      <UserBubble item={item} />
       {item.assistant ? (
         <View style={styles.assistantRow}>
           <AssistantBubble
@@ -451,6 +439,36 @@ export default function ChatScreen() {
   );
 }
 
+function UserBubble({ item }: { item: Turn }) {
+  const styles = useThemedStyles(baseStyles);
+  const [expanded, setExpanded] = useState(false);
+  // 定时任务的 prompt 可能上千字，默认折叠，避免气泡变成一堵墙
+  const long = item.userText.length > 200 || item.userText.split('\n').length > 6;
+
+  return (
+    <View style={styles.turn}>
+      <View style={styles.userRow}>
+        <View style={styles.userBubble}>
+          <Text style={styles.userText} selectable numberOfLines={!expanded && long ? 5 : undefined}>
+            {item.userText}
+          </Text>
+        </View>
+      </View>
+      {item.sendState === 'pending' ? <Text style={styles.sendStatus}>等待发送</Text> : null}
+      {item.sendState === 'failed' ? (
+        <Pressable onPress={() => void useChat.getState().retryTurn(item.id)}>
+          <Text style={[styles.sendStatus, styles.sendStatusFailed]}>发送失败 · 点击重试</Text>
+        </Pressable>
+      ) : null}
+      {long ? (
+        <Pressable onPress={() => setExpanded((v) => !v)} hitSlop={6}>
+          <Text style={styles.userToggle}>{expanded ? '收起' : `展开全文（${item.userText.length} 字）`}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 function MenuItem({
   icon,
   label,
@@ -520,6 +538,7 @@ const baseStyles = StyleSheet.create({
   userText: { color: '#fff', fontSize: 15, lineHeight: 21 },
   sendStatus: { textAlign: 'right', fontSize: 11, color: '#8E8E93', marginTop: 4 },
   sendStatusFailed: { color: '#FF3B30' },
+  userToggle: { textAlign: 'right', fontSize: 11, color: '#007AFF', marginTop: 4 },
   assistantRow: { alignItems: 'flex-start' },
   loadEarlier: { alignSelf: 'center', paddingVertical: 10 },
   loadEarlierText: { color: '#007AFF', fontSize: 13 },

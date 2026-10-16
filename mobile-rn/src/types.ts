@@ -60,6 +60,8 @@ export interface BackendMessage {
   run_id?: string;
   role?: string;
   kind?: string;
+  /** 消息正文（user_message / final_answer / reasoning 都在这里；tool_* 时是工具名） */
+  text?: string;
   payload?: Record<string, unknown>;
   created_at?: string;
   [key: string]: unknown;

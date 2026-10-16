@@ -559,18 +559,24 @@ export const useChat = create<ChatState>((set, get) => {
 
 /* ---------- 历史消息 → 轮次 ---------- */
 
+function firstString(...vals: unknown[]): string {
+  for (const v of vals) {
+    if (typeof v === 'string' && v.trim().length > 0) return v;
+  }
+  return '';
+}
+
 function messageToUpdate(msg: BackendMessage): StreamUpdate {
   const p = (msg.payload as Record<string, unknown>) ?? {};
-  const str = (...keys: string[]): string => {
-    for (const k of keys) {
-      const v = p[k];
-      if (typeof v === 'string' && v.length > 0) return v;
-    }
-    return '';
-  };
+  // 后端把正文放在顶层 text；tool_* 时顶层 text 是工具名，那些分支不能兜底到它
+  const top = typeof msg.text === 'string' ? msg.text : undefined;
+  const str = (...keys: string[]): string => firstString(...keys.map((k) => p[k]));
+  const strOrTop = (...keys: string[]): string => firstString(...keys.map((k) => p[k]), top);
   switch (msg.kind) {
-    case 'reasoning':
-      return str('text', 'latest_text') ? { kind: 'reasoning', text: str('text', 'latest_text') } : { kind: 'ignore' };
+    case 'reasoning': {
+      const txt = strOrTop('text', 'latest_text');
+      return txt ? { kind: 'reasoning', text: txt } : { kind: 'ignore' };
+    }
     case 'tool_call':
       return {
         kind: 'tool_call',
@@ -580,15 +586,15 @@ function messageToUpdate(msg: BackendMessage): StreamUpdate {
     case 'tool_result':
       return { kind: 'tool_result', callId: str('call_id'), preview: str('result_preview', 'text', 'output', 'result') };
     case 'final_answer':
-      return { kind: 'final_answer', text: str('conclusion', 'text', 'content') };
+      return { kind: 'final_answer', text: strOrTop('conclusion', 'text', 'content') };
     case 'clarification':
-      return { kind: 'clarification', request: null, text: str('question', 'text') };
+      return { kind: 'clarification', request: null, text: strOrTop('question', 'text') };
     case 'skill_trace': {
       const items = Array.isArray(p.items) ? (p.items as Record<string, unknown>[]) : [];
       return items.length ? { kind: 'skill_trace', steps: items } : { kind: 'ignore' };
     }
     case 'error':
-      return { kind: 'error', message: str('message', 'error') || '生成失败' };
+      return { kind: 'error', message: strOrTop('message', 'error') || '生成失败' };
     default:
       return { kind: 'ignore' };
   }
@@ -598,10 +604,17 @@ function messagesToTurns(messages: BackendMessage[]): Turn[] {
   const turns: Turn[] = [];
   for (const m of messages) {
     if (m.role === 'user') {
-      const text = (m.payload as Record<string, unknown> | undefined)?.message;
+      const p = (m.payload as Record<string, unknown> | undefined) ?? {};
+      // 关键：用户消息正文在顶层 text（payload 里只有 request/intent/skill，没有 message）
+      const userText = firstString(
+        typeof m.text === 'string' ? m.text : undefined,
+        p.message,
+        p.text,
+        p.content
+      );
       turns.push({
         id: m.message_id ?? `u-${Date.now()}-${turns.length}`,
-        userText: typeof text === 'string' ? text : '',
+        userText,
         assistant: null,
       });
     } else if (turns.length > 0) {
