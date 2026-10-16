@@ -3,13 +3,16 @@ import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from '
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { fetchReports } from '../api/client';
+import { ErrorState } from '../components/ErrorState';
 import type { RootStackParamList } from '../navigation';
 import { useConnection } from '../store/connection';
 import type { ReportSummary } from '../types';
+import { useThemedStyles } from '../lib/tokens';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 export default function ReportsScreen() {
+  const styles = useThemedStyles(baseStyles);
   const navigation = useNavigation<Nav>();
   const { baseURL, token } = useConnection();
   const [items, setItems] = useState<ReportSummary[]>([]);
@@ -17,16 +20,18 @@ export default function ReportsScreen() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const r = await fetchReports(baseURL, token, 1, 20);
       setItems(r.items);
       setTotal(r.total);
       setPage(1);
-    } catch {
-      /* ignore */
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
@@ -67,7 +72,15 @@ export default function ReportsScreen() {
           {item.conclusion ? <Text style={styles.conclusion} numberOfLines={2}>{item.conclusion}</Text> : null}
         </Pressable>
       )}
-      ListEmptyComponent={loading ? <ActivityIndicator style={{ marginTop: 40 }} /> : <Text style={styles.muted}>暂无报告</Text>}
+      ListEmptyComponent={
+        error ? (
+          <ErrorState message={error} onRetry={() => void load()} />
+        ) : loading ? (
+          <ActivityIndicator style={{ marginTop: 40 }} />
+        ) : (
+          <Text style={styles.muted}>暂无报告</Text>
+        )
+      }
       onEndReached={() => void more()}
       onEndReachedThreshold={0.3}
       ListFooterComponent={loadingMore ? <ActivityIndicator style={{ marginVertical: 16 }} /> : null}
@@ -75,7 +88,7 @@ export default function ReportsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const baseStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   card: { backgroundColor: '#f6f8fa', borderRadius: 10, padding: 14, marginBottom: 12 },
   title: { fontSize: 15, fontWeight: '700' },

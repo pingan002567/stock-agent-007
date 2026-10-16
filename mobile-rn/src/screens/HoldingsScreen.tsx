@@ -3,24 +3,32 @@ import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Tex
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { fetchHoldings } from '../api/client';
+import { ErrorState } from '../components/ErrorState';
+import { trendColor } from '../lib/colors';
 import type { RootStackParamList } from '../navigation';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useConnection } from '../store/connection';
 import type { HoldingItem, HoldingsResponse } from '../types';
+import { useThemedStyles } from '../lib/tokens';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 export default function HoldingsScreen() {
+  const styles = useThemedStyles(baseStyles);
   const navigation = useNavigation<Nav>();
+  const insets = useSafeAreaInsets();
   const { baseURL, token } = useConnection();
   const [data, setData] = useState<HoldingsResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       setData(await fetchHoldings(baseURL, token));
-    } catch {
-      /* ignore */
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
@@ -39,8 +47,7 @@ export default function HoldingsScreen() {
 
   const renderItem = ({ item }: { item: HoldingItem }) => {
     const pnl = item.pnl_pct ?? 0;
-    const up = pnl >= 0;
-    const color = up ? '#e53935' : '#26a69a';
+    const color = trendColor(pnl);
     return (
       <Pressable style={styles.row} onPress={() => navigation.navigate('StockDetail', { symbol: item.symbol ?? '', name: item.name })}>
         <View style={styles.main}>
@@ -55,7 +62,7 @@ export default function HoldingsScreen() {
         </View>
         <View style={[styles.col, { alignItems: 'flex-end' }]}>
           <Text style={[styles.val, { color }]}>
-            {up ? '+' : ''}
+            {pnl >= 0 ? '+' : ''}
             {pnl.toFixed(2)}%
           </Text>
           <Text style={styles.sub}>{item.quantity ?? 0} 股</Text>
@@ -65,7 +72,7 @@ export default function HoldingsScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       <Text style={styles.title}>持仓</Text>
       {summary && (
         <View style={styles.summary}>
@@ -89,13 +96,21 @@ export default function HoldingsScreen() {
         keyExtractor={(i, idx) => i.symbol ?? String(idx)}
         renderItem={renderItem}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
-        ListEmptyComponent={loading ? <ActivityIndicator style={{ marginTop: 40 }} /> : <Text style={styles.muted}>暂无持仓</Text>}
+        ListEmptyComponent={
+          error ? (
+            <ErrorState message={error} onRetry={() => void load()} />
+          ) : loading ? (
+            <ActivityIndicator style={{ marginTop: 40 }} />
+          ) : (
+            <Text style={styles.muted}>暂无持仓</Text>
+          )
+        }
       />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const baseStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   title: { fontSize: 20, fontWeight: '700', paddingHorizontal: 16, paddingVertical: 12 },
   summary: { flexDirection: 'row', padding: 16, backgroundColor: '#f6f8fa', marginBottom: 8 },

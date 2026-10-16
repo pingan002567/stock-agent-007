@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  ImageBackground,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -9,36 +10,102 @@ import {
   Text,
   TextInput,
   View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import { listUploads, uploadFiles } from '../api/client';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNetInfo } from '@react-native-community/netinfo';
+import { deleteUpload, listUploads, uploadFiles } from '../api/client';
 import { AssistantBubble } from '../components/AssistantBubble';
+import { EmptyState, ErrorStrip } from '../components/ErrorState';
 import { SessionDrawer } from '../components/SessionDrawer';
+import { STARTER_PROMPTS } from '../lib/toolLabels';
+import type { RootStackParamList } from '../navigation';
+import { useAppearance } from '../store/appearance';
 import { useChat } from '../store/chat';
 import { useConnection } from '../store/connection';
 import { usePrefill } from '../store/prefill';
 import type { SessionUpload, Turn } from '../types';
+import { useThemedStyles } from '../lib/tokens';
+
+const SESSION_REFRESH_MS = 30_000;
 
 export default function ChatScreen() {
+  const styles = useThemedStyles(baseStyles);
+  const insets = useSafeAreaInsets();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const tabBarHeight = useBottomTabBarHeight();
   const { disconnect } = useConnection();
+  const net = useNetInfo();
+  const online = net.isConnected !== false;
+
   const chat = useChat();
+  const currentSessionId = useChat((s) => s.currentSessionId);
+  const turns = useChat((s) => (s.currentSessionId ? s.turnsBySession[s.currentSessionId] ?? [] : []));
+  const busy = useChat((s) => (s.currentSessionId ? !!s.activeStreams[s.currentSessionId] : false));
+  const history = useChat((s) => (s.currentSessionId ? s.history[s.currentSessionId] : undefined));
+  const draft = useChat((s) => (s.currentSessionId ? s.drafts[s.currentSessionId] ?? '' : ''));
+  const dock = useChat((s) => (s.currentSessionId ? s.docks[s.currentSessionId] : undefined));
+  const wallpaper = useAppearance((s) => s.backgroundUri);
+  const dim = useAppearance((s) => s.dim);
+
   const [drawerVisible, setDrawerVisible] = useState(false);
-  const [input, setInput] = useState('');
   const [pendingUploads, setPendingUploads] = useState<SessionUpload[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [atBottom, setAtBottom] = useState(true);
   const listRef = useRef<FlatList<Turn>>(null);
+  const askContextRef = useRef<{ page?: string; symbol?: string } | undefined>(undefined);
 
+  // 初始加载：会话列表 + 草稿 + 断线遗留的流（前台恢复）
   useEffect(() => {
     void chat.loadSessions();
+    void chat.hydrate();
+    void chat.recoverOnForeground();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 30s 会话列表自动刷新
   useEffect(() => {
-    const pre = usePrefill.getState().take();
-    if (pre) setInput(pre);
+    const timer = setInterval(() => void useChat.getState().loadSessions(), SESSION_REFRESH_MS);
+    return () => clearInterval(timer);
   }, []);
 
-  const currentTitle = chat.sessions.find((s) => s.session_id === chat.currentSessionId)?.title ?? '对话';
+  // 「在对话中分析」等跨页预填（带 page/symbol 上下文）
+  useEffect(() => {
+    const pre = usePrefill.getState().take();
+    if (pre.text) {
+      askContextRef.current = pre.context ?? undefined;
+      const sid = useChat.getState().currentSessionId;
+      if (sid) useChat.getState().rememberDraft(sid, pre.text);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const currentTitle = useMemo(
+    () => chat.sessions.find((s) => s.session_id === currentSessionId)?.title ?? '对话',
+    [chat.sessions, currentSessionId]
+  );
+
+  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    const distance = contentSize.height - layoutMeasurement.height - contentOffset.y;
+    setAtBottom(distance < 60);
+    // 接近顶部时自动预取更早的消息（对齐 iOS ChatHistoryPager 的自动预取）
+    if (contentOffset.y < 80) {
+      const st = useChat.getState();
+      const sid = st.currentSessionId;
+      if (sid && st.history[sid]?.nextBefore && !st.loadingMore) void st.loadEarlier();
+    }
+  };
+
+  const jumpToLatest = useCallback(() => {
+    listRef.current?.scrollToEnd({ animated: true });
+    setAtBottom(true);
+  }, []);
 
   const pickAndUpload = async () => {
     const res = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true });
@@ -46,9 +113,9 @@ export default function ChatScreen() {
     const files = res.assets.map((a) => ({ uri: a.uri, name: a.name, mimeType: a.mimeType ?? 'application/octet-stream' }));
     setUploading(true);
     try {
-      let sid = chat.currentSessionId;
+      let sid = useChat.getState().currentSessionId;
       if (!sid) {
-        await chat.newSession();
+        await useChat.getState().newSession();
         sid = useChat.getState().currentSessionId;
       }
       if (!sid) return;
@@ -56,48 +123,107 @@ export default function ChatScreen() {
       await uploadFiles(baseURL, token, sid, files);
       const list = await listUploads(baseURL, token, sid);
       setPendingUploads(list.files ?? []);
-    } catch (e) {
-      // 附件上传失败不阻塞对话
+    } catch {
+      /* 附件失败不阻塞对话 */
     } finally {
       setUploading(false);
     }
   };
 
-  const send = async () => {
-    const text = input.trim();
-    if (!text || chat.busy) return;
-    setInput('');
+  /** 附件逐项删除：本地移除 + 通知服务端删除（对齐 iOS per-file delete） */
+  const removeUpload = async (filename: string) => {
+    setPendingUploads((prev) => prev.filter((x) => x.filename !== filename));
+    const sid = useChat.getState().currentSessionId;
+    if (!sid) return;
+    try {
+      const { baseURL, token } = useConnection.getState();
+      await deleteUpload(baseURL, token, sid, filename);
+    } catch {
+      /* 本地已移除，服务端失败不阻塞 */
+    }
+  };
+
+  const send = async (text?: string) => {
+    const value = (text ?? draft).trim();
+    const sid = useChat.getState().currentSessionId;
+    if ((!value && pendingUploads.length === 0) || busy || !online) return;
+    if (sid) useChat.getState().rememberDraft(sid, '');
     const uploads = pendingUploads;
     setPendingUploads([]);
-    await chat.send(text, uploads);
+    setAtBottom(true);
+    const ctx = askContextRef.current;
+    askContextRef.current = undefined;
+    await chat.send(value, uploads, undefined, ctx);
   };
 
   const renderTurn = ({ item }: { item: Turn }) => (
     <View style={styles.turn}>
       <View style={styles.userRow}>
         <View style={styles.userBubble}>
-          <Text style={styles.userText}>{item.userText}</Text>
+          <Text style={styles.userText} selectable>
+            {item.userText}
+          </Text>
         </View>
       </View>
       {item.assistant ? (
         <View style={styles.assistantRow}>
           <AssistantBubble
             assistant={item.assistant}
-            onRetry={() => void chat.retryLast()}
-            onReplyClarification={(resp) => void chat.replyClarification(resp)}
+            turnId={item.id}
+            userText={item.userText}
+            onRetry={() => void useChat.getState().retryTurn(item.id)}
+            onReplyClarification={(resp) => void useChat.getState().replyClarification(resp)}
+            onOpenDetail={(tid) => navigation.navigate('TurnDetail', { turnId: tid })}
           />
         </View>
       ) : null}
     </View>
   );
 
+  const list = (
+    <FlatList
+      ref={listRef}
+      data={turns}
+      keyExtractor={(t) => t.id}
+      renderItem={renderTurn}
+      contentContainerStyle={styles.listContent}
+      onScroll={onScroll}
+      scrollEventThrottle={16}
+      // 加载更早的消息时保持当前可见位置，避免被拽到底部
+      maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 10 }}
+      ListHeaderComponent={
+        history?.hasMore ? (
+          <Pressable style={styles.loadEarlier} onPress={() => void useChat.getState().loadEarlier()}>
+            {chat.loadingMore ? <ActivityIndicator size="small" /> : <Text style={styles.loadEarlierText}>上滑加载更早的消息</Text>}
+          </Pressable>
+        ) : turns.length > 0 ? (
+          <Text style={styles.noMore}>没有更多了</Text>
+        ) : null
+      }
+      ListEmptyComponent={
+        chat.loadingHistory ? (
+          <ActivityIndicator style={{ marginTop: 40 }} />
+        ) : (
+          <View style={styles.starters}>
+            <Text style={styles.startersTitle}>试试这些</Text>
+            {STARTER_PROMPTS.map((s) => (
+              <Pressable key={s.label} style={styles.starterBtn} onPress={() => void send(s.prompt)}>
+                <Text style={styles.starterText}>{s.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        )
+      }
+    />
+  );
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? tabBarHeight : 0}
     >
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <Pressable onPress={() => setDrawerVisible(true)} hitSlop={8}>
           <Text style={styles.menu}>☰</Text>
         </Pressable>
@@ -109,56 +235,68 @@ export default function ChatScreen() {
         </Pressable>
       </View>
 
-      <FlatList
-        ref={listRef}
-        data={chat.turns}
-        keyExtractor={(t) => t.id}
-        renderItem={renderTurn}
-        contentContainerStyle={styles.listContent}
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
-        ListHeaderComponent={
-          chat.hasMore ? (
-            <Pressable style={styles.loadEarlier} onPress={() => void chat.loadEarlier()}>
-              {chat.loadingMore ? <ActivityIndicator size="small" /> : <Text style={styles.loadEarlierText}>加载更早的消息</Text>}
-            </Pressable>
-          ) : null
-        }
-        ListEmptyComponent={
-          chat.loadingHistory ? (
-            <ActivityIndicator style={{ marginTop: 40 }} />
-          ) : (
-            <Text style={styles.empty}>发送一条消息开始对话</Text>
-          )
-        }
-      />
+      {!online ? <ErrorStrip message="网络不可用，恢复后可继续发送" /> : null}
+      <ErrorStrip message={chat.error ?? ''} onDismiss={() => chat.setError(null)} />
+      {chat.notice ? (
+        <Pressable onPress={chat.clearNotice}>
+          <Text style={styles.notice}>{chat.notice}</Text>
+        </Pressable>
+      ) : null}
 
-      {pendingUploads.length > 0 ? (
-        <View style={styles.uploadStrip}>
+      {wallpaper ? (
+        <ImageBackground source={{ uri: wallpaper }} style={styles.bg} imageStyle={{ opacity: 1 - dim }}>
+          {list}
+        </ImageBackground>
+      ) : (
+        <View style={styles.bg}>{list}</View>
+      )}
+
+      {!atBottom && turns.length > 0 ? (
+        <Pressable style={styles.jumpBtn} onPress={jumpToLatest}>
+          <Text style={styles.jumpText}>↓ 最新</Text>
+        </Pressable>
+      ) : null}
+
+      {pendingUploads.length > 0 ? (        <View style={styles.uploadStrip}>
           {pendingUploads.map((u) => (
-            <View key={u.filename} style={styles.uploadChip}>
-              <Text style={styles.uploadChipText}>{u.filename}</Text>
-            </View>
+            <Pressable key={u.filename} style={styles.uploadChip} onPress={() => void removeUpload(u.filename)}>
+              <Text style={styles.uploadChipText}>{u.filename} ✕</Text>
+            </Pressable>
           ))}
         </View>
       ) : null}
 
+      {dock ? (
+        <View style={[styles.dock, dock === 'stuck' && styles.dockStuck]}>
+          <Text style={styles.dockTitle}>{dock === 'stuck' ? '长时间没有新进展' : '正在处理…'}</Text>
+          <Text style={styles.dockDetail}>
+            {dock === 'stuck' ? '已超过 90 秒未收到进展，可继续等待或点停止重试' : '已连上，等待模型输出'}
+          </Text>
+        </View>
+      ) : null}
+
       <View style={styles.composer}>
-        <Pressable style={styles.attachBtn} onPress={() => void pickAndUpload()} disabled={uploading}>
+        <Pressable style={styles.attachBtn} onPress={() => void pickAndUpload()} disabled={uploading || !online}>
           {uploading ? <ActivityIndicator size="small" /> : <Text style={styles.attachText}>＋</Text>}
         </Pressable>
         <TextInput
           style={styles.input}
-          value={input}
-          onChangeText={setInput}
-          placeholder="输入消息"
+          value={draft}
+          onChangeText={(t) => currentSessionId && useChat.getState().rememberDraft(currentSessionId, t)}
+          placeholder={online ? '问 Stock Agent…' : '网络不可用，暂不可发送'}
           multiline
+          editable={online}
         />
-        {chat.busy ? (
-          <Pressable style={styles.sendBtn} onPress={chat.stop}>
+        {busy ? (
+          <Pressable style={styles.sendBtn} onPress={() => chat.stop()}>
             <Text style={styles.sendText}>停止</Text>
           </Pressable>
         ) : (
-          <Pressable style={[styles.sendBtn, !input.trim() && styles.sendDisabled]} onPress={() => void send()} disabled={!input.trim()}>
+          <Pressable
+            style={[styles.sendBtn, (!draft.trim() || !online) && styles.sendDisabled]}
+            onPress={() => void send()}
+            disabled={!draft.trim() || !online}
+          >
             <Text style={styles.sendText}>发送</Text>
           </Pressable>
         )}
@@ -168,35 +306,38 @@ export default function ChatScreen() {
         visible={drawerVisible}
         onClose={() => setDrawerVisible(false)}
         sessions={chat.sessions}
-        currentSessionId={chat.currentSessionId}
+        currentSessionId={currentSessionId}
+        activeStreams={chat.activeStreams}
         onNew={() => {
-          void chat.newSession();
+          void useChat.getState().newSession();
           setDrawerVisible(false);
         }}
         onOpen={(id) => {
-          void chat.openSession(id);
+          void useChat.getState().openSession(id);
           setDrawerVisible(false);
         }}
-        onRename={(id, title) => void chat.renameSession(id, title)}
-        onDelete={(id) => void chat.removeSession(id)}
+        onRename={(id, title) => void useChat.getState().renameSession(id, title)}
+        onDelete={(id) => void useChat.getState().removeSession(id)}
       />
     </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
+const baseStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
+  bg: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
   menu: { fontSize: 20, color: '#007AFF', marginRight: 12 },
   headerTitle: { flex: 1, fontSize: 16, fontWeight: '600', textAlign: 'center' },
   disconnect: { color: '#007AFF', fontSize: 14 },
+  notice: { backgroundColor: '#007AFF15', color: '#007AFF', fontSize: 12, paddingHorizontal: 14, paddingVertical: 6 },
   listContent: { padding: 16, flexGrow: 1 },
   turn: { marginBottom: 16 },
   userRow: { alignItems: 'flex-end', marginBottom: 6 },
@@ -205,17 +346,35 @@ const styles = StyleSheet.create({
   assistantRow: { alignItems: 'flex-start' },
   loadEarlier: { alignSelf: 'center', paddingVertical: 10 },
   loadEarlierText: { color: '#007AFF', fontSize: 13 },
-  empty: { textAlign: 'center', color: '#999', marginTop: 40 },
-  uploadStrip: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 16, paddingBottom: 4 },
-  uploadChip: { backgroundColor: '#eef3f8', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
-  uploadChipText: { fontSize: 12, color: '#334' },
-  composer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    padding: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
+  noMore: { textAlign: 'center', color: '#C7C7CC', fontSize: 12, paddingVertical: 10 },
+  starters: { paddingTop: 24 },
+  startersTitle: { textAlign: 'center', color: '#8E8E93', fontSize: 13, marginBottom: 12 },
+  starterBtn: {
+    borderWidth: 1,
+    borderColor: '#007AFF40',
+    backgroundColor: '#007AFF0D',
+    borderRadius: 10,
+    padding: 14,
+    marginBottom: 10,
   },
+  starterText: { color: '#007AFF', fontSize: 14 },
+  jumpBtn: {
+    position: 'absolute',
+    right: 16,
+    bottom: 96,
+    backgroundColor: '#007AFF',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  jumpText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  uploadStrip: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 16, paddingBottom: 4 },  uploadChip: { backgroundColor: '#eef3f8', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
+  uploadChipText: { fontSize: 12, color: '#334' },
+  dock: { paddingHorizontal: 14, paddingVertical: 6, backgroundColor: '#007AFF1A' },
+  dockStuck: { backgroundColor: '#FF950022' },
+  dockTitle: { fontSize: 12, fontWeight: '600', color: '#333' },
+  dockDetail: { fontSize: 11, color: '#666' },
+  composer: { flexDirection: 'row', alignItems: 'flex-end', padding: 8, borderTopWidth: 1, borderTopColor: '#eee' },
   attachBtn: {
     width: 36,
     height: 36,
@@ -227,22 +386,8 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   attachText: { fontSize: 18, color: '#666' },
-  input: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    padding: 10,
-    fontSize: 15,
-    maxHeight: 120,
-  },
-  sendBtn: {
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    marginLeft: 8,
-  },
+  input: { flex: 1, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, fontSize: 15, maxHeight: 120 },
+  sendBtn: { backgroundColor: '#007AFF', borderRadius: 8, paddingHorizontal: 18, paddingVertical: 12, marginLeft: 8 },
   sendDisabled: { opacity: 0.4 },
   sendText: { color: '#fff', fontWeight: '600' },
 });

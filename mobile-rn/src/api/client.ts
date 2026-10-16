@@ -32,7 +32,19 @@ import type {
   HistoryBar,
 } from '../types';
 
-export class ApiError extends Error {}
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status = 0) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** 401/403 回调：由 App 注册，用于把「令牌失效」暴露到界面上（对齐 iOS auth-failure 处理） */
+let authFailureHandler: (() => void) | null = null;
+export function setAuthFailureHandler(fn: (() => void) | null) {
+  authFailureHandler = fn;
+}
 
 async function request<T = unknown>(
   baseURL: string,
@@ -54,7 +66,18 @@ async function request<T = unknown>(
 
   const res = await fetch(`${baseURL}${path}`, { ...init, headers, body });
   if (!res.ok) {
-    throw new ApiError(`HTTP ${res.status}`);
+    if (res.status === 401 || res.status === 403) authFailureHandler?.();
+    let detail = '';
+    try {
+      const data = (await res.json()) as { detail?: unknown };
+      if (typeof data?.detail === 'string') detail = data.detail;
+    } catch {
+      /* ignore */
+    }
+    if (!detail) {
+      detail = res.status === 401 ? '访问令牌无效或已过期（HTTP 401）' : `请求被拒绝（HTTP ${res.status}）`;
+    }
+    throw new ApiError(detail, res.status);
   }
   return (await res.json()) as T;
 }
@@ -115,12 +138,13 @@ export function sendMessage(
   sessionId: string,
   message: string,
   attachments: SessionUpload[] = [],
-  humanInputResponse?: Record<string, unknown>
+  humanInputResponse?: Record<string, unknown>,
+  context?: { page?: string; symbol?: string }
 ): Promise<CopilotRun> {
   const body: Record<string, unknown> = {
     message,
-    page: 'chat',
-    symbol: '',
+    page: context?.page ?? 'chat',
+    symbol: context?.symbol ?? '',
     authority_level: 'A4',
     client_message_id: `rn-${Date.now()}`,
     attachments: attachments.map((a) => ({ filename: a.filename, size: a.size, markdown_file: a.markdown_file })),

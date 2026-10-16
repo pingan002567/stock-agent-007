@@ -1,12 +1,15 @@
 import { useState } from 'react';
-import { FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { relativeTime } from '../lib/format';
 import type { CopilotSession } from '../types';
+import { useThemedStyles } from '../lib/tokens';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
   sessions: CopilotSession[];
   currentSessionId: string | null;
+  activeStreams: Record<string, string>;
   onNew: () => void;
   onOpen: (id: string) => void;
   onRename: (id: string, title: string) => void;
@@ -18,16 +21,19 @@ export function SessionDrawer({
   onClose,
   sessions,
   currentSessionId,
+  activeStreams,
   onNew,
   onOpen,
   onRename,
   onDelete,
 }: Props) {
+  const styles = useThemedStyles(baseStyles);
   const [query, setQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
-  const filtered = sessions.filter((s) => (s.title ?? '').toLowerCase().includes(query.toLowerCase()));
+  const q = query.trim().toLowerCase();
+  const filtered = sessions.filter((s) => (s.title ?? '').toLowerCase().includes(q) || s.session_id.toLowerCase().includes(q));
 
   const beginRename = (s: CopilotSession) => {
     setEditingId(s.session_id);
@@ -36,6 +42,13 @@ export function SessionDrawer({
   const commitRename = () => {
     if (editingId && renameValue.trim()) onRename(editingId, renameValue.trim());
     setEditingId(null);
+  };
+
+  const confirmDelete = (s: CopilotSession) => {
+    Alert.alert('删除对话', `确定删除「${s.title || '新对话'}」？`, [
+      { text: '取消', style: 'cancel' },
+      { text: '删除', style: 'destructive', onPress: () => onDelete(s.session_id) },
+    ]);
   };
 
   return (
@@ -54,7 +67,7 @@ export function SessionDrawer({
 
           <TextInput
             style={styles.search}
-            placeholder="搜索对话"
+            placeholder="搜索标题或会话 ID"
             value={query}
             onChangeText={setQuery}
             autoCapitalize="none"
@@ -80,10 +93,15 @@ export function SessionDrawer({
                   </View>
                 ) : (
                   <Pressable style={styles.itemBody} onPress={() => onOpen(item.session_id)}>
-                    <Text style={styles.itemTitle} numberOfLines={1}>
-                      {item.title || '新对话'}
+                    <View style={styles.titleRow}>
+                      <Text style={styles.itemTitle} numberOfLines={1}>
+                        {item.title || '新对话'}
+                      </Text>
+                      {activeStreams[item.session_id] ? <ActivityIndicator size="small" style={{ marginLeft: 6 }} /> : null}
+                    </View>
+                    <Text style={styles.itemMeta}>
+                      {relativeTime(item.last_message_at ?? item.created_at)} · {item.message_count ?? 0} 条
                     </Text>
-                    <Text style={styles.itemMeta}>{item.message_count ?? 0} 条消息</Text>
                   </Pressable>
                 )}
 
@@ -92,7 +110,7 @@ export function SessionDrawer({
                     <Pressable onPress={() => beginRename(item)} hitSlop={8}>
                       <Text style={styles.link}>重命名</Text>
                     </Pressable>
-                    <Pressable onPress={() => onDelete(item.session_id)} hitSlop={8}>
+                    <Pressable onPress={() => confirmDelete(item)} hitSlop={8}>
                       <Text style={styles.delete}>删除</Text>
                     </Pressable>
                   </View>
@@ -107,7 +125,7 @@ export function SessionDrawer({
   );
 }
 
-const styles = StyleSheet.create({
+const baseStyles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, height: '85%', padding: 16 },
   header: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
@@ -116,10 +134,17 @@ const styles = StyleSheet.create({
   newText: { color: '#007AFF', fontSize: 15 },
   close: { color: '#666', fontSize: 15 },
   search: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, marginBottom: 12, fontSize: 14 },
-  item: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee', paddingVertical: 12, flexDirection: 'row', alignItems: 'center' },
+  item: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#eee',
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   itemActive: { backgroundColor: '#f0f6ff' },
   itemBody: { flex: 1 },
-  itemTitle: { fontSize: 15, fontWeight: '500' },
+  titleRow: { flexDirection: 'row', alignItems: 'center' },
+  itemTitle: { fontSize: 15, fontWeight: '500', flexShrink: 1 },
   itemMeta: { fontSize: 12, color: '#999', marginTop: 2 },
   actions: { flexDirection: 'row', gap: 12, marginLeft: 8 },
   link: { color: '#007AFF', fontSize: 13 },

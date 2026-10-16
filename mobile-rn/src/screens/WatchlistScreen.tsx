@@ -1,16 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { addWatchlistItem, deleteWatchlistItem, fetchWatchlist, searchStocks } from '../api/client';
 import type { RootStackParamList } from '../navigation';
+import { ErrorState } from '../components/ErrorState';
+import { trendColor } from '../lib/colors';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useConnection } from '../store/connection';
 import type { StockSearchHit, WatchlistItem } from '../types';
+import { useThemedStyles } from '../lib/tokens';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 export default function WatchlistScreen() {
+  const styles = useThemedStyles(baseStyles);
   const navigation = useNavigation<Nav>();
+  const insets = useSafeAreaInsets();
   const { baseURL, token } = useConnection();
   const [items, setItems] = useState<WatchlistItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -18,13 +25,15 @@ export default function WatchlistScreen() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<StockSearchHit[]>([]);
   const [searching, setSearching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       setItems(await fetchWatchlist(baseURL, token));
-    } catch {
-      /* ignore */
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
@@ -61,51 +70,68 @@ export default function WatchlistScreen() {
       setQuery('');
       setResults([]);
       await load();
-    } catch {
-      /* ignore */
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 
   const del = async (symbol: string) => {
-    try {
-      await deleteWatchlistItem(baseURL, token, symbol);
-      await load();
-    } catch {
-      /* ignore */
-    }
+    const item = items.find((i) => i.symbol === symbol);
+    Alert.alert('删除自选', `确定把 ${symbol}${item?.name ? ` ${item.name}` : ''} 移出自选？`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            try {
+              await deleteWatchlistItem(baseURL, token, symbol);
+              await load();
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e));
+            }
+          })();
+        },
+      },
+    ]);
   };
 
   const renderItem = ({ item }: { item: WatchlistItem }) => {
     const pct = item.price?.change_pct ?? 0;
-    const up = pct >= 0;
-    const color = up ? '#e53935' : '#26a69a';
+    const color = trendColor(pct);
     return (
-      <Pressable style={styles.row} onPress={() => navigation.navigate('StockDetail', { symbol: item.symbol, name: item.name })}>
-        <View style={styles.main}>
-          <Text style={styles.symbol}>{item.symbol}</Text>
-          <Text style={styles.name} numberOfLines={1}>
-            {item.name}
-          </Text>
-        </View>
-        <View style={styles.right}>
-          <Text style={[styles.price, { color }]}>
-            {item.price?.last != null ? item.price.last.toFixed(2) : '—'}
-          </Text>
-          <Text style={[styles.change, { color }]}>
-            {up ? '+' : ''}
-            {pct.toFixed(2)}%
-          </Text>
-        </View>
-        <Pressable onPress={() => void del(item.symbol)} hitSlop={10}>
-          <Text style={styles.del}>✕</Text>
+      <Swipeable
+        overshootRight={false}
+        renderRightActions={() => (
+          <Pressable style={styles.swipeAction} onPress={() => void del(item.symbol)}>
+            <Text style={styles.swipeActionText}>删除</Text>
+          </Pressable>
+        )}
+      >
+        <Pressable style={styles.row} onPress={() => navigation.navigate('StockDetail', { symbol: item.symbol, name: item.name })}>
+          <View style={styles.main}>
+            <Text style={styles.symbol}>{item.symbol}</Text>
+            <Text style={styles.name} numberOfLines={1}>
+              {item.name}
+            </Text>
+          </View>
+          <View style={styles.right}>
+            <Text style={[styles.price, { color }]}>
+              {item.price?.last != null ? item.price.last.toFixed(2) : '—'}
+            </Text>
+            <Text style={[styles.change, { color }]}>
+              {pct >= 0 ? '+' : ''}
+              {pct.toFixed(2)}%
+            </Text>
+          </View>
         </Pressable>
-      </Pressable>
+      </Swipeable>
     );
   };
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <Text style={styles.title}>自选</Text>
         <Pressable onPress={() => setShowAdd((v) => !v)}>
           <Text style={styles.addBtn}>{showAdd ? '关闭' : '＋ 添加'}</Text>
@@ -129,7 +155,15 @@ export default function WatchlistScreen() {
                   <Text style={styles.resultAdd}>＋</Text>
                 </Pressable>
               )}
-              ListEmptyComponent={query.trim() ? <Text style={styles.muted}>无结果</Text> : null}
+              ListEmptyComponent={
+                error ? (
+                  <ErrorState message={error} onRetry={() => void load()} />
+                ) : query.trim() ? (
+                  <Text style={styles.muted}>无结果</Text>
+                ) : (
+                  <Text style={styles.muted}>暂无自选</Text>
+                )
+              }
             />
           )}
         </View>
@@ -146,7 +180,7 @@ export default function WatchlistScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const baseStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 },
   title: { fontSize: 20, fontWeight: '700' },
@@ -164,6 +198,8 @@ const styles = StyleSheet.create({
   right: { alignItems: 'flex-end', marginRight: 12 },
   price: { fontSize: 15, fontWeight: '600' },
   change: { fontSize: 12, marginTop: 2 },
+  swipeAction: { backgroundColor: '#FF3B30', justifyContent: 'center', paddingHorizontal: 22 },
+  swipeActionText: { color: '#fff', fontWeight: '700' },
   del: { color: '#bbb', fontSize: 14, padding: 4 },
   muted: { color: '#999', textAlign: 'center', marginTop: 40 },
 });

@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Defs, G, Line, LinearGradient, Path, Rect, Stop, Text as SvgText } from 'react-native-svg';
 import type { HistoryBar } from '../types';
+import { useThemedStyles } from '../lib/tokens';
 
 const W = 800;
 const H = 320;
@@ -76,6 +77,7 @@ export function PriceChart({
   rangeDays: number;
   onRangeChange: (days: number) => void;
 }) {
+  const styles = useThemedStyles(baseStyles);
   const series = useMemo(() => {
     const asc = [...items].sort((a, b) => String(a.date).localeCompare(String(b.date)));
     return asc.slice(-rangeDays);
@@ -211,7 +213,7 @@ export function PriceChart({
   );
 }
 
-const styles = StyleSheet.create({
+const baseStyles = StyleSheet.create({
   wrap: { marginVertical: 8 },
   toolbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
   stats: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },

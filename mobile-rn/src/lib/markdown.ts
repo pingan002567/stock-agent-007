@@ -46,12 +46,33 @@ function isTableSep(line: string): boolean {
   return stripped.length > 0 && /^[\s:-]+$/.test(stripped);
 }
 
+// 中文常见列表符号：·／•／–／—，以及「1、」式有序列表
+const BULLET_PREFIX = /^([-*+]|[·•–—])\s*/;
+const ORDERED_PREFIX = /^(\d+)\s*[.、)]\s*/;
+
 function isBullet(line: string): boolean {
-  return /^[-*+]\s/.test(line);
+  return BULLET_PREFIX.test(line);
 }
 
 function isOrdered(line: string): boolean {
-  return /^\d+\.\s/.test(line);
+  return ORDERED_PREFIX.test(line);
+}
+
+/** 中文密集正文松换行（移植自 iOS Features/Chat/AnswerFormatter.swift:182-223）。 */
+export function loosenDenseProse(s: string): string {
+  let out = s;
+  const pairs: [string, string][] = [
+    ['。· ', '。\n\n· '],
+    ['；· ', '；\n· '],
+    ['！· ', '！\n\n· '],
+    ['：· ', '：\n· '],
+    ['。- ', '。\n\n- '],
+    ['。* ', '。\n\n* '],
+  ];
+  for (const [from, to] of pairs) out = out.split(from).join(to);
+  out = out.replace(/([。！？])([^。！？\n]{1,16}[：:])/g, '$1\n\n$2');
+  out = out.replace(/\s·\s([^·\n]{2,40}[：:])/g, '\n\n· $1');
+  return out;
 }
 
 /** 先抽代码块（内部可能含类 Markdown 语法），再逐行归组为块。 */
@@ -67,7 +88,8 @@ export function parseMarkdownBlocks(text: string): MdBlock[] {
       continue;
     }
 
-    const lines = part.split('\n');
+    // 中文长文常把「。·」当成结构分隔，先松成真正的段落（代码块不处理）
+    const lines = loosenDenseProse(part).split('\n');
     let i = 0;
     while (i < lines.length) {
       const line = lines[i];
@@ -125,7 +147,7 @@ export function parseMarkdownBlocks(text: string): MdBlock[] {
         while (i < lines.length) {
           const l = lines[i].trim();
           if (isOrdered(l)) {
-            items.push(l.replace(/^\d+\.\s/, ''));
+            items.push(l.replace(ORDERED_PREFIX, ''));
             i++;
           } else if (!l) {
             let j = i + 1;
@@ -145,7 +167,7 @@ export function parseMarkdownBlocks(text: string): MdBlock[] {
         while (i < lines.length) {
           const l = lines[i].trim();
           if (isBullet(l)) {
-            items.push(l.replace(/^[-*+]\s/, ''));
+            items.push(l.replace(BULLET_PREFIX, ''));
             i++;
           } else if (!l) {
             let j = i + 1;
@@ -168,7 +190,7 @@ export function parseMarkdownBlocks(text: string): MdBlock[] {
           while (peek < lines.length && !lines[peek].trim()) peek++;
           if (peek < lines.length && lines[peek].trim().includes('|')) break;
         }
-        if (/^(#{1,4}\s|\d+\.\s|[-*+]\s)/.test(t) || /^[-*_]{3,}$/.test(t)) break;
+        if (/^(#{1,4}\s|\d+\s*[.、)]\s*|[-*+·•–—]\s)/.test(t) || /^[-*_]{3,}$/.test(t)) break;
         paraLines.push(lines[i]);
         i++;
       }
