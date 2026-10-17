@@ -1474,6 +1474,7 @@ html.resizing { cursor: col-resize; user-select: none; }
 .kpi-icon.green { background: var(--green-soft); color: var(--green); }
 .kpi-icon.amber { background: var(--amber-soft); color: var(--amber); }
 .kpi-icon.red { background: var(--red-soft); color: var(--red); }
+.kpi-icon.violet { background: rgba(139, 92, 246, 0.12); color: #8b5cf6; }
 .kpi-value {
   font-size: 24px;
   font-weight: 700;

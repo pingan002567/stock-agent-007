@@ -11,6 +11,7 @@ import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { useAppState } from "@/hooks/useAppState";
 import { useToast } from "@/hooks/useToast";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { KpiIcon } from "@/components/ui/KpiIcon";
 
 interface TaskItem { task_id: string; title: string; status?: string; source?: string; progress?: number; current_step?: string; created_at?: string }
 interface TaskStep { step_id?: string; name?: string; status?: string; skill?: string; tool?: string; duration_ms?: number }
@@ -184,7 +185,7 @@ export default function Tasks() {
           <div className="kpi-card">
             <div className="kpi-header">
               <span className="kpi-label">总任务</span>
-              <div className="kpi-icon blue">📋</div>
+              <div className="kpi-icon blue"><KpiIcon name="clipboard" /></div>
             </div>
             <div className="kpi-value">{items.length}</div>
             <div className="kpi-change neutral">全部任务</div>
@@ -192,7 +193,7 @@ export default function Tasks() {
           <div className="kpi-card">
             <div className="kpi-header">
               <span className="kpi-label">运行中</span>
-              <div className="kpi-icon" style={{ background: "var(--blue-soft)", color: "var(--blue)" }}>⏳</div>
+              <div className="kpi-icon blue"><KpiIcon name="clock" /></div>
             </div>
             <div className="kpi-value" style={{ color: "var(--blue)" }}>{runningCount}</div>
             <div className="kpi-change" style={{ color: "var(--blue)" }}>进行中</div>
@@ -200,7 +201,7 @@ export default function Tasks() {
           <div className="kpi-card">
             <div className="kpi-header">
               <span className="kpi-label">已完成</span>
-              <div className="kpi-icon green">✅</div>
+              <div className="kpi-icon green"><KpiIcon name="checkCircle" /></div>
             </div>
             <div className="kpi-value" style={{ color: "var(--green)" }}>{completedCount}</div>
             <div className="kpi-change up">{items.length > 0 ? Math.round((completedCount / items.length) * 100) : 0}% 完成率</div>
@@ -208,7 +209,7 @@ export default function Tasks() {
           <div className="kpi-card">
             <div className="kpi-header">
               <span className="kpi-label">失败</span>
-              <div className="kpi-icon red">❌</div>
+              <div className="kpi-icon red"><KpiIcon name="xCircle" /></div>
             </div>
             <div className="kpi-value" style={{ color: failedCount > 0 ? "var(--red)" : undefined }}>{failedCount}</div>
             <div className={`kpi-change ${failedCount > 0 ? "down" : "neutral"}`}>{failedCount > 0 ? "需要处理" : "无失败"}</div>

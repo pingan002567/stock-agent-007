@@ -5,6 +5,7 @@ import { ErrorMessage } from "@/components/ui/Loading";
 import { PageHead } from "@/components/ui/PageHead";
 import { useAppState } from "@/hooks/useAppState";
 import { AskAiButton } from "@/components/ui/AskAiButton";
+import { KpiIcon } from "@/components/ui/KpiIcon";
 
 interface Strategy {
   strategy_id: string; name: string; description?: string; strategy_type?: string;
@@ -127,7 +128,7 @@ export default function Strategies() {
           <div className="kpi-card">
             <div className="kpi-header">
               <span className="kpi-label">总策略</span>
-              <div className="kpi-icon blue">📊</div>
+              <div className="kpi-icon blue"><KpiIcon name="layers" /></div>
             </div>
             <div className="kpi-value">{items.length}</div>
             <div className="kpi-change neutral">全部策略</div>
@@ -135,7 +136,7 @@ export default function Strategies() {
           <div className="kpi-card">
             <div className="kpi-header">
               <span className="kpi-label">启用中</span>
-              <div className="kpi-icon green">✅</div>
+              <div className="kpi-icon green"><KpiIcon name="checkCircle" /></div>
             </div>
             <div className="kpi-value" style={{ color: "var(--green)" }}>{enabledCount}</div>
             <div className="kpi-change up">{items.length > 0 ? Math.round((enabledCount / items.length) * 100) : 0}% 启用率</div>
@@ -143,7 +144,7 @@ export default function Strategies() {
           <div className="kpi-card">
             <div className="kpi-header">
               <span className="kpi-label">本月回测</span>
-              <div className="kpi-icon amber">🔄</div>
+              <div className="kpi-icon amber"><KpiIcon name="refresh" /></div>
             </div>
             <div className="kpi-value">{backtests.length}</div>
             <div className="kpi-change neutral">次</div>
@@ -151,7 +152,7 @@ export default function Strategies() {
           <div className="kpi-card">
             <div className="kpi-header">
               <span className="kpi-label">风险等级</span>
-              <div className="kpi-icon" style={{ background: "rgba(139, 92, 246, 0.12)", color: "#8b5cf6" }}>⚡</div>
+              <div className="kpi-icon violet"><KpiIcon name="zap" /></div>
             </div>
             <div className="kpi-value">{selected?.risk_level ?? "-"}</div>
             <div className="kpi-change neutral">当前策略</div>
