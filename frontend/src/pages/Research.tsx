@@ -205,6 +205,10 @@ export default function Research() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     const q = input.trim();
     if (!q) { setSearchResults([]); setShowDropdown(false); return; } // eslint-disable-line react-hooks/set-state-in-effect
+    // 选中标的后，上方 [stock] 的 effect 会把 input 回写成该代码。
+    // 若这里不拦住，input 的变化会重新触发一次搜索 -> setShowDropdown(true)，
+    // 表现为「选完个股后下拉又挂在那里」（详情已加载，下拉却盖在标题上）。
+    if (q === stock.trim()) { setSearchResults([]); setShowDropdown(false); return; } // eslint-disable-line react-hooks/set-state-in-effect
     debounceRef.current = setTimeout(async () => {
       setSearching(true);
       try {
@@ -221,7 +225,7 @@ export default function Research() {
       }
     }, 250);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [input]);
+  }, [input, stock]);
 
   // close dropdown on outside click
   useEffect(() => {
