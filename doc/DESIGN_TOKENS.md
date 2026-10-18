@@ -186,6 +186,33 @@ input, textarea, select { border: 1px solid var(--line-soft); border-radius: var
 ```
 发送键：圆形 30px + `background: var(--ink)` + `color: var(--canvas)`。
 
+### 5.5b 顶栏（两段式，对齐 DSH）
+
+```
+第一行 48px：折叠钮 │ 会话标题 + 运行状态胶囊（N 个工具 / N 个子代理）…… ⋯ 菜单 │ 折叠钮
+第二行 34px：       │ 对话 | 轨迹（活动项 2px 下划线）                        │
+```
+
+- **底色用 `--canvas`**，与内容同色，不做成一条 `--sidebar` 横带
+- 状态胶囊 = `var(--btn-subtle)` 底 + `--muted` 字，点击跳到「轨迹」
+- `⋯` 菜单 = 毛玻璃浮层（`blur(40px)`）+ `--elev-prominent`
+- tab 活动态：文字 `--ink` + 底部 2px `--ink` 下划线；非活动 `--faint`
+- 中栏内容是 **居中 max-width 780px** 的阅读列（不是铺满），所以顶栏标题左对齐、正文居中
+
+### 5.5c 轨迹视图
+
+一次会话里所有工具调用按"轮"聚合：
+
+```
+第 N 轮 · HH:mm · K 步
+  [prompt 摘要]
+  ⚡ 工具中文名   tool_name   ✓ → 一行结果摘要
+```
+
+- 复用 `ThoughtTimeline`（`expandAll` 展开全部步骤），点某一步 → 右栏工具详情
+- 轮次 prompt 若是系统触发（`[定时任务·…]`），只显示方括号里的来源标签
+- 结果行走 `summarizeToolResult`：**包装型 payload 一律显示「已完成」，不展示原始 JSON**
+
 ### 5.6 浮层（菜单 / 提示 / 模态）
 
 **半透明分三档，不要混用**：

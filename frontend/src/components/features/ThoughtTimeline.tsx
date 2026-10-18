@@ -96,15 +96,17 @@ function ToolStepRow({ tool, onClick }: { tool: StreamToolCall; onClick?: (t: St
   );
 }
 
-export function ThoughtTimeline({ steps, active, onToolClick }: {
+export function ThoughtTimeline({ steps, active, onToolClick, expandAll = false }: {
   steps: StreamStep[];
   /** 流式进行中(尾步高亮/shimmer) */
   active: boolean;
   onToolClick?: (t: StreamToolCall) => void;
+  /** 轨迹视图用：默认展开全部步骤，不做「更早 N 步」折叠 */
+  expandAll?: boolean;
 }) {
-  const [showAll, setShowAll] = useState(false);
+  const [showAll, setShowAll] = useState(expandAll);
   if (steps.length === 0) return null;
-  const hiddenCount = showAll ? 0 : Math.max(0, steps.length - VISIBLE_TAIL);
+  const hiddenCount = expandAll || showAll ? 0 : Math.max(0, steps.length - VISIBLE_TAIL);
   const visible = steps.slice(hiddenCount);
 
   return (
@@ -114,7 +116,7 @@ export function ThoughtTimeline({ steps, active, onToolClick }: {
           展开更早 {hiddenCount} 步
         </button>
       )}
-      {showAll && steps.length > VISIBLE_TAIL && (
+      {!expandAll && showAll && steps.length > VISIBLE_TAIL && (
         <button type="button" className="tl-collapse" onClick={() => setShowAll(false)}>
           收起早期步骤
         </button>

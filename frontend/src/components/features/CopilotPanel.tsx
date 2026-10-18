@@ -7,6 +7,7 @@ import { useCopilotChat, extractToolResultText, type StreamToolCall } from "@/ho
 import { useChatDetail } from "@/hooks/useChatDetail";
 import { CopilotMessageItem, type ToolInfo } from "@/components/features/CopilotMessageItem";
 import { CopilotStreamingMessage } from "@/components/features/CopilotStreamingMessage";
+import { TrajectoryView } from "@/components/features/TrajectoryView";
 import { ContextCard } from "@/components/features/ContextCard";
 import { TurnFailureStatus } from "@/components/features/TurnFailureStatus";
 import { useMobileLayout } from "@/hooks/useMobileLayout";
@@ -41,7 +42,7 @@ type ToolItem = {
   taskPrompt?: string;
 };
 
-type GroupedItem =
+export type GroupedItem =
   | {
       t: "msg";
       msg: CopilotMessage;
@@ -308,8 +309,14 @@ export function CopilotPanel() {
     );
   }, [handleRetry, sending]);
 
+  // 中栏视图：对话 / 轨迹（轨迹也要这份分组结果，所以提到 memo 外）
+  const { chatView } = useAppState();
+  const paired = useMemo(
+    () => pairMessages(messages, streamMessage?.runId),
+    [messages, streamMessage?.runId],
+  );
+
   const messageElements = useMemo(() => {
-    const paired = pairMessages(messages, streamMessage?.runId);
     const dateFlags = new Array<boolean>(paired.length);
     let prevDate = "";
     for (let i = 0; i < paired.length; i++) {
@@ -426,9 +433,21 @@ export function CopilotPanel() {
       );
     });
   }, [
-    messages, streamMessage?.runId, handleToolClick, answeredByRequestId,
+    paired, handleToolClick, answeredByRequestId,
     handleClarifySubmit, sending, renderActions, handleRetry,
   ]);
+
+  if (chatView === "trajectory") {
+    return (
+      <aside className="copilot-panel copilot-panel-main">
+        <TrajectoryView
+          items={paired}
+          streamMessage={streamMessage ?? null}
+          onStreamToolClick={handleStreamToolClick}
+        />
+      </aside>
+    );
+  }
 
   return (
     <aside className="copilot-panel copilot-panel-main">

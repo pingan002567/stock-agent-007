@@ -130,6 +130,7 @@ function AppShell({ onSwitchBackend }: { onSwitchBackend: () => void }) {
           onToggleLeft={toggleLeft}
           dockCollapsed={dockCollapsed}
           onToggleDock={toggleDock}
+          onOpenSettings={() => openSettings()}
         />
         <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
           <LeftSidebar

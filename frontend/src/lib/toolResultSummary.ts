@@ -108,12 +108,36 @@ const BACKTEST_TOOLS = new Set([
 ]);
 
 /** 返回一行摘要；无法识别时 null（调用方回退原截断文本）。 */
+/** 工具桥的包装 payload：真实内容在 result_preview 里，顶层只剩元字段，
+ *  直接展示就是一行原始 JSON。这类统一给一行人类可读摘要。 */
+function summarizeGeneric(data: Record<string, unknown>): string | null {
+  for (const key of ["result_preview", "summary", "message", "text", "answer", "detail"]) {
+    const v = data[key];
+    if (typeof v !== "string") continue;
+    const t = v.trim();
+    if (!t || t.startsWith("{") || t.startsWith("[")) continue;
+    return t.length > 88 ? `${t.slice(0, 88)}…` : t;
+  }
+  return null;
+}
+
+function looksLikeWrapper(data: Record<string, unknown>): boolean {
+  return "result_preview" in data || ("tool" in data && "execution_mode" in data);
+}
+
 export function summarizeToolResult(toolName: string, resultText?: string): string | null {
   const data = parsePayload(resultText);
   if (!data) return null;
-  if (QUOTE_TOOLS.has(toolName)) return summarizeQuoteLike(data);
-  if (HISTORY_TOOLS.has(toolName)) return summarizeHistory(data);
-  if (BACKTEST_TOOLS.has(toolName)) return summarizeBacktest(data);
+  // 专用摘要器可能对包装型 payload 返回 null（字段名对不上），
+  // 此时不要直接 return null —— 继续往下走通用兜底，否则会漏出原始 JSON。
+  const specific = QUOTE_TOOLS.has(toolName)
+    ? summarizeQuoteLike(data)
+    : HISTORY_TOOLS.has(toolName)
+      ? summarizeHistory(data)
+      : BACKTEST_TOOLS.has(toolName)
+        ? summarizeBacktest(data)
+        : null;
+  if (specific) return specific;
   // 通用：若顶层像行情
   if (data.price || data.quote || (data.last != null && data.change_pct != null)) {
     return summarizeQuoteLike(data);
@@ -123,6 +147,10 @@ export function summarizeToolResult(toolName: string, resultText?: string): stri
   }
   if (data.summary || data.bars != null) {
     return summarizeHistory(data);
+  }
+  if (looksLikeWrapper(data)) {
+    // 包装型 payload：能取到可读字段就用，否则不要展示原始 JSON
+    return summarizeGeneric(data) ?? "已完成";
   }
   return null;
 }

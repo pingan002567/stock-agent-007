@@ -37,10 +37,15 @@ export interface AppDataCache {
   stockFollowups?: unknown;
 }
 
+export type ChatView = "chat" | "trajectory";
+
 interface AppStateValue {
   currentScreen: Screen;
   setCurrentScreen: (s: Screen) => void;
   currentScreenLabel: string;
+  /** 中栏视图：对话 / 轨迹（对齐 DSH 的顶层 tab） */
+  chatView: ChatView;
+  setChatView: (v: ChatView) => void;
   stock: string;
   setStock: (s: string) => void;
   copilotStreaming: boolean;
@@ -108,6 +113,7 @@ applyTheme(getInitialThemeMode());
 export function AppStateProvider({ children }: { children: ReactNode }) {
   // 聊天会话中心：对话即首屏（doc/DESKTOP_APP_PLAN.md §3.4 迁移第 1 步）
   const [currentScreen, setCurrentScreen] = useState<Screen>("chat");
+  const [chatView, setChatView] = useState<ChatView>("chat");
   const [stock, setStock] = useState("");
   const [copilotStreaming, setCopilotStreaming] = useState(false);
   const [streamingReasoningText, setStreamingReasoningText] = useState("");
@@ -266,6 +272,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         currentScreen,
         setCurrentScreen,
         currentScreenLabel,
+        chatView,
+        setChatView,
         stock,
         setStock,
         copilotStreaming,
