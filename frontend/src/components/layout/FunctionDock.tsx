@@ -127,9 +127,6 @@ export function FunctionDock() {
             onClick={() => handleStrip(item.screen)}
           >
             {icons[item.screen] ?? item.label[0]}
-            {!detailOpen && currentScreen === item.screen && (
-              <span className="strip-short">{item.label}</span>
-            )}
             {item.screen === "monitor" && inboxHigh > 0 && <span className="strip-badge" />}
             <span className="strip-tip">
               {item.label}{item.screen === "monitor" && inboxHigh > 0 ? ` · 待审查 ${inboxHigh} 条高优` : ""}

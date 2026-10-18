@@ -699,17 +699,11 @@ html.resizing { cursor: col-resize; user-select: none; }
 .func-body .page { min-width: 0; }
 .detail-host { padding: 12px 14px; font-size: 13px; color: var(--ink); }
 
-.func-panel.open + .func-strip::before {
-  content: "";
-  display: block;
-  width: 100%;
-  height: 44px;
-  flex: none;
-  border-bottom: 1px solid var(--line-soft);
-}
+/* 面板打开时原来会往条带顶部插一个 44px 撑块（并把 padding-top 归零），
+   导致第一次点页面按钮（= 打开面板）时整排图标下移 37px。
+   图标条是全局导航，不跟随面板头部的行高对齐，两侧顶部保持一致。 */
 .func-panel.open + .func-strip {
   box-shadow: inset 1px 0 0 var(--line-soft);
-  padding-top: 0;
 }
 .func-strip {
   width: 52px; flex: none;
@@ -725,12 +719,13 @@ html.resizing { cursor: col-resize; user-select: none; }
   transition: background 0.15s, color 0.15s;
 }
 .strip-btn:hover { background: var(--selected); color: var(--ink-2); }
+/* 选中态只换底色与图标色，绝不改尺寸 —— 之前选中项要从 38px 长到 44px
+   好放下文字标签，而这一排是 flex column，一项变高它下面的图标就整体下移，
+   表现为「点不同页面图标会跳」。页面名已有面板标题 + hover 提示。 */
 .strip-btn.active {
-  height: auto; min-height: 44px; padding: 5px 0 3px;
-  display: flex; flex-direction: column; gap: 1px;
-  background: var(--selected-strong); color: var(--blue);
+  background: var(--selected-strong);
+  color: var(--blue);
 }
-.strip-short { font-size: 11px; line-height: 1; font-weight: 600; }
 .strip-badge {
   position: absolute; top: 5px; right: 5px; width: 6px; height: 6px;
   border-radius: 50%; background: var(--red, #e0565c);
