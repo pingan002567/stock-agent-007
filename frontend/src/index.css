@@ -3,13 +3,17 @@
    旧名 --bg/--bg-secondary/--panel 等为兼容别名，逐步可收敛到语义名 */
 :root,
 :root.dark {
-  --canvas: #1e1e1e;
-  --sidebar: #252526;
+  --canvas: #151517;
+  --sidebar: #232324;
   --left-sidebar-w: 260px;
-  --surface: #2d2d2d;
-  --surface-2: #333333;
-  --selected: rgba(255, 255, 255, 0.06);
-  --selected-strong: rgba(255, 255, 255, 0.10);
+  --surface: #2c2c2e;
+  --surface-2: #353638;
+  --selected: rgba(255, 255, 255, 0.08);
+  --selected-strong: rgba(255, 255, 255, 0.14);
+  /* DSH interactive-bg-hover / active */
+  --hover: rgba(255, 255, 255, 0.08);
+  --active: rgba(255, 255, 255, 0.14);
+  --btn-subtle: rgba(84, 85, 87, 0.50);   /* DSH button-tool-bar-fill */
 
   --bg: var(--canvas);
   --bg-secondary: var(--sidebar);
@@ -20,35 +24,39 @@
   --soft: var(--surface-2);
   --rail: var(--sidebar);
 
-  --ink: #e4e4e4;
-  --ink-2: #cccccc;
-  --muted: #9d9d9d;
-  --faint: #6e6e6e;
-  --line: rgba(255, 255, 255, 0.08);
-  --line-soft: rgba(255, 255, 255, 0.05);
+  --ink: #f9fafb;      /* neutral-bluish-50  */
+  --ink-2: #ebeef2;    /* 100 */
+  --muted: #cfd3d6;    /* 300 label-secondary */
+  --faint: #adb2b8;    /* 400 label-tertiary  */
+  --line: rgba(255, 255, 255, 0.12);       /* border-l2 */
+  --line-soft: rgba(255, 255, 255, 0.06);  /* border-l1 */
 
-  --blue: #0078d4;
-  --blue-hover: #1a86d9;
-  --blue-soft: rgba(0, 120, 212, 0.14);
-  --blue-glow: rgba(0, 120, 212, 0.12);
+  --blue: #60a5fa;                          /* dsw-static-blue-400 */
+  --blue-hover: #93c5fd;                    /* blue-300 */
+  --blue-soft: rgba(96, 165, 250, 0.14);
+  --blue-glow: rgba(96, 165, 250, 0.12);
 
-  --green: #3fb950;
-  --green-soft: rgba(63, 185, 80, 0.14);
-  --red: #f85149;
-  --red-soft: rgba(248, 81, 73, 0.14);
-  --amber: #d29922;
-  --amber-soft: rgba(210, 153, 34, 0.14);
+  --green: #4ade80;
+  --green-soft: rgba(74, 222, 128, 0.14);
+  --red: #f87171;
+  --red-soft: rgba(248, 113, 113, 0.14);
+  --amber: #fbbf24;
+  --amber-soft: rgba(251, 191, 36, 0.14);
 
   --mono: "JetBrains Mono", "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --sans: "PingFang SC", "Noto Sans SC", "Source Han Sans SC", -apple-system, BlinkMacSystemFont, "Microsoft YaHei", system-ui, sans-serif;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.32);
-  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.35);
-  --shadow-glow: 0 0 0 1px rgba(0, 120, 212, 0.25);
-  --composer-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  /* DSH elevation：第一段是环状描边（0 0 0 1px），后两段是极淡环境光 */
+  --elev-panel: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 3px 8px rgba(0, 0, 0, 0.03), 0 0 16px rgba(0, 0, 0, 0.02);
+  --elev-prominent: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 3px 8px rgba(0, 0, 0, 0.04), 0 0 20px rgba(0, 0, 0, 0.05);
+  --elev-soft: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 4px 16px rgba(0, 0, 0, 0.03), 0 0 24px rgba(0, 0, 0, 0.03);
+  --shadow-sm: var(--elev-panel);
+  --shadow-md: var(--elev-prominent);
+  --shadow-lg: var(--elev-prominent);
+  --shadow-glow: 0 0 0 1px var(--blue-soft);
+  --composer-shadow: var(--elev-soft);
 
-  --overlay: rgba(30, 30, 30, 0.96);
+  --overlay: rgba(0, 0, 0, 0.50);   /* DSH bg-mask-1：只压暗，不模糊 */
   --msg-user: var(--blue-soft);
   --msg-ai: transparent;
   --msg-event: rgba(255, 255, 255, 0.04);
@@ -64,9 +72,13 @@
   --tag-bg: transparent;
   --scrollbar: rgba(255, 255, 255, 0.12);
 
+  /* DSH radius 标度：4 / 8 / 12 / 16 / 20 / 28 */
   --radius: 8px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
   --radius-lg: 12px;
-  --radius-xl: 14px;
+  --radius-xl: 16px;
+  --radius-panel: 20px;
 
   font-size: 13px;
   line-height: 1.5;
@@ -79,11 +91,14 @@
 
 :root.light {
   --canvas: #ffffff;
-  --sidebar: #f3f3f3;
+  --sidebar: #f9fafb;
   --surface: #ffffff;
-  --surface-2: #f8f8f8;
-  --selected: rgba(0, 0, 0, 0.04);
-  --selected-strong: rgba(0, 0, 0, 0.07);
+  --surface-2: #f5f6f7;
+  --selected: rgba(38, 49, 72, 0.06);
+  --selected-strong: rgba(38, 49, 72, 0.10);
+  --hover: rgba(38, 49, 72, 0.06);
+  --active: rgba(38, 49, 72, 0.10);
+  --btn-subtle: rgba(38, 49, 72, 0.08);
 
   --bg: var(--canvas);
   --bg-secondary: var(--sidebar);
@@ -94,36 +109,39 @@
   --soft: var(--surface-2);
   --rail: var(--sidebar);
 
-  --ink: #1f1f1f;
-  --ink-2: #333333;
-  --muted: #616161;
-  --faint: #8a8a8a;
+  --ink: #0f1115;
+  --ink-2: #1f2126;
+  --muted: #61666b;
+  --faint: #81858c;
   --line: rgba(0, 0, 0, 0.10);
-  --line-soft: rgba(0, 0, 0, 0.06);
+  --line-soft: rgba(0, 0, 0, 0.04);
 
-  --blue: #0066b8;
-  --blue-hover: #005a9e;
-  --blue-soft: rgba(0, 102, 184, 0.10);
-  --blue-glow: rgba(0, 102, 184, 0.12);
+  --blue: #3b82f6;
+  --blue-hover: #2563eb;
+  --blue-soft: rgba(59, 130, 246, 0.10);
+  --blue-glow: rgba(59, 130, 246, 0.12);
 
-  --green: #1a7f37;
-  --green-soft: rgba(26, 127, 55, 0.12);
-  --red: #cf222e;
-  --red-soft: rgba(207, 34, 46, 0.12);
-  --amber: #9a6700;
-  --amber-soft: rgba(154, 103, 0, 0.12);
+  --green: #16a34a;
+  --green-soft: rgba(22, 163, 74, 0.12);
+  --red: #dc2626;
+  --red-soft: rgba(220, 38, 38, 0.12);
+  --amber: #b45309;
+  --amber-soft: rgba(180, 83, 9, 0.12);
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.08);
-  --shadow-glow: 0 0 0 1px rgba(0, 102, 184, 0.2);
-  --composer-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  --elev-panel: 0 0 0 1px rgba(0, 0, 0, 0.04), 0 3px 8px rgba(0, 0, 0, 0.03), 0 0 16px rgba(0, 0, 0, 0.02);
+  --elev-prominent: 0 0 0 1px rgba(0, 0, 0, 0.04), 0 3px 8px rgba(0, 0, 0, 0.04), 0 0 20px rgba(0, 0, 0, 0.05);
+  --elev-soft: 0 0 0 1px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.03), 0 0 24px rgba(0, 0, 0, 0.03);
+  --shadow-sm: var(--elev-panel);
+  --shadow-md: var(--elev-prominent);
+  --shadow-lg: var(--elev-prominent);
+  --shadow-glow: 0 0 0 1px var(--blue-soft);
+  --composer-shadow: var(--elev-soft);
 
-  --overlay: rgba(255, 255, 255, 0.96);
+  --overlay: rgba(0, 0, 0, 0.24);
   --msg-user: var(--blue-soft);
   --msg-event: rgba(0, 0, 0, 0.04);
   --msg-time: var(--faint);
-  --skeleton: #ececec;
+  --skeleton: #ebeef2;
   --ticket-bg: var(--blue-soft);
   --ticket-border: var(--line);
   --bar-bg: #ececec;
@@ -146,52 +164,58 @@ body {
 }
 
 button, input, textarea, select { font: inherit; font-family: var(--sans); }
+/* DSH Button：透明底 + 发丝描边 + 只过渡背景色；主按钮是高对比黑/白，不是蓝 */
 button {
   height: 32px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 0.5px solid var(--line);
+  border-radius: var(--radius-md);
   padding: 0 14px;
-  background: var(--bg-tertiary);
+  background: transparent;
   color: var(--ink);
   font-weight: 600;
-  font-size: 12px;
+  font-size: 12.5px;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.2s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
 }
-button:hover { 
-  border-color: var(--muted); 
-  box-shadow: var(--shadow-sm);
-  background: var(--panel-alt);
+button:hover { background: var(--hover); border-color: var(--line); }
+button:active { background: var(--active); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* 主操作：brand-primary = label-primary（深色=白底黑字，浅色=黑底白字） */
+button.primary {
+  background: var(--ink);
+  border-color: transparent;
+  color: var(--canvas);
 }
-button:active { transform: scale(0.97); }
-button.primary { 
-  background: var(--blue); 
-  border-color: var(--blue); 
-  color: #fff;
-  box-shadow: none;
-}
-button.primary:hover { 
-  background: var(--blue-hover); 
-  border-color: var(--blue-hover);
-  box-shadow: none;
-}
-button.danger { color: var(--red); }
-button.danger:hover { background: var(--red-soft); border-color: var(--red); }
+button.primary:hover { background: var(--ink-2); border-color: transparent; }
+button.primary:active { background: var(--muted); }
+
+/* 描边（次要操作） */
+button.outline { background: transparent; border-color: var(--line); }
+button.outline:hover { background: var(--hover); }
+
+/* 幽灵 */
+button.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+button.ghost:hover { background: var(--hover); color: var(--ink); border-color: transparent; }
+
+/* 危险 */
+button.danger { color: var(--red); border-color: transparent; background: transparent; }
+button.danger:hover { background: var(--red-soft); border-color: transparent; }
 button.link { border: none; background: none; color: var(--blue); padding: 0; font-weight: 600; text-decoration: none; }
 button.link:hover { text-decoration: underline; box-shadow: none; transform: none; }
-button.small { height: 28px; font-size: 11px; padding: 0 10px; border-radius: 6px; }
+button.small { height: 28px; font-size: 12px; padding: 0 10px; border-radius: var(--radius-sm); }
 button.outline { background: transparent; border-color: var(--line); }
 button.ghost { border-color: transparent; background: transparent; }
 button.ghost:hover { background: var(--selected); border-color: transparent; }
 
 input, textarea, select {
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
   padding: 8px 12px;
   background: var(--bg-tertiary);
   color: var(--ink);
@@ -213,7 +237,7 @@ textarea { min-height: 82px; resize: vertical; }
 ::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--scrollbar) 140%, transparent); }
 
 table { width: 100%; border-collapse: collapse; }
-th, td { padding: 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+th, td { padding: 12px; border-bottom: 1px solid var(--line-soft); text-align: left; vertical-align: middle; }
 th { 
   color: var(--muted); 
   font-size: 11px; 
@@ -423,13 +447,12 @@ html.desktop .app.left-collapsed .topbar3-center { padding-left: 84px; }
   flex: 1; display: flex; align-items: center; gap: 8px;
   height: 34px; padding: 0 12px;
   border: none; border-radius: var(--radius); cursor: pointer;
-  background: var(--blue); color: #fff; font-weight: 600; font-size: 13px;
-  transition: filter 0.15s;
+  background: var(--btn-subtle); color: var(--ink); font-weight: 600; font-size: 13px;
+  transition: background-color 0.15s, color 0.15s;
 }
 /* 全局 button:hover 的背景特异性更高，主按钮 hover 需显式锁定蓝底白字 */
 .new-chat:hover {
-  filter: brightness(1.08);
-  background: var(--blue); color: #fff;
+  background: var(--hover); color: var(--ink);
   border-color: transparent; box-shadow: none;
 }
 .side-icon-btn {
@@ -713,8 +736,8 @@ html.resizing { cursor: col-resize; user-select: none; }
 /* ─── 系统设置：居中悬浮模态（TeamClaw 式） ─── */
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 100;
-  background: rgba(4, 6, 10, 0.62);
-  backdrop-filter: blur(3px);
+  background: var(--overlay);
+  backdrop-filter: none;   /* DSH --dsw-mask-blur: none，遮罩只压暗不模糊 */
   display: grid; place-items: center;
   animation: backdrop-in 0.18s ease both;
 }
@@ -722,10 +745,12 @@ html.resizing { cursor: col-resize; user-select: none; }
 .settings-modal {
   width: min(940px, calc(100vw - 64px));
   height: min(82vh, 760px);
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  -webkit-backdrop-filter: blur(40px) saturate(150%);
+  backdrop-filter: blur(40px) saturate(150%);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--elev-prominent);
   display: grid; grid-template-rows: auto 1fr;
   overflow: hidden;
   animation: modal-in 0.22s cubic-bezier(0.3, 0.8, 0.3, 1) both;
@@ -1361,8 +1386,8 @@ html.resizing { cursor: col-resize; user-select: none; }
 
 .panel, .page-hero {
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-xl);
   overflow: hidden;
   box-shadow: var(--shadow-sm);
   transition: all 0.2s ease;
@@ -3252,7 +3277,7 @@ html.resizing { cursor: col-resize; user-select: none; }
 }
 .human-input-submit {
   border: none; border-radius: 8px;
-  background: var(--blue); color: #fff;
+  background: var(--ink); color: var(--canvas);
   font-size: 12px; font-weight: 600;
   padding: 6px 14px; cursor: pointer;
 }
@@ -3316,8 +3341,8 @@ html.resizing { cursor: col-resize; user-select: none; }
 .copilot-composer { min-width: 0; }
 .composer-card {
   background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xl);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-panel);
   padding: 12px 14px 10px;
   box-shadow: var(--composer-shadow);
   transition: border-color 0.15s, box-shadow 0.15s;
@@ -3461,11 +3486,11 @@ html.resizing { cursor: col-resize; user-select: none; }
   display: grid;
   place-items: center;
   border: none;
-  border-radius: 8px;
-  background: var(--blue);
-  color: #fff;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--canvas);
 }
-.composer-send:hover { filter: brightness(1.08); background: var(--blue); border: none; box-shadow: none; }
+.composer-send:hover { background: var(--ink-2); border: none; box-shadow: none; }
 .composer-send:disabled { opacity: 0.35; }
 @keyframes stop-breathe {
   0%, 100% {
@@ -4316,6 +4341,10 @@ html.mobile select {
   right: 0;
   z-index: 100;
   width: 320px;
+  /* DSH menu material：半透明 + 毛玻璃 */
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  -webkit-backdrop-filter: blur(40px) saturate(150%);
+  backdrop-filter: blur(40px) saturate(150%);
   max-width: calc(100vw - 100px);
   background: var(--panel);
   border: 1px solid var(--line);
@@ -4339,9 +4368,10 @@ html.mobile select {
 }
 .session-dropdown-new {
   padding: 4px 10px;
-  background: var(--blue);
+  background: var(--ink);
+  color: var(--canvas);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: 11px;
   font-weight: 600;
   color: white;
@@ -4401,8 +4431,9 @@ html.mobile select {
   background: var(--hover-row);
 }
 .session-item.active {
-  background: var(--blue-soft);
-  border-left: 3px solid var(--blue);
+  /* DSH：只用一层背景 + 圆角，没有左侧竖线 */
+  background: var(--surface-2);
+  border-left: 3px solid transparent;
 }
 .session-item-content {
   flex: 1;
@@ -4734,13 +4765,13 @@ input, textarea { cursor: text; }
 
 /* 紧凑数据表约定(DataTable):32px 行高,数字右对齐 mono,hover 行底色 */
 .data-table th {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--faint, var(--muted));
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.data-table td { height: 32px; padding-top: 0; padding-bottom: 0; font-size: 12.5px; }
+.data-table td { height: 34px; padding-top: 0; padding-bottom: 0; font-size: 13px; }
 .data-table tbody tr:hover td { background: var(--selected, var(--soft)); }
 .data-table td.num, .data-table th.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
@@ -4934,8 +4965,8 @@ html.mobile .turn-failure { padding: 0 4px; }
 .decision-card-conclusion { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
 .decision-card-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; user-select: none; }
 .decision-confirm {
-  height: 28px; padding: 0 14px; border-radius: 7px; border: none;
-  background: var(--blue); color: #fff; font-size: 12px; font-weight: 600;
+  height: 28px; padding: 0 14px; border-radius: var(--radius-sm); border: none;
+  background: var(--ink); color: var(--canvas); font-size: 12px; font-weight: 600;
 }
 .decision-reject {
   height: 28px; padding: 0 12px; border-radius: 7px;
