@@ -5517,17 +5517,6 @@ html.mobile .m-page .page-head { padding: 4px 0 12px; }
 
 
 /* ═══════════ 顶栏：运行状态胶囊 + 工具菜单 + 对话/轨迹 tab（对齐 DSH） ═══════════ */
-.topbar3-chips { display: flex; align-items: center; gap: 6px; flex: none; }
-.topbar-chip {
-  display: inline-flex; align-items: center; gap: 5px;
-  height: 24px; padding: 0 9px;
-  border: none; border-radius: var(--radius-sm);
-  background: var(--btn-subtle); color: var(--muted);
-  font-size: 11.5px; font-weight: 600; white-space: nowrap;
-  transition: background-color .15s ease, color .15s ease;
-}
-.topbar-chip:hover { background: var(--hover); color: var(--ink); }
-.topbar-chip.on { background: var(--hover); color: var(--ink); }
 
 .topbar3-menu-wrap { position: relative; flex: none; display: flex; align-items: center; }
 .topbar3-menu {
