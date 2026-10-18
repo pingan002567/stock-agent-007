@@ -29,11 +29,29 @@
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "create": false
+      },
+      {
+        "label": "pet",
+        "title": "Stock Agent",
+        "width": 132,
+        "height": 108,
+        "transparent": true,
+        "decorations": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "focus": false,
+        "visible": false,
+        "create": false
       }
     ],
     "security": {
       "csp": null
-    }
+    },
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,

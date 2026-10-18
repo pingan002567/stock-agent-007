@@ -6,6 +6,7 @@ import { ChatDetailProvider, useChatDetail } from "@/hooks/useChatDetail";
 import { TopBar } from "@/components/layout/TopBar";
 import { BottomBar } from "@/components/layout/BottomBar";
 import { LeftSidebar } from "@/components/layout/LeftSidebar";
+import { usePetBridge } from "@/hooks/usePetBridge";
 import { FunctionDock } from "@/components/layout/FunctionDock";
 import { CopilotPanel } from "@/components/features/CopilotPanel";
 import { SettingsModal } from "@/components/features/SettingsModal";
@@ -124,6 +125,7 @@ function AppShell({ onSwitchBackend }: { onSwitchBackend: () => void }) {
       openWorkspace={openWorkspace}
       switchBackend={onSwitchBackend}
     >
+      <PetBridgeMount />
       <div className={appCls}>
         <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
           <LeftSidebar
@@ -265,6 +267,12 @@ function AppContent() {
       </CopilotChatProvider>
     </AppStateProvider>
   );
+}
+
+/** 桌宠状态桥：必须挂在 AppStateProvider 内部（usePetBridge 依赖 useAppState） */
+function PetBridgeMount() {
+  usePetBridge();
+  return null;
 }
 
 export default function App() {

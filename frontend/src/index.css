@@ -5586,3 +5586,101 @@ html.mobile .m-page .page-head { padding: 4px 0 12px; }
 }
 .trajectory-empty-title { font-size: 14px; font-weight: 600; color: var(--ink); }
 .trajectory-empty-desc { font-size: 12px; line-height: 1.7; max-width: 440px; }
+
+/* ===== 桌宠窗口（label = "pet"）=====
+   独立透明窗口：整体背景必须透明，否则会挡住桌面。
+   这里不复用应用主题色 —— 桌宠浮在任意壁纸上，固定用深色玻璃更稳。 */
+html.pet-window-root,
+html.pet-window-root body,
+html.pet-window-root #root {
+  background: transparent !important;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+}
+html.pet-window-root body { margin: 0; }
+
+.pet-window {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.pet-window img,
+.pet-window svg { -webkit-user-drag: none; }
+
+.pet-body { position: relative; width: 132px; height: 108px; flex: none; }
+.pet-svg { width: 100%; height: 100%; overflow: visible; display: block; }
+
+.pet-bubble {
+  max-width: 268px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: rgba(44, 44, 46, 0.88);
+  -webkit-backdrop-filter: blur(40px) saturate(150%);
+  backdrop-filter: blur(40px) saturate(150%);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 18px 36px rgba(0, 0, 0, 0.28);
+  animation: pet-bubble-in 0.22s cubic-bezier(0.3, 0.9, 0.3, 1);
+}
+.pet-bubble-title { font-size: 12px; font-weight: 600; color: #f9fafb; }
+.pet-bubble-body { font-size: 11.5px; color: #adb2b8; margin-top: 3px; line-height: 1.5; }
+
+.pet-badge {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: #f87171;
+  color: #151517;
+  font-size: 10px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+
+@keyframes pet-bubble-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pet-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.025); }
+}
+@keyframes pet-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2.5px); }
+}
+@keyframes pet-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-3px); }
+  40% { transform: translateX(3px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+@keyframes pet-dots {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+@keyframes pet-tail-wag {
+  0%, 100% { transform: rotate(-7deg); }
+  50% { transform: rotate(9deg); }
+}
+
+.pet-svg.pet-idle { animation: pet-breathe 4s ease-in-out infinite; transform-origin: 80px 112px; }
+.pet-svg.pet-working { animation: pet-bob 1.6s ease-in-out infinite; }
+.pet-svg.pet-done { animation: pet-bob 1s ease-in-out 2; }
+.pet-svg.pet-alert { animation: pet-shake 0.5s ease-in-out 2; }
+
+.pet-d1, .pet-d2, .pet-d3 { animation: pet-dots 1.2s infinite; }
+.pet-d2 { animation-delay: 0.2s; }
+.pet-d3 { animation-delay: 0.4s; }
+.pet-tail { transform-origin: 122px 88px; animation: pet-tail-wag 0.7s ease-in-out infinite; }

@@ -4,6 +4,80 @@ use tauri::{
     Manager, WebviewWindowBuilder,
 };
 
+/// 当前窗口的 label：前端据此决定渲染桌宠还是主界面
+/// （两个窗口加载同一个 URL，只能靠 label 区分）
+#[tauri::command]
+fn window_label(window: tauri::WebviewWindow) -> String {
+    window.label().to_string()
+}
+
+/// 点桌宠：把主窗口叫到前台
+#[tauri::command]
+fn pet_focus_main(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        w.show().map_err(|e| e.to_string())?;
+        w.set_focus().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// 拖动桌宠：交给系统原生拖动（松手后才返回，前端据此存位置）
+#[tauri::command]
+fn pet_start_drag(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.start_dragging().map_err(|e| e.to_string())
+}
+
+/// 桌宠窗口改尺寸（气泡弹出/收回时用）。锚定右下角：窗口变大时往左上长，
+/// 桌宠本体在窗口里的位置不动。
+#[tauri::command]
+fn pet_resize(window: tauri::WebviewWindow, width: f64, height: f64) -> Result<(), String> {
+    let pos = window.outer_position().map_err(|e| e.to_string())?;
+    let size = window.outer_size().map_err(|e| e.to_string())?;
+    let sf = window.scale_factor().map_err(|e| e.to_string())?;
+    let nw = (width * sf) as i32;
+    let nh = (height * sf) as i32;
+    let nx = pos.x + size.width as i32 - nw;
+    let ny = pos.y + size.height as i32 - nh;
+    window
+        .set_size(tauri::LogicalSize::new(width, height))
+        .map_err(|e| e.to_string())?;
+    window
+        .set_position(tauri::PhysicalPosition::new(nx, ny))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 桌宠当前位置（物理像素）
+#[tauri::command]
+fn pet_position(window: tauri::WebviewWindow) -> Result<(i32, i32), String> {
+    let p = window.outer_position().map_err(|e| e.to_string())?;
+    Ok((p.x, p.y))
+}
+
+/// 恢复桌宠位置
+#[tauri::command]
+fn pet_set_position(window: tauri::WebviewWindow, x: i32, y: i32) -> Result<(), String> {
+    window
+        .set_position(tauri::PhysicalPosition::new(x, y))
+        .map_err(|e| e.to_string())
+}
+
+/// 显示 / 隐藏桌宠窗口
+#[tauri::command]
+fn pet_set_visible(app: tauri::AppHandle, visible: bool) -> Result<(), String> {
+    let Some(w) = app.get_webview_window("pet") else {
+        return Ok(());
+    };
+    if visible {
+        w.show().map_err(|e| e.to_string())?;
+    } else {
+        w.hide().map_err(|e| e.to_string())?;
+    }
+    println!("[pet] set_visible({visible}) -> visible={:?} pos={:?}", w.is_visible(), w.outer_position().ok());
+    Ok(())
+}
+
 /// 本机后端管理 CLI：跑 `python -m backend.service_cli <args>` 并解析其单 JSON 出口。
 /// 仅本地模式由 React ConnectionGate 调用；远端模式不会走这条启动链。
 #[tauri::command]
@@ -115,7 +189,18 @@ fn repo_root() -> std::path::PathBuf {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![service_cli, navigate, open_external])
+        .invoke_handler(tauri::generate_handler![
+            service_cli,
+            navigate,
+            open_external,
+            window_label,
+            pet_focus_main,
+            pet_start_drag,
+            pet_set_visible,
+            pet_position,
+            pet_set_position,
+            pet_resize
+        ])
         .setup(|app| {
             let window_cfg = app
                 .config()
@@ -143,6 +228,43 @@ pub fn run() {
                     tauri::webview::NewWindowResponse::Deny
                 })
                 .build()?;
+
+            // 桌宠窗口：透明、置顶、无边框、不抢焦点。先建好并藏在右下角，
+            // 是否显示由前端的「显示桌宠」开关通过 pet_set_visible 决定。
+            if let Some(pet_cfg) = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|w| w.label == "pet")
+                .cloned()
+            {
+                let pet = WebviewWindowBuilder::from_config(app.handle(), &pet_cfg)?
+                    .on_navigation(|url| is_app_webview_url(url.as_str()))
+                    .build()?;
+                // 右下角：用 work_area（已排除菜单栏与 Dock），别压到 Dock 上
+                if let Ok(Some(mon)) = app.primary_monitor() {
+                    let sf = mon.scale_factor();
+                    let w = (pet_cfg.width * sf) as i32;
+                    let h = (pet_cfg.height * sf) as i32;
+                    let margin = (24.0 * sf) as i32;
+                    let area = mon.work_area();
+                    let _ = pet.set_position(tauri::PhysicalPosition::new(
+                        area.position.x + area.size.width as i32 - w - margin,
+                        area.position.y + area.size.height as i32 - h - margin,
+                    ));
+                }
+                // 启动即显示；前端按「显示桌宠」开关再决定是否隐藏
+                let _ = pet.show();
+                println!(
+                    "[pet] window created: label={} visible={:?} pos={:?}",
+                    pet.label(),
+                    pet.is_visible(),
+                    pet.outer_position().ok()
+                );
+            } else {
+                println!("[pet] window config not found");
+            }
 
             // 空白页自愈：webview 停在 about:blank 时拉回壳首页（bundled SPA / Vite）。
             {
