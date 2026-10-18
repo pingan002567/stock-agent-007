@@ -302,13 +302,15 @@ html.resizing .topbar3 { transition: none; }
 }
 .topbar3-r1 {
   display: grid;
-  grid-template-columns: var(--shell-cols);
+  /* 固定三列，不复用 --shell-cols：后者在 .dock-collapsed 时会塌成两列，
+     会让顶栏的第三段掉到隐式第二行，整个顶栏重排 */
+  grid-template-columns: var(--left-sidebar-w) minmax(0, 1fr) auto;
   height: 48px;
   transition: grid-template-columns 0.22s cubic-bezier(0.3, 0.8, 0.3, 1);
 }
 .topbar3-r2 {
   display: grid;
-  grid-template-columns: var(--shell-cols);
+  grid-template-columns: var(--left-sidebar-w) minmax(0, 1fr) auto;
   height: 34px;
   border-bottom: 1px solid var(--line-soft);
   transition: grid-template-columns 0.22s cubic-bezier(0.3, 0.8, 0.3, 1);
@@ -323,7 +325,6 @@ html.resizing .topbar3 { transition: none; }
   padding: 0 14px;
   min-width: 0;
 }
-.topbar3-center-span { grid-column: 1 / -1; }
 .topbar3-right {
   padding: 0 8px;
   justify-content: flex-end;
@@ -5502,8 +5503,6 @@ html.mobile .m-page .page-head { padding: 4px 0 12px; }
 
 
 /* ═══════════ 顶栏：运行状态胶囊 + 工具菜单 + 对话/轨迹 tab（对齐 DSH） ═══════════ */
-.topbar3-spacer { flex: 1; min-width: 8px; }
-
 .topbar3-chips { display: flex; align-items: center; gap: 6px; flex: none; }
 .topbar-chip {
   display: inline-flex; align-items: center; gap: 5px;

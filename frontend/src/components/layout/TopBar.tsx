@@ -120,8 +120,6 @@ export function TopBar({
     </button>
   );
 
-  const bothCollapsed = leftCollapsed && dockCollapsed;
-
   return (
     <header className="topbar3" data-tauri-drag-region="deep">
       {/* ── 第一行：标题 + 运行状态 + 工具簇 ── */}
@@ -131,7 +129,7 @@ export function TopBar({
         </div>
 
         <div
-          className={`topbar3-seg topbar3-center${bothCollapsed ? " topbar3-center-span" : ""}`}
+          className="topbar3-seg topbar3-center"
           data-tauri-drag-region="deep"
         >
           {leftCollapsed && leftToggle}
@@ -162,8 +160,9 @@ export function TopBar({
             </div>
           )}
 
-          <span className="topbar3-spacer" />
+        </div>
 
+        <div className="topbar3-seg topbar3-right">
           <div className="topbar3-menu-wrap" ref={menuRef} data-tauri-drag-region="false">
             <button
               className={`topbar3-btn${menuOpen ? " on" : ""}`}
@@ -199,11 +198,7 @@ export function TopBar({
               </div>
             )}
           </div>
-          {dockCollapsed && dockToggle}
-        </div>
-
-        <div className="topbar3-seg topbar3-right">
-          {!dockCollapsed && dockToggle}
+          {dockToggle}
         </div>
       </div>
 
