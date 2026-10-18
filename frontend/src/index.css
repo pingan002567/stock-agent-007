@@ -407,11 +407,17 @@ html.resizing .topbar3 { transition: none; }
   border-right: 1px solid var(--line-soft);
   min-height: 0;
 }
-.brand { display: flex; align-items: center; gap: 10px; padding: 12px 14px 8px; }
-/* 桌面端的红绿灯漂浮在左栏顶部（左栏现在从 y=0 开始） */
-html.desktop .left-sidebar .brand { padding-top: 40px; }
+.brand {
+  display: flex; align-items: center; gap: 10px;
+  /* 与中栏标题行同高：三栏顶部的控件共用一条 48px 行、垂直中心 24。
+     原来 padding 12/8 让它比中栏低 5px。 */
+  height: 48px; padding: 0 14px;
+}
+/* 桌面端红绿灯漂浮在左栏左上角：横向让开（而不是纵向压一行），
+   这样 brand 行仍与中栏标题行等高对齐 */
+html.desktop .left-sidebar .brand { padding-left: 84px; }
 .brand-fold {
-  width: 26px; height: 26px; padding: 0; flex: none;
+  width: 28px; height: 28px; padding: 0; flex: none;
   display: grid; place-items: center;
   border: none; border-radius: var(--radius-sm);
   background: transparent; color: var(--faint);
@@ -682,14 +688,14 @@ html.resizing { cursor: col-resize; user-select: none; }
 }
 .func-head {
   display: flex; align-items: center; gap: 8px;
-  height: 44px; padding: 0 14px;
+  height: 48px; padding: 0 14px;
   border-bottom: 1px solid var(--line-soft);
 }
 .func-title { font-size: 13px; font-weight: 700; color: var(--ink); }
 .func-sub { font-size: 11px; color: var(--msg-time); font-family: var(--mono, ui-monospace, Menlo, monospace); }
 .func-close {
   margin-left: auto;
-  width: 26px; height: 26px;
+  width: 28px; height: 28px;
   display: grid; place-items: center;
   border: none; border-radius: var(--radius);
   background: transparent; color: var(--muted);
@@ -714,7 +720,8 @@ html.resizing { cursor: col-resize; user-select: none; }
   width: 52px; flex: none;
   background: var(--sidebar);
   display: flex; flex-direction: column; align-items: center;
-  padding: 10px 0; gap: 2px;
+  /* 5 + 38/2 = 24：条带首个按钮的中心与中栏标题行一致 */
+  padding: 5px 0; gap: 2px;
 }
 .strip-btn {
   position: relative;

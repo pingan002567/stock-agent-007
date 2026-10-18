@@ -62,11 +62,13 @@ export function TopBar({
   onToggleLeft,
   onToggleDock,
   leftCollapsed,
+  dockCollapsed,
 }: {
   onOpenSettings: () => void;
   onToggleLeft: () => void;
   onToggleDock: () => void;
   leftCollapsed: boolean;
+  dockCollapsed: boolean;
 }) {
   const { currentSession, messages } = useCopilotChat();
   const { chatView, setChatView } = useAppState();
@@ -124,6 +126,20 @@ export function TopBar({
         )}
 
         <span className="topbar3-spacer" />
+
+        {/* 功能栏整条收起时 Dock 不再渲染，展开入口必须留在这里 */}
+        {dockCollapsed && (
+          <button
+            className="topbar3-btn"
+            onClick={onToggleDock}
+            title="展开功能栏"
+            data-tauri-drag-region="false"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <rect x="3" y="4" width="18" height="16" rx="2" /><line x1="15" y1="4" x2="15" y2="20" />
+            </svg>
+          </button>
+        )}
 
         <div className="topbar3-menu-wrap" ref={menuRef} data-tauri-drag-region="false">
           <button

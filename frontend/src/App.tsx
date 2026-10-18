@@ -136,6 +136,7 @@ function AppShell({ onSwitchBackend }: { onSwitchBackend: () => void }) {
         <main className="center">
           <TopBar
             leftCollapsed={leftCollapsed}
+            dockCollapsed={dockCollapsed}
             onToggleLeft={toggleLeft}
             onToggleDock={toggleDock}
             onOpenSettings={() => openSettings()}
