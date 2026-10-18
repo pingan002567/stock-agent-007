@@ -317,6 +317,9 @@ html.resizing .topbar3 { transition: none; }
 }
 .topbar3-seg { display: flex; align-items: center; min-width: 0; }
 .topbar3-left { padding: 0 8px; border-right: 1px solid var(--line-soft); justify-content: flex-end; }
+/* 左栏收起后这一段是空的（折叠钮移进了中段），但 padding + border-right 还在，
+   会在 0 宽列里撑出一条竖线（标题行、tab 行各一条）。空段就彻底不占位。 */
+.topbar3-left:empty { padding: 0; border-right: none; }
 .app.left-collapsed .topbar3-left:not(:empty) { border-right: none; }
 .topbar3-center {
   display: flex;
