@@ -407,15 +407,17 @@ html.resizing .topbar3 { transition: none; }
   border-right: 1px solid var(--line-soft);
   min-height: 0;
 }
-.brand {
-  display: flex; align-items: center; gap: 10px;
-  /* 与中栏标题行同高：三栏顶部的控件共用一条 48px 行、垂直中心 24。
-     原来 padding 12/8 让它比中栏低 5px。 */
-  height: 48px; padding: 0 14px;
+/* 左栏顶部 48px 窗口条：只放折叠钮，左边让给桌面端红绿灯。
+   与中栏标题行等高、控件中心同为 24。brand 行在它下面（与 DSH 一致）。 */
+.left-topbar {
+  height: 48px; flex: none;
+  display: flex; align-items: center; justify-content: flex-end;
+  padding: 0 14px;
 }
-/* 桌面端红绿灯漂浮在左栏左上角：横向让开（而不是纵向压一行），
-   这样 brand 行仍与中栏标题行等高对齐 */
-html.desktop .left-sidebar .brand { padding-left: 84px; }
+html.desktop .left-topbar { padding-left: 84px; }
+
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 14px 8px; }
+
 .brand-fold {
   width: 28px; height: 28px; padding: 0; flex: none;
   display: grid; place-items: center;
@@ -753,6 +755,8 @@ html.resizing { cursor: col-resize; user-select: none; }
 }
 .strip-btn:hover .strip-tip { opacity: 1; transform: translateY(-50%) translateX(0); }
 .strip-gap { flex: 1; }
+/* 中栏标题行：把右侧工具簇推到最右 */
+.topbar3-spacer { flex: 1; min-width: 8px; }
 
 /* ─── 系统设置：居中悬浮模态（TeamClaw 式） ─── */
 .modal-backdrop {
