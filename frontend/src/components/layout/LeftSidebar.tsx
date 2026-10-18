@@ -35,11 +35,14 @@ export function LeftSidebar({
   onOpenWorkspace,
   variant = "desktop",
   onSessionPicked,
+  onToggleCollapse,
 }: {
   onOpenSettings: () => void;
   onOpenWorkspace: () => void;
   variant?: "desktop" | "drawer";
   onSessionPicked?: () => void;
+  /** 桌面态：收起会话栏（左栏现在占满高度，折叠钮放在自身的 brand 行里） */
+  onToggleCollapse?: () => void;
 }) {
   const {
     sessions, currentSession, sessionActivity,
@@ -100,6 +103,19 @@ export function LeftSidebar({
             {connLabel}
           </button>
         </div>
+        {onToggleCollapse && variant === "desktop" ? (
+          <button
+            type="button"
+            className="brand-fold"
+            title="收起会话栏"
+            onClick={onToggleCollapse}
+            data-tauri-drag-region="false"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <rect x="3" y="4" width="18" height="16" rx="2" /><line x1="9" y1="4" x2="9" y2="20" />
+            </svg>
+          </button>
+        ) : null}
       </div>
 
       <div className="left-actions">

@@ -272,7 +272,9 @@ pre {
   --shell-cols: var(--left-sidebar-w) minmax(0, 1fr) auto;
   height: 100vh;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  /* 单行铺满：左栏 / 中栏 / 右栏都从 y=0 开始（对齐 DSH —— 只有中栏有标题行，
+     左右两栏各自占满整个高度）。原来顶栏是通栏压在三栏之上，把左右栏都推到了 y=82 以下。 */
+  grid-template-rows: minmax(0, 1fr);
   grid-template-columns: var(--shell-cols);
   background: var(--canvas);
   transition: grid-template-columns 0.22s cubic-bezier(0.3, 0.8, 0.3, 1);
@@ -288,39 +290,33 @@ html.resizing .topbar3 { transition: none; }
 }
 .left-sidebar {
   min-width: 0;
-  grid-row: 2 / 4;
+  grid-row: 1;
   grid-column: 1;
 }
 
 /* 顶栏：grid-column 跨列 + 与 body 相同的列模板 */
 .topbar3 {
-  grid-column: 1 / -1;
+  flex: none;
   display: flex;
   flex-direction: column;
   /* 与内容同色：DSH 的标题行不是一条独立横带，层级靠 tab 下划线暗示 */
   background: var(--canvas);
 }
 .topbar3-r1 {
-  display: grid;
-  /* 固定三列，不复用 --shell-cols：后者在 .dock-collapsed 时会塌成两列，
-     会让顶栏的第三段掉到隐式第二行，整个顶栏重排 */
-  grid-template-columns: var(--left-sidebar-w) minmax(0, 1fr) auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   height: 48px;
-  transition: grid-template-columns 0.22s cubic-bezier(0.3, 0.8, 0.3, 1);
+  padding: 0 14px;
+  min-width: 0;
 }
 .topbar3-r2 {
-  display: grid;
-  grid-template-columns: var(--left-sidebar-w) minmax(0, 1fr) auto;
+  display: flex;
+  align-items: stretch;
   height: 34px;
+  padding: 0 14px;
   border-bottom: 1px solid var(--line-soft);
-  transition: grid-template-columns 0.22s cubic-bezier(0.3, 0.8, 0.3, 1);
 }
-.topbar3-seg { display: flex; align-items: center; min-width: 0; }
-.topbar3-left { padding: 0 8px; border-right: 1px solid var(--line-soft); justify-content: flex-end; }
-/* 左栏收起后这一段是空的（折叠钮移进了中段），但 padding + border-right 还在，
-   会在 0 宽列里撑出一条竖线（标题行、tab 行各一条）。空段就彻底不占位。 */
-.topbar3-left:empty { padding: 0; border-right: none; }
-.app.left-collapsed .topbar3-left:not(:empty) { border-right: none; }
 .topbar3-center {
   display: flex;
   align-items: center;
@@ -348,14 +344,11 @@ html.resizing .topbar3 { transition: none; }
 .topbar3-btn:hover { background: var(--selected); color: var(--ink-2); border: none; box-shadow: none; }
 .topbar3-btn.on { color: var(--muted); }
 /* 桌面态：Tauri 红绿灯 — 左栏展开时在左段，收起时在中栏段 */
-html.desktop .app:not(.left-collapsed) .topbar3-r1 .topbar3-left { padding-left: 84px; }
-html.desktop .app.left-collapsed .topbar3-r1 .topbar3-center { padding-left: 84px; }
 
 /* 底栏：仅占中栏列，Composer 浮动（Cursor 式） */
 .bottombar3 {
-  grid-row: 3;
-  grid-column: 2;
   min-width: 0;
+  flex: none;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -381,16 +374,19 @@ html.desktop .app.left-collapsed .topbar3-r1 .topbar3-center { padding-left: 84p
 }
 
 .center {
-  grid-row: 2;
+  grid-row: 1;
   grid-column: 2;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
   display: flex;
+  flex-direction: column;
   background: var(--canvas);
 }
+/* 中栏内部：标题行 + 消息区 + 底栏 */
+.center > .copilot-panel { flex: 1; min-height: 0; }
 .func-dock {
-  grid-row: 2 / 4;
+  grid-row: 1;
   grid-column: 3;
 }
 .app.dock-collapsed .func-dock { display: none; }
@@ -412,6 +408,15 @@ html.desktop .app.left-collapsed .topbar3-r1 .topbar3-center { padding-left: 84p
   min-height: 0;
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 12px 14px 8px; }
+/* 桌面端的红绿灯漂浮在左栏顶部（左栏现在从 y=0 开始） */
+html.desktop .left-sidebar .brand { padding-top: 40px; }
+.brand-fold {
+  width: 26px; height: 26px; padding: 0; flex: none;
+  display: grid; place-items: center;
+  border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--faint);
+}
+.brand-fold:hover { background: var(--hover); color: var(--ink); }
 .brand > div:nth-child(2) { flex: 1; min-width: 0; }
 .brand-status { display: flex; align-items: center; gap: 8px; flex: 1; justify-content: space-between; }
 .brand-status-col { display: grid; justify-items: end; gap: 2px; }
@@ -5531,7 +5536,7 @@ html.mobile .m-page .page-head { padding: 4px 0 12px; }
 .topbar3-menu-item:hover { background: var(--hover); }
 .topbar3-menu-sep { height: 1px; background: var(--line-soft); margin: 4px 2px; }
 
-.topbar3-tabs { display: flex; align-items: stretch; gap: 2px; padding: 0 14px; min-width: 0; }
+.topbar3-tabs { display: flex; align-items: stretch; gap: 2px; min-width: 0; }
 .topbar3-tab {
   position: relative; height: 100%; padding: 0 10px;
   border: none; border-radius: 0; background: transparent;

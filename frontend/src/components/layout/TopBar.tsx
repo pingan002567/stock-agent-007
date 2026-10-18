@@ -9,17 +9,7 @@ import type { CopilotMessage } from "@/api/client";
 function FoldLeftIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <rect x="3" y="4" width="18" height="16" rx="2" />
-      <line x1="9" y1="4" x2="9" y2="20" />
-    </svg>
-  );
-}
-
-function FoldRightIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <rect x="3" y="4" width="18" height="16" rx="2" />
-      <line x1="15" y1="4" x2="15" y2="20" />
+      <rect x="3" y="4" width="18" height="16" rx="2" /><line x1="9" y1="4" x2="9" y2="20" />
     </svg>
   );
 }
@@ -65,23 +55,18 @@ function useSessionStats(messages: CopilotMessage[]) {
   }, [messages]);
 }
 
-/** 统一顶栏（对齐 DSH 的两段式）：
- *  第一行 = 会话标题 + 运行状态胶囊 + 工具簇（与内容同色，不再做成一条横带）
- *  第二行 = 对话 / 轨迹 tab
- *  仍与 .app 共用 --shell-cols，分段与左/中/右栏列边界对齐。
- *  栏收起时折叠钮移入中栏段，避免顶栏列宽与 body 网格错位。 */
+/** 中栏标题区（对齐 DSH）：标题 + 运行状态胶囊 + 更多菜单；下面一行是 对话 / 轨迹 tab。
+ *  它现在只属于中栏 —— 左右两栏各自占满整个高度，不再被通栏顶栏推下来。 */
 export function TopBar({
-  leftCollapsed,
-  onToggleLeft,
-  dockCollapsed,
-  onToggleDock,
   onOpenSettings,
+  onToggleLeft,
+  onToggleDock,
+  leftCollapsed,
 }: {
-  leftCollapsed: boolean;
-  onToggleLeft: () => void;
-  dockCollapsed: boolean;
-  onToggleDock: () => void;
   onOpenSettings: () => void;
+  onToggleLeft: () => void;
+  onToggleDock: () => void;
+  leftCollapsed: boolean;
 }) {
   const { currentSession, messages } = useCopilotChat();
   const { chatView, setChatView } = useAppState();
@@ -98,113 +83,86 @@ export function TopBar({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [menuOpen]);
 
-  const leftToggle = (
-    <button
-      className={`topbar3-btn${leftCollapsed ? "" : " on"}`}
-      onClick={onToggleLeft}
-      title={leftCollapsed ? "展开会话栏" : "收起会话栏"}
-      data-tauri-drag-region="false"
-    >
-      <FoldLeftIcon />
-    </button>
-  );
-
-  const dockToggle = (
-    <button
-      className={`topbar3-btn${dockCollapsed ? "" : " on"}`}
-      onClick={onToggleDock}
-      title={dockCollapsed ? "展开功能栏" : "收起功能栏"}
-      data-tauri-drag-region="false"
-    >
-      <FoldRightIcon />
-    </button>
-  );
-
   return (
     <header className="topbar3" data-tauri-drag-region="deep">
-      {/* ── 第一行：标题 + 运行状态 + 工具簇 ── */}
-      <div className="topbar3-r1">
-        <div className="topbar3-seg topbar3-left" data-tauri-drag-region="deep">
-          {!leftCollapsed && leftToggle}
-        </div>
+      <div className="topbar3-r1" data-tauri-drag-region="deep">
+        {leftCollapsed && (
+          <button
+            className="topbar3-btn"
+            onClick={onToggleLeft}
+            title="展开会话栏"
+            data-tauri-drag-region="false"
+          >
+            <FoldLeftIcon />
+          </button>
+        )}
+        <span className="topbar3-title">{displaySessionTitle(currentSession?.title)}</span>
 
-        <div
-          className="topbar3-seg topbar3-center"
-          data-tauri-drag-region="deep"
-        >
-          {leftCollapsed && leftToggle}
-          <span className="topbar3-title">{displaySessionTitle(currentSession?.title)}</span>
-
-          {stats.tools > 0 && (
-            <div className="topbar3-chips" data-tauri-drag-region="false">
+        {stats.tools > 0 && (
+          <div className="topbar3-chips" data-tauri-drag-region="false">
+            <button
+              type="button"
+              className={`topbar-chip${chatView === "trajectory" ? " on" : ""}`}
+              title="查看执行轨迹"
+              onClick={() => setChatView("trajectory")}
+            >
+              <ToolGlyph />
+              {stats.tools} 个工具
+            </button>
+            {stats.subagents > 0 && (
               <button
                 type="button"
                 className={`topbar-chip${chatView === "trajectory" ? " on" : ""}`}
-                title="查看执行轨迹"
+                title="查看子代理"
                 onClick={() => setChatView("trajectory")}
               >
-                <ToolGlyph />
-                {stats.tools} 个工具
+                <SubagentGlyph />
+                {stats.subagents} 个子代理
               </button>
-              {stats.subagents > 0 && (
-                <button
-                  type="button"
-                  className={`topbar-chip${chatView === "trajectory" ? " on" : ""}`}
-                  title="查看子代理"
-                  onClick={() => setChatView("trajectory")}
-                >
-                  <SubagentGlyph />
-                  {stats.subagents} 个子代理
-                </button>
-              )}
-            </div>
-          )}
-
-        </div>
-
-        <div className="topbar3-seg topbar3-right">
-          <div className="topbar3-menu-wrap" ref={menuRef} data-tauri-drag-region="false">
-            <button
-              className={`topbar3-btn${menuOpen ? " on" : ""}`}
-              onClick={() => setMenuOpen((v) => !v)}
-              title="更多"
-            >
-              <DotsGlyph />
-            </button>
-            {menuOpen && (
-              <div className="topbar3-menu">
-                <button
-                  type="button"
-                  className="topbar3-menu-item"
-                  onClick={() => { setMenuOpen(false); onToggleLeft(); }}
-                >
-                  {leftCollapsed ? "展开会话栏" : "收起会话栏"}
-                </button>
-                <button
-                  type="button"
-                  className="topbar3-menu-item"
-                  onClick={() => { setMenuOpen(false); onToggleDock(); }}
-                >
-                  {dockCollapsed ? "展开功能栏" : "收起功能栏"}
-                </button>
-                <div className="topbar3-menu-sep" />
-                <button
-                  type="button"
-                  className="topbar3-menu-item"
-                  onClick={() => { setMenuOpen(false); onOpenSettings(); }}
-                >
-                  设置
-                </button>
-              </div>
             )}
           </div>
-          {dockToggle}
+        )}
+
+        <span className="topbar3-spacer" />
+
+        <div className="topbar3-menu-wrap" ref={menuRef} data-tauri-drag-region="false">
+          <button
+            className={`topbar3-btn${menuOpen ? " on" : ""}`}
+            onClick={() => setMenuOpen((v) => !v)}
+            title="更多"
+          >
+            <DotsGlyph />
+          </button>
+          {menuOpen && (
+            <div className="topbar3-menu">
+              <button
+                type="button"
+                className="topbar3-menu-item"
+                onClick={() => { setMenuOpen(false); onToggleLeft(); }}
+              >
+                {leftCollapsed ? "展开会话栏" : "收起会话栏"}
+              </button>
+              <button
+                type="button"
+                className="topbar3-menu-item"
+                onClick={() => { setMenuOpen(false); onToggleDock(); }}
+              >
+                收起 / 展开功能栏
+              </button>
+              <div className="topbar3-menu-sep" />
+              <button
+                type="button"
+                className="topbar3-menu-item"
+                onClick={() => { setMenuOpen(false); onOpenSettings(); }}
+              >
+                设置
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* ── 第二行：对话 / 轨迹 ── */}
       <div className="topbar3-r2">
-        <div className="topbar3-seg topbar3-left" />
         <div className="topbar3-tabs" data-tauri-drag-region="false">
           <button
             type="button"
@@ -221,7 +179,6 @@ export function TopBar({
             轨迹
           </button>
         </div>
-        <div className="topbar3-seg topbar3-right" />
       </div>
     </header>
   );

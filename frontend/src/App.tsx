@@ -125,32 +125,33 @@ function AppShell({ onSwitchBackend }: { onSwitchBackend: () => void }) {
       switchBackend={onSwitchBackend}
     >
       <div className={appCls}>
-        <TopBar
-          leftCollapsed={leftCollapsed}
-          onToggleLeft={toggleLeft}
-          dockCollapsed={dockCollapsed}
-          onToggleDock={toggleDock}
-          onOpenSettings={() => openSettings()}
-        />
         <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
           <LeftSidebar
             onOpenSettings={() => openSettings()}
             onOpenWorkspace={openWorkspace}
+            onToggleCollapse={toggleLeft}
           />
         </ErrorBoundary>
+        {/* 中栏自带标题区：左右两栏各自占满整个高度（对齐 DSH） */}
         <main className="center">
+          <TopBar
+            leftCollapsed={leftCollapsed}
+            onToggleLeft={toggleLeft}
+            onToggleDock={toggleDock}
+            onOpenSettings={() => openSettings()}
+          />
           <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
             <CopilotPanel />
           </ErrorBoundary>
+          <BottomBar
+            leftCollapsed={leftCollapsed}
+            onOpenSettings={() => openSettings()}
+            onOpenWorkspace={openWorkspace}
+          />
         </main>
         <ErrorBoundary onError={(e) => showToast(e.message, "error")}>
-          {!dockCollapsed && <FunctionDock />}
+          {!dockCollapsed && <FunctionDock onToggleCollapse={toggleDock} />}
         </ErrorBoundary>
-        <BottomBar
-          leftCollapsed={leftCollapsed}
-          onOpenSettings={() => openSettings()}
-          onOpenWorkspace={openWorkspace}
-        />
         <SettingsModal open={settingsOpen} initialTab={settingsTab} onClose={closeSettings} />
         <WorkspaceModal open={workspaceOpen} onClose={() => setWorkspaceOpen(false)} />
       </div>

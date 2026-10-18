@@ -12,7 +12,7 @@ import { formatTimeAgo } from "@/utils/format";
 /** 三栏布局右侧功能坞：52px 常驻图标条（"平时收起"态）+ 可展开功能面板。
  * currentScreen 语义 = 面板内容；"chat" = 面板关闭。业务页面与工具卡详情
  * 共用同一面板宿主，宽度过渡不卸载（流式进行中不断渲染）。 */
-export function FunctionDock() {
+export function FunctionDock({ onToggleCollapse }: { onToggleCollapse?: () => void } = {}) {
   const { currentScreen, setCurrentScreen, appDataCache, lastRefreshTime, globalLoading } = useAppState();
   const { detail, open: detailOpen, openDetail, closeDetail } = useChatDetail();
   const { currentSession } = useCopilotChat();
@@ -120,6 +120,17 @@ export function FunctionDock() {
       </section>
 
       <aside className="func-strip">
+        {onToggleCollapse ? (
+          <button
+            className="strip-btn"
+            title="收起功能栏"
+            onClick={onToggleCollapse}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <rect x="3" y="4" width="18" height="16" rx="2" /><line x1="15" y1="4" x2="15" y2="20" />
+            </svg>
+          </button>
+        ) : null}
         {stripItems.map((item) => (
           <button
             key={item.screen}

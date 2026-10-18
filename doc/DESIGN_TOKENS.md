@@ -186,18 +186,35 @@ input, textarea, select { border: 1px solid var(--line-soft); border-radius: var
 ```
 发送键：圆形 30px + `background: var(--ink)` + `color: var(--canvas)`。
 
-### 5.5b 顶栏（两段式，对齐 DSH）
+### 5.5b 外壳与顶栏（对齐 DSH：三栏各自占满高）
+
+**骨架**：左栏 / 中栏 / 右栏都从 `y=0` 开始，各自铺满整个高度；**只有中栏有标题行 + tab 行**。
+顶栏不是压在三栏之上的通栏条。
 
 ```
-第一行 48px：折叠钮 │ 会话标题 + 运行状态胶囊（N 个工具 / N 个子代理）…… ⋯ 菜单 │ 折叠钮
-第二行 34px：       │ 对话 | 轨迹（活动项 2px 下划线）                        │
+.app               grid-template-rows: minmax(0,1fr)        ← 单行
+  .left-sidebar    grid-row:1 col:1   （brand 行右侧自带折叠钮）
+  .center          grid-row:1 col:2   flex column
+      .topbar3       ← 48px 标题行 + 34px tab 行（只属于中栏）
+      .copilot-panel ← flex:1
+      .bottombar3    ← 输入条
+  .func-dock       grid-row:1 col:3   （条带顶部自带折叠钮）
 ```
 
-- **底色用 `--canvas`**，与内容同色，不做成一条 `--sidebar` 横带
-- 状态胶囊 = `var(--btn-subtle)` 底 + `--muted` 字，点击跳到「轨迹」
-- `⋯` 菜单 = 毛玻璃浮层（`blur(40px)`）+ `--elev-prominent`
-- tab 活动态：文字 `--ink` + 底部 2px `--ink` 下划线；非活动 `--faint`
-- 中栏内容是 **居中 max-width 780px** 的阅读列（不是铺满），所以顶栏标题左对齐、正文居中
+**中栏标题行**（`TopBar`，不再用三段列对齐）：
+
+```
+第一行 48px： [标题] [N 个工具] [N 个子代理] ………… ⋯ 菜单
+第二行 34px： 对话 | 轨迹（活动项 2px 下划线）
+```
+
+- 底色 `--canvas`，与内容同色，不做成一条横带
+- 状态胶囊 = `var(--btn-subtle)` 底 + `--muted` 字，点击跳「轨迹」
+- `⋯` 菜单 = 毛玻璃（`blur(40px)`）+ `--elev-prominent`，含收起/展开两栏与设置
+- 桌面端：红绿灯漂浮在**左栏**顶部，左栏 `.brand` 需要 `padding-top: 40px` 让开
+
+**为什么不能给顶栏用 `--shell-cols`**：`.app.dock-collapsed` 会把它改成两列，
+顶栏若复用同一个变量，第三段就会掉到隐式第二行、整行重排。
 
 ### 5.5c 轨迹视图
 
