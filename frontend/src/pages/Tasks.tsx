@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { apiGet } from "@/api/client";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage } from "@/components/ui/Loading";
-import { PageHead } from "@/components/ui/PageHead";
 import { Pagination } from "@/components/ui/Pagination";
 import { formatTimeAgo } from "@/utils/format";
 import { apiPost, apiDelete } from "@/api/client";
@@ -82,14 +81,18 @@ function ScheduledTasksCard() {
       <div className="panel-body" style={{ padding: 0 }}>
         <table className="data-table">
           <thead>
-            <tr><th>任务</th><th>周期</th><th className="num">下次</th><th>上次结果</th><th style={{ width: 210 }}></th></tr>
+            <tr><th>任务</th><th>周期</th><th>上次结果</th><th style={{ width: 128 }}></th></tr>
           </thead>
           <tbody>
             {tasks.map((t) => (
               <tr key={t.task_id}>
                 <td title={t.prompt}>{t.name}</td>
-                <td>{SCHEDULE_LABEL(t.schedule)}</td>
-                <td className="num">{t.enabled ? (t.next_run_at ?? "").slice(5, 16).replace("T", " ") : "—"}</td>
+                <td>
+                  <div>{SCHEDULE_LABEL(t.schedule)}</div>
+                  <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                    下次 {t.enabled ? ((t.next_run_at ?? "").slice(5, 16).replace("T", " ")) : "—"}
+                  </div>
+                </td>
                 <td>
                   {t.last_status === "running" ? <StatusDot tone="busy">运行中</StatusDot>
                     : t.last_status === "completed" ? <StatusDot tone="ok">成功 · {formatTimeAgo(t.last_run_at ?? undefined)}</StatusDot>
@@ -99,12 +102,16 @@ function ScheduledTasksCard() {
                     : <span className="muted" style={{ fontSize: 12 }}>未运行</span>}
                 </td>
                 <td>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "flex-end", paddingRight: 6 }}>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end", paddingRight: 2 }}>
                     {t.last_report_id ? (
-                      <button className="small" onClick={() => setCurrentScreen("reports")} type="button">报告</button>
+                      <button className="small icon-btn" title="查看报告" onClick={() => setCurrentScreen("reports")} type="button">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+                      </button>
                     ) : null}
-                    <button className="small" disabled={busyId === t.task_id} onClick={() => void runNow(t)} type="button">立即运行</button>
-                    <button className="small" style={{ color: "var(--red)" }} onClick={() => setPendingDelete(t)} type="button">✕</button>
+                    <button className="small icon-btn" title="立即运行" disabled={busyId === t.task_id} onClick={() => void runNow(t)} type="button">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5.5l11 6.5-11 6.5z"/></svg>
+                    </button>
+                    <button className="small icon-btn" title="删除" style={{ color: "var(--red)" }} onClick={() => setPendingDelete(t)} type="button">✕</button>
                     <ToggleSwitch checked={t.enabled} disabled={busyId === t.task_id} onChange={() => void toggle(t)} />
                   </div>
                 </td>
@@ -169,18 +176,6 @@ export default function Tasks() {
     <PageContainer>
       <div className="page-stack fade-in">
         {error && <ErrorMessage message={error} />}
-        <PageHead
-          kpis={[
-            { label: "总任务", value: items.length },
-            { label: "运行中", value: runningCount },
-            { label: "已完成", value: completedCount, tone: "up" },
-            { label: "失败", value: failedCount, tone: failedCount > 0 ? "down" : undefined,
-              prompt: "分析最近失败的 AI 任务原因" },
-          ]}
-        />
-
-        <ScheduledTasksCard />
-
         <div className="kpi-grid">
           <div className="kpi-card">
             <div className="kpi-header">
@@ -215,6 +210,8 @@ export default function Tasks() {
             <div className={`kpi-change ${failedCount > 0 ? "down" : "neutral"}`}>{failedCount > 0 ? "需要处理" : "无失败"}</div>
           </div>
         </div>
+
+        <ScheduledTasksCard />
 
         <div className="two-col">
           <div className="panel">

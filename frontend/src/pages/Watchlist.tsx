@@ -5,7 +5,7 @@ import { ErrorMessage } from "@/components/ui/Loading";
 import { PageHead } from "@/components/ui/PageHead";
 import { useAppState } from "@/hooks/useAppState";
 import { AskAiButton } from "@/components/ui/AskAiButton";
-import { inferMarket, marketMoney, pct, changeCls } from "@/utils/market";
+import { inferMarket, marketMoney, pct, changeCls, stockInitial } from "@/utils/market";
 
 interface WatchlistItem {
   symbol: string;
@@ -232,7 +232,22 @@ export default function Watchlist() {
               </thead>
               <tbody>
                 {filteredItems.length === 0 ? (
-                  <tr><td colSpan={6} className="muted" style={{ padding: 24 }}>暂无自选股票</td></tr>
+                  <tr>
+                    <td colSpan={6} style={{ padding: 28, textAlign: "center" }}>
+                      <div className="muted" style={{ fontSize: 13 }}>还没有自选股</div>
+                      <div className="muted" style={{ fontSize: 12, marginTop: 6, lineHeight: 18 }}>
+                        去「个股」页搜索并点「☆ 添加自选」；也可以在对话里让 Agent 帮你挑几只。
+                      </div>
+                      <button
+                        className="small"
+                        type="button"
+                        style={{ marginTop: 12 }}
+                        onClick={() => setCurrentScreen("research")}
+                      >
+                        去个股页添加
+                      </button>
+                    </td>
+                  </tr>
                 ) : filteredItems.map((item) => {
                   const cp = item.price?.change_pct ?? 0;
                   const market = inferMarket(item.symbol);
@@ -240,7 +255,7 @@ export default function Watchlist() {
                     <tr key={item.symbol} className="row" style={{ cursor: "pointer" }} onClick={() => openStock(item.symbol)}>
                       <td>
                         <div className="stock-info">
-                          <div className="stock-icon default">{item.symbol.charAt(0)}</div>
+                          <div className="stock-icon default">{stockInitial(item.name, item.symbol)}</div>
                           <div>
                             <div className="stock-name">{item.name ?? item.symbol}</div>
                             <div className="stock-code">{item.symbol}</div>

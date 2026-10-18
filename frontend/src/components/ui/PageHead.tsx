@@ -21,6 +21,7 @@ export function PageHead({ kpis, actions }: { kpis: KpiItem[]; actions?: ReactNo
   const { setCurrentScreen } = useAppState();
   return (
     <div className="page-head">
+      {kpis.length > 0 && (
       <div className="page-kpis">
         {kpis.map((k) => (
           <div
@@ -37,6 +38,7 @@ export function PageHead({ kpis, actions }: { kpis: KpiItem[]; actions?: ReactNo
           </div>
         ))}
       </div>
+      )}
       {actions && <div className="page-head-actions">{actions}</div>}
     </div>
   );

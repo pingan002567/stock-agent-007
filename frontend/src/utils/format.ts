@@ -51,3 +51,20 @@ export function formatLocalTime(dateStr?: string): string {
   const p2 = (n: number) => String(n).padStart(2, "0");
   return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
 }
+
+/** 纯文本位置去掉 Markdown 强调标记。
+ *  简报结论等只有一两行的字段走的是纯文本渲染（不是 Markdown 组件），
+ *  正文里的 ** 会原样漏出来。 */
+export function stripInlineMarkdown(input?: string | null): string {
+  if (!input) return "";
+  return input
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\*([^*\n]+)\*/g, "$1")
+    // 后端存的摘要可能被截断，只剩半对 ** （如「…收盘）**」），成对正则删不掉
+    .replace(/\*{1,2}(?=\s|$)/g, "")
+    .replace(/\*\*/g, "")
+    .trim();
+}

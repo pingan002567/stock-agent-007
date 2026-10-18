@@ -172,7 +172,7 @@ export default function Monitor() {
           kpis={[
             { label: "盯盘", value: <StatusDot tone={status?.status === "running" ? "ok" : "off"}>{status?.status === "running" ? "运行中" : "已暂停"}</StatusDot> },
             { label: "周期", value: `${status?.interval_seconds ?? "-"}s` },
-            { label: "高优待处理", value: highCount, tone: highCount > 0 ? "down" : undefined,
+            { label: "高优事件", value: highCount, tone: highCount > 0 ? "down" : undefined,
               prompt: "分析当前高优盯盘告警的根因,并给出处理建议" },
             { label: "今日事件", value: eventTotal },
             { label: "运行规则", value: rules.filter((r) => r.enabled).length },

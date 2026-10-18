@@ -35,6 +35,29 @@ export function formatPnlAmount(v: number | null | undefined, market?: string): 
   return body;
 }
 
+/** 股票头像字符：优先取名称首字。
+ *  A 股代码首位恒为 0/3/6，用 symbol.charAt(0) 当头像没有信息量
+ *  （历史上每行都显示「0」）。 */
+export function stockInitial(name?: string | null, symbol?: string | null): string {
+  const n = (name ?? "").trim();
+  if (n) return n.charAt(0).toUpperCase();
+  const s = (symbol ?? "").trim();
+  return s ? s.charAt(0).toUpperCase() : "?";
+}
+
+/** 按持仓市值占比计算权重（%）。
+ *  后端 holdings 的 weight_pct / max_weight_pct 目前恒为 0（未实现），
+ *  前端自算兜底，避免权重条全空、「最大权重 0.00%」。 */
+export function computeWeights(items: { market_value?: number | null }[]): {
+  weights: number[];
+  maxWeight: number;
+} {
+  const values = items.map((it) => Math.max(0, Number(it.market_value ?? 0)));
+  const total = values.reduce((a, b) => a + b, 0);
+  const weights = values.map((v) => (total > 0 ? (v / total) * 100 : 0));
+  return { weights, maxWeight: weights.length ? Math.max(...weights) : 0 };
+}
+
 export function weightUnavailable(item: {
   weight_pct?: number | null;
   quote?: { last?: number | null; degraded?: boolean } | null;

@@ -615,11 +615,25 @@ html.desktop .app.left-collapsed .topbar3-center { padding-left: 84px; }
   background: var(--sidebar);
   transition: width 0.26s cubic-bezier(0.3, 0.8, 0.3, 1), opacity 0.2s;
 }
-.func-panel.open { width: var(--func-panel-w, 424px); opacity: 1; }
+.func-panel.open { width: var(--func-panel-w, 520px); opacity: 1; }
 html.resizing .func-panel { transition: none; }
 html.resizing { cursor: col-resize; user-select: none; }
+/* 功能面板只有 520px，持仓/任务表有 6~8 列（实测 614px+）。
+   无滚动容器时超出的列会被 .func-panel 的 overflow:hidden 直接裁掉，
+   用户看不到「权重 / 操作」等列。 */
+.func-body table {
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.func-body table th,
+.func-body table td { white-space: nowrap; }
+/* 面板内收紧留白：全局 12px 在 520px 面板里太奢侈，6 列表格能省出约 100px */
+.func-body table th,
+.func-body table td { padding: 9px 7px; }
+
 .func-inner {
-  width: var(--func-panel-w, 424px); /* 固定内容宽度，折叠动画时内容不回流 */
+  width: var(--func-panel-w, 520px); /* 固定内容宽度，折叠动画时内容不回流 */
   height: 100%;
   display: grid;
   grid-template-rows: auto 1fr;
@@ -1332,7 +1346,16 @@ html.resizing { cursor: col-resize; user-select: none; }
 
 .content { min-height: 0; overflow-y: auto; padding: 20px; }
 
-.page-stack { display: grid; gap: 16px; }
+/* 表格行内的图标按钮：在 520px 面板里比文字按钮省一半宽度 */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  padding: 0 5px;
+}
+
+.page-stack { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
 .grid { display: grid; grid-template-columns: minmax(310px, .92fr) minmax(430px, 1.35fr); gap: 16px; }
 .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(330px, .82fr); gap: 16px; }
 
@@ -1419,7 +1442,9 @@ html.resizing { cursor: col-resize; user-select: none; }
 
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* 4 列在 520px 面板里每列只 ~110px，「总策略」会被拆成「总策 略」；
+     auto-fit 让窄面板自动降为 2 列，宽面板仍能一行 4 个 */
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
 }
 .kpi-card {
@@ -1450,6 +1475,11 @@ html.resizing { cursor: col-resize; user-select: none; }
 }
 .kpi-card:hover::after {
   opacity: 1;
+}
+.kpi-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .kpi-header {
   display: flex;

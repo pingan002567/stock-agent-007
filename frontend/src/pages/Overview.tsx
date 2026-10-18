@@ -5,7 +5,8 @@ import { AskAiButton } from "@/components/ui/AskAiButton";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ErrorMessage, OverviewSkeleton } from "@/components/ui/Loading";
 import { PageHead } from "@/components/ui/PageHead";
-import { inferMarket, marketMoney, pct, changeCls, formatCost, formatPnlAmount, weightUnavailable } from "@/utils/market";
+import { inferMarket, marketMoney, pct, changeCls, formatCost, formatPnlAmount, computeWeights, stockInitial } from "@/utils/market";
+import { stripInlineMarkdown } from "@/utils/format";
 
 interface PortfolioSummary {
   total_value?: number; positions?: number; max_weight_pct?: number;
@@ -54,6 +55,9 @@ export default function Overview() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // 后端 max_weight_pct / weight_pct 恒为 0（未实现），按持仓市值占比自算兜底
+  const derived = computeWeights(data?.holdings ?? []);
+
   const loadAll = useCallback(async () => {
     setLoading(true); setError(null);
     try {
@@ -93,13 +97,15 @@ export default function Overview() {
       {!loading && error && !data ? <ErrorMessage message={error} /> : null}
       {data ? (
         <div className="page-stack fade-in">
+          {/* 后端 max_weight_pct / weight_pct 恒为 0，按持仓市值占比自算 */}
+
           <PageHead
             kpis={[
               { label: "总资产", value: marketMoney(data.portfolio_summary?.total_value, "CN"),
                 prompt: "我的组合总资产构成如何?最近变化的主要原因是什么?" },
               { label: "持仓", value: `${data.portfolio_summary?.positions ?? 0} 只` },
-              { label: "最大权重", value: pct(data.portfolio_summary?.max_weight_pct),
-                tone: (data.portfolio_summary?.max_weight_pct ?? 0) >= 15 ? "down" : undefined,
+              { label: "最大权重", value: `${derived.maxWeight.toFixed(2)}%`,
+                tone: derived.maxWeight >= 15 ? "down" : undefined,
                 prompt: "我的持仓集中度是否过高?哪只需要减仓?" },
               { label: "可用资金", value: data.portfolio_summary?.available_cash == null
                 ? "未记录"
@@ -123,7 +129,7 @@ export default function Overview() {
                 </svg>
                 今日简报
                 {data.latest_ops_briefing?.exception_count ? (
-                  <span className="panel-badge">{data.latest_ops_briefing.exception_count} 例外</span>
+                  <span className="panel-badge">{data.latest_ops_briefing.exception_count} 条例外</span>
                 ) : null}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
@@ -143,8 +149,8 @@ export default function Overview() {
                 >
                   <div className={`event-dot ${data.latest_ops_briefing.degraded || (data.latest_ops_briefing.exception_count ?? 0) > 0 ? "warning" : "info"}`} />
                   <div className="event-content">
-                    <div className="event-title">{data.latest_ops_briefing.title}</div>
-                    <div className="event-desc">{data.latest_ops_briefing.conclusion}</div>
+                    <div className="event-title">{stripInlineMarkdown(data.latest_ops_briefing.title)}</div>
+                    <div className="event-desc">{stripInlineMarkdown(data.latest_ops_briefing.conclusion)}</div>
                   </div>
                   <div className="event-time">{data.latest_ops_briefing.created_at?.slice(5, 16).replace("T", " ") ?? ""}</div>
                 </div>
@@ -163,7 +169,7 @@ export default function Overview() {
                 </svg>
                 今日机会
                 {data.latest_discovery_briefing?.exception_count ? (
-                  <span className="panel-badge">{data.latest_discovery_briefing.exception_count} 例外</span>
+                  <span className="panel-badge">{data.latest_discovery_briefing.exception_count} 条例外</span>
                 ) : null}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
@@ -184,8 +190,8 @@ export default function Overview() {
                 >
                   <div className={`event-dot ${data.latest_discovery_briefing.degraded || (data.latest_discovery_briefing.exception_count ?? 0) > 0 ? "warning" : "info"}`} />
                   <div className="event-content">
-                    <div className="event-title">{data.latest_discovery_briefing.title}</div>
-                    <div className="event-desc">{data.latest_discovery_briefing.conclusion}</div>
+                    <div className="event-title">{stripInlineMarkdown(data.latest_discovery_briefing.title)}</div>
+                    <div className="event-desc">{stripInlineMarkdown(data.latest_discovery_briefing.conclusion)}</div>
                   </div>
                   <div className="event-time">{data.latest_discovery_briefing.created_at?.slice(5, 16).replace("T", " ") ?? ""}</div>
                 </div>
@@ -240,16 +246,17 @@ export default function Overview() {
                   <tbody>
                     {(data.holdings ?? []).length === 0 ? (
                       <tr><td colSpan={7} className="muted" style={{ padding: 16 }}>暂无持仓</td></tr>
-                    ) : (data.holdings ?? []).map((item) => {
+                    ) : (data.holdings ?? []).map((item, idx) => {
                       const market = item.market || inferMarket(item.symbol);
-                      const weightBad = weightUnavailable(item);
+                      const weightPct = derived.weights[idx] ?? 0;
+                      const weightBad = !(Number(item.market_value) > 0);
                       const day = item.quote?.degraded ? null : item.quote?.change_pct;
                       const last = item.quote?.degraded ? null : item.quote?.last;
                       return (
                         <tr key={item.symbol} className="row" style={{ cursor: "pointer" }} onClick={() => openStock(item.symbol)}>
                           <td>
                             <div className="stock-info">
-                              <div className="stock-icon default">{item.symbol.charAt(0)}</div>
+                              <div className="stock-icon default">{stockInitial(item.name, item.symbol)}</div>
                               <div>
                                 <div className="stock-name">{item.name ?? item.symbol}</div>
                                 <div className="stock-code">{item.symbol}</div>
@@ -280,9 +287,9 @@ export default function Overview() {
                             ) : (
                               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                 <div className="weight-bar">
-                                  <div className="weight-bar-fill" style={{ width: `${Math.min(item.weight_pct ?? 0, 100)}%` }} />
+                                  <div className="weight-bar-fill" style={{ width: `${Math.min(weightPct, 100)}%` }} />
                                 </div>
-                                <span className="num" style={{ fontSize: 12 }}>{(item.weight_pct ?? 0).toFixed(2)}%</span>
+                                <span className="num" style={{ fontSize: 12 }}>{weightPct.toFixed(2)}%</span>
                               </div>
                             )}
                           </td>

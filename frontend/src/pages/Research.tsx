@@ -5,6 +5,7 @@ import { ErrorMessage, PanelSkeleton, KpiSkeleton } from "@/components/ui/Loadin
 import { useAppState } from "@/hooks/useAppState";
 import { AskAiButton } from "@/components/ui/AskAiButton";
 import { useToast } from "@/hooks/useToast";
+import { stockInitial } from "@/utils/market";
 import { MarkdownRenderer as Markdown } from "@/components/features/MarkdownRenderer";
 import { StockHistoryChart } from "@/components/features/StockHistoryChart";
 import {
@@ -351,7 +352,7 @@ export default function Research() {
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="搜索个股名称或代码，如 寒武纪 / 600519 / AAPL"
+              placeholder="搜索代码或名称，如 600519 / 茅台"
               onKeyDown={handleKeyDown}
               onFocus={() => { if (searchResults.length > 0) setShowDropdown(true); }}
             />
@@ -367,7 +368,7 @@ export default function Research() {
                   onMouseEnter={() => setSelectedIdx(i)}
                 >
                   <div className="stock-icon default" style={{ width: 32, height: 32, fontSize: 12 }}>
-                    {r.symbol.charAt(0)}
+                    {stockInitial(r.name, r.symbol)}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -427,7 +428,7 @@ export default function Research() {
             <div className="stock-hero">
               <div className="stock-hero-header">
                 <div className="stock-brand">
-                  <div className="stock-icon-lg">{context.symbol.charAt(0)}</div>
+                  <div className="stock-icon-lg">{stockInitial(context.name, context.symbol)}</div>
                   <div className="stock-title">
                     <h1>{context.name ?? context.symbol}</h1>
                     <div className="stock-subtitle">

@@ -132,7 +132,7 @@ export function FunctionDock() {
             )}
             {item.screen === "monitor" && inboxHigh > 0 && <span className="strip-badge" />}
             <span className="strip-tip">
-              {item.label}{item.screen === "monitor" && inboxHigh > 0 ? ` · ${inboxHigh} 条高优` : ""}
+              {item.label}{item.screen === "monitor" && inboxHigh > 0 ? ` · 待审查 ${inboxHigh} 条高优` : ""}
             </span>
           </button>
         ))}

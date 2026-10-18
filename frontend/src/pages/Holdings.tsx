@@ -6,7 +6,7 @@ import { ErrorMessage, TableSkeleton } from "@/components/ui/Loading";
 import { PageHead } from "@/components/ui/PageHead";
 import { useAppState } from "@/hooks/useAppState";
 import { AskAiButton } from "@/components/ui/AskAiButton";
-import { changeCls, formatCost, formatPnlAmount, inferMarket, marketMoney, pct, weightUnavailable } from "@/utils/market";
+import { changeCls, computeWeights, formatCost, formatPnlAmount, inferMarket, marketMoney, pct, stockInitial } from "@/utils/market";
 
 // === Types ===
 
@@ -149,6 +149,9 @@ export default function Holdings() {
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
 
+  // 后端 weight_pct / max_weight_pct 恒为 0（未实现），按持仓市值占比自算兜底
+  const derived = computeWeights(holdings?.items ?? []);
+
   // === loadAll: parallel fetch all data in one shot ===
   const loadAll = async () => {
     const hasData = holdings !== null;
@@ -243,8 +246,8 @@ export default function Holdings() {
             { label: "总资产", value: money(holdings?.summary?.total_value),
               prompt: "我的持仓总资产构成如何?" },
             { label: "持仓", value: `${holdings?.summary?.positions ?? holdings?.items.length ?? 0} 只` },
-            { label: "最大权重", value: pct(holdings?.summary?.max_weight_pct),
-              tone: (holdings?.summary?.max_weight_pct ?? 0) >= 15 ? "down" : undefined,
+            { label: "最大权重", value: `${derived.maxWeight.toFixed(2)}%`,
+              tone: derived.maxWeight >= 15 ? "down" : undefined,
               prompt: "我的持仓集中度是否过高?哪只需要减仓?" },
             { label: "可用资金", value: (
               <AvailableCashValue
@@ -300,20 +303,22 @@ export default function Holdings() {
                     </tr>
                   </thead>
                   <tbody>
-                    {holdings.items.map((item) => {
+                    {holdings.items.map((item, idx) => {
                       const market = item.market || inferMarket(item.symbol);
-                      const weightBad = weightUnavailable(item);
+                      // 后端 weight_pct 恒为 0，用市值占比自算（computeWeights）
+                      const weightPct = derived.weights[idx] ?? 0;
+                      const weightBad = !(Number(item.market_value) > 0);
                       const day = item.quote?.degraded ? null : item.quote?.change_pct;
                       return (
                       <tr
                         key={item.symbol}
                         className="row"
-                        style={{ cursor: "pointer", ...((item.weight_pct ?? 0) >= 15 && !weightBad ? { boxShadow: "inset 2px 0 0 var(--red)" } : {}) }}
+                        style={{ cursor: "pointer", ...(weightPct >= 15 && !weightBad ? { boxShadow: "inset 2px 0 0 var(--red)" } : {}) }}
                         onClick={() => openStock(item.symbol)}
                       >
                         <td>
                           <div className="stock-info">
-                            <div className="stock-icon default">{item.symbol.charAt(0)}</div>
+                            <div className="stock-icon default">{stockInitial(item.name, item.symbol)}</div>
                             <div>
                               <div className="stock-name">{item.name ?? item.symbol}</div>
                               <div className="stock-code">{item.symbol}</div>
@@ -349,9 +354,9 @@ export default function Holdings() {
                           ) : (
                             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                               <div className="weight-bar">
-                                <div className="weight-bar-fill" style={{ width: `${Math.min(item.weight_pct ?? 0, 100)}%` }} />
+                                <div className="weight-bar-fill" style={{ width: `${Math.min(weightPct, 100)}%` }} />
                               </div>
-                              <span className="num" style={{ fontSize: 12 }}>{(item.weight_pct ?? 0).toFixed(2)}%</span>
+                              <span className="num" style={{ fontSize: 12 }}>{weightPct.toFixed(2)}%</span>
                             </div>
                           )}
                         </td>

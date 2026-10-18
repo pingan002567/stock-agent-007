@@ -103,6 +103,14 @@ export default function Strategies() {
 
 
   const selected = items.find((s) => s.strategy_id === selectedId);
+  // 风险等级：KPI 里显示中文，避免和表单（低/中/高风险）不一致
+  const RISK_LABEL: Record<string, string> = { low: "低风险", medium: "中风险", high: "高风险" };
+  const RISK_ORDER: Record<string, number> = { low: 0, medium: 1, high: 2 };
+  // 默认没有选中时，取启用策略里最高的一档作为「全部策略」的风险概览
+  const topRisk = items
+    .filter((s) => s.enabled !== false)
+    .map((s) => s.risk_level ?? "medium")
+    .sort((a, b) => (RISK_ORDER[b] ?? 1) - (RISK_ORDER[a] ?? 1))[0];
 
   const enabledCount = items.filter(s => s.enabled).length;
 
@@ -111,11 +119,7 @@ export default function Strategies() {
       <div className="page-stack fade-in">
         {error && <ErrorMessage message={error} />}
         <PageHead
-          kpis={[
-            { label: "策略", value: `${items.length} 个` },
-            { label: "启用中", value: enabledCount, tone: enabledCount > 0 ? "up" : undefined },
-            { label: "回测", value: `${backtests.length} 次` },
-          ]}
+          kpis={[]}
           actions={<>
             <button className="small" onClick={() => void handleAddStrategy()} disabled={addingStrategy} type="button">
               {addingStrategy ? "添加中…" : "新增策略"}
@@ -154,8 +158,8 @@ export default function Strategies() {
               <span className="kpi-label">风险等级</span>
               <div className="kpi-icon violet"><KpiIcon name="zap" /></div>
             </div>
-            <div className="kpi-value">{selected?.risk_level ?? "-"}</div>
-            <div className="kpi-change neutral">当前策略</div>
+            <div className="kpi-value">{RISK_LABEL[selected?.risk_level ?? topRisk ?? ""] ?? "-"}</div>
+            <div className="kpi-change neutral">{selected ? "当前策略" : items.length ? "启用中最高" : "暂无策略"}</div>
           </div>
         </div>
 
@@ -186,7 +190,7 @@ export default function Strategies() {
                   <div className="intel-content">
                     <div className="intel-title">{s.name}</div>
                     <div className="intel-desc">
-                      {s.strategy_type ?? "-"} · {s.risk_level ?? "medium"} 风险 · {s.enabled ? "已启用" : "已禁用"}
+                      {s.strategy_type ?? "-"} · {RISK_LABEL[s.risk_level ?? "medium"] ?? s.risk_level ?? "中风险"} · {s.enabled ? "已启用" : "已禁用"}
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 4 }}>
