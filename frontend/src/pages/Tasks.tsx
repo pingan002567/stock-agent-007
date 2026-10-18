@@ -81,7 +81,7 @@ function ScheduledTasksCard() {
       <div className="panel-body" style={{ padding: 0 }}>
         <table className="data-table">
           <thead>
-            <tr><th>任务</th><th>周期</th><th>上次结果</th><th style={{ width: 128 }}></th></tr>
+            <tr><th>任务</th><th>周期</th><th>上次结果</th><th style={{ width: 114 }}></th></tr>
           </thead>
           <tbody>
             {tasks.map((t) => (
@@ -95,9 +95,9 @@ function ScheduledTasksCard() {
                 </td>
                 <td>
                   {t.last_status === "running" ? <StatusDot tone="busy">运行中</StatusDot>
-                    : t.last_status === "completed" ? <StatusDot tone="ok">成功 · {formatTimeAgo(t.last_run_at ?? undefined)}</StatusDot>
-                    : t.last_status === "failed" ? <StatusDot tone="bad">失败{t.last_error ? ` · ${t.last_error}` : ""}</StatusDot>
-                    : t.last_status === "skipped" ? <StatusDot tone="off">已跳过 · {t.last_error?.replace("已跳过：", "") || "休市"}</StatusDot>
+                    : t.last_status === "completed" ? <StatusDot tone="ok">成功 {formatTimeAgo(t.last_run_at ?? undefined)}</StatusDot>
+                    : t.last_status === "failed" ? <StatusDot tone="bad">失败{t.last_error ? ` ${t.last_error}` : ""}</StatusDot>
+                    : t.last_status === "skipped" ? <StatusDot tone="off">已跳过 {t.last_error?.replace("已跳过：", "") || "休市"}</StatusDot>
                     : t.skip_reason ? <span className="muted" style={{ fontSize: 12 }}>今日{t.skip_reason}</span>
                     : <span className="muted" style={{ fontSize: 12 }}>未运行</span>}
                 </td>

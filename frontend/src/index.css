@@ -409,7 +409,7 @@ html.desktop .app.left-collapsed .topbar3-center { padding-left: 84px; }
 .brand-ai {
   display: flex; align-items: center; gap: 4px;
   font-family: var(--mono, ui-monospace, Menlo, monospace);
-  font-size: 9.5px; color: var(--msg-time);
+  font-size: 11px; color: var(--msg-time);
 }
 .brand-avatar {
   width: 24px; height: 24px; border-radius: 50%;
@@ -653,7 +653,7 @@ html.resizing { cursor: col-resize; user-select: none; }
 .func-body table td { white-space: nowrap; }
 /* 面板内收紧留白：全局 12px 在 520px 面板里太奢侈，6 列表格能省出约 100px */
 .func-body table th,
-.func-body table td { padding: 9px 7px; }
+.func-body table td { padding: 9px 6px; }
 
 .func-inner {
   width: var(--func-panel-w, 520px); /* 固定内容宽度，折叠动画时内容不回流 */
@@ -1016,7 +1016,7 @@ html.resizing { cursor: col-resize; user-select: none; }
   top: 2px; left: 2px;
   width: 20px; height: 20px; border-radius: 50%;
   background: var(--paper);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--elev-panel);
   transition: left 0.2s ease;
 }
 .toggle-switch.on .toggle-thumb { left: 22px; }
@@ -1149,7 +1149,7 @@ html.resizing { cursor: col-resize; user-select: none; }
   min-width: 16px; height: 16px;
   border-radius: 8px;
   background: var(--red); color: #fff;
-  font-size: 10px; font-weight: 700;
+  font-size: 11px; font-weight: 700;
   display: inline-flex; align-items: center; justify-content: center;
   padding: 0 4px; line-height: 1;
 }
@@ -1706,15 +1706,15 @@ html.resizing { cursor: col-resize; user-select: none; }
 }
 .event-dot.warning {
   background: var(--amber);
-  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+  
 }
 .event-dot.info {
   background: var(--blue);
-  box-shadow: 0 0 8px rgba(59, 130, 246, 0.4);
+  
 }
 .event-dot.success {
   background: var(--green);
-  box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+  
 }
 .event-content {
   flex: 1;
@@ -2053,9 +2053,9 @@ html.resizing { cursor: col-resize; user-select: none; }
   margin-top: 6px;
   flex-shrink: 0;
 }
-.intel-dot.warning { background: var(--amber); box-shadow: 0 0 8px rgba(245, 158, 11, 0.4); }
-.intel-dot.info { background: var(--blue); box-shadow: 0 0 8px rgba(59, 130, 246, 0.4); }
-.intel-dot.success { background: var(--green); box-shadow: 0 0 8px rgba(16, 185, 129, 0.4); }
+.intel-dot.warning { background: var(--amber);  }
+.intel-dot.info { background: var(--blue);  }
+.intel-dot.success { background: var(--green);  }
 .intel-content { flex: 1; min-width: 0; }
 .intel-title {
   font-size: 13px;
@@ -2235,7 +2235,7 @@ html.resizing { cursor: col-resize; user-select: none; }
 
 .refresh-btn:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+  box-shadow: var(--elev-soft);
 }
 
 .refresh-btn:active:not(:disabled) {
@@ -2851,7 +2851,7 @@ html.resizing { cursor: col-resize; user-select: none; }
   overflow: hidden; text-overflow: ellipsis; transition: all 0.2s;
 }
 .session-current:hover { background: var(--hover-row); }
-.session-current::before { content: "▼"; font-size: 10px; margin-right: 4px; color: var(--muted); }
+.session-current::before { content: "▼"; font-size: 11px; margin-right: 4px; color: var(--muted); }
 .copilot-tabs {
   display: flex;
   gap: 4px;
@@ -3097,7 +3097,7 @@ html.resizing { cursor: col-resize; user-select: none; }
   text-decoration: line-through;
 }
 .skill-trace-auth {
-  font-size: 10px;
+  font-size: 11px;
   opacity: 0.7;
   font-family: var(--mono);
 }
@@ -3608,14 +3608,14 @@ html.resizing { cursor: col-resize; user-select: none; }
   position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
   z-index: 3; padding: 6px 12px; border-radius: 999px;
   border: 1px solid var(--line); background: var(--surface);
-  color: var(--ink-2); font-size: 13px; box-shadow: var(--composer-shadow, 0 4px 16px rgba(0,0,0,.08));
+  color: var(--ink-2); font-size: 13px; box-shadow: var(--composer-shadow);
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
 }
 .jump-bottom:hover {
   background: var(--surface-2);
   border-color: color-mix(in srgb, var(--ink) 18%, var(--line));
-  box-shadow: var(--composer-shadow, 0 4px 16px rgba(0,0,0,.08)), inset 0 1px 0 color-mix(in srgb, var(--ink) 6%, transparent);
+  box-shadow: var(--composer-shadow);
 }
 .jump-bottom:active {
   background: var(--selected-strong);
@@ -3774,16 +3774,16 @@ html.resizing { cursor: col-resize; user-select: none; }
 }
 .msg-tool .tool-dot.ok { 
   background: var(--green);
-  box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+  
 }
 .msg-tool .tool-dot.busy { 
   background: var(--amber);
-  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+  
   animation: pulse 1s infinite;
 }
 .msg-tool .tool-dot.fail { 
   background: var(--red);
-  box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+  
 }
 .msg-tool .tool-name { font-weight: 700; color: var(--blue); font-family: var(--mono); }
 .msg-tool .tool-eng { font-weight: 400; font-size: 12px; color: var(--muted); }
@@ -4085,7 +4085,7 @@ html.mobile select {
   .overview-grid, .proposal-grid, .stock-info-grid, .kpi-strip, .impact, .heat-grid, .rule-grid, .step-grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 820px) {
-  .rail-nav button, .rail-footer button { height: 40px; font-size: 10px; }
+  .rail-nav button, .rail-footer button { height: 40px; font-size: 11px; }
   .rail-logo { width: 36px; height: 36px; margin: 10px auto 8px; font-size: 13px; }
   .topbar { padding: 10px 16px; gap: 12px; }
   .topbar-title { font-size: 14px; }
@@ -4128,7 +4128,7 @@ html.mobile select {
 .loading-box {
   background: var(--panel); border-radius: 12px;
   padding: 36px 48px; text-align: center;
-  box-shadow: 0 8px 40px rgba(0,0,0,.2);
+  box-shadow: var(--elev-prominent);
 }
 .loading-spinner {
   width: 36px; height: 36px; margin: 0 auto 16px;
@@ -4167,7 +4167,7 @@ html.mobile select {
   font-size: 14px;
   font-weight: 500;
   line-height: 1.5;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--elev-prominent);
   cursor: pointer;
   pointer-events: auto;
   animation: toast-slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
@@ -4187,19 +4187,19 @@ html.mobile select {
   background: rgba(16, 185, 129, 0.15); 
   color: var(--green); 
   border-color: rgba(16, 185, 129, 0.3);
-  box-shadow: 0 8px 32px rgba(16, 185, 129, 0.2);
+  box-shadow: var(--elev-prominent);
 }
 .toast-error { 
   background: rgba(239, 68, 68, 0.15); 
   color: var(--red); 
   border-color: rgba(239, 68, 68, 0.3);
-  box-shadow: 0 8px 32px rgba(239, 68, 68, 0.2);
+  box-shadow: var(--elev-prominent);
 }
 .toast-info { 
   background: rgba(59, 130, 246, 0.15); 
   color: var(--blue); 
   border-color: rgba(59, 130, 246, 0.3);
-  box-shadow: 0 8px 32px rgba(59, 130, 246, 0.2);
+  box-shadow: var(--elev-prominent);
 }
 .toast-icon {
   flex-shrink: 0;
@@ -4325,7 +4325,7 @@ html.mobile select {
   height: 6px;
   border-radius: 50%;
   background: var(--green);
-  box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+  
 }
 .session-trigger-text {
   font-weight: 600;
@@ -4605,9 +4605,9 @@ html.mobile select {
   width: min(520px, calc(100vw - 64px));
   max-height: 70vh;
   background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--elev-prominent);
   display: grid; grid-template-rows: auto 1fr;
   overflow: hidden;
   animation: modal-in 0.22s cubic-bezier(0.3, 0.8, 0.3, 1) both;
@@ -4619,7 +4619,7 @@ html.mobile select {
 }
 .ws-row-name { font-size: 13.5px; font-weight: 650; color: var(--ink); display: flex; align-items: center; gap: 8px; }
 .ws-badge {
-  font-family: var(--mono); font-size: 9.5px; color: var(--blue);
+  font-family: var(--mono); font-size: 11px; color: var(--blue);
   border: 1px solid color-mix(in srgb, var(--blue) 40%, transparent);
   border-radius: 4px; padding: 1px 6px;
 }
