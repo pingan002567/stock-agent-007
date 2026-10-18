@@ -2027,17 +2027,21 @@ html.resizing { cursor: col-resize; user-select: none; }
 .time-range-btn:hover { background: var(--soft); color: var(--ink); }
 .time-range-btn.active { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
 
+/* 长列表（报告 74 / 任务 255 / 事件）改成发丝线行：
+   一屏能看到 10+ 条，比「每项一张卡 + 12px 间距」信息密度高得多 */
 .intel-item {
   display: flex;
   gap: 12px;
-  padding: 14px;
-  background: var(--bg-tertiary);
-  border-radius: var(--radius-md);
-  margin-bottom: 12px;
-  transition: all 0.2s ease;
+  align-items: flex-start;
+  padding: 11px 10px;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--line-soft);
+  transition: background-color 0.15s ease;
   cursor: pointer;
 }
-.intel-item:last-child { margin-bottom: 0; }
+.intel-item:last-child { border-bottom: none; }
 .intel-item:hover {
   background: var(--hover-row);
   transform: translateX(4px);
@@ -4283,9 +4287,9 @@ html.mobile select {
   border-color: var(--blue);
 }
 .pagination-btn.active {
-  background: var(--blue);
-  border-color: var(--blue);
-  color: white;
+  background: var(--ink);
+  border-color: transparent;
+  color: var(--canvas);
 }
 .pagination-btn:disabled {
   opacity: 0.5;

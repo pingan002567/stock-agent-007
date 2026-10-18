@@ -232,7 +232,7 @@ export default function Tasks() {
                 <div
                   key={t.task_id}
                   className="intel-item"
-                  style={selectedTask?.task_id === t.task_id ? { background: "var(--hover-row)", borderLeft: "3px solid var(--blue)" } : {}}
+                  style={selectedTask?.task_id === t.task_id ? { background: "var(--surface-2)" } : {}}
                   onClick={() => void handleSelect(t)}
                 >
                   <div className={`intel-dot ${t.status === "running" ? "info" : t.status === "completed" ? "success" : t.status === "failed" ? "warning" : "info"}`} />

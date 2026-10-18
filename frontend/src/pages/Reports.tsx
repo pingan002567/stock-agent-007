@@ -129,7 +129,7 @@ export default function Reports() {
                 <div
                   key={r.report_id}
                   className="intel-item"
-                  style={selectedReport?.report_id === r.report_id ? { background: "var(--hover-row)", borderLeft: "3px solid var(--blue)" } : {}}
+                  style={selectedReport?.report_id === r.report_id ? { background: "var(--surface-2)" } : {}}
                   onClick={() => void handleSelectReport(r)}
                 >
                   <div className={`intel-dot ${(r.quality_score ?? 0) >= 8 ? "success" : (r.quality_score ?? 0) >= 6 ? "warning" : "info"}`} />

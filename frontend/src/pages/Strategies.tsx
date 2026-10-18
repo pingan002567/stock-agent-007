@@ -183,7 +183,7 @@ export default function Strategies() {
                 <div
                   key={s.strategy_id}
                   className="intel-item"
-                  style={selectedId === s.strategy_id ? { background: "var(--hover-row)", borderLeft: "3px solid var(--blue)" } : {}}
+                  style={selectedId === s.strategy_id ? { background: "var(--surface-2)" } : {}}
                   onClick={() => void handleSelect(s.strategy_id)}
                 >
                   <div className="intel-dot" style={{ background: s.enabled ? "var(--green)" : "var(--muted)" }} />
