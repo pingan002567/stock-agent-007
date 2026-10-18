@@ -310,6 +310,9 @@ html.resizing .topbar3 { transition: none; }
   padding: 0 14px;
   min-width: 0;
 }
+/* 左栏收起后中栏从 x=0 开始，桌面端红绿灯会压在第一行上：
+   给标题行让出左侧 84px（与左栏 .left-topbar 用的是同一个值） */
+html.desktop .app.left-collapsed .topbar3-r1 { padding-left: 84px; }
 .topbar3-r2 {
   display: flex;
   align-items: stretch;
