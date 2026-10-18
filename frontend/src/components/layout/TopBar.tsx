@@ -100,6 +100,8 @@ export function TopBar({
         )}
         <span className="topbar3-title">{displaySessionTitle(currentSession?.title)}</span>
 
+        <span className="topbar3-spacer" />
+
         {stats.tools > 0 && (
           <div className="topbar3-chips" data-tauri-drag-region="false">
             <button
@@ -125,7 +127,6 @@ export function TopBar({
           </div>
         )}
 
-        <span className="topbar3-spacer" />
 
         {/* 功能栏整条收起时 Dock 不再渲染，展开入口必须留在这里 */}
         {dockCollapsed && (
