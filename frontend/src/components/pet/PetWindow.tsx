@@ -1,12 +1,26 @@
 import { useEffect, useState } from "react";
-import { ShibaPet, type PetState } from "@/components/pet/ShibaPet";
 import {
   BUBBLE_STATES,
   PET_POS_KEY,
   PET_SIZE,
   PET_STATE_KEY,
   type PetPayload,
+  type PetState,
 } from "@/lib/petBridge";
+import idleImg from "@/assets/pet/idle.png";
+import workingImg from "@/assets/pet/working.png";
+import doneImg from "@/assets/pet/done.png";
+import alertImg from "@/assets/pet/alert.png";
+import errorImg from "@/assets/pet/error.png";
+
+/** 5 个姿态：AI 生成的客服柴犬（与 App 图标同一角色），已去背景 */
+const PET_IMG: Record<PetState, string> = {
+  idle: idleImg,
+  working: workingImg,
+  done: doneImg,
+  alert: alertImg,
+  error: errorImg,
+};
 
 type TauriGlobal = {
   core?: { invoke?: <T = unknown>(cmd: string, args?: Record<string, unknown>) => Promise<T> };
@@ -127,7 +141,7 @@ export function PetWindow() {
         </div>
       )}
       <div className="pet-body">
-        <ShibaPet state={state} />
+        <img className={`pet-img pet-${state}`} src={PET_IMG[state]} alt="" draggable={false} />
         {badge > 0 && <span className="pet-badge">{badge > 9 ? "9+" : badge}</span>}
       </div>
     </div>

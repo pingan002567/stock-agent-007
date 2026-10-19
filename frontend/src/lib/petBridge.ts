@@ -4,7 +4,8 @@
  *  所以用 localStorage + storage 事件同步状态，不需要额外的事件总线或插件。
  */
 
-import type { PetState } from "@/components/pet/ShibaPet";
+/** 桌宠的 5 个状态 */
+export type PetState = "idle" | "working" | "done" | "alert" | "error";
 
 /** 主窗口写、桌宠窗口读 */
 export const PET_STATE_KEY = "pet.state";

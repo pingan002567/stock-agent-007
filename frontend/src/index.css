@@ -5616,7 +5616,7 @@ html.pet-window-root body { margin: 0; }
 .pet-window svg { -webkit-user-drag: none; }
 
 .pet-body { position: relative; width: 132px; height: 108px; flex: none; }
-.pet-svg { width: 100%; height: 100%; overflow: visible; display: block; }
+.pet-img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; }
 
 .pet-bubble {
   max-width: 268px;
@@ -5675,10 +5675,10 @@ html.pet-window-root body { margin: 0; }
   50% { transform: rotate(9deg); }
 }
 
-.pet-svg.pet-idle { animation: pet-breathe 4s ease-in-out infinite; transform-origin: 80px 112px; }
-.pet-svg.pet-working { animation: pet-bob 1.6s ease-in-out infinite; }
-.pet-svg.pet-done { animation: pet-bob 1s ease-in-out 2; }
-.pet-svg.pet-alert { animation: pet-shake 0.5s ease-in-out 2; }
+.pet-img.pet-idle { animation: pet-breathe 4s ease-in-out infinite; transform-origin: 80px 112px; }
+.pet-img.pet-working { animation: pet-bob 1.6s ease-in-out infinite; }
+.pet-img.pet-done { animation: pet-bob 1s ease-in-out 2; }
+.pet-img.pet-alert { animation: pet-shake 0.5s ease-in-out 2; }
 
 .pet-d1, .pet-d2, .pet-d3 { animation: pet-dots 1.2s infinite; }
 .pet-d2 { animation-delay: 0.2s; }

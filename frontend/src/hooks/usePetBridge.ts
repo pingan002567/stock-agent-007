@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppState } from "@/hooks/useAppState";
-import { PET_ENABLED_KEY, PET_STATE_KEY, type PetPayload } from "@/lib/petBridge";
-import type { PetState } from "@/components/pet/ShibaPet";
+import { PET_ENABLED_KEY, PET_STATE_KEY, type PetPayload, type PetState } from "@/lib/petBridge";
 
 /** done 状态在气泡里停留多久 */
 const DONE_MS = 8000;
