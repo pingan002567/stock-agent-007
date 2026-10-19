@@ -37,13 +37,27 @@ fn pet_debug(msg: String) {
     println!("[pet-debug] {msg}");
 }
 
-/// 桌宠窗口的几何（物理像素 + 缩放），前端据此按"锚点"算位置
+/// 桌宠窗口的几何（物理像素）+ 屏幕可用区域，前端据此按"锚点"算位置并做越界校验。
+/// 返回 (x, y, w, h, scale, workX, workY, workW, workH)
 #[tauri::command]
-fn pet_metrics(window: tauri::WebviewWindow) -> Result<(i32, i32, u32, u32, f64), String> {
+#[allow(clippy::type_complexity)]
+fn pet_metrics(
+    window: tauri::WebviewWindow,
+) -> Result<(i32, i32, u32, u32, f64, i32, i32, u32, u32), String> {
     let pos = window.outer_position().map_err(|e| e.to_string())?;
     let size = window.outer_size().map_err(|e| e.to_string())?;
     let sf = window.scale_factor().map_err(|e| e.to_string())?;
-    Ok((pos.x, pos.y, size.width, size.height, sf))
+    let area = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten())
+        .map(|m| *m.work_area());
+    let (wx, wy, ww, wh) = match area {
+        Some(a) => (a.position.x, a.position.y, a.size.width, a.size.height),
+        None => (0, 0, 0, 0),
+    };
+    Ok((pos.x, pos.y, size.width, size.height, sf, wx, wy, ww, wh))
 }
 
 /// 一次性设置桌宠窗口的位置 + 尺寸。

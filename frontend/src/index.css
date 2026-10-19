@@ -5615,8 +5615,38 @@ html.pet-window-root body { margin: 0; }
 .pet-window img,
 .pet-window svg { -webkit-user-drag: none; }
 
-.pet-body { position: relative; width: 132px; height: 108px; flex: none; }
-.pet-img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; }
+.pet-body {
+  position: relative;
+  width: 132px;
+  height: 108px;
+  flex: none;
+  transition: transform 0.16s cubic-bezier(0.3, 0.9, 0.3, 1);
+}
+.pet-window:hover .pet-body { transform: scale(1.04); }
+
+/* 帧序列：多张姿态图叠在一起，靠透明度交叉淡入 —— 静态图也能"动" */
+.pet-stage { position: absolute; inset: 0; }
+.pet-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.26s ease;
+}
+.pet-frame.on { opacity: 1; }
+
+/* 点一下的回弹反馈 */
+.pet-bounce { animation: pet-bounce 0.42s cubic-bezier(0.3, 0.9, 0.3, 1); }
+@keyframes pet-bounce {
+  0% { transform: scale(1, 1); }
+  30% { transform: scale(1.1, 0.9); }
+  60% { transform: scale(0.95, 1.06); }
+  100% { transform: scale(1, 1); }
+}
 
 .pet-bubble {
   max-width: 268px;
@@ -5675,10 +5705,10 @@ html.pet-window-root body { margin: 0; }
   50% { transform: rotate(9deg); }
 }
 
-.pet-img.pet-idle { animation: pet-breathe 4s ease-in-out infinite; transform-origin: 80px 112px; }
-.pet-img.pet-working { animation: pet-bob 1.6s ease-in-out infinite; }
-.pet-img.pet-done { animation: pet-bob 1s ease-in-out 2; }
-.pet-img.pet-alert { animation: pet-shake 0.5s ease-in-out 2; }
+.pet-stage.pet-idle { animation: pet-breathe 4.5s ease-in-out infinite; transform-origin: 50% 92%; }
+.pet-stage.pet-working { animation: pet-bob 1.5s ease-in-out infinite; }
+.pet-stage.pet-done { animation: pet-bob 1s ease-in-out infinite; }
+.pet-stage.pet-alert { animation: pet-shake 0.9s ease-in-out 4; }
 
 .pet-d1, .pet-d2, .pet-d3 { animation: pet-dots 1.2s infinite; }
 .pet-d2 { animation-delay: 0.2s; }
