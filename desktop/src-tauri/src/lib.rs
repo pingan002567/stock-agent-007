@@ -18,6 +18,9 @@ fn pet_focus_main(app: tauri::AppHandle) -> Result<(), String> {
         let _ = w.unminimize();
         w.show().map_err(|e| e.to_string())?;
         w.set_focus().map_err(|e| e.to_string())?;
+        println!("[pet] focus_main -> ok");
+    } else {
+        println!("[pet] focus_main -> main window missing");
     }
     Ok(())
 }

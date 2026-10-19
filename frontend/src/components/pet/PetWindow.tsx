@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BUBBLE_STATES,
   PET_POS_KEY,
@@ -113,27 +113,61 @@ export function PetWindow() {
     }
   }, [invoke]);
 
-  // 按下：先试拖动；松手后若窗口没动过，就当成单击
-  const onPointerDown = async () => {
+  // 交互：按下 → 看有没有真的移动 → 移动了才启动原生拖拽；没移动就是单击
+  // （之前是按下就无条件 pet_start_drag，macOS 上原生拖拽会把这次点击吃掉，
+  //   而且一旦 pet_position 取不到就永远不响应点击 —— 两个原因叠加就是"点了没反应"）
+  const dragRef = useRef<{ x: number; y: number; active: boolean; dragging: boolean }>({
+    x: 0,
+    y: 0,
+    active: false,
+    dragging: false,
+  });
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    dragRef.current = { x: e.screenX, y: e.screenY, active: true, dragging: false };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const st = dragRef.current;
+    if (!st.active || st.dragging) return;
+    if (Math.abs(e.screenX - st.x) + Math.abs(e.screenY - st.y) < 5) return;
+    st.dragging = true;
     if (!invoke) return;
-    const before = await invoke<[number, number]>("pet_position").catch(() => null);
-    await invoke("pet_start_drag").catch(() => {});
-    const after = await invoke<[number, number]>("pet_position").catch(() => null);
-    if (!after) return;
-    const moved = before ? Math.abs(after[0] - before[0]) + Math.abs(after[1] - before[1]) > 3 : true;
-    if (moved) {
-      try {
-        localStorage.setItem(PET_POS_KEY, JSON.stringify({ x: after[0], y: after[1] }));
-      } catch {
-        /* ignore */
-      }
-    } else {
-      void invoke("pet_focus_main").catch(() => {});
-    }
+    void invoke("pet_start_drag")
+      .then(() => invoke<[number, number]>("pet_position"))
+      .then(([x, y]) => {
+        try {
+          localStorage.setItem(PET_POS_KEY, JSON.stringify({ x, y }));
+        } catch {
+          /* ignore */
+        }
+      })
+      .catch(() => {});
+  };
+
+  const onPointerUp = () => {
+    const st = dragRef.current;
+    const wasClick = st.active && !st.dragging;
+    st.active = false;
+    st.dragging = false;
+    if (wasClick) void invoke?.("pet_focus_main")?.catch(() => {});
+  };
+
+  const onPointerCancel = () => {
+    dragRef.current.active = false;
+    dragRef.current.dragging = false;
   };
 
   return (
-    <div className="pet-window" onPointerDown={onPointerDown} title="点我叫出主窗口 · 拖我可以挪位置">
+    <div
+      className="pet-window"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      title="点我叫出主窗口 · 拖我可以挪位置"
+    >
       {bubble && (
         <div className="pet-bubble">
           <div className="pet-bubble-title">{bubble.title}</div>
