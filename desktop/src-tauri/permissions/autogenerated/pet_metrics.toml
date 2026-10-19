@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pet-metrics"
+description = "Enables the pet_metrics command without any pre-configured scope."
+commands.allow = ["pet_metrics"]
+
+[[permission]]
+identifier = "deny-pet-metrics"
+description = "Denies the pet_metrics command without any pre-configured scope."
+commands.deny = ["pet_metrics"]

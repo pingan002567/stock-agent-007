@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
   BUBBLE_STATES,
-  PET_POS_KEY,
-  PET_SIZE,
+  PET_ANCHOR_KEY,
   PET_STATE_KEY,
+  PET_SIZE,
   type PetPayload,
   type PetState,
 } from "@/lib/petBridge";
@@ -91,27 +91,40 @@ export function PetWindow() {
     return () => window.clearTimeout(t);
   }, [bubble]);
 
-  // 有气泡时把窗口撑大（锚定右下角），收起时缩回本体大小
-  useEffect(() => {
-    if (!invoke) return;
-    const s = bubble ? PET_SIZE.bubble : PET_SIZE.base;
-    void invoke("pet_resize", { width: s.w, height: s.h }).catch(() => {});
-  }, [bubble, invoke]);
+  // 锚点：窗口右下角（物理像素）。窗口大小随气泡变，但锚点不动 ——
+  // 位置一律由「锚点 - 当前尺寸」推出来，避免和别的改位置操作抢。
+  const anchorRef = useRef<{ x: number; y: number } | null>(null);
+  const scaleRef = useRef(1);
 
-  // 恢复上次位置
   useEffect(() => {
     if (!invoke) return;
-    const saved = localStorage.getItem(PET_POS_KEY);
-    if (!saved) return;
-    try {
-      const p = JSON.parse(saved) as { x?: number; y?: number };
-      if (typeof p.x === "number" && typeof p.y === "number") {
-        void invoke("pet_set_position", { x: p.x, y: p.y }).catch(() => {});
+    void (async () => {
+      try {
+        const [px, py, pw, ph, sf] = await invoke<[number, number, number, number, number]>("pet_metrics");
+        scaleRef.current = sf;
+        if (!anchorRef.current) {
+          let saved: { x: number; y: number } | null = null;
+          try {
+            saved = JSON.parse(localStorage.getItem(PET_ANCHOR_KEY) ?? "null") as { x: number; y: number } | null;
+          } catch {
+            /* 脏数据忽略 */
+          }
+          anchorRef.current = saved ?? { x: px + pw, y: py + ph };
+        }
+        const size = bubble ? PET_SIZE.bubble : PET_SIZE.base;
+        const w = Math.round(size.w * sf);
+        const h = Math.round(size.h * sf);
+        await invoke("pet_set_frame", {
+          x: anchorRef.current.x - w,
+          y: anchorRef.current.y - h,
+          width: size.w,
+          height: size.h,
+        });
+      } catch {
+        /* 忽略：拿不到度量就保持原样 */
       }
-    } catch {
-      /* 脏数据忽略 */
-    }
-  }, [invoke]);
+    })();
+  }, [bubble, invoke]);
 
   // 交互：按下 → 看有没有真的移动 → 移动了才启动原生拖拽；没移动就是单击
   // （之前是按下就无条件 pet_start_drag，macOS 上原生拖拽会把这次点击吃掉，
@@ -124,6 +137,7 @@ export function PetWindow() {
   });
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    void invoke?.("pet_debug", { msg: `pointerdown ${Math.round(e.screenX)},${Math.round(e.screenY)}` })?.catch(() => {});
     dragRef.current = { x: e.screenX, y: e.screenY, active: true, dragging: false };
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
@@ -133,17 +147,7 @@ export function PetWindow() {
     if (!st.active || st.dragging) return;
     if (Math.abs(e.screenX - st.x) + Math.abs(e.screenY - st.y) < 5) return;
     st.dragging = true;
-    if (!invoke) return;
-    void invoke("pet_start_drag")
-      .then(() => invoke<[number, number]>("pet_position"))
-      .then(([x, y]) => {
-        try {
-          localStorage.setItem(PET_POS_KEY, JSON.stringify({ x, y }));
-        } catch {
-          /* ignore */
-        }
-      })
-      .catch(() => {});
+    void invoke?.("pet_start_drag")?.catch(() => {});
   };
 
   const onPointerUp = () => {
@@ -151,7 +155,23 @@ export function PetWindow() {
     const wasClick = st.active && !st.dragging;
     st.active = false;
     st.dragging = false;
-    if (wasClick) void invoke?.("pet_focus_main")?.catch(() => {});
+    void invoke?.("pet_debug", { msg: `pointerup click=${wasClick} dragging=${st.dragging}` })?.catch(() => {});
+    if (wasClick) {
+      void invoke?.("pet_focus_main")?.catch(() => {});
+      return;
+    }
+    // 拖动结束：以当前窗口右下角刷新锚点，下次启动按它复位
+    void (async () => {
+      try {
+        const [px, py, pw, ph, sf] = await invoke!("pet_metrics");
+        scaleRef.current = sf;
+        const anchor = { x: px + pw, y: py + ph };
+        anchorRef.current = anchor;
+        localStorage.setItem(PET_ANCHOR_KEY, JSON.stringify(anchor));
+      } catch {
+        /* ignore */
+      }
+    })();
   };
 
   const onPointerCancel = () => {

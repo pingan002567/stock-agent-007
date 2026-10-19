@@ -196,7 +196,15 @@ Tauri 2 的 `emit_to(label, event, payload)` 是现成能力，不用加插件�
 | 拖动 + 位置记忆 | ✅ | `pet_start_drag`（松手才返回）→ 存 `localStorage['pet.pos']` |
 | 浏览器预览 | ✅ | `?pet=1` 可直接看桌宠 UI（设计/联调用） |
 
-**踩过的两个坑**（都已记在这份文档里）：
+**踩过的坑**（都记在这份文档里）：
+
+0. **新窗口必须显式授权，否则所有 invoke 静默失败**（这是「点击没反应」的真正原因）
+   - `src-tauri/build.rs` 的 `AppManifest::commands([...])` 要列出每个 app 命令，
+     否则不会生成 `allow-<cmd>` 权限
+   - `capabilities/*.json` 的 `windows` 要加 `"pet"`，`permissions` 要加对应的 `allow-*`
+   - 两处任一漏掉，`invoke` 会被拒绝；而前端若用 `.catch(() => {})` 吞掉错误，
+     表现就是「点了完全没反应」——**调试时一定先确认 invoke 能不能通**
+
 
 1. macOS 上透明窗口必须开 `app.macOSPrivateApi`，否则窗口是黑的/不透明；
 2. `usePetBridge` 依赖 `useAppState`，必须挂在 `AppStateProvider` **内部** ——

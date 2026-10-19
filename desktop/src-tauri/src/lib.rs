@@ -31,39 +31,39 @@ fn pet_start_drag(window: tauri::WebviewWindow) -> Result<(), String> {
     window.start_dragging().map_err(|e| e.to_string())
 }
 
-/// 桌宠窗口改尺寸（气泡弹出/收回时用）。锚定右下角：窗口变大时往左上长，
-/// 桌宠本体在窗口里的位置不动。
+/// 桌宠窗口的调试打点（前端把事件名发回来，打到终端）
 #[tauri::command]
-fn pet_resize(window: tauri::WebviewWindow, width: f64, height: f64) -> Result<(), String> {
+fn pet_debug(msg: String) {
+    println!("[pet-debug] {msg}");
+}
+
+/// 桌宠窗口的几何（物理像素 + 缩放），前端据此按"锚点"算位置
+#[tauri::command]
+fn pet_metrics(window: tauri::WebviewWindow) -> Result<(i32, i32, u32, u32, f64), String> {
     let pos = window.outer_position().map_err(|e| e.to_string())?;
     let size = window.outer_size().map_err(|e| e.to_string())?;
     let sf = window.scale_factor().map_err(|e| e.to_string())?;
-    let nw = (width * sf) as i32;
-    let nh = (height * sf) as i32;
-    let nx = pos.x + size.width as i32 - nw;
-    let ny = pos.y + size.height as i32 - nh;
+    Ok((pos.x, pos.y, size.width, size.height, sf))
+}
+
+/// 一次性设置桌宠窗口的位置 + 尺寸。
+/// 位置由前端按「右下角锚点 - 新尺寸」算出 —— 不要在这里读旧尺寸做增量，
+/// 窗口服务器的 size 是异步生效的，读到的会是上一次的值。
+#[tauri::command]
+fn pet_set_frame(
+    window: tauri::WebviewWindow,
+    x: i32,
+    y: i32,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
     window
         .set_size(tauri::LogicalSize::new(width, height))
         .map_err(|e| e.to_string())?;
     window
-        .set_position(tauri::PhysicalPosition::new(nx, ny))
+        .set_position(tauri::PhysicalPosition::new(x, y))
         .map_err(|e| e.to_string())?;
     Ok(())
-}
-
-/// 桌宠当前位置（物理像素）
-#[tauri::command]
-fn pet_position(window: tauri::WebviewWindow) -> Result<(i32, i32), String> {
-    let p = window.outer_position().map_err(|e| e.to_string())?;
-    Ok((p.x, p.y))
-}
-
-/// 恢复桌宠位置
-#[tauri::command]
-fn pet_set_position(window: tauri::WebviewWindow, x: i32, y: i32) -> Result<(), String> {
-    window
-        .set_position(tauri::PhysicalPosition::new(x, y))
-        .map_err(|e| e.to_string())
 }
 
 /// 显示 / 隐藏桌宠窗口
@@ -200,9 +200,9 @@ pub fn run() {
             pet_focus_main,
             pet_start_drag,
             pet_set_visible,
-            pet_position,
-            pet_set_position,
-            pet_resize
+            pet_debug,
+            pet_metrics,
+            pet_set_frame
         ])
         .setup(|app| {
             let window_cfg = app

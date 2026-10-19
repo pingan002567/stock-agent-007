@@ -11,8 +11,8 @@ export type PetState = "idle" | "working" | "done" | "alert" | "error";
 export const PET_STATE_KEY = "pet.state";
 /** 桌宠开关（"0" = 关） */
 export const PET_ENABLED_KEY = "pet.enabled";
-/** 桌宠位置（物理像素） */
-export const PET_POS_KEY = "pet.pos";
+/** 桌宠右下角锚点（物理像素）—— 窗口大小随气泡变化，但锚点不变 */
+export const PET_ANCHOR_KEY = "pet.anchor";
 
 /** 只有这三个状态弹气泡；unread 只出角标（避免吵） */
 export const BUBBLE_STATES: readonly PetState[] = ["alert", "done", "error"];

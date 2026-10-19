@@ -45,7 +45,8 @@
         "minimizable": false,
         "focus": false,
         "visible": false,
-        "create": false
+        "create": false,
+        "acceptFirstMouse": true
       }
     ],
     "security": {

@@ -9,14 +9,22 @@
     ]
   },
   "windows": [
-    "main"
+    "main",
+    "pet"
   ],
-    "permissions": [
+  "permissions": [
     "core:default",
     "dialog:allow-open",
     "core:window:allow-start-dragging",
     "allow-service-cli",
     "allow-navigate",
-    "allow-open-external"
+    "allow-open-external",
+    "allow-window-label",
+    "allow-pet-focus-main",
+    "allow-pet-start-drag",
+    "allow-pet-set-visible",
+    "allow-pet-debug",
+    "allow-pet-metrics",
+    "allow-pet-set-frame"
   ]
 }
