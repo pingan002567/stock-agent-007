@@ -5618,7 +5618,7 @@ html.pet-window-root body { margin: 0; }
 .pet-body {
   position: relative;
   width: 132px;
-  height: 108px;
+  height: 132px;
   flex: none;
   transition: transform 0.16s cubic-bezier(0.3, 0.9, 0.3, 1);
 }
@@ -5626,17 +5626,55 @@ html.pet-window-root body { margin: 0; }
 
 /* 帧序列：多张姿态图叠在一起，靠透明度交叉淡入 —— 静态图也能"动" */
 .pet-stage { position: absolute; inset: 0; }
+
+/* sprite sheet：8 帧横排（源 264/帧，这里按 132 显示 = 2x，不掉清晰度） */
+.pet-sprite {
+  position: absolute;
+  inset: 0;
+  background-repeat: no-repeat;
+  background-position: 0 0;
+  pointer-events: none;
+}
+.pet-breathe {
+  background-image: url("./assets/pet/loop-idle-breathe.webp");
+  background-size: 396px 132px;
+  animation: pet-strip-3 1.9s steps(3) infinite;
+}
+.pet-run {
+  background-image: url("./assets/pet/loop-run.webp");
+  background-size: 1056px 132px;
+  animation: pet-strip-8 0.8s steps(8) infinite;
+}
+/* 一次性动作：叠在基础循环上面，播完就隐藏 */
+.pet-oneshot { opacity: 1; }
+.pet-blink {
+  background-image: url("./assets/pet/loop-idle-blink.webp");
+  background-size: 396px 132px;
+  animation: pet-strip-3 0.42s steps(3) 1;
+}
+.pet-tilt {
+  background-image: url("./assets/pet/loop-idle-tilt.webp");
+  background-size: 264px 132px;
+  animation: pet-strip-2 0.62s steps(2) 1;
+}
+@keyframes pet-strip-2 { to { background-position: -264px 0; } }
+@keyframes pet-strip-3 { to { background-position: -396px 0; } }
+@keyframes pet-strip-8 { to { background-position: -1056px 0; } }
+
 .pet-frame {
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+  background-repeat: no-repeat;
+  background-position: center bottom;
+  background-size: contain;
   display: block;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.26s ease;
+  transition: opacity 0.28s ease;
 }
+
+/* 没有素材自带阴影（已剥掉），用 CSS 补一层，贴着桌面更自然 */
+.pet-stage { filter: drop-shadow(0 5px 8px rgba(0, 0, 0, 0.32)); }
 .pet-frame.on { opacity: 1; }
 
 /* 点一下的回弹反馈 */

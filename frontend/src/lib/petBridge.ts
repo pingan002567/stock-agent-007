@@ -12,7 +12,7 @@ export const PET_STATE_KEY = "pet.state";
 /** 桌宠开关（"0" = 关） */
 export const PET_ENABLED_KEY = "pet.enabled";
 /** 桌宠右下角锚点（物理像素）—— 窗口大小随气泡变化，但锚点不变 */
-export const PET_ANCHOR_KEY = "pet.anchor.v2";
+export const PET_ANCHOR_KEY = "pet.pos.v3";
 
 /** 只有这三个状态弹气泡；unread 只出角标（避免吵） */
 export const BUBBLE_STATES: readonly PetState[] = ["alert", "done", "error"];
@@ -27,4 +27,4 @@ export type PetPayload = {
 };
 
 /** 桌宠窗口两种尺寸：只有本体 / 带气泡 */
-export const PET_SIZE = { base: { w: 132, h: 108 }, bubble: { w: 300, h: 200 } } as const;
+export const PET_SIZE = { base: { w: 132, h: 132 }, bubble: { w: 300, h: 236 } } as const;

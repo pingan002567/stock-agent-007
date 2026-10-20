@@ -7,70 +7,33 @@ import {
   type PetPayload,
   type PetState,
 } from "@/lib/petBridge";
-import idle1 from "@/assets/pet/idle.png";
-import idle2 from "@/assets/pet/idle-2.png";
-import working1 from "@/assets/pet/working.png";
-import working2 from "@/assets/pet/working-2.png";
-import done1 from "@/assets/pet/done.png";
-import done2 from "@/assets/pet/done-2.png";
-import done3 from "@/assets/pet/done-3.png";
-import alert1 from "@/assets/pet/alert.png";
-import alert2 from "@/assets/pet/alert-2.png";
-import error1 from "@/assets/pet/error.png";
-import error2 from "@/assets/pet/error-2.png";
-
-/** 每个状态一组帧（同一角色不同姿态），按 FRAME_MS 轮播 —— 静态图靠"换姿态"动起来。
- *  idle 里放两张躺着的，第三张才是睡着，等于大部分时间醒着、偶尔打个盹。 */
-const FRAMES: Record<PetState, string[]> = {
-  idle: [idle1, idle1, idle2],
-  working: [working1, working2],
-  done: [done1, done2, done3],
-  alert: [alert1, alert2],
-  error: [error1, error2],
-};
-
-/** 每帧停留时长：done 是庆祝，节奏最快；idle 最慢 */
-const FRAME_MS: Record<PetState, number> = {
-  idle: 7000,
-  working: 1400,
-  done: 420,
-  alert: 700,
-  error: 1600,
-};
-
-/** 帧序列：state 变化时整体重挂（key），所以 index 自然归零 */
-function PetFrames({ state }: { state: PetState }) {
-  const frames = FRAMES[state];
-  const [idx, setIdx] = useState(0);
-
-  useEffect(() => {
-    if (frames.length < 2) return;
-    const t = window.setInterval(() => setIdx((i) => (i + 1) % frames.length), FRAME_MS[state]);
-    return () => window.clearInterval(t);
-  }, [frames.length, state]);
-
-  return (
-    <span className={`pet-stage pet-${state}`}>
-      {frames.map((src, i) => (
-        <img
-          key={`${src}-${i}`}
-          className={`pet-frame${i === idx ? " on" : ""}`}
-          src={src}
-          alt=""
-          draggable={false}
-        />
-      ))}
-    </span>
-  );
-}
+import done1 from "@/assets/pet/done-1.webp";
+import done2 from "@/assets/pet/done-2.webp";
+import done3 from "@/assets/pet/done-3.webp";
+import alert1 from "@/assets/pet/alert-1.webp";
+import alert2 from "@/assets/pet/alert-2.webp";
+import error1 from "@/assets/pet/error-1.webp";
+import error2 from "@/assets/pet/error-2.webp";
 
 type TauriGlobal = {
   core?: { invoke?: <T = unknown>(cmd: string, args?: Record<string, unknown>) => Promise<T> };
 };
 
-const BUBBLE_MS = 8000;
+/** 主窗口 → 桌宠的度量：[x, y, w, h, scale, workX, workY, workW, workH]（物理像素） */
+type Metrics = [number, number, number, number, number, number, number, number, number];
 
-/** 读主窗口发布的桌宠状态 */
+const BUBBLE_MS = 8000;
+/** 一次性动作（眨眼/歪头）时长 */
+const ONESHOT_MS = 620;
+
+/** done / alert / error 用静态关键帧交叉淡入（与 idle/run 同一套画风） */
+const STATIC_FRAMES: Record<"done" | "alert" | "error", string[]> = {
+  done: [done1, done2, done3],
+  alert: [alert1, alert2],
+  error: [error1, error2],
+};
+const STATIC_MS = { done: 700, alert: 900, error: 1400 } as const;
+
 function readPayload(): PetPayload | null {
   try {
     const raw = localStorage.getItem(PET_STATE_KEY);
@@ -82,26 +45,78 @@ function readPayload(): PetPayload | null {
   }
 }
 
+/** 静态帧：叠在一起靠透明度交叉淡入 */
+function PetStills({ frames, ms }: { frames: string[]; ms: number }) {
+  const [idx, setIdx] = useState(0);
+  useEffect(() => {
+    if (frames.length < 2) return;
+    const t = window.setInterval(() => setIdx((i) => (i + 1) % frames.length), ms);
+    return () => window.clearInterval(t);
+  }, [frames.length, ms]);
+  return (
+    <>
+      {frames.map((src, i) => (
+        <span
+          key={src}
+          className={`pet-frame${i === idx ? " on" : ""}`}
+          style={{ backgroundImage: `url(${src})` }}
+        />
+      ))}
+    </>
+  );
+}
+
+/** 桌宠本体：idle/working 是 sprite sheet 真循环（含偶尔的眨眼/歪头），
+ *  done/alert/error 是静态关键帧交叉淡入。 */
+function PetSprite({
+  state,
+  oneshot,
+  tick,
+}: {
+  state: PetState;
+  oneshot: "blink" | "tilt" | null;
+  tick: number;
+}) {
+  if (state === "idle") {
+    return (
+      <>
+        <span className="pet-sprite pet-breathe" />
+        {oneshot && <span key={`${oneshot}-${tick}`} className={`pet-sprite pet-oneshot pet-${oneshot}`} />}
+      </>
+    );
+  }
+  if (state === "working") return <span className="pet-sprite pet-run" />;
+  return <PetStills frames={STATIC_FRAMES[state]} ms={STATIC_MS[state]} />;
+}
+
 /** 桌宠窗口（label = "pet"）。
  *
  *  - 状态从 localStorage 读（主窗口写、storage 事件送达）
- *  - 单击：把主窗口叫到前台；拖动：系统原生拖动，松手存位置
- *  - 气泡只在 alert / done / error 弹，并临时把窗口撑大再缩回
+ *  - 单击：叫出主窗口 + 弹一下；拖动：系统原生拖拽，松手存位置
+ *  - 气泡只在 alert / done / error 弹，弹出时窗口临时撑大（锚定右下角）
  */
 export function PetWindow() {
-  // 初值直接从 localStorage 读（lazy initializer，避免在 effect 里同步 setState）
   const initial = readPayload();
   const [state, setState] = useState<PetState>(initial?.state ?? "idle");
   const [badge, setBadge] = useState(initial?.badge ?? 0);
-  const [bounce, setBounce] = useState(false);
   const [bubble, setBubble] = useState<{ title: string; body?: string } | null>(
     initial && BUBBLE_STATES.includes(initial.state) && initial.title
       ? { title: initial.title, body: initial.body }
       : null,
   );
+  const [bounce, setBounce] = useState(false);
+  const [oneshot, setOneshot] = useState<"blink" | "tilt" | null>(null);
+  const [oneshotTick, setOneshotTick] = useState(0);
+
   const invoke = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__?.core?.invoke;
 
-  // 跨窗口 storage 事件（初值已在 useState 里读好）
+  /** 窗口几何缓存（物理像素）。改尺寸时用它算新位置 —— 不去读 outer_size，
+   *  那个值是异步生效的，跟上一次 set_size 抢起来会把窗口推到屏幕中间。 */
+  const frameRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+  const scaleRef = useRef(1);
+  const dragRef = useRef({ x: 0, y: 0, active: false, dragging: false });
+
+  // 跨窗口状态同步（初值已在 useState 里读好）
   useEffect(() => {
     const apply = (raw: string | null) => {
       if (!raw) return;
@@ -114,11 +129,8 @@ export function PetWindow() {
       if (!p?.state) return;
       setState(p.state);
       setBadge(p.badge ?? 0);
-      if (BUBBLE_STATES.includes(p.state) && p.title) {
-        setBubble({ title: p.title, body: p.body });
-      } else {
-        setBubble(null);
-      }
+      if (BUBBLE_STATES.includes(p.state) && p.title) setBubble({ title: p.title, body: p.body });
+      else setBubble(null);
     };
     const onStorage = (e: StorageEvent) => {
       if (e.key === PET_STATE_KEY) apply(e.newValue);
@@ -127,6 +139,46 @@ export function PetWindow() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  // 尺寸：随气泡切换。位置按「右下角不动」推出来。
+  useEffect(() => {
+    if (!invoke) return;
+    void (async () => {
+      try {
+        const [px, py, pw, ph, sf, wx, wy, ww, wh] = await invoke<Metrics>("pet_metrics");
+        scaleRef.current = sf;
+
+        if (!frameRef.current) {
+          let saved: { x: number; y: number } | null = null;
+          try {
+            saved = JSON.parse(localStorage.getItem(PET_ANCHOR_KEY) ?? "null") as { x: number; y: number } | null;
+          } catch {
+            /* 脏数据忽略 */
+          }
+          const sane =
+            saved && ww > 0 && saved.x >= wx && saved.y >= wy && saved.x < wx + ww && saved.y < wy + wh;
+          if (saved && !sane) localStorage.removeItem(PET_ANCHOR_KEY);
+          frameRef.current = {
+            x: sane ? (saved as { x: number; y: number }).x : px,
+            y: sane ? (saved as { x: number; y: number }).y : py,
+            w: pw,
+            h: ph,
+          };
+        }
+
+        const cur = frameRef.current;
+        const size = bubble ? PET_SIZE.bubble : PET_SIZE.base;
+        const nw = Math.round(size.w * sf);
+        const nh = Math.round(size.h * sf);
+        const nx = cur.x + cur.w - nw;
+        const ny = cur.y + cur.h - nh;
+        await invoke("pet_set_frame", { x: nx, y: ny, width: size.w, height: size.h });
+        frameRef.current = { x: nx, y: ny, w: nw, h: nh };
+      } catch {
+        /* 拿不到度量就保持原样 */
+      }
+    })();
+  }, [bubble, invoke]);
+
   // 气泡 8s 自动收
   useEffect(() => {
     if (!bubble) return;
@@ -134,65 +186,26 @@ export function PetWindow() {
     return () => window.clearTimeout(t);
   }, [bubble]);
 
-  // 锚点：窗口右下角（物理像素）。窗口大小随气泡变，但锚点不动 ——
-  // 位置一律由「锚点 - 当前尺寸」推出来，避免和别的改位置操作抢。
-  const anchorRef = useRef<{ x: number; y: number } | null>(null);
-  const scaleRef = useRef(1);
-
+  // idle 时每 4.5~9s 插一次眨眼 / 歪头（一次性动作，播完回基础循环）
   useEffect(() => {
-    if (!invoke) return;
-    void (async () => {
-      try {
-        type Metrics = [number, number, number, number, number, number, number, number, number];
-        const [px, py, pw, ph, sf, wx, wy, ww, wh] = await invoke<Metrics>("pet_metrics");
-        scaleRef.current = sf;
-
-        if (!anchorRef.current) {
-          let saved: { x: number; y: number } | null = null;
-          try {
-            saved = JSON.parse(localStorage.getItem(PET_ANCHOR_KEY) ?? "null") as { x: number; y: number } | null;
-          } catch {
-            /* 脏数据忽略 */
-          }
-          // 锚点必须落在当前屏幕可用区域内，否则丢掉（旧版本存过脏值）
-          const sane =
-            saved &&
-            ww > 0 &&
-            saved.x >= wx + 40 &&
-            saved.y >= wy + 40 &&
-            saved.x <= wx + ww + 8 &&
-            saved.y <= wy + wh + 8;
-          anchorRef.current = sane ? (saved as { x: number; y: number }) : { x: px + pw, y: py + ph };
-          if (!sane && saved) localStorage.removeItem(PET_ANCHOR_KEY);
-        }
-
-        const size = bubble ? PET_SIZE.bubble : PET_SIZE.base;
-        const w = Math.round(size.w * sf);
-        const h = Math.round(size.h * sf);
-        await invoke("pet_set_frame", {
-          x: anchorRef.current.x - w,
-          y: anchorRef.current.y - h,
-          width: size.w,
-          height: size.h,
-        });
-      } catch {
-        /* 忽略：拿不到度量就保持原样 */
-      }
-    })();
-  }, [bubble, invoke]);
+    if (state !== "idle") return;
+    let hide = 0;
+    const loop = window.setInterval(
+      () => {
+        setOneshot(Math.random() < 0.65 ? "blink" : "tilt");
+        setOneshotTick((v) => v + 1);
+        hide = window.setTimeout(() => setOneshot(null), ONESHOT_MS);
+      },
+      4500 + Math.random() * 4500,
+    );
+    return () => {
+      window.clearInterval(loop);
+      window.clearTimeout(hide);
+    };
+  }, [state]);
 
   // 交互：按下 → 看有没有真的移动 → 移动了才启动原生拖拽；没移动就是单击
-  // （之前是按下就无条件 pet_start_drag，macOS 上原生拖拽会把这次点击吃掉，
-  //   而且一旦 pet_position 取不到就永远不响应点击 —— 两个原因叠加就是"点了没反应"）
-  const dragRef = useRef<{ x: number; y: number; active: boolean; dragging: boolean }>({
-    x: 0,
-    y: 0,
-    active: false,
-    dragging: false,
-  });
-
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    void invoke?.("pet_debug", { msg: `pointerdown ${Math.round(e.screenX)},${Math.round(e.screenY)}` })?.catch(() => {});
     dragRef.current = { x: e.screenX, y: e.screenY, active: true, dragging: false };
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
@@ -210,24 +223,21 @@ export function PetWindow() {
     const wasClick = st.active && !st.dragging;
     st.active = false;
     st.dragging = false;
-    void invoke?.("pet_debug", { msg: `pointerup click=${wasClick} dragging=${st.dragging}` })?.catch(() => {});
+
     if (wasClick) {
       void invoke?.("pet_focus_main")?.catch(() => {});
-      // 点一下给个反馈：弹一下
       setBounce(true);
       window.setTimeout(() => setBounce(false), 420);
       return;
     }
-    // 拖动结束：以当前窗口右下角刷新锚点，下次启动按它复位
+
+    // 拖动结束：以当前几何为准刷新缓存 + 存位置
     void (async () => {
       try {
-        type Metrics = [number, number, number, number, number, number, number, number, number];
-        const [px, py, pw, ph, sf, wx, wy, ww, wh] = await invoke<Metrics>("pet_metrics");
+        const [px, py, pw, ph, sf] = await invoke!<Metrics>("pet_metrics");
         scaleRef.current = sf;
-        const anchor = { x: px + pw, y: py + ph };
-        if (ww > 0 && (anchor.x > wx + ww + 8 || anchor.y > wy + wh + 8)) return;
-        anchorRef.current = anchor;
-        localStorage.setItem(PET_ANCHOR_KEY, JSON.stringify(anchor));
+        frameRef.current = { x: px, y: py, w: pw, h: ph };
+        localStorage.setItem(PET_ANCHOR_KEY, JSON.stringify({ x: px, y: py }));
       } catch {
         /* ignore */
       }
@@ -255,7 +265,9 @@ export function PetWindow() {
         </div>
       )}
       <div className={`pet-body${bounce ? " pet-bounce" : ""}`}>
-        <PetFrames key={state} state={state} />
+        <span className={`pet-stage pet-${state}`}>
+          <PetSprite state={state} oneshot={oneshot} tick={oneshotTick} />
+        </span>
         {badge > 0 && <span className="pet-badge">{badge > 9 ? "9+" : badge}</span>}
       </div>
     </div>
