@@ -324,8 +324,9 @@ pub fn run() {
             // 托盘：Show / Quit（§2 改造清单 5）。后端由 launchd 常驻，
             // 壳退出与否不影响盯盘告警，Quit 只是关壳。
             let show = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
+            let pet_show = MenuItem::with_id(app, "pet_show", "显示桌宠", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &quit])?;
+            let menu = Menu::with_items(app, &[&show, &pet_show, &quit])?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
@@ -335,6 +336,12 @@ pub fn run() {
                         if let Some(w) = app.get_webview_window("main") {
                             let _ = w.show();
                             let _ = w.set_focus();
+                        }
+                    }
+                    // 桌宠被隐藏后从这里恢复（同时把开关打开）
+                    "pet_show" => {
+                        if let Some(w) = app.get_webview_window("pet") {
+                            let _ = w.show();
                         }
                     }
                     "quit" => app.exit(0),

@@ -5601,6 +5601,7 @@ html.pet-window-root #root {
 html.pet-window-root body { margin: 0; }
 
 .pet-window {
+  position: relative;
   width: 100vw;
   height: 100vh;
   display: flex;
@@ -5625,12 +5626,22 @@ html.pet-window-root body { margin: 0; }
 .pet-window:hover .pet-body { transform: scale(1.04); }
 
 /* 帧序列：多张姿态图叠在一起，靠透明度交叉淡入 —— 静态图也能"动" */
-.pet-stage { position: absolute; inset: 0; }
+.pet-stage {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 132px;
+  height: 132px;
+  margin-left: -66px;
+  transform-origin: center bottom;
+}
 
 /* sprite sheet：8 帧横排（源 264/帧，这里按 132 显示 = 2x，不掉清晰度） */
 .pet-sprite {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
   background-repeat: no-repeat;
   background-position: 0 0;
   pointer-events: none;
@@ -5743,12 +5754,38 @@ html.pet-window-root body { margin: 0; }
   50% { transform: rotate(9deg); }
 }
 
-.pet-stage.pet-idle { animation: pet-breathe 4.5s ease-in-out infinite; transform-origin: 50% 92%; }
-.pet-stage.pet-working { animation: pet-bob 1.5s ease-in-out infinite; }
-.pet-stage.pet-done { animation: pet-bob 1s ease-in-out infinite; }
-.pet-stage.pet-alert { animation: pet-shake 0.9s ease-in-out 4; }
 
 .pet-d1, .pet-d2, .pet-d3 { animation: pet-dots 1.2s infinite; }
 .pet-d2 { animation-delay: 0.2s; }
 .pet-d3 { animation-delay: 0.4s; }
 .pet-tail { transform-origin: 122px 88px; animation: pet-tail-wag 0.7s ease-in-out infinite; }
+
+/* 右键菜单 */
+.pet-menu {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  min-width: 176px;
+  padding: 6px;
+  border-radius: 12px;
+  background: rgba(38, 38, 41, 0.94);
+  -webkit-backdrop-filter: blur(40px) saturate(150%);
+  backdrop-filter: blur(40px) saturate(150%);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 18px 40px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 10;
+}
+.pet-menu-item {
+  text-align: left;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #e6e8eb;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.pet-menu-item:hover { background: rgba(255, 255, 255, 0.09); }

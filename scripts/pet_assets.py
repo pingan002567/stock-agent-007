@@ -27,8 +27,8 @@ import os
 import numpy as np
 from PIL import Image, ImageFilter
 
-CANVAS = 264          # 画布边长（2x）
-SUBJECT_H = 240       # 主体目标高度
+CANVAS = 396          # 画布边长（3x：132pt 显示，2x/3x 屏都清晰）
+SUBJECT_H = 360       # 主体目标高度
 QUALITY = 82
 
 
@@ -184,29 +184,38 @@ def main() -> None:
     os.makedirs(out, exist_ok=True)
 
     print("循环（sprite sheet）：")
-    # 待机 8 帧其实是「呼吸 + 眨眼 + 歪头」三段拼的：
-    # 整段循环会让它每 1.4s 眨一次眼（太频繁），所以拆开：
-    # 呼吸常驻循环，眨眼/歪头偶尔插播。
-    frames, boxes = load_frames(os.path.join(args.src, "坐立待机循环"))
-    # 三段共用一个缩放（否则眨眼前后大小会跳）
-    scale_idle = group_scale(frames, boxes)
-    build_loop(frames, boxes, f"{out}/loop-idle-breathe.webp", scale_idle, [1, 2, 3])
-    build_loop(frames, boxes, f"{out}/loop-idle-blink.webp", scale_idle, [4, 5, 6])
-    build_loop(frames, boxes, f"{out}/loop-idle-tilt.webp", scale_idle, [7, 8])
+    # 待机 8 帧是「呼吸 + 眨眼 + 歪头」三段拼的：整段循环会每 1.4s 眨一次眼（太频繁），
+    # 所以拆开：呼吸常驻循环，眨眼/歪头偶尔插播。
+    idle_f, idle_b = load_frames(os.path.join(args.src, "坐立待机循环"))
+    scale_idle = group_scale(idle_f, idle_b)
+    build_loop(idle_f, idle_b, f"{out}/loop-idle-breathe.webp", scale_idle, [1, 2, 3])
+    build_loop(idle_f, idle_b, f"{out}/loop-idle-blink.webp", scale_idle, [4, 5, 6])
+    build_loop(idle_f, idle_b, f"{out}/loop-idle-tilt.webp", scale_idle, [7, 8])
 
-    run_frames, run_boxes = load_frames(os.path.join(args.src, "跑步循环"))
-    # 跑步是"宽姿态"：只按高度缩放会被裁掉，必须宽高同时适配
-    build_loop(run_frames, run_boxes, f"{out}/loop-run.webp")
+    for name, folder in (("run", "跑步循环"), ("walk", "走路循环"), ("tail", "尾巴摇摆循环")):
+        f, b = load_frames(os.path.join(args.src, folder))
+        build_loop(f, b, f"{out}/loop-{name}.webp")
 
     print("静态关键帧：")
-    for state, files in {
-        "done": ["01_开心拍掌.png", "10_下班开心.png", "14_跳跃欢呼.png"],
+    stills = {
         "alert": ["04_惊讶抬爪.png", "05_收到敬礼.png"],
         "error": ["08_无语扶额.png", "02_委屈抱胸.png"],
-    }.items():
+        # 一次性小动作（点击/闲时随机播）
+        "clap": ["01_开心拍掌.png", "10_下班开心.png"],
+        "phone": ["11_摸鱼看手机.png"],
+        "stretch": ["15_伸懒腰.png"],
+        "tilt": ["16_歪头疑惑.png"],
+        "yawn": ["36_打哈欠.png"],
+    }
+    for state, files in stills.items():
         for i, f in enumerate(files, start=1):
             build_static(os.path.join(args.src, f), f"{out}/{state}-{i}.webp")
 
+    # 睡觉：直接取待机循环里的「全闭眼」帧
+    build_static(
+        os.path.join(args.src, "坐立待机循环", sorted(os.listdir(os.path.join(args.src, "坐立待机循环")))[4]),
+        f"{out}/sleep-1.webp",
+    )
 
 if __name__ == "__main__":
     main()
