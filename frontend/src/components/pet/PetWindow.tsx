@@ -155,6 +155,7 @@ export function PetWindow() {
   const scaleRef = useRef(1);
   const dragRef = useRef({ x: 0, y: 0, active: false, dragging: false });
   const lastActiveRef = useRef(0);
+  const lastRawRef = useRef<string | null>(null);
 
   const size = PET_SIZES[sizeIdx];
   const scale = size.base.w / STAGE;
@@ -191,14 +192,39 @@ export function PetWindow() {
         setBubble(null);
       }
     };
+    lastRawRef.current = localStorage.getItem(PET_STATE_KEY);
+    let seen = lastRawRef.current;
     const onStorage = (e: StorageEvent) => {
       if (e.key === PET_STATE_KEY) apply(e.newValue);
       if (e.key === PET_QUIET_KEY) setQuiet(readNumber(PET_QUIET_KEY, 0) === 1);
       if (e.key === PET_SIZE_KEY) setSizeIdx(Math.min(2, Math.max(0, readNumber(PET_SIZE_KEY, 1))));
     };
+    // 兜底轮询：storage 事件偶尔会漏（窗口休眠/重载），2s 对一次就够
+    const poll = window.setInterval(() => {
+      const raw = localStorage.getItem(PET_STATE_KEY);
+      if (raw && raw !== seen) {
+        seen = raw;
+        apply(raw);
+      }
+    }, 2000);
     window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.clearInterval(poll);
+    };
   }, [quiet]);
+
+  // 空闲时预热其余素材：避免第一次切到某状态时闪一下空窗
+  useEffect(() => {
+    const srcs = [
+      breatheSrc, walkSrc, runSrc, tailSrc,
+      alert1, alert2, error1, error2,
+      clap1, clap2, phone1, stretch1, tilt1, yawn1, sleep1,
+    ];
+    const preload = () => srcs.forEach((src) => { const img = new Image(); img.src = src; });
+    const t = window.setTimeout(preload, 2500);
+    return () => window.clearTimeout(t);
+  }, []);
 
   // 尺寸：随气泡/档位切换。位置按「右下角不动」由缓存推出。
   useEffect(() => {
@@ -330,6 +356,9 @@ export function PetWindow() {
     setDragging(false);
   };
 
+  /** clip 身份：变化时让舞台重挂，触发淡入（侧面/正面切换不至于硬跳） */
+  const clipKey = dragging ? "walk" : oneshot ? oneshot.key : sleeping ? "sleep" : state;
+
   const clip: Clip = dragging
     ? LOOPS.walk
     : oneshot
@@ -365,6 +394,7 @@ export function PetWindow() {
         style={{ width: size.base.w, height: size.base.h }}
       >
         <span
+          key={clipKey}
           className={`pet-stage pet-${state}`}
           style={{ transform: `scale(${scale})` }}
         >

@@ -5626,7 +5626,10 @@ html.pet-window-root body { margin: 0; }
 .pet-window:hover .pet-body { transform: scale(1.04); }
 
 /* 帧序列：多张姿态图叠在一起，靠透明度交叉淡入 —— 静态图也能"动" */
+@keyframes pet-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
 .pet-stage {
+  animation: pet-fade-in 0.2s ease;
   position: absolute;
   left: 50%;
   bottom: 0;
