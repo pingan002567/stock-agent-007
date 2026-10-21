@@ -111,6 +111,26 @@ allowed-tools:
 
 ---
 
+## 2.6 规范校验（tests/test_skill_specs.py）
+
+四条硬约束写在测试里，`make test` / CI 都会跑到：
+
+| 断言 | 防的是什么 |
+|---|---|
+| frontmatter `name` == 目录名 | DeerFlow 按 name 找 `<user>/skills/custom/<name>/SKILL.md`，不一致会静默取不到 |
+| `allowed-tools` 都是真实工具 | 写错名字时子代理 schema 里没有它，模型只能猜 |
+| 工具的 required_authority ≤ 该 skill 的 authority | 否则运行时被 `permission_guard.require` 拒（`watch-rule-monitor` 曾声明 A3 工具却是 A2） |
+| 正文反引号里的工具 ⊆ allowed-tools | 否则技能在教模型用没授权的工具（`sector-rotation-digest` 曾承诺 write_file/bash） |
+| 运行时副本 == 仓库 seed（存在时） | 改了仓库却不生效 |
+
+修过的三个真实问题：
+
+1. `watch-rule-monitor`：A2 → **A3**（它要 `upsert_monitor_rule` / `delete_monitor_rule`）
+2. `sector-rotation-digest`：正文去掉 `write_file`/`bash` 承诺，补 `generate_report` 授权
+3. `get_stock_financial` 不在任何 authority group → 补进 `A2_TOOLS`（否则 Lead 完全看不见）
+
+---
+
 ## 3. 你的 SkillRegistry 现状
 
 ```python

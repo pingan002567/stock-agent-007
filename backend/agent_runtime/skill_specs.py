@@ -99,7 +99,8 @@ WORKBENCH_SKILLS: dict[str, WorkbenchSkill] = {
         label="AI 调仓规划师", authority="A4", max_turns=40, timeout_seconds=600,
     ),
     "watch-rule-monitor": WorkbenchSkill(
-        label="AI 盯盘员", authority="A2", max_turns=20, timeout_seconds=300,
+        # 需要 upsert/delete_monitor_rule（A3）—— 提权到 A3，工具集仍由 allowed-tools 限定
+        label="AI 盯盘员", authority="A3", max_turns=20, timeout_seconds=300,
     ),
     "report-render": WorkbenchSkill(
         label="AI 报告员", authority="A2", max_turns=20, timeout_seconds=300,

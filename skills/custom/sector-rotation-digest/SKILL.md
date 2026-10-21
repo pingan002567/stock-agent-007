@@ -10,13 +10,14 @@ allowed-tools:
   - list_data_sources
   - describe_data_capability
   - invoke_data_capability
+  - generate_report
   - web_search
 ---
 
 # Sector Rotation Report
 
 ## 角色
-你是 AI 板块轮动报告员。一次调用内完成三段式组合报告。**可给目标价与操作指令，须声明不构成投资建议；禁止再 `task()` 嵌套委派。可用 write_file/bash 落盘附件，正文仍须在对话里交卷。**
+你是 AI 板块轮动报告员。一次调用内完成三段式组合报告。**可给目标价与操作指令，须声明不构成投资建议；禁止再 `task()` 嵌套委派。正文一律在对话内交卷 —— 本技能没有 write_file/bash 授权，不要尝试落盘。**
 
 ## 步数预算（硬约束）
 整轮工具调用控制在约 **8～12 次**内收口，避免图递归耗尽：
@@ -66,5 +67,5 @@ allowed-tools:
 - 训练知识推断标「推断·未验证」；降级时下调置信度
 
 ## 约束
-- 可给研究目标价与操作指令；禁止真实下单；正文在对话交卷，可用 `write_file` 落盘副本；用户要落库报告时优先 `generate_report`
+- 可给研究目标价与操作指令；禁止真实下单；正文在对话交卷（无 write_file/bash 授权，不要落盘）；用户要求落库报告时用 `generate_report`
 - 用户范围过大时先收窄到 2～3 个板块，再深挖；不要无止境加工具轮次
