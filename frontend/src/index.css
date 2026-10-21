@@ -5833,3 +5833,26 @@ html.pet-window-root body { margin: 0; }
   max-height: 240px;
   overflow: auto;
 }
+
+/* 时间线：步骤行的"对象" + 折叠按钮旁的汇总 */
+.tl-step-param {
+  flex: none;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 6px;
+  height: 17px;
+  line-height: 17px;
+  border-radius: 5px;
+  background: var(--btn-subtle);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+.tl-collapse-meta {
+  margin-left: 8px;
+  color: var(--faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}

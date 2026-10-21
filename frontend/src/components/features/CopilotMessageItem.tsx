@@ -33,6 +33,7 @@ export interface ToolInfo {
   subagentType?: string;
   taskDescription?: string;
   taskPrompt?: string;
+  args?: Record<string, unknown>;
 }
 
 interface Props {
@@ -74,14 +75,14 @@ export function CopilotMessageItem({
       callId: t.id, name: t.name,
       status: t.failed ? "failed" as const : t.done ? "done" as const : "running" as const,
       resultText: t.resultText, subagentType: t.subagentType,
-      taskDescription: t.taskDescription, taskPrompt: t.taskPrompt,
+      taskDescription: t.taskDescription, taskPrompt: t.taskPrompt, args: t.args,
     },
   }));
   const handleTimelineClick = onToolClick
     ? (t: StreamToolCall) => onToolClick({
         id: t.callId, name: t.name, done: t.status === "done",
         failed: t.status === "failed", resultText: t.resultText, subagentType: t.subagentType,
-        taskDescription: t.taskDescription, taskPrompt: t.taskPrompt,
+        taskDescription: t.taskDescription, taskPrompt: t.taskPrompt, args: t.args,
       })
     : undefined;
 
@@ -147,7 +148,7 @@ function splitScheduledPrompt(text: string): { tag: string; task: string; rest: 
       ?? parseHumanInputRequest({ question: msg.text, call_id: (msg.payload as { call_id?: string })?.call_id });
     body = (
       <>
-        {hasTools && <ThoughtTimeline steps={toolSteps} active={false} onToolClick={handleTimelineClick} />}
+        {hasTools && <ThoughtTimeline steps={toolSteps} active={false} onToolClick={handleTimelineClick} durationMs={durationMs} />}
         {request ? (
           <HumanInputCard
             request={request}
@@ -180,7 +181,7 @@ function splitScheduledPrompt(text: string): { tag: string; task: string; rest: 
     const raw = (evPayload.conclusion as string) || msg.text || "";
     body = (
       <>
-        {hasTools && <ThoughtTimeline steps={toolSteps} active={false} onToolClick={handleTimelineClick} />}
+        {hasTools && <ThoughtTimeline steps={toolSteps} active={false} onToolClick={handleTimelineClick} durationMs={durationMs} />}
         <MarkdownRenderer text={stripToolCallTags(raw)} />
         <CopilotFinalMeta payload={evPayload} durationMs={durationMs} />
       </>
@@ -190,7 +191,7 @@ function splitScheduledPrompt(text: string): { tag: string; task: string; rest: 
     const evPayload = ev.payload as Record<string, unknown>;
     body = (
       <>
-        {hasTools && <ThoughtTimeline steps={toolSteps} active={false} onToolClick={handleTimelineClick} />}
+        {hasTools && <ThoughtTimeline steps={toolSteps} active={false} onToolClick={handleTimelineClick} durationMs={durationMs} />}
         <>⚠️ {(evPayload.error as string) || msg.text || "error"}</>
       </>
     );

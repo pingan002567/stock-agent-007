@@ -1594,13 +1594,21 @@ class CopilotService:
                 if key
                 in {
                     "symbol",
+                    "code",
+                    "ts_code",
+                    "name",
+                    "query",
+                    "keyword",
                     "report_type",
                     "source_type",
                     "source_id",
                     "strategy_id",
+                    "strategy_name",
                     "limit",
                     "priority",
                     "status",
+                    "days",
+                    "period",
                 }
             }
             tool_name = str(payload.get("tool") or "")

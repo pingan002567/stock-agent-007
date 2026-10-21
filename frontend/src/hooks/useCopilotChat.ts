@@ -41,6 +41,8 @@ export interface StreamToolCall {
   taskDescription?: string;
   /** task 工具的 prompt 字段（完整指令，展示截断） */
   taskPrompt?: string;
+  /** 调用参数（用于步骤行显示"对象"：个股代码 / 搜索词） */
+  args?: Record<string, unknown>;
 }
 
 /** 思维链时间线步骤(deer-flow ChainOfThought 借鉴):推理与工具按到达顺序交错 */

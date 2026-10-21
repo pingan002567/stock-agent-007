@@ -40,6 +40,7 @@ type ToolItem = {
   subagentType?: string;
   taskDescription?: string;
   taskPrompt?: string;
+  args?: Record<string, unknown>;
 };
 
 export type GroupedItem =
@@ -142,6 +143,8 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
       tools.push({
         t: "tool", name, done: matched, failed, id: msg.message_id, created_at: msg.created_at,
         resultText, subagentType, taskDescription, taskPrompt,
+        // 流式事件带完整 arguments；落库消息只保留白名单的 arguments_preview
+        args: (p?.arguments ?? p?.arguments_preview) as Record<string, unknown> | undefined,
       });
       pendingTools.set(rid, tools);
     } else if (ev.type === EVENT_TOOL_RESULT) {

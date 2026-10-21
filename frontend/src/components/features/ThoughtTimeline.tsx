@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { toolLabel, type StreamStep, type StreamToolCall } from "@/hooks/useCopilotChat";
+import { toolParamSummary } from "@/components/features/taskToolMeta";
+import { formatDuration } from "@/utils/format";
 import { skillLabelOf } from "@/components/features/skillLabels";
 import { ThinkingBlock } from "@/components/features/ThinkingBlock";
 import { truncateText } from "@/components/features/taskToolMeta";
@@ -68,6 +70,7 @@ function ToolStepRow({ tool, onClick }: { tool: StreamToolCall; onClick?: (t: St
         <div className="tl-step-main">
           <div className="tl-step-row">
             <span className={`tl-step-label${running ? " shimmer" : ""}`}>{skillLabel}</span>
+            {paramOf(tool) ? <span className="tl-step-param">{paramOf(tool)}</span> : null}
             <span className="tl-step-eng">{taskEngLabel(tool)}</span>
             <span className={`tl-step-state ${failed ? "bad" : running ? "busy" : "ok"}`}>
               {failed ? "失败" : running ? "…" : "✓"}
@@ -85,6 +88,7 @@ function ToolStepRow({ tool, onClick }: { tool: StreamToolCall; onClick?: (t: St
       <div className="tl-step-main">
         <div className="tl-step-row">
           <span className={`tl-step-label${running ? " shimmer" : ""}`}>{toolLabel(tool.name)}</span>
+          {paramOf(tool) ? <span className="tl-step-param">{paramOf(tool)}</span> : null}
           <span className="tl-step-eng">{tool.name}</span>
           <span className={`tl-step-state ${failed ? "bad" : running ? "busy" : "ok"}`}>
             {failed ? "失败" : running ? "…" : "✓"}
@@ -96,13 +100,20 @@ function ToolStepRow({ tool, onClick }: { tool: StreamToolCall; onClick?: (t: St
   );
 }
 
-export function ThoughtTimeline({ steps, active, onToolClick, expandAll = false }: {
+/** 步骤行的"对象"：个股代码 / 搜索关键词等，取不到就不显示 */
+function paramOf(tool: StreamToolCall): string {
+  return toolParamSummary(tool.args);
+}
+
+export function ThoughtTimeline({ steps, active, onToolClick, expandAll = false, durationMs }: {
   steps: StreamStep[];
   /** 流式进行中(尾步高亮/shimmer) */
   active: boolean;
   onToolClick?: (t: StreamToolCall) => void;
   /** 轨迹视图用：默认展开全部步骤，不做「更早 N 步」折叠 */
   expandAll?: boolean;
+  /** 本轮用时：显示在折叠按钮旁（16 步 · 1 分 12 秒） */
+  durationMs?: number;
 }) {
   const [showAll, setShowAll] = useState(expandAll);
   if (steps.length === 0) return null;
@@ -114,6 +125,9 @@ export function ThoughtTimeline({ steps, active, onToolClick, expandAll = false 
       {hiddenCount > 0 && (
         <button type="button" className="tl-collapse" onClick={() => setShowAll(true)}>
           展开更早 {hiddenCount} 步
+          <span className="tl-collapse-meta">
+            共 {steps.length} 步{(durationMs ?? 0) > 0 ? ` · ${formatDuration(durationMs ?? 0)}` : ""}
+          </span>
         </button>
       )}
       {!expandAll && showAll && steps.length > VISIBLE_TAIL && (
