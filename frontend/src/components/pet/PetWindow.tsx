@@ -146,6 +146,8 @@ export function PetWindow() {
   const [sleeping, setSleeping] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [menu, setMenu] = useState(false);
+  /** 首次出现时给一次引导（只显示一次） */
+  const [guide, setGuide] = useState(() => localStorage.getItem("pet.guide") !== "1");
 
   const invoke = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__?.core?.invoke;
 
@@ -226,7 +228,7 @@ export function PetWindow() {
 
         const cur = frameRef.current;
         // 气泡撑到气泡尺寸；右键菜单再高一档（菜单放右上、柴犬留右下，互不遮挡）
-        const target = menu ? { w: size.bubble.w, h: 300 } : bubble ? size.bubble : size.base;
+        const target = menu ? { w: size.bubble.w, h: 300 } : bubble || guide ? size.bubble : size.base;
         const nw = Math.round(target.w * sf);
         const nh = Math.round(target.h * sf);
         const nx = cur.x + cur.w - nw;
@@ -237,7 +239,17 @@ export function PetWindow() {
         /* 拿不到度量就保持原样 */
       }
     })();
-  }, [bubble, menu, invoke, size]);
+  }, [bubble, guide, menu, invoke, size]);
+
+  // 引导气泡：10s 后自动收，并记下已看过
+  useEffect(() => {
+    if (!guide) return;
+    const t = window.setTimeout(() => {
+      setGuide(false);
+      localStorage.setItem("pet.guide", "1");
+    }, 10000);
+    return () => window.clearTimeout(t);
+  }, [guide]);
 
   // 记录"最后一次活动"的起点
   useEffect(() => {
@@ -339,10 +351,12 @@ export function PetWindow() {
       }}
       title="单击叫我出来 · 拖动挪位置 · 右键设置"
     >
-      {bubble && (
+      {(guide || bubble) && (
         <div className="pet-bubble">
-          <div className="pet-bubble-title">{bubble.title}</div>
-          {bubble.body && <div className="pet-bubble-body">{bubble.body}</div>}
+          <div className="pet-bubble-title">{guide ? "👋 我在这儿" : bubble?.title}</div>
+          <div className="pet-bubble-body">
+            {guide ? "点我叫出主应用 · 拖动挪位置 · 右键设置" : bubble?.body}
+          </div>
         </div>
       )}
 
