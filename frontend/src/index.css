@@ -5792,3 +5792,44 @@ html.pet-window-root body { margin: 0; }
   cursor: pointer;
 }
 .pet-menu-item:hover { background: rgba(255, 255, 255, 0.09); }
+
+/* 定时任务轮次：用户气泡里的系统提示词折叠成标签 + 详情 */
+.sched-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px;
+  margin-bottom: 6px;
+  border-radius: 999px;
+  background: var(--btn-subtle);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sched-detail { margin-top: 8px; }
+.sched-detail > summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--faint);
+  list-style: none;
+  user-select: none;
+}
+.sched-detail > summary::-webkit-details-marker { display: none; }
+.sched-detail > summary:hover { color: var(--ink); }
+.sched-detail-body {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  max-height: 240px;
+  overflow: auto;
+}

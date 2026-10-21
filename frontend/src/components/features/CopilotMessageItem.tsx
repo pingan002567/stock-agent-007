@@ -45,6 +45,8 @@ interface Props {
   /** 未答澄清卡可交互（点选项 / 卡内提交） */
   onClarifySubmit?: (response: HumanInputResponse, displayText: string) => void;
   clarifyPending?: boolean;
+  /** 本轮第一条用户消息的时间：用来算「用时」 */
+  runStartedAt?: string;
 }
 
 /** final / error 两个分支共用的「调用了 N 个工具」折叠区 */
@@ -55,6 +57,7 @@ export function CopilotMessageItem({
   clarifiedResponse,
   onClarifySubmit,
   clarifyPending,
+  runStartedAt,
 }: Props) {
   const ev = parseCopilotEvent(msg as unknown as Record<string, unknown>);
   const isUser = msg.role === "user";
@@ -82,13 +85,44 @@ export function CopilotMessageItem({
       })
     : undefined;
 
+/** 定时任务等系统触发的轮次：用户消息正文其实是整段研究员提示词。
+ *  直接铺在气泡里既长又全是内部指令，所以拆成「来源标签 + 用户任务 + 折叠详情」。 */
+function splitScheduledPrompt(text: string): { tag: string; task: string; rest: string } | null {
+  const m = text.match(/^\[([^\]]{1,40})\]\s*/);
+  if (!m) return null;
+  const rest = text.slice(m[0].length).trim();
+  const idx = rest.search(/用户任务[:：]/);
+  return { tag: m[1], task: idx >= 0 ? rest.slice(idx).replace(/^用户任务[:：]\s*/, "").trim() : "", rest };
+}
+
+  /** 本轮用时：final 消息时间 - 该轮第一条用户消息时间 */
+  const durationMs =
+    isFinal && runStartedAt
+      ? new Date(msg.created_at).getTime() - new Date(runStartedAt).getTime()
+      : undefined;
+
   let body: React.ReactNode;
   let cls = "msg";
 
   if (isUser) {
     cls += " user";
     const attachments = attachmentsFromMessagePayload(msg.payload);
-    body = (
+    const scheduled = splitScheduledPrompt(msg.text || "");
+    body = scheduled ? (
+      <>
+        <div className="sched-chip" title={scheduled.tag}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+            <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+          </svg>
+          {scheduled.tag}
+        </div>
+        {scheduled.task ? <MarkdownRenderer text={scheduled.task} /> : null}
+        <details className="sched-detail">
+          <summary>查看完整指令（{scheduled.rest.length} 字）</summary>
+          <div className="sched-detail-body">{scheduled.rest}</div>
+        </details>
+      </>
+    ) : (
       <>
         {attachments.length > 0 && (
           <div className="upload-chips msg-attachments">
@@ -148,7 +182,7 @@ export function CopilotMessageItem({
       <>
         {hasTools && <ThoughtTimeline steps={toolSteps} active={false} onToolClick={handleTimelineClick} />}
         <MarkdownRenderer text={stripToolCallTags(raw)} />
-        <CopilotFinalMeta payload={evPayload} />
+        <CopilotFinalMeta payload={evPayload} durationMs={durationMs} />
       </>
     );
   } else if (isErrorEvent) {

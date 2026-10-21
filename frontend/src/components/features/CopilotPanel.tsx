@@ -52,7 +52,7 @@ export type GroupedItem =
       incomplete?: boolean;
       tools?: ToolItem[];
     }
-  | { t: "ai"; msg: CopilotMessage; tools: ToolItem[] };
+  | { t: "ai"; msg: CopilotMessage; tools: ToolItem[]; startedAt?: string };
 
 /** 把未完成 run 的工具过程挂到对应用户消息上，禁止合成空 AI 气泡。 */
 function attachIncompleteToUser(
@@ -109,6 +109,12 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
 
   const out: GroupedItem[] = [];
   const pendingTools = new Map<string, ToolItem[]>();
+  // run -> 该轮第一条用户消息的时间（用来算"用时"）
+  const runStartedAt = new Map<string, string>();
+  for (const m of msgs) {
+    if (m.role === "user" && m.run_id && !runStartedAt.has(m.run_id)) runStartedAt.set(m.run_id, m.created_at);
+  }
+  const lastUserAtFor = (rid?: string | null) => (rid ? runStartedAt.get(rid) : undefined);
 
   for (let i = 0; i < msgs.length; i++) {
     const msg = msgs[i];
@@ -175,7 +181,7 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
       if (ev.type === EVENT_FINAL && rid && lastFinalIndex.get(rid) !== i) continue;
       const tools = pendingTools.get(rid) || [];
       pendingTools.delete(rid);
-      out.push({ t: "ai", msg, tools });
+      out.push({ t: "ai", msg, tools, startedAt: lastUserAtFor(msg.run_id) });
     } else if (msg.role === "user") {
       if (msg.run_id) {
         for (const [pendingRid, tools] of [...pendingTools.entries()]) {
@@ -364,7 +370,7 @@ export function CopilotPanel() {
           <React.Fragment key={item.msg.message_id}>
             {showHeader && <div className="date-divider">{dateHeader(msgDate)}</div>}
             <div className="msg-block">
-              <CopilotMessageItem msg={item.msg} tools={item.tools} onToolClick={handleToolClick} />
+              <CopilotMessageItem msg={item.msg} tools={item.tools} onToolClick={handleToolClick} runStartedAt={item.startedAt} />
               {renderActions({
                 msg: item.msg,
                 showRetry: canRetryFailure && isAiError,

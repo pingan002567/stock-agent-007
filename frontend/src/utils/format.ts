@@ -68,3 +68,15 @@ export function stripInlineMarkdown(input?: string | null): string {
     .replace(/\*\*/g, "")
     .trim();
 }
+
+/** 毫秒 → 「2 分 31 秒」/「8.4 秒」 */
+export function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const sec = ms / 1000;
+  if (sec < 60) return `${sec < 10 ? sec.toFixed(1) : Math.round(sec)} 秒`;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  if (m < 60) return `${m} 分 ${s} 秒`;
+  const h = Math.floor(m / 60);
+  return `${h} 小时 ${m % 60} 分`;
+}

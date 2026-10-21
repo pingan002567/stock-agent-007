@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatDuration } from "@/utils/format";
 import { skillTraceItems, type SkillTraceItem } from "@/api/copilot";
 import { DraftDecisionCard } from "@/components/features/DraftDecisionCard";
 
@@ -54,7 +55,7 @@ export function SkillTraceChain({ items }: { items: SkillTraceItem[] }) {
   );
 }
 
-export function CopilotFinalMeta({ payload }: { payload: Record<string, unknown> }) {
+export function CopilotFinalMeta({ payload, durationMs }: { payload: Record<string, unknown>; durationMs?: number }) {
   const [openCounter, setOpenCounter] = useState(false);
   const [openRefs, setOpenRefs] = useState(false);
 
@@ -70,7 +71,7 @@ export function CopilotFinalMeta({ payload }: { payload: Record<string, unknown>
   const draftId = typeof payload.draft_id === "string" ? payload.draft_id : null;
   const hasAny =
     confidence || counterReasons.length > 0 || evidenceRefs.length > 0 || trace.length > 0 ||
-    tokensIn + tokensOut > 0 || draftId;
+    tokensIn + tokensOut > 0 || draftId || (durationMs ?? 0) > 0;
   if (!hasAny) return null;
 
   return (
@@ -93,6 +94,9 @@ export function CopilotFinalMeta({ payload }: { payload: Record<string, unknown>
           <button className="final-meta-toggle" onClick={() => setOpenRefs((v) => !v)}>
             {openRefs ? "▼" : "▶"} 引用来源 {evidenceRefs.length}
           </button>
+        )}
+        {(durationMs ?? 0) > 0 && (
+          <span className="final-meta-usage">用时 {formatDuration(durationMs ?? 0)}</span>
         )}
         {tokensIn + tokensOut > 0 && (
           <span className="final-meta-usage">
