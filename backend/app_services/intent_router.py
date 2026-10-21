@@ -32,11 +32,11 @@ class _Rule:
 # specialized reviews before the generic report/research rules).
 _RULES: list[_Rule] = [
     _Rule(
-        "ops_briefing", "stock-researcher", "A2",
+        "ops_briefing", "stock-deep-dive", "A2",
         lambda m, t, p: m.startswith("[定时任务·") or "你是值班研究员" in m,
     ),
     _Rule(
-        "review_inbox", "risk-officer", "A3",
+        "review_inbox", "portfolio-risk-audit", "A3",
         lambda m, t, p: (
             "今天我需要处理什么" in m
             or "列出高优先级待办" in m
@@ -48,7 +48,7 @@ _RULES: list[_Rule] = [
         ),
     ),
     _Rule(
-        "decision_journal_review", "risk-officer", "A3",
+        "decision_journal_review", "portfolio-risk-audit", "A3",
         lambda m, t, p: (
             "决策档案" in m
             or "建议链路" in m
@@ -58,7 +58,7 @@ _RULES: list[_Rule] = [
         ),
     ),
     _Rule(
-        "paper_portfolio_review", "risk-officer", "A3",
+        "paper_portfolio_review", "portfolio-risk-audit", "A3",
         lambda m, t, p: (
             ("paper" in t and _any(m, ["复盘", "调仓效果", "绩效归因"]))
             or ("paper portfolio" in t)
@@ -66,7 +66,7 @@ _RULES: list[_Rule] = [
         ),
     ),
     _Rule(
-        "pre_trade_review", "rebalance-planner", "A4",
+        "pre_trade_review", "rebalance-plan", "A4",
         lambda m, t, p: (
             _any(m, ["交易前审查", "执行前审查"])
             or ("审查" in m and _any(m, ["拟单", "草案", "执行"]))
@@ -82,7 +82,7 @@ _RULES: list[_Rule] = [
         ),
     ),
     _Rule(
-        "sector_rotation_report", "sector-rotation-report", "A2",
+        "sector_rotation_report", "sector-rotation-digest", "A2",
         lambda m, t, p: (
             _any(m, ["轮动", "板块深挖", "催化剂日历", "行业轮动", "板块轮动"])
             or ("组合报告" in m and _any(m, ["板块", "轮动", "催化剂"]))
@@ -90,33 +90,33 @@ _RULES: list[_Rule] = [
         ),
     ),
     _Rule(
-        "report_write", "report-writer", "A2",
+        "report_write", "report-render", "A2",
         lambda m, t, p: _any(m, ["报告", "复盘", "总结", "简报", "盘前"]) or "report" in t,
     ),
     _Rule(
-        "strategy_backtest", "strategy-analyst", "A3",
+        "strategy_backtest", "strategy-backtest", "A3",
         lambda m, t, p: _any(m, ["回测", "策略"]) or _any(t, ["backtest", "strategy"]),
     ),
     _Rule(
-        "rebalance_plan", "rebalance-planner", "A4",
+        "rebalance_plan", "rebalance-plan", "A4",
         lambda m, t, p: _any(m, ["调仓", "拟单", "仓位"]),
     ),
     _Rule(
-        "risk_review", "risk-officer", "A3",
+        "risk_review", "portfolio-risk-audit", "A3",
         lambda m, t, p: _any(m, ["风险", "风控", "集中度"]),
     ),
     _Rule(
-        "monitor_event", "stock-monitor", "A2",
+        "monitor_event", "watch-rule-monitor", "A2",
         lambda m, t, p: _any(m, ["盯盘", "异动", "提醒"]),
     ),
     _Rule(
-        "stock_research", "stock-researcher", "A2",
+        "stock_research", "stock-deep-dive", "A2",
         lambda m, t, p: "research" in t or _any(m, ["研究", "深研", "分析"]),
     ),
     # Page-context fallback: on the holdings page, an otherwise-unmatched message
     # defaults to a risk review rather than generic chat.
     _Rule(
-        "risk_review", "risk-officer", "A3",
+        "risk_review", "portfolio-risk-audit", "A3",
         lambda m, t, p: p == "holdings",
     ),
 ]
@@ -128,4 +128,4 @@ class IntentRouter:
         for rule in _RULES:
             if rule.match(message, text, page):
                 return Intent(rule.name, rule.skill, rule.required_authority, symbol)
-        return Intent("copilot_chat", "stock-researcher", "A2", symbol)
+        return Intent("copilot_chat", "stock-deep-dive", "A2", symbol)

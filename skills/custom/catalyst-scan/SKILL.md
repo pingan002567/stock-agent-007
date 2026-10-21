@@ -1,5 +1,5 @@
 ---
-name: catalyst-tracker
+name: catalyst-scan
 description: 从情报与公告中提炼带时点的催化剂（事件驱动）。适用场景：识别近期/中期可能驱动股价的事件及其时间窗口与方向。触发词：催化剂、事件、利好、利空、公告。
 allowed-tools:
   - search_stock_intel

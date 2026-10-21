@@ -251,7 +251,7 @@ def patch_skill_policy_builtins() -> None:
     skill's ``allowed-tools``. ``task`` and ``web_search`` are intentionally
     outside that set for reviewed skill packages, but once a SKILL.md is loaded
     into ``skill_context`` the lead loses both — so ``create_risk_policy`` fails
-    *and* ``task(risk-officer)`` cannot recover.
+    *and* ``task(portfolio-risk-audit)`` cannot recover.
 
     Extending ``ALWAYS_AVAILABLE_BUILTIN_TOOL_NAMES`` only **preserves** tools
     already on the request (lead ``tool_groups`` / subagent ``extra_tools``); it

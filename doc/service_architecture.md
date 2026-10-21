@@ -356,7 +356,7 @@ v0.8 的工具桥和执行台账边界：
 - 成功执行写 `status=succeeded`；`PermissionDenied` 写 `status=blocked` 后继续抛出；其他异常写 `status=failed` 后要收口成 `error + final`，避免 SSE 崩掉。
 - `place_real_order` 永远落为 `blocked`；未知工具不写 ledger。
 - 拟单草案状态机固定为 `pending_user_confirmation -> confirmed_no_execution | rejected | expired`；confirm 命中过期草案必须返回 `409` 并要求重新生成。
-- `strategy-analyst` skill 的回测触发必须映射到已知 `run_strategy_backtest`，不能作为 unknown DeerFlow tool 透传。
+- `strategy-backtest` skill 的回测触发必须映射到已知 `run_strategy_backtest`，不能作为 unknown DeerFlow tool 透传。
 - final payload 可以附带 `tool_evidence_refs`，用于报告和审计解释数据来源。
 - `tool_evidence_refs` 只能来自真实执行过的 Workbench 工具结果，不能根据计划中的 `skill_trace` 虚构。
 - `/api/settings` 的 `tools` 只展示运行时注册表；V1 不允许通过设置 API 覆盖工具契约或启用 `place_real_order`。

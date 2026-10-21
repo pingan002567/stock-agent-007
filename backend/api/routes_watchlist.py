@@ -195,7 +195,7 @@ def batch_research(request: Request, services: AppServices = Depends(get_service
     for item in items:
         try:
             context = services.context_builder.build_stock_context(item.symbol)
-            task = services.task_service.create(f"{context.symbol} 深研", "stock-researcher", "read_quote_and_intel")
+            task = services.task_service.create(f"{context.symbol} 深研", "stock-deep-dive", "read_quote_and_intel")
             report = services.report_service.generate(
                 ReportGenerateRequest(
                     report_type="stock_research", source_type="stock",

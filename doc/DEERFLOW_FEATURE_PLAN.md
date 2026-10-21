@@ -161,17 +161,17 @@ config = {
 ```python
 # copilot_service.py — stream_run() 中
 INTENT_SKILLS_MAP = {
-    "stock_research":        {"stock-researcher", "report-writer"},
-    "strategy_backtest":     {"strategy-analyst", "report-writer"},
-    "rebalance_plan":        {"stock-researcher", "risk-officer", "rebalance-planner"},
-    "risk_review":           {"risk-officer", "report-writer"},
-    "monitor_event":         {"stock-monitor", "report-writer"},
+    "stock_research":        {"stock-deep-dive", "report-render"},
+    "strategy_backtest":     {"strategy-backtest", "report-render"},
+    "rebalance_plan":        {"stock-deep-dive", "portfolio-risk-audit", "rebalance-plan"},
+    "risk_review":           {"portfolio-risk-audit", "report-render"},
+    "monitor_event":         {"watch-rule-monitor", "report-render"},
 }
 
 # 重建 client 时传入
 client = DeerFlowClient(
     ...,
-    available_skills=INTENT_SKILLS_MAP.get(intent_name, {"stock-researcher"}),
+    available_skills=INTENT_SKILLS_MAP.get(intent_name, {"stock-deep-dive"}),
 )
 ```
 
@@ -182,8 +182,8 @@ client = DeerFlowClient(
 ```python
 # 初始化时一次性设置该 session 可能用到的技能
 client = DeerFlowClient(available_skills={
-    "stock-researcher", "risk-officer", "strategy-analyst",
-    "rebalance-planner", "stock-monitor", "report-writer",
+    "stock-deep-dive", "portfolio-risk-audit", "strategy-backtest",
+    "rebalance-plan", "watch-rule-monitor", "report-render",
 })
 ```
 

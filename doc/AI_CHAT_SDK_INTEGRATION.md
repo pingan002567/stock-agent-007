@@ -226,8 +226,8 @@ custom { ... }
 {
   "user_message": "帮我分析 AAPL",
   "skill_trace": [
-    {"step": 1, "skill": "stock-researcher", "label": "股票研究员", "tools": [...], "status": "planned"},
-    {"step": 2, "skill": "report-writer", "label": "报告撰写", "tools": [...], "status": "planned"}
+    {"step": 1, "skill": "stock-deep-dive", "label": "股票研究员", "tools": [...], "status": "planned"},
+    {"step": 2, "skill": "report-render", "label": "报告撰写", "tools": [...], "status": "planned"}
   ],
   "context": {
     "page": "stock_detail",

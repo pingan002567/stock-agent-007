@@ -1,5 +1,5 @@
 ---
-name: stock-monitor
+name: watch-rule-monitor
 description: 查看盯盘事件和监控规则，按优先级聚合异动、关联舆情根因并建议后续动作；可按用户要求创建/修改/删除监控规则。适用场景：了解当前有哪些异动、触发条件、监控状态，或"帮我盯住某只票"。
 allowed-tools:
   - get_monitor_events
@@ -32,7 +32,7 @@ allowed-tools:
 2. **活跃事件**：事件类型 / 触发条件 / 涉及标的 / 严重级别
 3. **根因关联**：把异动与可能成因关联（如"成交量异动 → 建议搜该票舆情/公告"）
 4. **规则状态**：启用/暂停的规则、最后评估时间
-5. **跨 skill 建议**：如"建议对 X 跑 risk-officer 看持仓影响 / 跑 stock-researcher 深研"
+5. **跨 skill 建议**：如"建议对 X 跑 portfolio-risk-audit 看持仓影响 / 跑 stock-deep-dive 深研"
 
 ## 引用纪律
 - 每条异动标注事件时间与触发规则 `[来源: monitor_event · 时间]`

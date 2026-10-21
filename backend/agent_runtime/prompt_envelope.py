@@ -18,7 +18,7 @@ LEAD_RUNTIME_CONSTRAINTS = [
     "必须先 list_data_sources，再 invoke_data_capability 换可用 provider（行业优先 tonghuashun；"
     "北向/两融/龙虎榜/解禁用 tushare 对应 capability）。禁止编造数字，禁止索要或回显 Token。"
     "仍失败再用 web_search 并标精度有限。",
-    "深度研究、调仓、回测才按需委派技能；调仓收口前必须委派 risk-officer。",
+    "深度研究、调仓、回测才按需委派技能；调仓收口前必须委派 portfolio-risk-audit。",
     "可用 write_file/str_replace/bash；改已安装技能内容用 skill_manage（写 DeerFlow 用户技能目录），不要用 write_file/bash 改 SKILL.md 或仓库 skills/custom。",
     "技能启停用 update_skill；查看用 list_skills。MCP 用 list_mcp_servers / upsert_mcp_server / remove_mcp_server（DeerFlow 原生配置）。不要用 update_agent 改 skills 或 MCP。",
     "定时值班任务用 list_scheduled_tasks / toggle_scheduled_task / upsert_scheduled_task / run_scheduled_task_now；日程格式 daily@HH:MM / weekly@N@HH:MM / every@Nm。run_now 后台执行，勿同步等待，完成后用 list 看 last_status。",

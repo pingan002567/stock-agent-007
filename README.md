@@ -298,12 +298,12 @@ WORKBENCH_AI_MODEL=deepseek-chat
 ```json
 {
   "skills": {
-    "stock-researcher":  {"enabled": true},
-    "risk-officer":      {"enabled": true},
-    "strategy-analyst":  {"enabled": true},
-    "rebalance-planner": {"enabled": true},
-    "stock-monitor":     {"enabled": true},
-    "report-writer":     {"enabled": true}
+    "stock-deep-dive":  {"enabled": true},
+    "portfolio-risk-audit":      {"enabled": true},
+    "strategy-backtest":  {"enabled": true},
+    "rebalance-plan": {"enabled": true},
+    "watch-rule-monitor":     {"enabled": true},
+    "report-render":     {"enabled": true}
   }
 }
 ```
@@ -408,8 +408,8 @@ stock-agent-001/
 │   └── package.json
 ├── skills/                 # AI 技能定义
 │   └── custom/
-│       ├── stock-researcher/
-│       ├── risk-officer/
+│       ├── stock-deep-dive/
+│       ├── portfolio-risk-audit/
 │       └── ...
 ├── doc/                    # 项目文档
 ├── tests/                  # 测试文件

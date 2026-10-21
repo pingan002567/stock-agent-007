@@ -101,7 +101,7 @@ def view_image_tool(
     }
   },
   "skills": {
-    "stock-researcher": {"enabled": true}
+    "stock-deep-dive": {"enabled": true}
   }
 }
 ```
@@ -189,12 +189,12 @@ tool_search:
 {
   "mcpServers": {},
   "skills": {
-    "stock-researcher":    {"enabled": true},
-    "risk-officer":        {"enabled": true},
-    "strategy-analyst":    {"enabled": true},
-    "rebalance-planner":   {"enabled": true},
-    "stock-monitor":       {"enabled": true},
-    "report-writer":       {"enabled": true}
+    "stock-deep-dive":    {"enabled": true},
+    "portfolio-risk-audit":        {"enabled": true},
+    "strategy-backtest":    {"enabled": true},
+    "rebalance-plan":   {"enabled": true},
+    "watch-rule-monitor":       {"enabled": true},
+    "report-render":       {"enabled": true}
   }
 }
 ```
@@ -379,7 +379,7 @@ tool_output:
 deerflow_generated_config.yaml        extensions_config.json
 ─────────────────────────────────     ────────────────────────
 models: [...]                         mcpServers: { ... }
-tools: [...] (38 个注册)               skills: { stock-researcher: {enabled: true}, ... }
+tools: [...] (38 个注册)               skills: { stock-deep-dive: {enabled: true}, ... }
 tool_groups: [...]                    
 sandbox: ...                          
 skills: { path: "skills" }           ← skills 路径在这里

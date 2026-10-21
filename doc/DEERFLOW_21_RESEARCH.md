@@ -69,7 +69,7 @@ cron 表(repo + scheduler service)定时 `create_run`(盘前简报/周度复盘/
 
 ### P1 InfoQuest 情报源(0.5 天)
 BytePlus 中文向搜索/爬取,对 A 股情报质量优于 ddg/tavily 英文源。挂 `INFOQUEST_API_KEY`
-即入 web_search 择优链;catalyst-tracker/researcher 直接受益。
+即入 web_search 择优链;catalyst-scan/researcher 直接受益。
 
 ### P2 vision 看图(0.5 天)
 确认 mimo-v2.5 视觉能力后开 vision feature:上传 K 线/研报截图让 AI 读图。

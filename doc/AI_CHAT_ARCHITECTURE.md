@@ -49,12 +49,12 @@
 │  │                                                              │
 │  └── 复杂模式: task() 调度 Subagent                             │
 │      │                                                          │
-│      ├── Subagent "stock-researcher"                            │
+│      ├── Subagent "stock-deep-dive"                            │
 │      │   tools: [get_stock_context, get_daily_history,          │
 │      │           search_stock_intel]                             │
 │      │   → 返回 {基本面, 技术面, 情报}                           │
 │      │                                                          │
-│      ├── Subagent "risk-officer"                                │
+│      ├── Subagent "portfolio-risk-audit"                                │
 │      │   tools: [get_portfolio_snapshot, evaluate_policy_risk]   │
 │      │   → 返回 {集中度, 行业风险}                                │
 │      │                                                          │
@@ -125,9 +125,9 @@
   Lead Agent 直接调用工具 → 返回分析
 
 复杂 intent (rebalance_plan):
-  Lead Agent 调用 task("stock-researcher") → Subagent 1
-  Lead Agent 调用 task("risk-officer")     → Subagent 2
-  Lead Agent 调用 task("strategy-analyst") → Subagent 3
+  Lead Agent 调用 task("stock-deep-dive") → Subagent 1
+  Lead Agent 调用 task("portfolio-risk-audit")     → Subagent 2
+  Lead Agent 调用 task("strategy-backtest") → Subagent 3
   → 最多3个并行 → 各自完成 → Lead 汇总
 
 Subagent 安全边界:

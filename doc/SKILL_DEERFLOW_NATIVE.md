@@ -31,7 +31,7 @@ DeerFlow 通过 `os.walk()` 递归扫描 `skills/{public,custom}/`，查找包�
 
 ```yaml
 ---
-name: stock-researcher           # ★ 必需: hyphen-case, ^[a-z0-9-]+$, ≤64 chars
+name: stock-deep-dive           # ★ 必需: hyphen-case, ^[a-z0-9-]+$, ≤64 chars
 description: 分析个股...          # ★ 必需: ≤1024 chars, 不能含 < >
 license: MIT                     # 可选
 allowed-tools:                   # 可选: 字符串列表
@@ -101,23 +101,23 @@ SummarizationMiddleware._partition_with_skill_rescue()
 skills/
 ├── public/                                    ← 空（DeerFlow 要求存在，可以为空）
 └── custom/
-    ├── stock-researcher/SKILL.md     ✅ name 匹配
-    ├── risk-officer/SKILL.md         ✅ name 匹配
-    ├── strategy-analyst/SKILL.md     ✅ name 匹配
-    ├── rebalance-planner/SKILL.md    ✅ name 匹配
-    ├── stock-monitor/SKILL.md        ✅ name 匹配
-    └── report-writer/SKILL.md        ✅ name 匹配
+    ├── stock-deep-dive/SKILL.md     ✅ name 匹配
+    ├── portfolio-risk-audit/SKILL.md         ✅ name 匹配
+    ├── strategy-backtest/SKILL.md     ✅ name 匹配
+    ├── rebalance-plan/SKILL.md    ✅ name 匹配
+    ├── watch-rule-monitor/SKILL.md        ✅ name 匹配
+    └── report-render/SKILL.md        ✅ name 匹配
 ```
 
 ### 2.2 命名校验 ✅
 
 ```
-stock-researcher      → ^[a-z0-9-]+$ ✅  ≤64 ✅  无首尾- ✅
-risk-officer          → ^[a-z0-9-]+$ ✅  ≤64 ✅  无首尾- ✅
-strategy-analyst      → ^[a-z0-9-]+$ ✅  ≤64 ✅  无首尾- ✅
-rebalance-planner     → ^[a-z0-9-]+$ ✅  ≤64 ✅  无首尾- ✅
-stock-monitor         → ^[a-z0-9-]+$ ✅  ≤64 ✅  无首尾- ✅
-report-writer         → ^[a-z0-9-]+$ ✅  ≤64 ✅  无首尾- ✅
+stock-deep-dive      → ^[a-z0-9-]+$ ✅  ≤64 ✅  无首尾- ✅
+portfolio-risk-audit          → ^[a-z0-9-]+$ ✅  ≤64 ✅  无首尾- ✅
+strategy-backtest      → ^[a-z0-9-]+$ ✅  ≤64 ✅  无首尾- ✅
+rebalance-plan     → ^[a-z0-9-]+$ ✅  ≤64 ✅  无首尾- ✅
+watch-rule-monitor         → ^[a-z0-9-]+$ ✅  ≤64 ✅  无首尾- ✅
+report-render         → ^[a-z0-9-]+$ ✅  ≤64 ✅  无首尾- ✅
 ```
 
 ### 2.3 allowed-tools 校验 ✅
@@ -167,12 +167,12 @@ def generate_config(target_dir="data"):
 {
   "mcpServers": {},
   "skills": {
-    "stock-researcher":    {"enabled": true},
-    "risk-officer":        {"enabled": true},
-    "strategy-analyst":    {"enabled": true},
-    "rebalance-planner":   {"enabled": true},
-    "stock-monitor":       {"enabled": true},
-    "report-writer":       {"enabled": true}
+    "stock-deep-dive":    {"enabled": true},
+    "portfolio-risk-audit":        {"enabled": true},
+    "strategy-backtest":    {"enabled": true},
+    "rebalance-plan":   {"enabled": true},
+    "watch-rule-monitor":       {"enabled": true},
+    "report-render":       {"enabled": true}
   }
 }
 ```
@@ -180,22 +180,22 @@ def generate_config(target_dir="data"):
 或运行时 API：
 
 ```python
-client.update_skill("stock-researcher", enabled=True)
+client.update_skill("stock-deep-dive", enabled=True)
 ```
 
 ### 3.3 `deerflow_client.py` — 按 intent 传 available_skills
 
 ```python
 INTENT_SKILLS = {
-    "stock_research":    {"stock-researcher", "report-writer"},
-    "strategy_backtest": {"strategy-analyst", "report-writer"},
-    "rebalance_plan":    {"stock-researcher", "risk-officer", "rebalance-planner", "report-writer"},
-    "risk_review":       {"risk-officer", "report-writer"},
-    "monitor_event":     {"stock-monitor", "report-writer"},
+    "stock_research":    {"stock-deep-dive", "report-render"},
+    "strategy_backtest": {"strategy-backtest", "report-render"},
+    "rebalance_plan":    {"stock-deep-dive", "portfolio-risk-audit", "rebalance-plan", "report-render"},
+    "risk_review":       {"portfolio-risk-audit", "report-render"},
+    "monitor_event":     {"watch-rule-monitor", "report-render"},
 }
 
 # adapter.stream() 中
-client = DeerFlowClient(available_skills=INTENT_SKILLS.get(intent, {"stock-researcher"}))
+client = DeerFlowClient(available_skills=INTENT_SKILLS.get(intent, {"stock-deep-dive"}))
 ```
 
 ### 3.4 `skill_registry.py` — 精简
@@ -204,12 +204,12 @@ client = DeerFlowClient(available_skills=INTENT_SKILLS.get(intent, {"stock-resea
 # 保留 intent_router 需要的 skill→label 映射即可
 # 实际 skill 数据和工具过滤由 DeerFlow 管理
 SKILL_LABELS = {
-    "stock-researcher": "AI 研究员",
-    "risk-officer": "AI 风控官",
-    "strategy-analyst": "AI 策略分析师",
-    "rebalance-planner": "AI 调仓规划师",
-    "stock-monitor": "AI 盯盘员",
-    "report-writer": "AI 报告员",
+    "stock-deep-dive": "AI 研究员",
+    "portfolio-risk-audit": "AI 风控官",
+    "strategy-backtest": "AI 策略分析师",
+    "rebalance-plan": "AI 调仓规划师",
+    "watch-rule-monitor": "AI 盯盘员",
+    "report-render": "AI 报告员",
 }
 ```
 
@@ -218,7 +218,7 @@ SKILL_LABELS = {
 ```python
 # DeerFlow 的 allowed-tools 已经过滤工具，SubagentConfig.tools 设置 None
 STOCK_RESEARCHER = SubagentConfig(
-    name="stock-researcher",
+    name="stock-deep-dive",
     tools=None,  # ← 让 DeerFlow 根据 SKILL.md allowed-tools 自动过滤
 )
 ```
@@ -234,25 +234,25 @@ STOCK_RESEARCHER = SubagentConfig(
    → 6 个 Skill 对象（enabled 状态来自 extensions_config.json）
 
 2. Agent 创建（每次 stream）
-   available_skills = {"stock-researcher", "report-writer"}
+   available_skills = {"stock-deep-dive", "report-render"}
    ↓
    _load_enabled_skills_for_tool_policy()
-   → 加载所有 enabled skills → 按 available_skills 过滤 → [stock-researcher, report-writer]
+   → 加载所有 enabled skills → 按 available_skills 过滤 → [stock-deep-dive, report-render]
    ↓
-   filter_tools_by_skill_allowed_tools(38 tools, [stock-researcher, report-writer])
+   filter_tools_by_skill_allowed_tools(38 tools, [stock-deep-dive, report-render])
    → union(allowed-tools) = {get_stock_context, get_daily_history, search_stock_intel,
                               list_report_templates, generate_report, get_report_quality}
    → Agent 只看到这 6 个工具！其余 32 个不可见
    ↓
    apply_prompt_template()
    → <skills> 段注入:
-       - stock-researcher: 分析个股基本面、技术面和情报...
-         (/mnt/skills/custom/stock-researcher/SKILL.md)
-       - report-writer: 生成结构化分析报告...
-         (/mnt/skills/custom/report-writer/SKILL.md)
+       - stock-deep-dive: 分析个股基本面、技术面和情报...
+         (/mnt/skills/custom/stock-deep-dive/SKILL.md)
+       - report-render: 生成结构化分析报告...
+         (/mnt/skills/custom/report-render/SKILL.md)
 
 3. Agent 运行时
-   需要详细了解研究员工作流 → read_file("/mnt/skills/custom/stock-researcher/SKILL.md")
+   需要详细了解研究员工作流 → read_file("/mnt/skills/custom/stock-deep-dive/SKILL.md")
    → 获得完整指引
 
 4. 长对话摘要时
@@ -273,7 +273,7 @@ find skills -name "SKILL.md" -type f
 # 2. 命名校验
 python -c "
 import re
-for name in ['stock-researcher','risk-officer','strategy-analyst','rebalance-planner','stock-monitor','report-writer']:
+for name in ['stock-deep-dive','portfolio-risk-audit','strategy-backtest','rebalance-plan','watch-rule-monitor','report-render']:
     ok = bool(re.match(r'^[a-z0-9-]+$', name)) and len(name) <= 64
     print(f'{name}: {\"PASS\" if ok else \"FAIL\"}')"
 

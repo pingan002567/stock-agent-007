@@ -28,10 +28,10 @@ AI 角色在产品层表现为 Skills，而不是固定 tab。它们应根据上
 
 | Skill | 中文角色 | 职责 | 当前权限 |
 | --- | --- | --- | --- |
-| `stock-researcher` | AI 研究员 | 单股深研、报告、追问、证据整理 | 开启 |
-| `stock-monitor` | AI 盯盘员 | 控制盯盘策略、开关、事件解释 | 开启 |
-| `risk-officer` | AI 风控官 | 组合风险、仓位规则、集中度诊断 | 开启 |
-| `rebalance-planner` | AI 调仓规划师 | 调仓方案、拟单草案、影响模拟 | 开启但需确认 |
+| `stock-deep-dive` | AI 研究员 | 单股深研、报告、追问、证据整理 | 开启 |
+| `watch-rule-monitor` | AI 盯盘员 | 控制盯盘策略、开关、事件解释 | 开启 |
+| `portfolio-risk-audit` | AI 风控官 | 组合风险、仓位规则、集中度诊断 | 开启 |
+| `rebalance-plan` | AI 调仓规划师 | 调仓方案、拟单草案、影响模拟 | 开启但需确认 |
 | `execution-agent-disabled` | AI 执行代理 | 未来真实执行接口 | V1 关闭 |
 
 ## Skill Trace 与 Team 边界

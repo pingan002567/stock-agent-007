@@ -240,7 +240,7 @@ def test_adapter_embedded_mode_maps_fake_client_stream(monkeypatch):
             async for event in adapter.stream(
                 run_id="run_1",
                 task_id="task_1",
-                skill="risk-officer",
+                skill="portfolio-risk-audit",
                 message="分析 AAPL",
                 context={},
             )
@@ -278,7 +278,7 @@ def test_adapter_sync_stream_is_bridged_without_blocking_event_loop():
             heartbeat.append("tick")
 
         async def consume():
-            async for event in adapter.stream(run_id="run_1", task_id="task_1", skill="risk-officer", message="分析 AAPL", context={}):
+            async for event in adapter.stream(run_id="run_1", task_id="task_1", skill="portfolio-risk-audit", message="分析 AAPL", context={}):
                 collected.append(event)
 
         await asyncio.gather(asyncio.create_task(consume()), asyncio.create_task(ticker()))
@@ -316,7 +316,7 @@ def test_adapter_sync_stream_uses_bounded_async_queue(monkeypatch):
             async for event in adapter.stream(
                 run_id="run_1",
                 task_id="task_1",
-                skill="risk-officer",
+                skill="portfolio-risk-audit",
                 message="分析 AAPL",
                 context={},
             )
@@ -351,7 +351,7 @@ def test_adapter_startup_failure_falls_back_to_stub_once():
             async for event in adapter.stream(
                 run_id="run_1",
                 task_id="task_1",
-                skill="risk-officer",
+                skill="portfolio-risk-audit",
                 message="分析 AAPL",
                 context={"symbol": "AAPL"},
             )
@@ -378,7 +378,7 @@ def test_adapter_mid_stream_failure_returns_error_and_final_without_stub_second_
             async for event in adapter.stream(
                 run_id="run_1",
                 task_id="task_1",
-                skill="risk-officer",
+                skill="portfolio-risk-audit",
                 message="分析 AAPL",
                 context={},
             )

@@ -113,7 +113,7 @@ BASELINE_TOOL_TEST = pytest.param(
         message="分析 AAPL 风险",
         page="holdings",
         symbol="AAPL",
-        expected_skills=["stock-researcher", "risk-officer", "report-writer"],
+        expected_skills=["stock-deep-dive", "portfolio-risk-audit", "report-render"],
         expected_tools=["evaluate_policy_risk"],
         allow_degraded_data=True,
     ),

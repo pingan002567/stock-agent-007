@@ -1,6 +1,6 @@
 ---
-name: report-writer
-description: 用报告模板落库生成结构化报告（个股研究、策略回测、盯盘回顾、值班简报）。板块轮动/催化剂日历组合报告请改用 sector-rotation-report，不要本技能硬套模板。
+name: report-render
+description: 用报告模板落库生成结构化报告（个股研究、策略回测、盯盘回顾、值班简报）。板块轮动/催化剂日历组合报告请改用 sector-rotation-digest，不要本技能硬套模板。
 allowed-tools:
   - list_report_templates
   - generate_report
@@ -14,7 +14,7 @@ allowed-tools:
 
 ## 工作流
 
-0. 若用户要「轮动概览 → 板块深挖 → 催化剂日历」或板块轮动组合报告：停止本流程，在回复中说明应由 `sector-rotation-report` 处理（Lead 应改派），不要 `write_file`
+0. 若用户要「轮动概览 → 板块深挖 → 催化剂日历」或板块轮动组合报告：停止本流程，在回复中说明应由 `sector-rotation-digest` 处理（Lead 应改派），不要 `write_file`
 1. 使用 `list_report_templates` 查看可用报告模板
 2. 使用 `generate_report` 生成报告
   - `stock_research`: 个股研究
@@ -23,7 +23,7 @@ allowed-tools:
   - `ops_briefing`: 值班简报（盘前/收盘/周度）。**由定时任务结束后系统自动落盘，不要为值班任务再调用 generate_report**
 3. 使用 `get_report_quality` 检查报告质量；**evidence_refs 为空或缺免责声明视为不合格，需补全后重生成**
 
-## 个股研究报告应包含（与 stock-researcher 对齐）
+## 个股研究报告应包含（与 stock-deep-dive 对齐）
 - **投资论点**（一句话 + 置信度）
 - **三情景**（乐观/中性/悲观 + 触发条件 + 方向区间/研究目标价）
 - **支撑论据 / 反方论据（bear case）**

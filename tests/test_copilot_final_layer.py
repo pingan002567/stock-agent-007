@@ -318,7 +318,7 @@ def test_copilot_context_builder_redacts_full_holdings_reports_and_tool_args(tmp
         )
     )
     secret_marker = "super-secret-tool-argument"
-    task = services.task_service.create("Secret task", "risk-officer", "testing")
+    task = services.task_service.create("Secret task", "portfolio-risk-audit", "testing")
     services.tool_execution_service.record(
         tool="evaluate_policy_risk",
         domain="risk",

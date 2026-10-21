@@ -67,7 +67,7 @@ SkillRegistry 精简为 label 映射
 ### 需要改动
 | 文件 | 改动 |
 |------|------|
-| `extensions_config.json` | 新建: `{"mcpServers":{}, "skills":{"stock-researcher":{"enabled":true},...}}` |
+| `extensions_config.json` | 新建: `{"mcpServers":{}, "skills":{"stock-deep-dive":{"enabled":true},...}}` |
 | `deerflow_config.py` L114-124 | 加入 `"skills": {"path": "skills", "container_path": "/mnt/skills"}` |
 | `deerflow_client.py` | `DeerFlowClient(available_skills=INTENT_SKILLS[intent])` |
 | `skill_registry.py` | 精简为 SKILL_LABELS 映射表 |
@@ -168,7 +168,7 @@ tool_groups:
 
 ### 目标
 ```json
-{"mcpServers": {}, "skills": {"stock-researcher": {"enabled": true}, ...}}
+{"mcpServers": {}, "skills": {"stock-deep-dive": {"enabled": true}, ...}}
 ```
 
 ### 需要改动

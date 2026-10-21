@@ -84,7 +84,7 @@ SPA
  → Memory / Summarization / Guardrail / Todo / Clarification
  → Lead Agent
       ├─ 直接调 Workbench 域工具
-      └─ task(stock-researcher | risk-officer | …)
+      └─ task(stock-deep-dive | portfolio-risk-audit | …)
  → adapter 映射 SSE → 投影 SQLite → UI
 ```
 
@@ -125,7 +125,7 @@ Lead Agent **不得**看到：`envelope_version`、intent 名、预生成 skill_
 | IntentRouter | SKILL.md `description` + Lead Agent | 技能描述写触发场景；模型选技能或直接调工具 |
 | 「买入」拦截 | guardrails `denied_tools` + SOUL.md | 已拒绝 `place_real_order` / `confirm_rebalance_draft`。确认草案继续只走 HTTP |
 | INTENT_BUDGETS 白名单 | 全部 custom_agents 对 Lead 可见 | 简单问题靠 description 约束零委派，不靠 Python 白名单 |
-| required `risk-officer` | `rebalance-planner/SKILL.md` | 「收口前必须 task(risk-officer)」 |
+| required `portfolio-risk-audit` | `rebalance-plan/SKILL.md` | 「收口前必须 task(portfolio-risk-audit)」 |
 | 预声明 skill_trace | 仅 `task()` 流事件 | 前端已忽略纯 available 链（`CopilotFinalMeta` OBSERVED 集合）；P0 停发预算 SSE |
 | skill_specs.system_prompt | SKILL.md 正文 | 删 Python 里 `_RESEARCHER` 等字符串 |
 | SkillRegistry 启停 | `extensions_config.json` | 设置页已写该文件 |
@@ -152,8 +152,8 @@ Lead Agent **不得**看到：`envelope_version`、intent 名、预生成 skill_
 - 身份：Stock Agent 个人投研助手；禁止自称 DeerFlow。
 - 研究-only：不下真实单；草案须用户在页面确认。
 - 简单问题：直接调域工具回答，禁止为查一个 PE 而 `task()`。
-- 深度研究：可并行委派 researcher / valuation / catalyst；报告用 report-writer。
-- 调仓 / 交易前审查：收口前必须委派 risk-officer，并将其结论写入最终回答。
+- 深度研究：可并行委派 researcher / valuation / catalyst；报告用 report-render。
+- 调仓 / 交易前审查：收口前必须委派 portfolio-risk-audit，并将其结论写入最终回答。
 - 安全：不要求完整持仓明细、不泄露路径/密钥/env。
 - 引用：数字必须带来源；降级须说明。
 - 免责声明：仅供研究，不构成投资建议（每轮 final 由模型写，不由 Python 补）。
@@ -161,7 +161,7 @@ Lead Agent **不得**看到：`envelope_version`、intent 名、预生成 skill_
 ### 4.2 SKILL.md 必须改的三处
 
 1. **所有技能 `description`**：写清「何时该委派我 / 何时 Lead 自己干就行」。例如 researcher：仅在用户要深度研究、多情景、正反方时委派；单指标查询不要委派。
-2. **`rebalance-planner`、涉及拟单的技能**：正文增加「收口前必须 `task(risk-officer)`」。这替换 `INTENT_BUDGETS.required_skills`。
+2. **`rebalance-plan`、涉及拟单的技能**：正文增加「收口前必须 `task(portfolio-risk-audit)`」。这替换 `INTENT_BUDGETS.required_skills`。
 3. **Python `system_prompt` 迁入正文**：`skill_specs.py` 里 `_RESEARCHER` 等与 SKILL.md 已部分重复。P2 以 SKILL.md 为准做一次合并（保留反方纪律、市场结构必调、引用格式），然后删除 Python 副本。
 
 `custom_agents.system_prompt` 改为 SKILL.md 全文或「角色+工作流」节，由生成器从 markdown 读取，不再从 `WorkbenchSkill.system_prompt` 读取。
@@ -222,7 +222,7 @@ Lead Agent **不得**看到：`envelope_version`、intent 名、预生成 skill_
 测试：
 
 - 改 `tests/test_copilot_final_layer.py`：首事件不再必须是 `skill_trace`。
-- 改 `tests/test_api.py` / `test_services.py` 中「预声明 trace 含 report-writer / execution-agent-disabled」类断言 → 改为「无预声明」或「仅 observed」。
+- 改 `tests/test_api.py` / `test_services.py` 中「预声明 trace 含 report-render / execution-agent-disabled」类断言 → 改为「无预声明」或「仅 observed」。
 - 新增：stub/direct 下「茅台市盈率」类短问题不得出现 `tool=task`（P0 在 stub 里用夹具模拟；真实模型作为手工验收）。
 - 修 `test_turn_upload_files_marked_on_envelope_human_message`。
 
@@ -268,7 +268,7 @@ Lead Agent **不得**看到：`envelope_version`、intent 名、预生成 skill_
 - 删除 `INTENT_BUDGETS`、`intent_budget*`、`subagent_intent_enabled`、`plan_mode_intent_enabled`。
 - `SkillRegistry` 缩成读 `extensions_config.json` + SKILL.md 列表；或直接删，启停只走 extensions_store。
 - `execution-agent-disabled` 占位行删除；UI 不再展示一条 blocked 执行代理。真下单拒绝靠 guardrail 即可。
-- `rebalance-planner/SKILL.md` 写入必跑 risk-officer。
+- `rebalance-plan/SKILL.md` 写入必跑 portfolio-risk-audit。
 - 更新 `doc/STACK_DECISIONS.md` §1：删除「必须 envelope」「subagent 锁定 False」。
 - 更新 `doc/README.md` 原则 6、7、9（skill_trace 改为 observed；prompt 改为原文 + 动态上下文）。
 
@@ -327,7 +327,7 @@ Lead Agent **不得**看到：`envelope_version`、intent 名、预生成 skill_
 |---|---|
 | 单元 | SKILL.md 解析与 custom_agents 生成；uploads 标记；guardrail 拒绝名单；tool_groups 随 authority 过滤；mapper 回放过滤 |
 | 集成（stub） | 无预声明 skill_trace；create_run 无 intent 字段依赖；投影落库；A2 不能出草案工具 |
-| 集成（direct，手工/可选 CI） | 短问零 task；深研有 task；调仓路径出现 risk-officer 委派；澄清卡；多轮草案查询 |
+| 集成（direct，手工/可选 CI） | 短问零 task；深研有 task；调仓路径出现 portfolio-risk-audit 委派；澄清卡；多轮草案查询 |
 | 前端 | SkillTraceChain 仅 OBSERVED；缺 confidence 不显示假徽章；plan todos 仍渲染 |
 | 明确放弃 | `test_intent_router.py` 行为断言；「execution-agent-disabled 出现在 trace 末尾」 |
 
@@ -340,7 +340,7 @@ Lead Agent **不得**看到：`envelope_version`、intent 名、预生成 skill_
 1. 总览闲聊：「你是谁」→ 自称 Stock Agent，不提 DeerFlow。
 2. 个股页锚定 600519：「现在市盈率多少」→ 零或一次域工具，无子代理卡。
 3. 「全面研究 600519，给正反方」→ 可见 researcher（及可选 valuation/catalyst）task 卡，有反方。
-4. 持仓页：「给我调仓草案」→ 有 risk-officer 委派或明确风控结论，草案 pending，页面确认仍走 HTTP。
+4. 持仓页：「给我调仓草案」→ 有 portfolio-risk-audit 委派或明确风控结论，草案 pending，页面确认仍走 HTTP。
 5. 「买入茅台」→ 不下单，说明研究-only。
 6. 上传一段研报 PDF：「摘要要点」→ 读上传文件，不四向澄清。
 7. 多轮：出草案后追问「那张草案风险点」→ 能指到草案，不要求用户再贴 ID（工具 list/get）。
@@ -353,7 +353,7 @@ Lead Agent **不得**看到：`envelope_version`、intent 名、预生成 skill_
 | 失败 | 表现 | 处理 |
 |---|---|---|
 | 简单问题仍狂委派 | 查 PE 也拉四个子代理 | 改 SKILL.md description + SOUL「零委派」；加一条可选回归（task 次数）。不加 IntentRouter |
-| 调仓漏风控 | 只有 planner 没有 risk-officer | SKILL.md 必跑句 + 抽查黄金路径 4；可在投影层打 metric，**不要**把 required_skills 表加回 Python |
+| 调仓漏风控 | 只有 planner 没有 portfolio-risk-audit | SKILL.md 必跑句 + 抽查黄金路径 4；可在投影层打 metric，**不要**把 required_skills 表加回 Python |
 | 持仓页不问组合就答 | 没调 get_portfolio_snapshot | DynamicContext 写明「在 holdings 页先考虑组合工具」 |
 | 上传回归 | envelope 标记删除后澄清风暴 | P0 必改 HumanMessage files 标记 |
 | 前端仍等首包 skill_trace | 加载态挂起 | 确认 `useCopilotChat` 不依赖首事件类型 |

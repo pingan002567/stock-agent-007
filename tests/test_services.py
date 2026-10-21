@@ -82,7 +82,7 @@ def test_risk_policy_service_seeds_default_active_policy(services):
 
 def test_research_task_creates_report_and_audit(services):
     context = services.context_builder.build_stock_context("600519")
-    task = services.task_service.create("600519 深研", "stock-researcher", "read_quote")
+    task = services.task_service.create("600519 深研", "stock-deep-dive", "read_quote")
     report = services.report_service.create_stock_report(context)
     services.audit_service.record("stock research created", f"{task.task_id} {report.report_id}")
     assert services.repo.get_task(task.task_id).status == "running"
@@ -1126,7 +1126,7 @@ def test_delegation_observation_and_required_skill_compliance(services):
                 "type": "ai", "id": "m1", "content": "",
                 "tool_calls": [{
                     "name": "task", "id": "call_1",
-                    "args": {"subagent_type": "rebalance-planner", "description": "拟单"},
+                    "args": {"subagent_type": "rebalance-plan", "description": "拟单"},
                 }],
             })
             yield ("messages-tuple", {
@@ -1156,8 +1156,8 @@ def test_delegation_observation_and_required_skill_compliance(services):
     final = events[-1]
     assert final.type == "final"
     trace = {item["skill"]: item["status"] for item in final.payload["skill_trace"]}
-    assert trace["rebalance-planner"] == "done"
-    assert "risk-officer" not in trace
+    assert trace["rebalance-plan"] == "done"
+    assert "portfolio-risk-audit" not in trace
     assert "budget_compliance" not in final.payload
 
 
@@ -1169,14 +1169,14 @@ def test_serialize_tool_call_persists_task_meta(services):
             "tool": "task",
             "call_id": "call_x",
             "arguments": {
-                "subagent_type": "risk-officer",
+                "subagent_type": "portfolio-risk-audit",
                 "description": "评估组合风险",
                 "prompt": "分析当前持仓集中度与最大回撤",
             },
         },
     )
     assert kind == "tool_call"
-    assert data["task_meta"]["subagent_type"] == "risk-officer"
+    assert data["task_meta"]["subagent_type"] == "portfolio-risk-audit"
     assert data["task_meta"]["description"] == "评估组合风险"
     assert "集中度" in data["task_meta"]["prompt"]
 

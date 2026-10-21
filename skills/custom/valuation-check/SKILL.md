@@ -1,5 +1,5 @@
 ---
-name: valuation-analyst
+name: valuation-check
 description: 基于财务报表做估值与财务健康分析（盈利能力、偿债能力、估值倍数、多期趋势）。适用场景：评估个股财务质量与相对估值。触发词：估值、财报、市盈率、财务、贵不贵。
 allowed-tools:
   - get_stock_financial

@@ -125,7 +125,7 @@ Session（一个 Chat）
      thread_id = run_4（全新）
      context = { turn_summary: turn_summary_3, session_state, domain_ctx }
      模型看到: "上轮是闲聊, 当前无待处理"
-     output → 正常调用 stock-researcher 工具 ✅（不级联 rebalance 工具）
+     output → 正常调用 stock-deep-dive 工具 ✅（不级联 rebalance 工具）
 ```
 
 ### 4.2 第 1 层：Run Context（单次执行的上下文，不跨轮继承）

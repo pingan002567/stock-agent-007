@@ -35,31 +35,31 @@
   1. `stock_domain/industry_tools.py`（新模块，走 provider_router 缓存）
   2. `tool_bridge.py`：注册 handler + ToolSpec（A2 / domain=industry / 只读）
   3. `agent_runtime/tools.py`：`IndustryContextInput` + `_tool` 定义
-  4. `skill_specs`/SKILL.md：stock-researcher、valuation-analyst 的 allowed-tools 加入
+  4. `skill_specs`/SKILL.md：stock-deep-dive、valuation-check 的 allowed-tools 加入
   5. 前端 TOOL_LABELS：`get_industry_context: "行业格局"`
 - **验收**：bridge 单测（含降级：行业查不到时返回明确 degraded 标记）；真实模型问"茅台在白酒行业什么位置"能调用并引用数字
 - **工作量**：中（1 天）
 - **依赖**：P0-A
 
-### P0-C stock-researcher 提示词升级（竞争格局一节）
+### P0-C stock-deep-dive 提示词升级（竞争格局一节）
 
 - **交付物**：SKILL.md 输出框架新增第 5 节「竞争格局」：
   - 行业地位（调 `get_industry_context`，硬数据）
   - 壁垒/护城河（web_search / 已上传研报，**必须标注来源与可信度**）
   - 上下游依赖（同上；查不到就明确写"数据不足"，禁止凭训练知识编造现状）
 - **引用纪律扩展**：web 来源标 `[来源: web · 域名 · 日期]`，训练知识推断必须标「推断·未验证」
-- **改动面**：仅 `skills/custom/stock-researcher/SKILL.md`（+valuation-analyst 顺带）
+- **改动面**：仅 `skills/custom/stock-deep-dive/SKILL.md`（+valuation-check 顺带）
 - **验收**：AI 回归标记用例：报告含竞争格局节且每条有来源标注或「数据不足」声明
 - **工作量**：小（2 小时）
 - **依赖**：P0-B（无工具时该节只能全靠 web，质量差）
 
-### P1-D valuation-analyst 行业相对估值
+### P1-D valuation-check 行业相对估值
 
 - **交付物**：估值结论从绝对倍数升级为"相对行业分位"（如 PE 处于行业 35 分位）
 - **改动面**：SKILL.md 工作流引用 `get_industry_context` 的行业中位数数据
 - **工作量**：小 · **依赖**：P0-B
 
-### P1-E report-writer 模板加行业节
+### P1-E report-render 模板加行业节
 
 - **交付物**：报告模板含「行业与竞争格局」章节，质量检查项加"行业数据是否有来源"
 - **改动面**：report 模板注册表 + 质量检查规则

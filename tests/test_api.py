@@ -3007,7 +3007,7 @@ def test_settings_profiles_and_tools_round_trip(tmp_path):
             {
                 "name": "测试 Profile",
                 "default_model": "gpt-5.4",
-                "skills": ["stock-researcher"],
+                "skills": ["stock-deep-dive"],
             }
         ]
     }

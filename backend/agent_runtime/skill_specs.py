@@ -71,40 +71,40 @@ class WorkbenchSkill:
 
 
 WORKBENCH_SKILLS: dict[str, WorkbenchSkill] = {
-    "stock-researcher": WorkbenchSkill(
+    "stock-deep-dive": WorkbenchSkill(
         label="AI 研究员",
         authority="A2",
         max_turns=50,
         timeout_seconds=600,
     ),
-    "valuation-analyst": WorkbenchSkill(
+    "valuation-check": WorkbenchSkill(
         label="AI 估值分析师",
         authority="A2",
         max_turns=40,
         timeout_seconds=600,
     ),
-    "catalyst-tracker": WorkbenchSkill(
+    "catalyst-scan": WorkbenchSkill(
         label="AI 催化剂追踪",
         authority="A2",
         max_turns=30,
         timeout_seconds=300,
     ),
-    "risk-officer": WorkbenchSkill(
+    "portfolio-risk-audit": WorkbenchSkill(
         label="AI 风控官", authority="A3", max_turns=30, timeout_seconds=300,
     ),
-    "strategy-analyst": WorkbenchSkill(
+    "strategy-backtest": WorkbenchSkill(
         label="AI 策略分析师", authority="A3", max_turns=30, timeout_seconds=600,
     ),
-    "rebalance-planner": WorkbenchSkill(
+    "rebalance-plan": WorkbenchSkill(
         label="AI 调仓规划师", authority="A4", max_turns=40, timeout_seconds=600,
     ),
-    "stock-monitor": WorkbenchSkill(
+    "watch-rule-monitor": WorkbenchSkill(
         label="AI 盯盘员", authority="A2", max_turns=20, timeout_seconds=300,
     ),
-    "report-writer": WorkbenchSkill(
+    "report-render": WorkbenchSkill(
         label="AI 报告员", authority="A2", max_turns=20, timeout_seconds=300,
     ),
-    "sector-rotation-report": WorkbenchSkill(
+    "sector-rotation-digest": WorkbenchSkill(
         label="AI 板块轮动报告",
         authority="A2",
         max_turns=40,

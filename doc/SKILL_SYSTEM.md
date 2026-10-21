@@ -80,17 +80,48 @@ allowed-tools:
 
 ---
 
+## 2.5 命名规范：id 功能化，职业名留给 label
+
+`name`（目录名 / frontmatter / `subagent_type`）**必须是功能 id**；
+职业称谓只出现在 `label`（UI）和 SKILL.md 正文的「角色」段落里。
+
+理由：
+
+- **`name` 是路由键**：Lead 选 `task(subagent_type=…)`，问的是"这件事该干什么"，
+  功能名自带触发信号（`valuation-check` vs `valuation-analyst`）。
+- **职业名必然过 claim**：旧名 `stock-researcher` 听起来"任何股票研究都归我"，
+  逼得 description 里要写"单指标/现价/PE 查询不要委派"这种补丁；
+  `report-writer` 与板块轮动报告重叠，也要写"不要本技能硬套模板"。
+- **人格不会丢**：每个 SKILL.md 的「角色」段落 + `label` 都是职业称谓，
+  改名不动人设。
+
+| 旧名（职业） | 新名（功能） | label（职业，不变） |
+|---|---|---|
+| stock-researcher | `stock-deep-dive` | AI 研究员 |
+| valuation-analyst | `valuation-check` | AI 估值分析师 |
+| catalyst-tracker | `catalyst-scan` | AI 催化剂追踪 |
+| risk-officer | `portfolio-risk-audit` | AI 风控官 |
+| strategy-analyst | `strategy-backtest` | AI 策略分析师 |
+| rebalance-planner | `rebalance-plan` | AI 调仓规划师 |
+| stock-monitor | `watch-rule-monitor` | AI 盯盘员 |
+| report-writer | `report-render` | AI 报告员 |
+| sector-rotation-report | `sector-rotation-digest` | AI 板块轮动报告 |
+
+新增技能时按此约定：`name` 用「对象-动作」，`label` 用职业称谓。
+
+---
+
 ## 3. 你的 SkillRegistry 现状
 
 ```python
 # 当前 6 个 Skill，纯声明式元数据
 DEFAULT_SKILLS = {
-    "stock-researcher":  SkillSpec("stock-researcher", "AI 研究员", ["quote", "history", "intel", "report"]),
-    "stock-monitor":     SkillSpec("stock-monitor", "AI 盯盘员", ["quote", "intel", "monitor_event"]),
-    "risk-officer":      SkillSpec("risk-officer", "AI 风控官", ["portfolio", "risk", "audit", "review_inbox"]),
-    "strategy-analyst":  SkillSpec("strategy-analyst", "AI 策略分析师", ["list_strategies", "run_strategy_backtest", ...]),
-    "rebalance-planner": SkillSpec("rebalance-planner", "AI 调仓规划师", ["portfolio", "risk", "draft_order"]),
-    "report-writer":     SkillSpec("report-writer", "AI 报告员", ["report", "history", "audit"]),
+    "stock-deep-dive":  SkillSpec("stock-deep-dive", "AI 研究员", ["quote", "history", "intel", "report"]),
+    "watch-rule-monitor":     SkillSpec("watch-rule-monitor", "AI 盯盘员", ["quote", "intel", "monitor_event"]),
+    "portfolio-risk-audit":      SkillSpec("portfolio-risk-audit", "AI 风控官", ["portfolio", "risk", "audit", "review_inbox"]),
+    "strategy-backtest":  SkillSpec("strategy-backtest", "AI 策略分析师", ["list_strategies", "run_strategy_backtest", ...]),
+    "rebalance-plan": SkillSpec("rebalance-plan", "AI 调仓规划师", ["portfolio", "risk", "draft_order"]),
+    "report-render":     SkillSpec("report-render", "AI 报告员", ["report", "history", "audit"]),
 }
 ```
 
@@ -125,7 +156,7 @@ SkillRegistry  →  intent_router  →  skill_plan
 #   - disallowed_tools（禁止的工具）
 
 STOCK_RESEARCHER = SubagentConfig(
-    name="stock-researcher",
+    name="stock-deep-dive",
     description="分析个股基本面、技术面和情报",
     system_prompt="""你是 AI 股票研究员...""",
     tools=["get_stock_context", "get_daily_history", "search_stock_intel"],
@@ -139,14 +170,14 @@ STOCK_RESEARCHER = SubagentConfig(
 # 按 intent 决定可见的 skill 范围
 # 简单 intent: 只开放对应 skill
 INTENT_SKILLS = {
-    "stock_research":  {"stock-researcher", "report-writer"},
-    "strategy_backtest": {"strategy-analyst", "report-writer"},
-    "rebalance_plan":  {"stock-researcher", "risk-officer", "rebalance-planner", "report-writer"},
+    "stock_research":  {"stock-deep-dive", "report-render"},
+    "strategy_backtest": {"strategy-backtest", "report-render"},
+    "rebalance_plan":  {"stock-deep-dive", "portfolio-risk-audit", "rebalance-plan", "report-render"},
 }
 
 # 传入 DeerFlowClient
 client = DeerFlowClient(
-    available_skills=INTENT_SKILLS.get(intent_name, {"stock-researcher"}),
+    available_skills=INTENT_SKILLS.get(intent_name, {"stock-deep-dive"}),
 )
 ```
 

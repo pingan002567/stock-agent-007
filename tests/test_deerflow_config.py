@@ -76,21 +76,21 @@ def test_product_skills_are_seeded_into_deerflow_user_custom_dir(tmp_path, monke
     ensure_user_custom_skills()
 
     dest = paths_mod.get_paths().user_custom_skills_dir(DEFAULT_USER_ID)
-    assert (dest / "stock-researcher" / "SKILL.md").is_file()
-    assert skill_md_path("stock-researcher") == dest / "stock-researcher" / "SKILL.md"
+    assert (dest / "stock-deep-dive" / "SKILL.md").is_file()
+    assert skill_md_path("stock-deep-dive") == dest / "stock-deep-dive" / "SKILL.md"
 
     # Product skills re-sync from seed when content drifts (allowed-tools updates).
-    edited = dest / "stock-researcher" / "SKILL.md"
-    seed_text = (REPO_ROOT / "skills" / "custom" / "stock-researcher" / "SKILL.md").read_text(
+    edited = dest / "stock-deep-dive" / "SKILL.md"
+    seed_text = (REPO_ROOT / "skills" / "custom" / "stock-deep-dive" / "SKILL.md").read_text(
         encoding="utf-8"
     )
     edited.write_text(seed_text + "\n<!-- user edit -->\n", encoding="utf-8")
     ensure_user_custom_skills()
     assert "user edit" not in edited.read_text(encoding="utf-8")
-    assert "create_risk_policy" in (dest / "risk-officer" / "SKILL.md").read_text(encoding="utf-8")
+    assert "create_risk_policy" in (dest / "portfolio-risk-audit" / "SKILL.md").read_text(encoding="utf-8")
 
     storage = UserScopedSkillStorage(DEFAULT_USER_ID, host_path=str(REPO_ROOT / "skills"))
-    storage.ensure_custom_skill_is_editable("stock-researcher")
+    storage.ensure_custom_skill_is_editable("stock-deep-dive")
     (dest / "notes-only").mkdir()
     (dest / "notes-only" / "SKILL.md").write_text(
         "---\nname: notes-only\ndescription: scratch\n---\nbody\n",
@@ -99,9 +99,9 @@ def test_product_skills_are_seeded_into_deerflow_user_custom_dir(tmp_path, monke
     ensure_user_custom_skills()
     assert "scratch" in (dest / "notes-only" / "SKILL.md").read_text(encoding="utf-8")
     names = {skill.name for skill in storage.load_skills()}
-    assert "stock-researcher" in names
+    assert "stock-deep-dive" in names
     assert "notes-only" in names
-    assert "sector-rotation-report" in names
+    assert "sector-rotation-digest" in names
 
 
 def test_patch_skill_policy_builtins_keeps_task_and_web_search():

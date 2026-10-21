@@ -1,5 +1,5 @@
 ---
-name: strategy-analyst
+name: strategy-backtest
 description: 运行策略回测并分析结果，含稳健性、基准对比与过拟合警示。适用场景：评估策略历史表现、比较策略、分析回测指标。
 allowed-tools:
   - list_strategies

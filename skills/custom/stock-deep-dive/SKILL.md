@@ -1,5 +1,5 @@
 ---
-name: stock-researcher
+name: stock-deep-dive
 description: 仅在用户要深度研究（投资论点、三情景、正反方、引用）时委派。单指标/现价/PE 查询不要委派，由 Lead 直接调 get_stock_context。触发词：深度研究、全面分析、基本面、技术面、行业地位。
 allowed-tools:
   - get_stock_context

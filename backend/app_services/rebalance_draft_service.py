@@ -156,7 +156,7 @@ class RebalanceDraftService:
         summary = DecisionContext(
             decision_id=draft.decision_id,
             subject={"type": "holding", "symbol": draft.symbol, "name": draft.name},
-            skill="rebalance-planner",
+            skill="rebalance-plan",
             conclusion=draft.conclusion,
             confidence=draft.confidence,
             reasons=list(draft.reasons),

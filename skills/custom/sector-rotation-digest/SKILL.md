@@ -1,5 +1,5 @@
 ---
-name: sector-rotation-report
+name: sector-rotation-digest
 description: 输出「轮动概览 → 重点板块深挖 → 催化剂日历」组合报告。适用场景：板块轮动、行业热度、多板块对比、事件日历。触发词：轮动、板块深挖、催化剂日历、组合报告、行业轮动。禁止为落盘写文件；一次性在对话内交卷。
 allowed-tools:
   - get_industry_context

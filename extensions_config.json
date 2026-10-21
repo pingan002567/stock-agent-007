@@ -1,31 +1,31 @@
 {
   "mcpServers": {},
   "skills": {
-    "stock-researcher": {
+    "stock-deep-dive": {
       "enabled": true
     },
-    "risk-officer": {
+    "portfolio-risk-audit": {
       "enabled": true
     },
-    "strategy-analyst": {
+    "strategy-backtest": {
       "enabled": true
     },
-    "rebalance-planner": {
+    "rebalance-plan": {
       "enabled": true
     },
-    "stock-monitor": {
+    "watch-rule-monitor": {
       "enabled": true
     },
-    "report-writer": {
+    "report-render": {
       "enabled": true
     },
-    "valuation-analyst": {
+    "valuation-check": {
       "enabled": true
     },
-    "catalyst-tracker": {
+    "catalyst-scan": {
       "enabled": true
     },
-    "sector-rotation-report": {
+    "sector-rotation-digest": {
       "enabled": true
     },
     "worldcup-predictor": {

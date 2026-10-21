@@ -1964,14 +1964,14 @@ class CopilotService:
 
     def _skill_purpose(self, skill_name: str) -> str:
         purposes = {
-            "stock-researcher": "读取个股上下文、行情、历史和情报证据",
-            "valuation-analyst": "基于财报做盈利/偿债/估值倍数与财务健康分析",
-            "catalyst-tracker": "从情报/公告提炼带时点的事件驱动催化剂",
-            "stock-monitor": "解释盯盘事件和规则触发原因",
-            "risk-officer": "评估持仓集中度和组合风险",
-            "strategy-analyst": "读取策略库并执行只读回测，输出策略快照和研究结论",
-            "rebalance-planner": "生成调仓方案和拟单草案，不执行真实交易",
-            "report-writer": "汇总结论、证据、反对理由和风险提示",
+            "stock-deep-dive": "读取个股上下文、行情、历史和情报证据",
+            "valuation-check": "基于财报做盈利/偿债/估值倍数与财务健康分析",
+            "catalyst-scan": "从情报/公告提炼带时点的事件驱动催化剂",
+            "watch-rule-monitor": "解释盯盘事件和规则触发原因",
+            "portfolio-risk-audit": "评估持仓集中度和组合风险",
+            "strategy-backtest": "读取策略库并执行只读回测，输出策略快照和研究结论",
+            "rebalance-plan": "生成调仓方案和拟单草案，不执行真实交易",
+            "report-render": "汇总结论、证据、反对理由和风险提示",
             "execution-agent-disabled": "V1 真实交易执行关闭，仅保留阻断占位",
         }
         # Fall back to the skill's label so newly-added skills never KeyError here.
@@ -1993,11 +1993,11 @@ class CopilotService:
             for item in (tool_call_events or [])
         }
         observed = {str(item.get("skill") or "") for item in skill_trace}
-        if "risk-officer" in observed or "evaluate_policy_risk" in tools:
+        if "portfolio-risk-audit" in observed or "evaluate_policy_risk" in tools:
             refs.append("portfolio_risk")
-        if "strategy-analyst" in observed or "run_strategy_backtest" in tools:
+        if "strategy-backtest" in observed or "run_strategy_backtest" in tools:
             refs.extend(["strategy_spec", "backtest_run", "research_only"])
-        if "rebalance-planner" in observed or "generate_draft_order" in tools:
+        if "rebalance-plan" in observed or "generate_draft_order" in tools:
             refs.extend(
                 [
                     "draft_order_guard:auto_trade_false",

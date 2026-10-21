@@ -91,7 +91,7 @@ SYNC_STREAM_QUEUE_MAXSIZE = 64
 # Both overridable via env for ops without a code change.
 _DEFAULT_RECURSION_LIMIT = 100
 # Nested task()/skill graphs burn LangGraph super-steps quickly on multi-section
-# reports. sector-rotation-report keeps tool budgets low; 320 is the safety ceiling.
+# reports. sector-rotation-digest keeps tool budgets low; 320 is the safety ceiling.
 _SUBAGENT_RECURSION_LIMIT = 320
 
 
@@ -1257,36 +1257,36 @@ class DeerFlowClientAdapter:
             return any(word in message for word in words)
 
         if message.startswith("[定时任务·") or "你是值班研究员" in message:
-            return "risk-officer"
+            return "portfolio-risk-audit"
         if self._wants_review_inbox(message) or self._wants_decision_journal_review(message):
-            return "risk-officer"
+            return "portfolio-risk-audit"
         if (
             ("paper" in lower and has("复盘", "调仓效果", "绩效归因"))
             or "paper portfolio" in lower
             or ("sandbox" in lower and has("复盘", "绩效"))
         ):
-            return "risk-officer"
+            return "portfolio-risk-audit"
         if (
             has("轮动", "板块深挖", "催化剂日历", "行业轮动", "板块轮动")
             or ("组合报告" in message and has("板块", "轮动", "催化剂"))
             or "轮动概览" in message
         ):
-            return "sector-rotation-report"
+            return "sector-rotation-digest"
         if has("报告", "复盘", "总结", "简报", "盘前") or "report" in lower:
-            return "report-writer"
+            return "report-render"
         if has("回测", "策略") or any(word in lower for word in ("backtest", "strategy")):
-            return "strategy-analyst"
+            return "strategy-backtest"
         if has("调仓", "拟单", "仓位"):
-            return "rebalance-planner"
+            return "rebalance-plan"
         if has("风险", "风控", "集中度"):
-            return "risk-officer"
+            return "portfolio-risk-audit"
         if has("盯盘", "异动", "提醒"):
-            return "stock-monitor"
+            return "watch-rule-monitor"
         if has("研究", "深研", "分析") or "research" in lower:
-            return "stock-researcher"
+            return "stock-deep-dive"
         if page == "holdings":
-            return "risk-officer"
-        return "stock-researcher"
+            return "portfolio-risk-audit"
+        return "stock-deep-dive"
 
     def _stub_tool_for_skill(
         self, skill: str, message: str, context: Dict[str, Any]
@@ -1295,7 +1295,7 @@ class DeerFlowClientAdapter:
             return "get_portfolio_snapshot", {}, AuthorityLevel.A3
         symbol = self._message_symbol(message, context)
         lower = message.lower()
-        if skill == "strategy-analyst":
+        if skill == "strategy-backtest":
             return (
                 "run_strategy_backtest",
                 {
@@ -1305,7 +1305,7 @@ class DeerFlowClientAdapter:
                 },
                 AuthorityLevel.A3,
             )
-        if skill == "rebalance-planner":
+        if skill == "rebalance-plan":
             if (
                 ("确认" in message and "草案" in message and "审查" not in message)
                 or any(word in message for word in ["approve", "批准"])
@@ -1358,7 +1358,7 @@ class DeerFlowClientAdapter:
                 {"symbol": symbol, "target_weight_pct": 15},
                 AuthorityLevel.A4,
             )
-        if skill == "risk-officer":
+        if skill == "portfolio-risk-audit":
             if self._wants_review_inbox(message):
                 if "高优先级" in message:
                     return (
@@ -1406,9 +1406,9 @@ class DeerFlowClientAdapter:
             ):
                 return "analyze_paper_performance", {}, AuthorityLevel.A3
             return "evaluate_policy_risk", {}, AuthorityLevel.A3
-        if skill == "stock-monitor":
+        if skill == "watch-rule-monitor":
             return "get_monitor_events", {"limit": 5}, AuthorityLevel.A2
-        if skill == "report-writer":
+        if skill == "report-render":
             return (
                 "generate_report",
                 self._stub_report_arguments(message, context),

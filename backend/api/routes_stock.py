@@ -125,7 +125,7 @@ def create_research(symbol: str, request: Request, services: AppServices = Depen
         }
     
     # 创建新任务
-    task = services.task_service.create(f"{context.symbol} 深研", "stock-researcher", "read_quote_and_intel")
+    task = services.task_service.create(f"{context.symbol} 深研", "stock-deep-dive", "read_quote_and_intel")
     report = services.report_service.generate(
         ReportGenerateRequest(
             report_type="stock_research",

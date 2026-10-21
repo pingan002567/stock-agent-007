@@ -12,7 +12,7 @@
 用户消息 → IntentRouter → SkillRegistry → 产出 Skill Trace
                                    │
         ┌──────────────────────────┘
-        │  plan: stock_research → [stock-researcher, report-writer]
+        │  plan: stock_research → [stock-deep-dive, report-render]
         │  但这些 skill 只是元数据标签，实际执行只有 1 个 lead agent
         ▼
    Lead Agent（唯一执行者）
@@ -23,8 +23,8 @@
 
 ```python
 # 当前只是元数据
-"stock-researcher":  SkillSpec("stock-researcher", "AI 研究员", ["quote", "history", "intel"])
-"risk-officer":      SkillSpec("risk-officer", "AI 风控官", ["portfolio", "risk", "audit"])
+"stock-deep-dive":  SkillSpec("stock-deep-dive", "AI 研究员", ["quote", "history", "intel"])
+"portfolio-risk-audit":      SkillSpec("portfolio-risk-audit", "AI 风控官", ["portfolio", "risk", "audit"])
 # ...它们不会真的分离执行
 ```
 
@@ -54,7 +54,7 @@ Lead Agent 调用 task() 工具
 
 ```python
 SubagentConfig(
-    name="stock-researcher",         # 名称
+    name="stock-deep-dive",         # 名称
     description="分析个股基本面...",   # Lead Agent 看到的使用说明
     system_prompt="你是股票研究员...", # 角色提示词
     tools=["get_stock_context",      # 工具白名单（仅 A2 工具）
@@ -91,28 +91,28 @@ SubagentConfig(
 │                                                              │
 │  收到: "全面评估 AAPL 并生成调仓建议"                           │
 │                                                              │
-│  调用 task("stock-researcher", "分析 AAPL 基本面和技术面")      │
-│  调用 task("risk-officer", "评估当前持仓风险")                 │
-│  调用 task("strategy-analyst", "运行回测")  ← 如果有           │
+│  调用 task("stock-deep-dive", "分析 AAPL 基本面和技术面")      │
+│  调用 task("portfolio-risk-audit", "评估当前持仓风险")                 │
+│  调用 task("strategy-backtest", "运行回测")  ← 如果有           │
 │                                                              │
-│  等待 3 个 Subagent 完成 → 汇总 → 调用 report-writer 生成报告   │
+│  等待 3 个 Subagent 完成 → 汇总 → 调用 report-render 生成报告   │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  Layer 3: Subagents（执行层）                                 │
 │                                                              │
-│  Subagent "stock-researcher":                                │
+│  Subagent "stock-deep-dive":                                │
 │    工具: get_stock_context, get_daily_history, search_intel   │
 │    system_prompt: "你是股票研究员，聚焦基本面分析..."            │
 │    → 返回结构化结果 {基本面:..., 技术面:..., 风险:...}          │
 │                                                              │
-│  Subagent "risk-officer":                                    │
+│  Subagent "portfolio-risk-audit":                                    │
 │    工具: get_portfolio_snapshot, evaluate_policy_risk          │
 │    system_prompt: "你是风控官，聚焦风险指标..."                  │
 │    → 返回 {集中度:..., 行业风险:..., 建议:...}                  │
 │                                                              │
-│  Subagent "strategy-analyst":                                │
+│  Subagent "strategy-backtest":                                │
 │    工具: run_strategy_backtest                                │
 │    → 返回 {回测结果:..., 信号:...}                             │
 └─────────────────────────────────────────────────────────────┘
@@ -128,7 +128,7 @@ SubagentConfig(
 from deerflow.subagents.config import SubagentConfig
 
 STOCK_RESEARCHER = SubagentConfig(
-    name="stock-researcher",
+    name="stock-deep-dive",
     description="分析个股基本面、技术面和情报。适用场景：需要深入了解单只股票的估值、趋势和新闻。",
     system_prompt="""你是 AI 股票研究员。你的工作是深度分析指定股票。
 
@@ -155,7 +155,7 @@ STOCK_RESEARCHER = SubagentConfig(
 )
 
 RISK_OFFICER = SubagentConfig(
-    name="risk-officer",
+    name="portfolio-risk-audit",
     description="评估持仓风险、策略合规和集中度。适用场景：需要检查持仓是否违反风险策略。",
     system_prompt="""你是 AI 风控官。你的工作是评估持仓风险。
 
@@ -173,7 +173,7 @@ RISK_OFFICER = SubagentConfig(
 )
 
 STRATEGY_ANALYST = SubagentConfig(
-    name="strategy-analyst",
+    name="strategy-backtest",
     description="运行策略回测并分析结果。适用场景：需要评估策略的历史表现。",
     system_prompt="""你是 AI 策略分析师。你的工作是运行和解读策略回测。
 
@@ -204,7 +204,7 @@ config = {
     "subagents": {
         "timeout_seconds": 900,
         "custom_agents": {
-            "stock-researcher": {
+            "stock-deep-dive": {
                 "description": STOCK_RESEARCHER.description,
                 "system_prompt": STOCK_RESEARCHER.system_prompt,
                 "tools": STOCK_RESEARCHER.tools,
@@ -212,8 +212,8 @@ config = {
                 "max_turns": STOCK_RESEARCHER.max_turns,
                 "timeout_seconds": STOCK_RESEARCHER.timeout_seconds,
             },
-            "risk-officer": { ... },
-            "strategy-analyst": { ... },
+            "portfolio-risk-audit": { ... },
+            "strategy-backtest": { ... },
         },
     },
 }
@@ -264,10 +264,10 @@ place_real_order 永远是 blocked
 ### Subagent 工具白名单示例
 
 ```python
-# stock-researcher: 只给 A2 研究工具
+# stock-deep-dive: 只给 A2 研究工具
 tools=["get_stock_context", "get_daily_history", "search_stock_intel"]
 
-# risk-officer: 只给 A3 风险工具
+# portfolio-risk-audit: 只给 A3 风险工具
 tools=["get_portfolio_snapshot", "get_active_risk_policy", "evaluate_policy_risk"]
 
 # 注意: generate_draft_order(A4) 和 place_real_order(A5) 永远不进白名单
@@ -281,9 +281,9 @@ Subagent 执行过程通过 SSE 事件可见：
 
 ```
 SSE 事件流:
-  skill_trace    → [{step:1, skill:"stock-researcher"}, {step:2, skill:"report-writer"}]
-  tool_call      → {tool:"task", arguments:{subagent_type:"stock-researcher", ...}}
-  reasoning      → {phase:"subagent_started", agent:"stock-researcher"}
+  skill_trace    → [{step:1, skill:"stock-deep-dive"}, {step:2, skill:"report-render"}]
+  tool_call      → {tool:"task", arguments:{subagent_type:"stock-deep-dive", ...}}
+  reasoning      → {phase:"subagent_started", agent:"stock-deep-dive"}
   tool_result    → {tool:"task", result:"{基本面:..., 技术面:...}"}  ← Subagent 返回
   partial_answer → "根据各研究员的分析，综合建议如下..."
   final          → {conclusion:..., evidence_refs:[...]}
@@ -299,10 +299,10 @@ SSE 事件流:
 Phase 1（当前）: subagent_enabled=False，Lead Agent 单打
     ↓
 Phase 2: 为 "strategy_backtest" intent 启用 Subagent
-    → 只有 strategy-analyst 一个 Subagent，风险可控
+    → 只有 strategy-backtest 一个 Subagent，风险可控
     ↓
 Phase 3: 为 "rebalance_plan" intent 启用多 Subagent
-    → stock-researcher + risk-officer + rebalance-planner 并行
+    → stock-deep-dive + portfolio-risk-audit + rebalance-plan 并行
     ↓
 Phase 4: 所有复杂 intent 启用 Subagent + 结果缓存
     → 同一天内同一股票的 research 结果可复用
