@@ -98,6 +98,10 @@ WORKBENCH_SKILLS: dict[str, WorkbenchSkill] = {
     "rebalance-plan": WorkbenchSkill(
         label="AI 调仓规划师", authority="A4", max_turns=40, timeout_seconds=600,
     ),
+    "market-sentiment": WorkbenchSkill(
+        # 情绪判断是"该不该做"的前置问题，比个股结论更靠前；工具少、轮次少
+        label="AI 情绪裁判", authority="A2", max_turns=16, timeout_seconds=240,
+    ),
     "watch-rule-monitor": WorkbenchSkill(
         # 需要 upsert/delete_monitor_rule（A3）—— 提权到 A3，工具集仍由 allowed-tools 限定
         label="AI 盯盘员", authority="A3", max_turns=20, timeout_seconds=300,

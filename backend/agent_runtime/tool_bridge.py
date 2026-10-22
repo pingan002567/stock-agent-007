@@ -158,6 +158,7 @@ class WorkbenchToolBridge:
             "invoke_data_capability": self._invoke_data_capability,
             "get_market_structure": self._get_market_structure,
             "refresh_market_data": self._refresh_market_data,
+            "get_market_sentiment": self._get_market_sentiment,
             "get_monitor_events": self._get_monitor_events,
             "get_monitor_rules": self._get_monitor_rules,
             "evaluate_monitor_rules": self._evaluate_monitor_rules,
@@ -576,6 +577,15 @@ class WorkbenchToolBridge:
                 True,
                 {"symbol": "str"},
                 ["quote", "history", "market_structure"],
+            ),
+            "get_market_sentiment": ToolSpec(
+                "get_market_sentiment",
+                "market-data",
+                AuthorityLevel.A2,
+                "low",
+                True,
+                {},
+                ["market_sentiment", "limit_pool", "market_review"],
             ),
             "get_monitor_events": ToolSpec(
                 "get_monitor_events",
@@ -1279,6 +1289,12 @@ class WorkbenchToolBridge:
         from backend.stock_domain.quote_tools import refresh_market_data
 
         return refresh_market_data(str(arguments.get("symbol") or ""))
+
+    def _get_market_sentiment(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """A 股全市场情绪温度计（涨停/连板/炸板/赚钱效应 + 温度与阶段）。"""
+        from backend.stock_domain.sentiment_tools import get_market_sentiment
+
+        return get_market_sentiment()
 
     def _get_monitor_events(self, arguments: dict[str, Any]) -> dict[str, Any]:
         from backend.stock_domain.result_projection import (

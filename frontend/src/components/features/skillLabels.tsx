@@ -10,6 +10,7 @@ const SKILL_LABELS: Record<string, string> = {
   "watch-rule-monitor": "AI 盯盘员",
   "report-render": "AI 报告员",
   "sector-rotation-digest": "AI 板块轮动报告",
+  "market-sentiment": "AI 情绪裁判",
   "general-purpose": "通用子代理",
   bash: "命令行子代理",
 };
