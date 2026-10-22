@@ -51,7 +51,7 @@ stock-deep-dive 116 行，其中 27 行含「禁止/不得/不要/严禁」（23
 | A1 | `get_market_structure.extra.lhb` | `significance`(noise/notable/strong) + `summary.consecutive_days` + `net_buy` | "net_rate<5% 是噪音" / "连续多日才谈接力" | ✅ 已做 |
 | A2 | `get_market_structure.extra.unlock` | `risk_level`(low/medium/high/critical) + `days_to_float` + `summary.max_risk_30d` | "float_ratio≥5% 且≤30天" | ✅ 已做 |
 | A3 | `get_market_structure.chip` | `pressure`(sell/hold/buy) + `position`(高于/低于成本密集区) | "获利比例高+贴近密集上沿→抛压" | ⏳ |
-| A4 | `get_market_sentiment` | `phase` + `divergence`（已下沉）| 阶段纪律表 | ✅ 已做 |
+| A4 | ~~`get_market_sentiment` 温度/阶段~~ | ~~阶段纪律表~~ | ~~已做~~ → **已回退**：温度/阶段/历史整体移除，只留原始数据，判断交回模型 |
 | A5 | `get_stock_context` | `stance`/`confidence` 结构化 | "AI 评分是评分，不是事实" | ⏳ |
 | A6 | `get_daily_history` | `trend`(up/down/side) + `volatility` | "均线多头/空头" | ⏳（有争议，倾向留给模型）|
 
@@ -68,9 +68,8 @@ stock-deep-dive 116 行，其中 27 行含「禁止/不得/不要/严禁」（23
 
 ### D. 数据历史：从「今天」到「周期位置」（单独一期）
 
-情绪温度落库（每天收盘一条 `market_sentiment_daily` 表），
-`get_market_sentiment` 返回 `phase_day`（升温第几天 / 退潮第几天），
-并支持画情绪曲线。这是"知道今天"到"知道处在周期哪个位置"的跨越。
+~~情绪温度落库 + phase_day + 情绪曲线~~ → **已回退**：温度/阶段/历史模块整体移除。
+A 股强分化，全市场一个温度会掩盖主线；判断交回模型（skill 给数据含义 + 提示即可）。
 
 ### E. 可审计性强化
 
@@ -98,7 +97,7 @@ stock-deep-dive 116 行，其中 27 行含「禁止/不得/不要/严禁」（23
 |---|---|---|
 | **P0** | A1/A2（已做）+ A3 筹码压力 + A5 stance/confidence | 0.5 天 |
 | **P1** | C 判断层放开 + F skill 瘦身（逐个过一遍，删判断、留事实/约束）| 0.5 天 |
-| **P2** | D 情绪历史表 + phase_day + 情绪曲线 | 1 天 |
+| ~~**P2**~~ | ~~D 情绪历史 + phase_day + 情绪曲线~~ → 已回退，不做 | — |
 | **P3** | E 结构化 citations + G 阈值残留 lint | 0.5 天 |
 
 ## 5. 本轮已交付（样例）

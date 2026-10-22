@@ -149,32 +149,18 @@ allowed-tools:
 | 跌停池 | `stock_zt_pool_dtgc_em` | 跌停家数 |
 | 涨跌家数/成交额 | `provider_router.get_market_review()` | 广度（已有缓存） |
 
-返回：`temperature`(0-100) / `phase` / `phase_hint` / `divergence` /
-`limit_up{ladder,max_streak,sealed_amount_top,hot_sectors}` / `broken{count,rate}` /
-`previous_limit_up{red_ratio}` / `breadth` / `score_parts` / `formula` / `coverage`。
+返回（**只给数据，不给结论**）：`limit_up{ladder,max_streak,sealed_amount_top,hot_sectors}` /
+`broken{count,rate}` / `previous_limit_up{red_ratio}` / `limit_down{count}` /
+`breadth` / `coverage`。
 
-**温度分权重**（合计 100，`formula` 字段会一并返回，便于解释）：
-
-```
-涨停家数 min(25, 涨停/50*25)    连板高度 min(20, 最高板/6*20)
-涨跌比   0.2→0 / 0.8→25          炸板率  20%→15 / 60%→0
-昨日涨停红盘率 0.2→0 / 0.8→15
-```
-
-**背离守卫（关键）**：A 股常见"涨停不少、全市场普跌"。
-只看涨停与赚钱效应会把这种日子判成"升温"，误导成可以普涨参与 ——
-所以 `上涨家数占比 < 30% 且涨停 ≥ 30` 时，温度**封顶 55**、阶段改为 **分化**，
-并在 `divergence` 里写明"结构性分化，不是普涨"。实测同一交易日：
-原始分 88.6（高潮）→ 守卫后 55.0（分化）。
+**不产出温度分 / 阶段 / 该不该做这类结论** —— 那是模型的活。工具只做聚合
+（计数、排序、比值），把"涨停多但全市场普跌"这类结构性分化留给模型自己判断。
 
 ### 技能 `market-sentiment`（A2，16 轮以内）
 
-回答"今天该不该做"，不回答"买什么"。六段输出：
-一句话结论（能做/试仓/防守/空仓）→ 温度与阶段 → 温度计三件套 →
-资金去向（涨停板块集中度）→ 纪律建议 → 数据健康。
-
-内置阶段纪律表（高潮不加仓 / 冰点不抄底…）与**一致性陷阱**：
-"满屏涨停 + 涨跌家数背离"是风险信号而非买入信号。
+回答"今天该不该做"，不回答"买什么"。skill 只给**数据含义 + 判断提示**
+（涨停多+跌停少+红盘率高 = 情绪好；涨停多但普跌 = 分化；炸板率高+红盘率低 = 一日游），
+结论由模型自己权衡，不硬编码阶段纪律表。
 
 ### 个股维度：资金与筹码行为（stock-deep-dive 新增一节）
 
@@ -193,7 +179,7 @@ allowed-tools:
 ### 测试
 
 - `tests/test_market_sentiment.py`：全部离线（monkeypatch 两个取数函数），
-  覆盖梯队统计、炸板率、红盘率、温度区间、**背离守卫**、全池失败时的降级（温度必须是 null 而不是 0）
+  覆盖梯队统计、炸板率、红盘率、封板资金排序、**无判断字段断言**、全池失败时的降级
 - `tests/test_skill_specs.py`：新技能自动纳入 5 条规范校验
 
 ---
