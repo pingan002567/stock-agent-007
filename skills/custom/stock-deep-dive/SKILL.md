@@ -42,8 +42,7 @@ allowed-tools:
 ## 输出框架（必须按此结构）
 1. **投资论点（一句话）**：当前研究观点 + 置信度（高/中/低）
 2. **三情景**：
-   - **乐观(bull)** / **中性(base)** / **悲观(bear)**，每个给「触发条件 + 方向/幅度 + 研究目标价或区间（可给点位）」
-   - 按市场区分口径（A 股/港股/美股）
+   - 乐观 / 中性 / 悲观，各给触发条件与方向；目标价或区间可给
 3. **支撑论据**：基本面 / 技术面 / 情报催化剂（每条标来源）
 4. **反方论据（bear case · 必填）**：主动找反对自身论点的证据，不得省略
 5. **市场结构（必填）**：
@@ -60,10 +59,11 @@ allowed-tools:
 7. **风险**：行业 / 政策 / 估值 / 流动性
 8. **同业参照（必做）**：优先用 `get_industry_context` 的 Top10 成分股对比；工具降级时才允许写「数据不足」
 
-## 筹码解读（禁止自由发挥）
-- 获利比例高 + 现价贴近成本密集上沿 → 抛压风险（可作反方论据）
-- 套牢比例高 + 现价在 90% 成本下方 → 上方套牢，反弹遇压
-- 集中度低（带宽大）→ 成本分散，方向性弱
+## 筹码解读
+- **结论直接用 `chip` 的字段**：`position`(above/below/inside_cost_zone)、
+  `pressure`(profit_taking/overhead_supply/balanced)、`direction`(concentrated/dispersed)
+- `pressure=profit_taking` → 作反方论据；`overhead_supply` → 反弹遇压；
+  `direction=dispersed` → 方向性弱
 - 东财 CYQ 是流通盘成本分布估计，不是交易所持仓还原；不得用训练知识补筹码数字
 
 ## 资金与筹码行为（A 股专用，禁止自由发挥）
@@ -74,7 +74,7 @@ allowed-tools:
 ### 龙虎榜 `extra.lhb`
 - 先看 `on_list`：false 就是没上榜，不要谈席位、不要反推"主力意图"
 - **显著性直接用结论字段**：`summary.latest_significance`（noise/notable/strong）。
-  noise = 净买额占成交额 <5%，不要据此说"资金大举介入"
+  noise 不要据此说"资金大举介入"
 - **连续上榜用 `summary.consecutive_days`**：≥2 才谈"接力"，=1 时不要美化，
   次日不涨就写一日游
 - `institutions` 里出现「机构专用」字样 = 机构席位参与；只有营业部名称 = 游资营业部。

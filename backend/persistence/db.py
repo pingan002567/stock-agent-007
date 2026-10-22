@@ -7,6 +7,22 @@ from typing import Iterable
 
 SCHEMA: Iterable[str] = (
     """
+    CREATE TABLE IF NOT EXISTS market_sentiment_daily (
+      trade_date TEXT PRIMARY KEY,
+      temperature REAL NOT NULL,
+      phase TEXT,
+      limit_up INTEGER,
+      max_streak INTEGER,
+      broken_rate REAL,
+      red_ratio REAL,
+      rising INTEGER,
+      falling INTEGER,
+      divergence TEXT,
+      recorded_at TEXT
+    )
+    """,
+
+    """
     CREATE TABLE IF NOT EXISTS watchlist_item (
       symbol TEXT PRIMARY KEY,
       name TEXT NOT NULL,

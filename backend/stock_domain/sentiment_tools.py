@@ -125,6 +125,31 @@ def _phase_of(temperature: float) -> tuple[str, str]:
     return "冰点", "涨停稀少、炸板率高，等待修复信号而不是抄底"
 
 
+def _record_and_history(snapshot: dict) -> tuple[int, list[dict[str, Any]]]:
+    """把当天快照落库（幂等），并返回「当前阶段连续天数」与近 30 天曲线。
+
+    依赖 provider_router.repo（bootstrap 里已注入）。repo 不可用时静默跳过 ——
+    情绪温度计仍可用，只是没有周期位置。
+    """
+    try:
+        from backend.schemas import now_iso
+
+        from backend.stock_domain.provider_router import provider_router
+    except Exception:  # noqa: BLE001
+        return 0, []
+    repo = getattr(provider_router, "repo", None)
+    if repo is None:
+        return 0, []
+    snapshot["recorded_at"] = now_iso()
+    try:
+        repo.record_market_sentiment(snapshot)
+        streak = repo.phase_streak(snapshot.get("phase"))
+        history = repo.list_market_sentiment(limit=30)
+    except Exception:  # noqa: BLE001
+        return 0, []
+    return streak, history
+
+
 def get_market_sentiment() -> dict:
     """A 股全市场情绪温度计（涨停/连板/炸板/赚钱效应 + 温度分与阶段）。"""
     day = _trade_date()
@@ -224,7 +249,7 @@ def get_market_sentiment() -> dict:
             phase, phase_hint = "分化", "只有主线能走；按板块做，不要当普涨行情追"
 
     degraded = bool(missing)
-    return {
+    result = {
         "as_of": day.isoformat(),
         "source": "akshare/eastmoney + market_review",
         "degraded": degraded,
@@ -270,3 +295,8 @@ def get_market_sentiment() -> dict:
             "red": f"昨日涨停红盘率 0.2→0 / 0.8→{W_RED:.0f}",
         },
     }
+    # 落库 + 周期位置（repo 不可用时静默跳过，温度计仍可用）
+    phase_day, history = _record_and_history(result)
+    result["phase_day"] = phase_day
+    result["history"] = history
+    return result

@@ -273,6 +273,43 @@ def _chip_quality(bars: list[dict[str, Any]], bar_count: int) -> tuple[str, str 
     return "normal", None
 
 
+def _chip_pressure(
+    profit: float | None,
+    trapped: float | None,
+    last: float | None,
+    low90: float | None,
+    high90: float | None,
+    conc90: float | None,
+) -> dict[str, str]:
+    """筹码结论下沉：把 stock-deep-dive 旧提示词里的 3 条规则变成结构化字段。
+
+    - position: 现价在 90% 成本密集区的上方/下方/内部
+    - pressure: profit_taking(获利盘抛压) / overhead_supply(套牢盘压制) / balanced
+    - direction: concentrated(成本集中,方向性强) / dispersed(成本分散,方向弱)
+    阈值只在代码里出现一次。
+    """
+    position = "unknown"
+    if last and low90 and high90:
+        if last > high90:
+            position = "above_cost_zone"
+        elif last < low90:
+            position = "below_cost_zone"
+        else:
+            position = "inside_cost_zone"
+
+    pressure = "balanced"
+    if profit is not None and profit >= 0.7 and position in ("above_cost_zone", "inside_cost_zone"):
+        pressure = "profit_taking"
+    elif trapped is not None and trapped >= 0.7 and position == "below_cost_zone":
+        pressure = "overhead_supply"
+
+    direction = "unknown"
+    if conc90 is not None:
+        direction = "dispersed" if conc90 < 0.08 else "concentrated"
+
+    return {"position": position, "pressure": pressure, "direction": direction}
+
+
 def _chip_from_row(row: dict[str, Any], last: float | None, bars: list[dict[str, Any]]) -> dict[str, Any]:
     profit = _ratio_unit(_safe_float(row.get("获利比例") or row.get("获利盘比例")))
     avg_cost = _safe_float(row.get("平均成本") or row.get("market_avg_cost"))
@@ -316,6 +353,7 @@ def _chip_from_row(row: dict[str, Any], last: float | None, bars: list[dict[str,
         "cost_70_low": low70,
         "cost_70_high": high70,
         "concentration_70": conc70,
+        **_chip_pressure(profit, trapped, last, low90, high90, conc90),
         "notes": notes,
     }
 
