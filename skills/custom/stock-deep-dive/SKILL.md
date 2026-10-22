@@ -73,12 +73,12 @@ allowed-tools:
 
 ### 龙虎榜 `extra.lhb`
 - 先看 `on_list`：false 就是没上榜，不要谈席位、不要反推"主力意图"
-- `net_amount` 是当日龙虎榜净买入额（元），`net_rate` 是净买额占成交额比重：
-  |net_rate| < 5% 视为噪音，不要据此说"资金大举介入"
+- **显著性直接用结论字段**：`summary.latest_significance`（noise/notable/strong）。
+  noise = 净买额占成交额 <5%，不要据此说"资金大举介入"
+- **连续上榜用 `summary.consecutive_days`**：≥2 才谈"接力"，=1 时不要美化，
+  次日不涨就写一日游
 - `institutions` 里出现「机构专用」字样 = 机构席位参与；只有营业部名称 = 游资营业部。
   **只能陈述"有机构/游资席位"，不能断言"主力在吸筹"**——龙虎榜不披露后续持仓
-- `reason` 是上榜原因（涨幅偏离/换手/振幅）。**同一只票连续多日上榜**才谈"接力"，
-  单日上榜 + 次日不涨 = 一日游，不要美化
 - `as_of` 是最近上榜日，不是今天；用"最近一次上榜（{as_of}）"表述
 
 ### 两融 `extra.margin`
@@ -88,8 +88,8 @@ allowed-tools:
 - A 股券源稀缺，`rqye` 长期极小；**融券余额低不等于"没人看空"**，不要反向解读
 
 ### 解禁 `extra.unlock`
-- `upcoming[].float_ratio` 是本次解禁占总股本比例，`float_date` 是解禁日
-- 判据：`float_ratio ≥ 5%` 且距今 ≤ 30 天 → **明确列为抛压风险**；≥ 10% 升级为主要风险
+- **风险等级直接用结论字段**：`summary.max_risk_30d`（low/medium/high/critical），
+  high/critical 才列为抛压风险；具体到单条看 `upcoming[].risk_level` 与 `days_to_float`
 - `recent` 用于说明"刚解禁完"，可解释近期弱势，但**不得据此断定下跌原因**
 - `holder_name`（定增/首发原股东等）+ `share_type` 决定抛售意愿：定增浮盈越大越可能跑
 

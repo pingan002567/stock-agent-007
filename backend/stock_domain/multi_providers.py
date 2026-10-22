@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from importlib.util import find_spec
 from typing import Any, Callable
 
@@ -555,14 +555,25 @@ class TushareMarketDataProvider:
                 checked += 1
             day -= timedelta(days=1)
         collected.sort(key=lambda r: str(r.get("trade_date") or ""), reverse=True)
+        for it in collected:
+            it["significance"] = _lhb_significance(it.get("net_rate"))
+            it["net_buy"] = (it.get("net_amount") or 0.0) > 0
+        items = collected[: max(int(limit), 1)]
         return {
             "degraded": False,
             "on_list": bool(collected),
             "as_of": collected[0].get("trade_date") if collected else None,
-            "items": collected[: max(int(limit), 1)],
+            "items": items,
             "count": len(collected),
             "source": "tushare.top_list",
             "lookback_trading_days": checked,
+            # 结论下沉：模型直接引用，不用在提示词里背 5% / 10% 阈值
+            "summary": {
+                "latest_significance": items[0].get("significance") if items else None,
+                "consecutive_days": _consecutive_days(items),
+                "net_buy_days": sum(1 for it in items if it.get("net_buy")),
+                "net_buy_total": round(sum(float(it.get("net_amount") or 0.0) for it in items if it.get("net_buy")), 2),
+            },
         }
 
     def fetch_share_float(self, symbol: str, *, limit: int = 10) -> dict[str, Any]:
@@ -594,6 +605,9 @@ class TushareMarketDataProvider:
                 "holder_name": (str(row.get("holder_name") or "")[:40] or None),
                 "share_type": str(row.get("share_type") or "") or None,
             }
+            days = (date.fromisoformat(float_date) - today).days
+            entry["days_to_float"] = days
+            entry["risk_level"] = _unlock_risk_level(entry["float_ratio"], days)
             if float_date >= today_s:
                 upcoming.append(entry)
             else:
@@ -607,6 +621,16 @@ class TushareMarketDataProvider:
             "recent": recent[:cap],
             "upcoming_count": len(upcoming),
             "recent_count": len(recent),
+            # 结论下沉：最近一次解禁的风险等级 + 30 天内的最大抛压
+            "summary": {
+                "next_unlock": upcoming[0]["float_date"] if upcoming else None,
+                "next_risk_level": upcoming[0]["risk_level"] if upcoming else "none",
+                "max_risk_30d": max(
+                    (x["risk_level"] for x in upcoming if x.get("days_to_float", 999) <= 30),
+                    key=lambda lv: {"low": 0, "medium": 1, "high": 2, "critical": 3}.get(lv, 0),
+                    default="none",
+                ),
+            },
             "source": "tushare.share_float",
             "window": {"start": _ts_date(start), "end": _ts_date(end)},
         }
@@ -619,6 +643,60 @@ class TushareMarketDataProvider:
         if str(stock.get("market")) != "CN":
             raise ProviderError(f"tushare chip/fund-flow only cover CN: {normalized}")
         return normalized, stock
+
+
+def _lhb_significance(net_rate: float | None) -> str:
+    """龙虎榜净买额占成交额比重的显著性 —— 阈值在代码里，skill 只引用结论。"""
+    rate = abs(net_rate or 0.0)
+    if rate >= 0.10:
+        return "strong"
+    if rate >= 0.05:
+        return "notable"
+    return "noise"
+
+
+def _unlock_risk_level(ratio: float | None, days: int) -> str:
+    """解禁风险分级：占比 × 时间距离。阈值与 stock-deep-dive 旧提示词保持一致。
+
+    无比例信息（ratio=None）一律 low —— 不能因为"快解禁了"就凭空升级，
+    数据缺失时宁可低估也不要吓唬用户。
+    """
+    r = ratio or 0.0
+    if r >= 0.10 and days <= 30:
+        return "critical"
+    if r >= 0.05 and days <= 30:
+        return "high"
+    if r >= 0.03 and days <= 90:
+        return "medium"
+    return "low"
+
+
+def _consecutive_days(items: list[dict[str, Any]]) -> int:
+    """最近一段连续上榜的天数（周末跳 2 天也算连续）。
+
+    入参按 trade_date 降序；只算开头那段，第一次断档即停 ——
+    "连续上榜"指"最近这一波"，不是历史里最长的一段。
+    """
+    if not items:
+        return 0
+    streak = 0
+    prev: date | None = None
+    for it in items:
+        raw = str(it.get("trade_date") or "")
+        try:
+            cur = date.fromisoformat(raw[:10])
+        except ValueError:
+            continue
+        if prev is None:
+            streak = 1
+        else:
+            gap = (prev - cur).days
+            if 1 <= gap <= 3:
+                streak += 1
+            else:
+                break
+        prev = cur
+    return streak
 
 
 def _ts_date(value: Any) -> str:
