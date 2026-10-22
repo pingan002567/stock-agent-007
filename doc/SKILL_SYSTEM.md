@@ -176,6 +176,20 @@ allowed-tools:
 内置阶段纪律表（高潮不加仓 / 冰点不抄底…）与**一致性陷阱**：
 "满屏涨停 + 涨跌家数背离"是风险信号而非买入信号。
 
+### 个股维度：资金与筹码行为（stock-deep-dive 新增一节）
+
+`get_market_structure` 的 `extra` 块给了四类 A 股行为数据，但此前**只有数据、没有解读规则**。
+现在 `stock-deep-dive` 里写清了判据与禁止项：
+
+| 数据 | 可用字段 | 判据 | 明令禁止 |
+|---|---|---|---|
+| 龙虎榜 `extra.lhb` | `on_list` / `net_amount` / `net_rate` / `reason` / `institutions` | `|net_rate|<5%` 视为噪音；连续多日上榜才谈接力 | 断言"主力吸筹"；没上榜还反推意图 |
+| 两融 `extra.margin` | `rzye` / `rqye` / `rzmre` / `rzche` | **融资净买入 = rzmre − rzche** 是唯一方向信号 | 只有当期值却说"连续 N 日上升"；把低融券余额读成"没人看空" |
+| 解禁 `extra.unlock` | `float_ratio` / `float_date` / `holder_name` | ≥5% 且 ≤30 天 → 明确抛压；≥10% 升级为主要风险 | 据此断定近期下跌原因 |
+| 北向 `extra.northbound` | 持股快照 `as_of` | 只能描述持仓，不能当资金流 | 写"今日北向净买入" |
+
+并强调三者是**不同的钱**（成本分布 / 席位买卖 / 杠杆资金），禁止互相替代。
+
 ### 测试
 
 - `tests/test_market_sentiment.py`：全部离线（monkeypatch 两个取数函数），

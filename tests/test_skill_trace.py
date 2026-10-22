@@ -18,6 +18,7 @@ def test_custom_agents_come_from_skill_md():
         "watch-rule-monitor",
         "report-render",
         "sector-rotation-digest",
+        "market-sentiment",
     }
     rotation = agents["sector-rotation-digest"]
     assert "轮动概览" in rotation["system_prompt"]
@@ -26,6 +27,9 @@ def test_custom_agents_come_from_skill_md():
     researcher = agents["stock-deep-dive"]
     assert "反方" in researcher["system_prompt"]
     assert "不要委派" in researcher["description"] or "不要委派" in researcher["system_prompt"]
+    sentiment = agents["market-sentiment"]
+    assert "能不能做" in sentiment["system_prompt"] or "该不该做" in sentiment["system_prompt"]
+    assert "get_market_sentiment" in sentiment["tools"]
     planner = agents["rebalance-plan"]
     assert "task(portfolio-risk-audit)" in planner["system_prompt"]
 
