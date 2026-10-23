@@ -16,6 +16,7 @@ function base(overrides: Partial<StreamMessage> = {}): StreamMessage {
     clarificationRequest: null,
     finalPayload: null,
     errorText: null,
+    startedAt: Date.now(),
     ...overrides,
   };
 }

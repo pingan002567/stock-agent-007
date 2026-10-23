@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { type StreamMessage, type StreamToolCall } from "@/hooks/useCopilotChat";
 import { CopilotFinalMeta, SkillTraceChain } from "@/components/features/CopilotFinalMeta";
 import { ThoughtTimeline } from "@/components/features/ThoughtTimeline";
@@ -7,7 +7,21 @@ import { StreamMarkdown } from "@/components/features/StreamMarkdown";
 import { StreamAwaitingDots } from "@/components/features/StreamAwaitingDots";
 import { useStreamAwaitingNextEvent } from "@/hooks/useStreamAwaitingNextEvent";
 import { streamProgressKey, toolStatusesKey } from "@/lib/chatShell";
+import { formatDuration } from "@/utils/format";
 import type { HumanInputResponse } from "@/lib/humanInput";
+
+/** 本轮已执行时长（每秒 tick）；非流式时停表并归零 */
+function useElapsedMs(active: boolean, startedAt: number): number {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!active || !startedAt) return;
+    const tick = () => setElapsed(Math.max(0, Date.now() - startedAt));
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [active, startedAt]);
+  return active ? elapsed : 0;
+}
 
 interface Props {
   streamMessage: StreamMessage;
@@ -45,6 +59,8 @@ export function CopilotStreamingMessage({
   const phaseColor = PHASE_COLORS[streamMessage.phase] || "var(--blue)";
   const streamingActive = streamMessage.phase !== "final" && streamMessage.phase !== "error";
   const clarificationRequest = streamMessage.clarificationRequest;
+  // 本轮已执行时长：替代原先浮在输入框上方的「正在执行 task…」心跳卡片
+  const elapsedMs = useElapsedMs(streamingActive, streamMessage.startedAt);
 
   const progressRevision = useMemo(
     () => streamProgressKey({
@@ -140,6 +156,11 @@ export function CopilotStreamingMessage({
       )}
       {streamMessage.errorText && (
         <div style={{ color: "var(--red)" }}>⚠️ {streamMessage.errorText}</div>
+      )}
+      {elapsedMs > 0 && (
+        <div className="turn-elapsed" style={{ fontSize: 12, color: "var(--text-3, #888)", marginTop: 8 }}>
+          已执行 {formatDuration(elapsedMs)}
+        </div>
       )}
     </div>
   );

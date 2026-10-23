@@ -55,18 +55,19 @@ export interface RunLiveness {
   alive: boolean;
 }
 
+/**
+ * 工作台提示文案。工具执行阶段返回 null —— 该阶段的反馈已由回复气泡下方的
+ * 「已执行 X」计时器承担，不再叠一张「正在执行 task…」的卡片。
+ */
 export function workingDockCopy(liveness: RunLiveness | null | undefined): {
   title: string;
   detail?: string;
-} {
+} | null {
+  if (liveness?.phase === "tool") {
+    return null;
+  }
   if (!liveness) {
     return { title: "正在生成…", detail: "连接正常，请稍候。" };
-  }
-  if (liveness.phase === "tool" && liveness.currentTool) {
-    return {
-      title: `正在执行 ${liveness.currentTool}…`,
-      detail: "长工具调用中，心跳正常。",
-    };
   }
   if (liveness.phase === "awaiting_human") {
     return { title: "等待你的回复", detail: "本轮已暂停在澄清步骤。" };

@@ -152,6 +152,7 @@ function makeStream(overrides: Partial<StreamMessage> = {}): StreamMessage {
     clarificationRequest: null,
     finalPayload: null,
     errorText: null,
+    startedAt: Date.now(),
     ...overrides,
   };
   // 时间线渲染读 steps:夹具从旧字段派生,保持用例只声明 reasoningText/tools
@@ -201,6 +202,19 @@ describe("CopilotStreamingMessage", () => {
     const { container } = render(<CopilotStreamingMessage streamMessage={sm} />);
     // 时间线里完成态显示 ✓(紧凑步行,非文字标签)
     expect(container.querySelector(".tl-step-state.ok")?.textContent).toContain("✓");
+  });
+
+  it("流式中在气泡下方显示本轮已执行时长", () => {
+    const sm = makeStream({ phase: "tools", startedAt: Date.now() - 65_000 });
+    const { container } = render(<CopilotStreamingMessage streamMessage={sm} />);
+    // 起始时间回溯 65s → 首次 tick 即显示「已执行 1 分 …」
+    expect(container.textContent).toMatch(/已执行\s*1 分/);
+  });
+
+  it("结束后不再显示进行中的「已执行」计时器", () => {
+    const sm = makeStream({ phase: "final", startedAt: Date.now() - 65_000 });
+    const { container } = render(<CopilotStreamingMessage streamMessage={sm} />);
+    expect(container.textContent).not.toContain("已执行");
   });
 });
 

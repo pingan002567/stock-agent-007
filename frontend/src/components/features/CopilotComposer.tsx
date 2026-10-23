@@ -271,12 +271,15 @@ export function CopilotComposer() {
           : {}),
       });
     } else if (showWorking) {
+      // 工具执行阶段 copy 为 null：改由回复气泡下方的「已执行 X」计时器反馈
       const copy = workingDockCopy(streamLiveness);
-      list.push({
-        kind: "working",
-        title: copy.title,
-        detail: copy.detail,
-      });
+      if (copy) {
+        list.push({
+          kind: "working",
+          title: copy.title,
+          detail: copy.detail,
+        });
+      }
     }
     if (waitingClarify && !stuck) {
       list.push({

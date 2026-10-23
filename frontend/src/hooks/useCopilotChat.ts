@@ -74,6 +74,8 @@ export interface StreamMessage {
   clarificationRequest: import("@/lib/humanInput").HumanInputRequest | null;
   finalPayload: Record<string, unknown> | null;
   errorText: string | null;
+  /** 本轮开始时间（epoch ms）：用来在气泡下方实时显示「已执行 X」 */
+  startedAt: number;
 }
 
 // ── Tool labels ──
@@ -630,6 +632,7 @@ function useCopilotChatState() {
       clarificationRequest: null,
       finalPayload: null,
       errorText: null,
+      startedAt: Date.now(),
     };
     bindStream(sid, initialStream);
 

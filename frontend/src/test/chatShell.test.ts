@@ -49,7 +49,7 @@ describe("chatShell", () => {
     expect(running).not.toBe(done);
   });
 
-  it("labels working dock from live phase/tool", () => {
+  it("工具执行阶段不出 dock 卡片（改由气泡下方「已执行 X」计时器反馈）", () => {
     expect(
       workingDockCopy({
         lastAt: Date.now(),
@@ -57,8 +57,8 @@ describe("chatShell", () => {
         phase: "tool",
         currentTool: "web_search",
         alive: true,
-      }).title,
-    ).toContain("web_search");
+      }),
+    ).toBeNull();
     expect(
       workingDockCopy({
         lastAt: Date.now(),
@@ -66,7 +66,7 @@ describe("chatShell", () => {
         phase: "llm",
         currentTool: null,
         alive: true,
-      }).title,
+      })?.title,
     ).toContain("推理");
   });
 });
