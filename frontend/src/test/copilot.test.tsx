@@ -85,6 +85,20 @@ describe("CopilotMessageItem", () => {
     expect(container.textContent).toContain("API timeout");
   });
 
+  it("完成时间移到气泡底部（头行不再挂时间）", () => {
+    const msg = makeMsg({
+      kind: "final_answer",
+      text: "ok",
+      payload: { type: "final_answer", conclusion: "ok" },
+      created_at: "2026-10-23T08:35:34Z",
+    });
+    const { container } = render(<CopilotMessageItem msg={msg} />);
+    // 头行不再显示时间
+    expect(container.querySelector(".msg-label-time")).toBeNull();
+    // 底部 meta 里出现完成时间
+    expect(container.querySelector(".final-meta-time")?.textContent).toBeTruthy();
+  });
+
   it("renders markdown links that the app can intercept", () => {
     const msg = makeMsg({
       kind: "final_answer",

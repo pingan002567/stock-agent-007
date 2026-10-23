@@ -96,6 +96,9 @@ function splitScheduledPrompt(text: string): { tag: string; task: string; rest: 
   return { tag: m[1], task: idx >= 0 ? rest.slice(idx).replace(/^用户任务[:：]\s*/, "").trim() : "", rest };
 }
 
+  /** 消息本地时间（用户气泡与 AI 完成时间都用它） */
+  const time = formatLocalTime(msg.created_at);
+
   /** 本轮用时：final 消息时间 - 该轮第一条用户消息时间 */
   const durationMs =
     isFinal && runStartedAt
@@ -183,7 +186,7 @@ function splitScheduledPrompt(text: string): { tag: string; task: string; rest: 
       <>
         {hasTools && <ThoughtTimeline steps={toolSteps} active={false} onToolClick={handleTimelineClick} durationMs={durationMs} />}
         <MarkdownRenderer text={stripToolCallTags(raw)} />
-        <CopilotFinalMeta payload={evPayload} durationMs={durationMs} />
+        <CopilotFinalMeta payload={evPayload} durationMs={durationMs} completedAt={time} />
       </>
     );
   } else if (isErrorEvent) {
@@ -202,11 +205,9 @@ function splitScheduledPrompt(text: string): { tag: string; task: string; rest: 
     return null;
   }
 
-  const time = formatLocalTime(msg.created_at);
-
   return (
     <div className={cls}>
-      {/* 便签体头行：身份 + mono 时间（时间归入头行，正文下不再挂时间） */}
+      {/* 便签体头行：只放身份；完成时间移到气泡底部「用时」右侧 */}
       {!isUser && (
         <div className="msg-label">
           <span className="ai-disc">
@@ -215,7 +216,6 @@ function splitScheduledPrompt(text: string): { tag: string; task: string; rest: 
             </svg>
           </span>
           AI Copilot
-          <span className="msg-label-time">{time}</span>
         </div>
       )}
       {body}

@@ -55,7 +55,7 @@ export function SkillTraceChain({ items }: { items: SkillTraceItem[] }) {
   );
 }
 
-export function CopilotFinalMeta({ payload, durationMs }: { payload: Record<string, unknown>; durationMs?: number }) {
+export function CopilotFinalMeta({ payload, durationMs, completedAt }: { payload: Record<string, unknown>; durationMs?: number; completedAt?: string }) {
   const [openCounter, setOpenCounter] = useState(false);
   const [openRefs, setOpenRefs] = useState(false);
 
@@ -71,7 +71,7 @@ export function CopilotFinalMeta({ payload, durationMs }: { payload: Record<stri
   const draftId = typeof payload.draft_id === "string" ? payload.draft_id : null;
   const hasAny =
     confidence || counterReasons.length > 0 || evidenceRefs.length > 0 || trace.length > 0 ||
-    tokensIn + tokensOut > 0 || draftId || (durationMs ?? 0) > 0;
+    tokensIn + tokensOut > 0 || draftId || (durationMs ?? 0) > 0 || Boolean(completedAt);
   if (!hasAny) return null;
 
   return (
@@ -98,6 +98,7 @@ export function CopilotFinalMeta({ payload, durationMs }: { payload: Record<stri
         {(durationMs ?? 0) > 0 && (
           <span className="final-meta-usage">用时 {formatDuration(durationMs ?? 0)}</span>
         )}
+        {completedAt && <span className="final-meta-usage final-meta-time">{completedAt}</span>}
         {tokensIn + tokensOut > 0 && (
           <span className="final-meta-usage">
             {formatTokens(tokensIn)} in / {formatTokens(tokensOut)} out
