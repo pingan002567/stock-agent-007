@@ -3,6 +3,7 @@ DEFAULT_TOOLS = [
     {"domain": "stock", "name": "get_stock_context", "risk": "low", "status": "enabled"},
     {"domain": "stock", "name": "get_stock_financial", "risk": "low", "status": "enabled"},
     {"domain": "market-data", "name": "get_market_sentiment", "risk": "low", "status": "enabled"},
+    {"domain": "ops", "name": "submit_duty_briefing", "risk": "low", "status": "enabled"},
     {"domain": "market-data", "name": "get_daily_history", "risk": "low", "status": "enabled"},
     {"domain": "intel", "name": "search_stock_intel", "risk": "medium", "status": "enabled"},
     {"domain": "industry", "name": "get_industry_context", "risk": "low", "status": "enabled"},

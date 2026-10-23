@@ -390,8 +390,15 @@ def test_legacy_default_prompts_upgraded_on_list(tmp_path):
     assert listed["sched_close"]["prompt"] == "我自己改过的收盘文案"
     assert "集合竞价前" in listed["sched_premarket"]["prompt"]
     assert "不重复 08:20" in listed["sched_premarket"]["prompt"]
-    assert "熔断次数" in listed["sched_premarket"]["prompt"]
-    assert "哪条判断作废" in listed["sched_premarket"]["prompt"]
+    # 数据健康口径已收敛到统一四段契约（preamble 注入），prompt 只引用四段
+    from backend.app_services.scheduler_service import DUTY_OUTPUT_CONTRACT
+
+    assert "熔断次数" in DUTY_OUTPUT_CONTRACT
+    assert "数据健康" in listed["sched_premarket"]["prompt"]
+    from backend.app_services.scheduler_service import DUTY_OUTPUT_CONTRACT
+
+    assert "哪条判断作废" in DUTY_OUTPUT_CONTRACT
+    assert listed["sched_premarket"]["prompt"].count("数据健康") == 1
 
 
 def test_structured_default_prompts_upgrade_data_health_rule(tmp_path):
@@ -432,7 +439,11 @@ def test_structured_default_prompts_upgrade_data_health_rule(tmp_path):
     listed = {t["task_id"]: t for t in services.scheduler_service.list_tasks()}
     seed = {t["task_id"]: t for t in DEFAULT_TASKS}
     assert listed["sched_premarket"]["prompt"] == seed["sched_premarket"]["prompt"]
-    assert "哪条判断作废" in listed["sched_premarket"]["prompt"]
+    # 数据健康口径收敛到统一四段契约（preamble 注入），任务 prompt 只引用四段
+    from backend.app_services.scheduler_service import DUTY_OUTPUT_CONTRACT
+
+    assert "哪条判断作废" in DUTY_OUTPUT_CONTRACT
+    assert "固定四段" in listed["sched_premarket"]["prompt"]
     assert "本次降级/缺失字段" not in listed["sched_premarket"]["prompt"]
 
 

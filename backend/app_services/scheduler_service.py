@@ -38,13 +38,26 @@ _DATA_HEALTH_RULE = (
     "官方日K在收盘前落后一交易日不算故障，收盘后仍缺当日开高低量才写。"
 )
 
+# 统一四段输出契约：所有定时任务共用，任务差异只体现在「依据/动作」里写什么。
+DUTY_OUTPUT_CONTRACT = (
+    "【输出】固定四段，只写这四段，不要另加章节或改变顺序：\n"
+    "1. 结论：一句话（≤40 字），说清今天该做什么，或明确「今天不用动」。\n"
+    "2. 依据：≤5 条，每条一句话且带数字或来源。\n"
+    "3. 动作：≤5 条，每条写「标的 + 做什么 + 触发条件/价位」；没有动作就写「无需操作」。\n"
+    "4. 数据健康：≤5 条，只写会影响本场结论的缺口，每项一行「缺什么 → 哪条判断作废」；"
+    "不写熔断次数、provider 名、内部字段名；与本场结论无关的标的不写；"
+    "官方日K在收盘前落后一交易日不算故障，收盘后仍缺当日开高低量才写。\n"
+    "收口前必须调用 submit_duty_briefing，把同样的结论/依据/动作/数据健康提交成结构化字段。\n"
+    "正文与工具提交必须一致；表格合计 ≤8 行。"
+)
+
 DUTY_PREAMBLE = (
     "你是值班研究员。禁止自动交易。\n"
     f"{_DATA_DISCIPLINE}\n"
     "必须调用：get_portfolio_snapshot、get_monitor_events、summarize_review_inbox。\n"
     "持仓+自选合计超过 15 只时，只深拉权重最高与今日异动 Top 8，其余一行涨跌，禁止逐只深研。\n"
     "A 股讨论抛压/套牢时必须 get_market_structure；港美股禁止写获利/套牢比例。\n"
-    "输出按下方「用户任务」小节；表格合计 ≤8 行。\n"
+    f"{DUTY_OUTPUT_CONTRACT}\n"
     f"{_DISCLAIMER_TAIL}\n"
     "不要调用 generate_report，系统会在运行结束后自动落盘值班简报。"
 )
@@ -55,12 +68,17 @@ DISCOVERY_PREAMBLE = (
     f"{_DATA_DISCIPLINE}\n"
     "必须先拉市场面：invoke_data_capability 或快捷工具获取 market_review、sectors、"
     "industry_boards（必要时 Mode A 换源）；再按**上方已注入**的风险画像筛选候选。\n"
-    "输出按下方「用户任务」小节；表格合计 ≤8 行。\n"
+    f"{DUTY_OUTPUT_CONTRACT}\n"
     f"{_DISCLAIMER_TAIL}\n"
     "不要调用 generate_report，系统会在运行结束后自动落盘机会发现报告。"
 )
 
 # 仍等于这些旧默认文案的已落库任务，会在 list_tasks 时升级到 DEFAULT_TASKS 新 prompt。
+# 四段契约改造前的旧文案都带「【输出】≤N 字」且不含「固定四段」；
+# 用它做升级判定，比维护精确文案集合更省事，也不会误伤已迁移的任务。
+_LEGACY_PROMPT_MARKERS = ("【输出】≤600 字", "【输出】≤900 字")
+_NEW_PROMPT_MARKER = "固定四段"
+
 _LEGACY_DEFAULT_PROMPTS: dict[str, frozenset[str]] = {
     "sched_premarket_discovery": frozenset(
         {
@@ -148,19 +166,7 @@ DEFAULT_TASKS: list[dict[str, Any]] = [
     {
         "task_id": "sched_premarket_discovery",
         "name": "盘前机会发现",
-        "prompt": (
-            "【任务】盘前机会发现（每日 08:20，含周末与节假日）。范围＝全市场，不限于自选/持仓。"
-            "休市日照常输出，机会对应下一开市日，并注明今日休市。\n"
-            "【取数】按已注入的风险画像筛选；大盘/板块走市场复盘与行业能力（行业优先同花顺）；"
-            "逐个候选排查与现有持仓是否重叠；失败须标注「精度有限」。\n"
-            "【输出】≤600 字\n"
-            "1. 市场环境：1 段，指数与板块强弱（缺失则说明）。\n"
-            "2. 机会清单：3–5 个；每条含代码/名称、行业、触发逻辑、参考入场区间、止损位、"
-            "仓位上限（不超风险策略单票上限）、与持仓是否重叠。\n"
-            "3. 回避清单：2–3 个方向及理由。\n"
-            f"4. {_DATA_HEALTH_RULE}\n"
-            "【约束】只写市场环境+全市场机会，不写自选/持仓隔夜简报（留给 08:30）。"
-        ),
+        "prompt": "【任务】盘前机会发现（每日 08:20，含周末与节假日）。范围＝全市场，不限于自选/持仓。休市日照常输出，机会对应下一开市日，并注明今日休市。\n【取数】按已注入的风险画像筛选；大盘/板块走市场复盘与行业能力（行业优先同花顺）；逐个候选排查与现有持仓是否重叠；失败须标注「精度有限」。\n【输出】固定四段（见 preamble 的四段契约）：\n1. 结论：今天做不做、做哪个方向，一句话。\n2. 依据：≤5 条，覆盖市场环境（指数与板块强弱）与 3–5 个机会的核心逻辑（代码/名称、行业、触发逻辑、与持仓是否重叠）。\n3. 动作：≤5 条，每条含参考入场区间、止损位、仓位上限（不超风险策略单票上限）；另给 2–3 个回避方向。\n4. 数据健康：降级/缺失项及被作废的判断。\n【约束】只写市场环境+全市场机会，不写自选/持仓隔夜简报（留给 08:30）。",
         "page": "chat",
         "authority_level": "A3",
         "schedule": "daily@08:20",
@@ -169,17 +175,7 @@ DEFAULT_TASKS: list[dict[str, Any]] = [
     {
         "task_id": "sched_premarket",
         "name": "盘前简报",
-        "prompt": (
-            "【任务】今日盘前简报（A股交易日 08:30，集合竞价前）。只做自选/持仓+隔夜要闻，"
-            "不重复 08:20 机会发现已述的全市场机会清单。\n"
-            "【取数】自选/持仓/盯盘优先本地缓存；隔夜要闻与情报窗口＝上一交易日收盘后至今。\n"
-            "【输出】≤600 字\n"
-            "1. 隔夜要闻：≤5 条；每条含来源与对自选/持仓影响（利好/利空/中性）。\n"
-            "2. 今日重点标的：≤5 个；关注理由与关键价位；此刻无开盘价，不得编造。\n"
-            "3. 风险与日历：今日解禁/财报/停复牌、公司或监管公告、昨日已触发的盯盘规则。\n"
-            f"4. {_DATA_HEALTH_RULE}\n"
-            "【约束】只写例外与动作，不复述行情流水账。"
-        ),
+        "prompt": "【任务】今日盘前简报（A股交易日 08:30，集合竞价前）。只做自选/持仓+隔夜要闻，不重复 08:20 机会发现已述的全市场机会清单。\n【取数】自选/持仓/盯盘优先本地缓存；隔夜要闻与情报窗口＝上一交易日收盘后至今。\n【输出】固定四段（见 preamble 的四段契约）：\n1. 结论：今天该做什么或不用动，一句话。\n2. 依据：≤5 条，覆盖隔夜要闻（含来源与利好/利空/中性）、今日重点标的与关键价位（此刻无开盘价，不得编造）。\n3. 动作：≤5 条，标的+做什么+触发条件；无动作写「无需操作」。\n4. 数据健康：只写会影响本场结论的缺口。\n【约束】只写例外与动作，不复述行情流水账。",
         "page": "chat",
         "authority_level": "A3",
         "schedule": "daily@08:30",
@@ -189,21 +185,7 @@ DEFAULT_TASKS: list[dict[str, Any]] = [
     {
         "task_id": "sched_intraday",
         "name": "盘中报告",
-        "prompt": (
-            "【任务】盘中报告（A股交易日 11:45，上午收盘后／下午开盘前）。"
-            "目标＝上午盘总结 + 下午开盘操作预案；不重复盘前简报的隔夜要闻流水账，"
-            "也不替代 15:15 收盘体检。\n"
-            "【取数】持仓/自选/盯盘优先本地缓存；结论依赖现价时，同一标的最多 refresh 一次；"
-            "板块强弱走市场复盘/行业能力。\n"
-            "【输出】≤600 字\n"
-            "1. 上午盘总结：指数与主线强弱 1 段；持仓/自选正负贡献各 ≤3 只"
-            "（含当日涨跌）；已触发盯盘与异动。\n"
-            "2. 下午开盘预案：≤5 条可执行动作（继续持有/加仓/减仓/观望），"
-            "每条含标的、理由、参考价位或触发条件、仓位上限；回避方向 1–3 条。\n"
-            "3. 例外清单：明确「无需处理」与「开盘前必须处理」。\n"
-            f"4. {_DATA_HEALTH_RULE}\n"
-            "【约束】只写结论与动作；禁止真实下单。"
-        ),
+        "prompt": "【任务】盘中报告（A股交易日 11:45，上午收盘后／下午开盘前）。目标＝上午盘总结 + 下午开盘操作预案；不重复盘前简报的隔夜要闻流水账，也不替代 15:15 收盘体检。\n【取数】持仓/自选/盯盘优先本地缓存；结论依赖现价时，同一标的最多 refresh 一次；板块强弱走市场复盘/行业能力。\n【输出】固定四段（见 preamble 的四段契约）：\n1. 结论：下午做不做、做哪个方向，一句话。\n2. 依据：≤5 条，覆盖上午指数与主线强弱、持仓/自选正负贡献各 ≤3 只（含当日涨跌）、已触发盯盘与异动。\n3. 动作：≤5 条可执行动作（继续持有/加仓/减仓/观望），每条含标的、理由、参考价位或触发条件、仓位上限；另给 1–3 条回避方向。\n4. 数据健康：只写会影响本场结论的缺口。\n【约束】只写结论与动作；禁止真实下单。",
         "page": "chat",
         "authority_level": "A3",
         "schedule": "daily@11:45",
@@ -213,17 +195,7 @@ DEFAULT_TASKS: list[dict[str, Any]] = [
     {
         "task_id": "sched_close",
         "name": "收盘体检",
-        "prompt": (
-            "【任务】收盘体检（A股交易日 15:15）。\n"
-            "【取数】持仓/自选/盯盘优先本地缓存；结论依赖当日现价时，同一标的最多 refresh 一次。\n"
-            "【输出】≤600 字\n"
-            "1. 组合表现：整体涨跌；正/负贡献最大各 ≤3 只（含权重与当日涨跌）。\n"
-            "2. 盯盘事件：未处理事件按严重度排序 + 建议动作。\n"
-            "3. 距硬限：逐项「当前值/阈值/剩余空间」；阈值以风险策略为准，无则用 5 个百分点；"
-            "剩余空间 <5 个百分点即预警。\n"
-            "4. 例外清单：明确今日「无需处理」与「必须处理」。\n"
-            f"5. {_DATA_HEALTH_RULE}"
-        ),
+        "prompt": "【任务】收盘体检（A股交易日 15:15）。\n【取数】持仓/自选/盯盘优先本地缓存；结论依赖当日现价时，同一标的最多 refresh 一次。\n【输出】固定四段（见 preamble 的四段契约）：\n1. 结论：今天要不要动、明天要准备什么，一句话。\n2. 依据：≤5 条，覆盖组合整体涨跌与正/负贡献最大各 ≤3 只（含权重与当日涨跌）、未处理盯盘事件按严重度排序、距硬限「当前值/阈值/剩余空间」（阈值以风险策略为准，无则用 5 个百分点，剩余空间 <5 个百分点即预警）。\n3. 动作：≤5 条，明确今日「必须处理」与明日「需要准备」；无需处理写「无需操作」。\n4. 数据健康：只写会影响本场结论的缺口。\n【约束】只写结论与动作，不复述行情流水账。",
         "page": "chat",
         "authority_level": "A3",
         "schedule": "daily@15:15",
@@ -233,18 +205,7 @@ DEFAULT_TASKS: list[dict[str, Any]] = [
     {
         "task_id": "sched_weekly_review",
         "name": "周度复盘",
-        "prompt": (
-            "【任务】本周周度复盘（周日 17:00）。\n"
-            "【取数】持仓/自选走本地缓存；归因用决策日志与结果汇总；板块/行业走行业能力。\n"
-            "【输出】≤900 字\n"
-            "1. 周度表现：组合收益 vs 基准（基准不可得则说明），最大回撤。\n"
-            "2. 归因：前 3 大正/负贡献标的及原因（事件/情绪/基本面）。\n"
-            "3. 决策复盘：本周建议与实际走势是否一致，偏差在哪。\n"
-            "4. 风险变化：集中度、单票超限、行业集中、距硬限的环比变化。\n"
-            "5. 下周关注：3–5 条，含催化剂时点与回避方向。\n"
-            f"6. {_DATA_HEALTH_RULE}\n"
-            "【约束】只写结论与动作，不复述每日简报。"
-        ),
+        "prompt": "【任务】本周周度复盘（周日 17:00）。\n【取数】持仓/自选走本地缓存；归因用决策日志与结果汇总；板块/行业走行业能力。\n【输出】固定四段（见 preamble 的四段契约）：\n1. 结论：本周做对/做错了什么、下周怎么打，一句话。\n2. 依据：≤5 条，覆盖组合收益 vs 基准（不可得则说明）与最大回撤、前 3 大正/负贡献标的及原因、决策建议与实际走势是否一致及偏差、风险变化（集中度/单票超限/行业集中/距硬限环比）。\n3. 动作：≤5 条，下周关注方向与回避方向，含催化剂时点。\n4. 数据健康：只写会影响本场结论的缺口。\n【约束】只写结论与动作，不复述每日简报。",
         "page": "chat",
         "authority_level": "A3",
         "schedule": "weekly@7@17:00",
@@ -395,7 +356,15 @@ class SchedulerService:
                 if seed is None:
                     continue
                 legacy = _LEGACY_DEFAULT_PROMPTS.get(tid) or frozenset()
-                if str(item.get("prompt") or "") in legacy:
+                prompt_text = str(item.get("prompt") or "")
+                is_legacy = prompt_text in legacy or (
+                    not prompt_text.strip()
+                    or (
+                        any(m in prompt_text for m in _LEGACY_PROMPT_MARKERS)
+                        and _NEW_PROMPT_MARKER not in prompt_text
+                    )
+                )
+                if is_legacy and seed.get("prompt"):
                     item["prompt"] = seed["prompt"]
                     dirty = True
                 if is_discovery_task(item) and item.get("calendar"):
@@ -617,6 +586,19 @@ class SchedulerService:
         finals = [item.text.strip() for item in messages if item.kind == "final_answer" and item.text.strip()]
         return finals[-1] if finals else ""
 
+    def _read_duty_briefing(self, run_id: str | None) -> dict[str, Any] | None:
+        """从 tool_execution 账本取本轮 submit_duty_briefing 的结构化结果。"""
+        if not run_id:
+            return None
+        try:
+            from backend.app_services.duty_briefing import extract_briefing
+
+            executions = self.repo.list_tool_executions(run_id=run_id, limit=400)
+        except Exception:
+            logger.exception("read duty briefing failed for %s", run_id)
+            return None
+        return extract_briefing(executions)
+
     def _persist_ops_briefing(self, task: dict[str, Any], outcome: dict[str, Any]) -> None:
         if self.report_service is None:
             return
@@ -642,6 +624,8 @@ class SchedulerService:
                         "run_error": outcome.get("error"),
                         "narrative": self._copilot_narrative(outcome.get("run_id")),
                         "task_name": task.get("name"),
+                        # 四段契约的结构化提交（缺省时报告层回退到原文解析）
+                        "briefing": self._read_duty_briefing(outcome.get("run_id")),
                     },
                 )
             )

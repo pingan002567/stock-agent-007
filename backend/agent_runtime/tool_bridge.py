@@ -159,6 +159,7 @@ class WorkbenchToolBridge:
             "get_market_structure": self._get_market_structure,
             "refresh_market_data": self._refresh_market_data,
             "get_market_sentiment": self._get_market_sentiment,
+            "submit_duty_briefing": self._submit_duty_briefing,
             "get_monitor_events": self._get_monitor_events,
             "get_monitor_rules": self._get_monitor_rules,
             "evaluate_monitor_rules": self._evaluate_monitor_rules,
@@ -577,6 +578,20 @@ class WorkbenchToolBridge:
                 True,
                 {"symbol": "str"},
                 ["quote", "history", "market_structure"],
+            ),
+            "submit_duty_briefing": ToolSpec(
+                "submit_duty_briefing",
+                "ops",
+                AuthorityLevel.A2,
+                "low",
+                True,
+                {
+                    "conclusion": "str",
+                    "evidence": "list[str]?",
+                    "actions": "list[str]?",
+                    "data_health": "list[str]?",
+                },
+                ["duty_briefing"],
             ),
             "get_market_sentiment": ToolSpec(
                 "get_market_sentiment",
@@ -1289,6 +1304,22 @@ class WorkbenchToolBridge:
         from backend.stock_domain.quote_tools import refresh_market_data
 
         return refresh_market_data(str(arguments.get("symbol") or ""))
+
+    def _submit_duty_briefing(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """定时值班任务提交统一四段结论（结论/依据/动作/数据健康）。"""
+        from backend.app_services.duty_briefing import normalize_briefing
+
+        briefing = normalize_briefing(arguments)
+        return {
+            "accepted": True,
+            "conclusion": briefing["conclusion"],
+            "counts": {
+                "evidence": len(briefing["evidence"]),
+                "actions": len(briefing["actions"]),
+                "data_health": len(briefing["data_health"]),
+            },
+            "note": "已记录结构化值班结论，报告落盘会用它生成固定四段。",
+        }
 
     def _get_market_sentiment(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """A 股全市场情绪温度计（涨停/连板/炸板/赚钱效应 + 温度与阶段）。"""

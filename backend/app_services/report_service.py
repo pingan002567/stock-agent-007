@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -74,7 +75,7 @@ REPORT_TEMPLATE_REGISTRY: tuple[ReportTemplate, ...] = (
         name="值班简报模板",
         summary="定时任务结束后落盘的值班简报：结论、持仓/自选、盯盘例外与数据源状态。不自动交易。",
         source_types=["scheduled_task"],
-        sections=["值班结论", "指数与数据源", "持仓与自选", "例外", "观察", "执行约束"],
+        sections=["结论", "依据", "动作", "数据健康", "执行约束"],
         version="v0.20",
     ),
 )
@@ -1029,6 +1030,8 @@ class ReportService:
                 "run_status": options.get("run_status"),
                 "run_error": options.get("run_error"),
                 "narrative": str(options.get("narrative") or "")[:4000],
+                # 四段契约的结构化提交（submit_duty_briefing）
+                "briefing": options.get("briefing"),
                 "holdings": [model_to_dict(item) for item in holdings],
                 "watchlist": [model_to_dict(item) for item in watchlist],
                 "monitor_events": [model_to_dict(item) for item in events],
@@ -1107,6 +1110,23 @@ class ReportService:
             index_rows = [["指数", "—", "无指数快照"]]
         narrative = str(payload.get("narrative") or "").strip()
         narrative_block = [narrative[:2000]] if narrative else ["（本轮 Copilot 无值班叙事，以上为系统快照。）"]
+
+        # 四段契约：优先用 submit_duty_briefing 的结构化提交，缺失时回退到原文快照
+        from backend.app_services.duty_briefing import briefing_missing_note
+
+        briefing = payload.get("briefing") if isinstance(payload.get("briefing"), dict) else None
+        briefing_note = briefing_missing_note(briefing)
+        if briefing and briefing.get("conclusion"):
+            conclusion = str(briefing["conclusion"])
+        evidence_lines = [f"- {t}" for t in (briefing or {}).get("evidence") or []] or observation_lines
+        action_lines = [f"- {t}" for t in (briefing or {}).get("actions") or []]
+        if not action_lines:
+            action_lines = ["- 无需操作" if briefing else "- 本轮未提交结构化动作，见「依据」里的原文。"]
+        health_lines = [f"- {t}" for t in (briefing or {}).get("data_health") or []]
+        if not health_lines:
+            health_lines = [
+                "- 行情源降级：" + str(market.get("degraded_reason") or "未编造点位")
+            ] if market_degraded else ["- 数据源与持仓快照均可用，无需声明的缺口。"]
         execution_guard = {
             "research_only": True,
             "auto_trade": False,
@@ -1116,28 +1136,30 @@ class ReportService:
             [
                 f"# {title}",
                 "",
-                f"> **值班结论**：{conclusion}",
+                f"> **结论**：{conclusion}",
                 "",
-                "## 指数与数据源",
-                *rc.table(["标的", "点位", "涨跌/说明"], index_rows),
+                *([f"> {briefing_note}", ""] if briefing_note else []),
+                "## 依据",
+                *evidence_lines,
+                "",
+                *rc.table(["指数", "点位", "涨跌/说明"], index_rows),
                 f"- 行情源：`{market.get('source') or 'provider_router'}`"
                 + (" · 已降级" if market_degraded else ""),
                 "",
-                "## 持仓与自选",
                 f"持仓 {len(holdings)} 只 · 自选 {len(watchlist)} 只。",
                 "",
                 *rc.table(["持仓", "市值", "权重%"], holding_rows),
                 "",
                 *rc.table(["自选", "名称", "分组"], watch_rows),
                 "",
-                "## 例外",
                 *exception_lines,
                 "",
-                "## 观察",
-                *observation_lines,
+                *([] if briefing else ["**值班原文**（未提交结构化结论，以下为模型原文）", "", *narrative_block, ""]),
+                "## 动作",
+                *action_lines,
                 "",
-                "## 值班叙事",
-                *narrative_block,
+                "## 数据健康",
+                *health_lines,
                 "",
                 "## 执行约束",
                 "- `execution_guard.auto_trade = false`（研究态，禁止自动下单）",
@@ -1160,6 +1182,7 @@ class ReportService:
                 for item in [*focus_holdings, *focus_watchlist]
                 if item.get("symbol")
             ],
+            "briefing": briefing,
             "auto_trade": False,
         }
         return Report(
@@ -1432,14 +1455,46 @@ def _ops_focus_tables(
     return focus_holdings, focus_watchlist, [note]
 
 
+_TITLE_TAIL = re.compile(r"(简报|报告|复盘|体检|概览|机会发现)\s*$")
+_DATE_LINE = re.compile(r"^[\d\-/:. ]+$")
+# 各任务的标题行形态：「今日盘前简报 · 10-23（…）」「收盘体检 10-23 15:15」「盘中报告 · 10-23 11:45」
+_TASK_TITLE_PREFIX = re.compile(
+    r"^(今日|本周)?\s*(盘前简报|盘前机会发现|每日机会发现|盘中报告|收盘体检|周度复盘|本周复盘|值班简报|值班报告|周度值班复盘)"
+)
+_TIME_IN_LINE = re.compile(r"\d{1,2}:\d{2}")
+
+
 def _ops_briefing_one_liner(text: str) -> str:
+    """取正文里第一句真正的结论。
+
+    旧实现直接取第一行，而各任务第一行是各自的标题/编号/日期行 ——
+    于是「值班结论」被写成了「收盘体检 10-23 15:15**」这种东西。
+    现在跳过标题行、编号行、纯日期行，取第一句实质内容。
+    """
     raw = (text or "").strip()
     if not raw:
         return ""
-    first = raw.splitlines()[0].strip().lstrip("#").strip().lstrip("*- ").strip()
-    if first.startswith("{") or first.startswith("```"):
-        return ""
-    return first[:120]
+    for line in raw.splitlines():
+        candidate = line.strip().lstrip("#*-→· ").strip().replace("**", "").strip()
+        if not candidate:
+            continue
+        if candidate.startswith("{") or candidate.startswith("```"):
+            return ""
+        if candidate.startswith(">"):
+            candidate = candidate.lstrip("> ").strip()
+        # 编号行（1. / 2、）与标题行（以「简报/报告/复盘…」结尾）都不是结论
+        if re.match(r"^\d+[.、)]", candidate):
+            continue
+        if _DATE_LINE.match(candidate):
+            continue
+        if _TITLE_TAIL.search(candidate) and len(candidate) <= 30:
+            continue
+        if _TASK_TITLE_PREFIX.match(candidate):
+            continue
+        if len(candidate) <= 40 and _TIME_IN_LINE.search(candidate):
+            continue
+        return candidate[:120]
+    return ""
 
 
 def _ops_briefing_exceptions(payload: dict[str, Any]) -> list[dict[str, Any]]:
