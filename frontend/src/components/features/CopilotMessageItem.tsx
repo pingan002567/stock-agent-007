@@ -4,6 +4,7 @@ import { MarkdownRenderer } from "@/components/features/MarkdownRenderer";
 import { formatLocalTime } from "@/utils/format";
 import { CopilotFinalMeta } from "@/components/features/CopilotFinalMeta";
 import { ThoughtTimeline } from "@/components/features/ThoughtTimeline";
+import { isCommandTool } from "@/hooks/useCopilotChat";
 import type { StreamStep, StreamToolCall } from "@/hooks/useCopilotChat";
 import { attachmentsFromMessagePayload } from "@/lib/sessionUploads";
 import { HumanInputCard } from "@/components/features/HumanInputCard";
@@ -76,6 +77,8 @@ export function CopilotMessageItem({
       status: t.failed ? "failed" as const : t.done ? "done" as const : "running" as const,
       resultText: t.resultText, subagentType: t.subagentType,
       taskDescription: t.taskDescription, taskPrompt: t.taskPrompt, args: t.args,
+      // 历史消息没存 kind：按工具名重新判定，bash 才能渲染成终端块
+      kind: isCommandTool(t.name) ? "command" : "tool",
     },
   }));
   const handleTimelineClick = onToolClick

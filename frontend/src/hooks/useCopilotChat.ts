@@ -35,6 +35,16 @@ export interface StreamToolCall {
   name: string;
   status: "running" | "done" | "failed";
   resultText?: string;
+  /** 命令执行类（bash / shell）——渲染成终端块，和 API 工具区分 */
+  kind?: "tool" | "command";
+  /** 所属轮次：一轮 = 一次「思考 → 调用工具」 */
+  round?: number;
+  /** 调用开始时间（epoch ms）：用于算单次耗时 */
+  startedAt?: number;
+  /** 单次耗时（ms）：tool_result 到达时算出来 */
+  durationMs?: number;
+  /** 工具自己报告的部分可用（degraded=true）——不能当失败藏起来 */
+  degraded?: boolean;
   /** task 委派时的子代理类型(subagent_type) */
   subagentType?: string;
   /** task 工具的 description 字段（短标题） */
@@ -47,7 +57,7 @@ export interface StreamToolCall {
 
 /** 思维链时间线步骤(deer-flow ChainOfThought 借鉴):推理与工具按到达顺序交错 */
 export type StreamStep =
-  | { kind: "reasoning"; id: string; text: string }
+  | { kind: "reasoning"; id: string; text: string; round?: number }
   | { kind: "tool"; id: string; tool: StreamToolCall };
 
 export interface PlanTodo {
@@ -67,6 +77,8 @@ export interface StreamMessage {
   tools: StreamToolCall[];
   /** 有序步骤流(时间线渲染用;tools 保留供旧消费方) */
   steps: StreamStep[];
+  /** 已经用掉的轮次：一轮 = 一次「思考 → 调用工具」 */
+  rounds: number;
   answerText: string;
   /** AI 反问澄清的问题文本（ask_clarification）；出现即等待用户下一条消息回答 */
   clarificationText: string | null;
@@ -202,6 +214,30 @@ export function extractToolResultText(payload: Record<string, unknown> | null | 
   const rest = { ...payload };
   delete rest.call_id;
   return Object.keys(rest).length ? JSON.stringify(rest) : undefined;
+}
+
+/** 命令执行类工具：渲染成终端块（深色 stdout + exit code），与 API 工具区分 */
+const COMMAND_TOOLS = new Set(["bash", "shell", "run_command", "sandbox_exec", "execute_command"]);
+
+export function isCommandTool(name: string): boolean {
+  return COMMAND_TOOLS.has(String(name || "").toLowerCase());
+}
+
+/** 工具结果里是否报告了「部分可用」。
+ *
+ * 后端约定 degraded=true 表示数据源部分失败（不是彻底失败）。这类结果不能
+ * 当成成功挂在 ✓ 上 —— 它意味着依赖它的结论要打折。
+ */
+export function detectDegraded(payload: Record<string, unknown> | null | undefined): boolean {
+  if (!payload) return false;
+  if (payload.degraded === true) return true;
+  const raw = payload.text ?? payload.output ?? payload.result;
+  if (raw && typeof raw === "object" && (raw as Record<string, unknown>).degraded === true) return true;
+  if (typeof raw === "string") {
+    const head = raw.trimStart();
+    if (head.startsWith("{") && head.includes('"degraded": true')) return true;
+  }
+  return false;
 }
 
 // ── Hook ──
@@ -627,6 +663,7 @@ function useCopilotChatState() {
       todos: [],
       tools: [],
       steps: [],
+      rounds: 0,
       answerText: "",
       clarificationText: null,
       clarificationRequest: null,
@@ -812,12 +849,20 @@ function useCopilotChatState() {
           }
           patchStream(sid, (prev) => {
             if (prev.tools.some((t) => t.callId === callId)) return prev;
+            // 轮次：一轮 = 一次「思考 → 调用工具」。
+            // 并行的多个工具共用同一轮（还有工具在跑就不算新轮）。
+            const anyRunning = prev.tools.some((t) => t.status === "running");
+            const round = prev.tools.length === 0 ? 1 : anyRunning ? prev.rounds : prev.rounds + 1;
             const tool: StreamToolCall = {
               callId, name, status: "running", subagentType, taskDescription, taskPrompt,
+              round,
+              kind: isCommandTool(name) ? "command" : "tool",
+              startedAt: Date.now(),
             };
             return {
               ...prev,
               phase: "tools",
+              rounds: round,
               tools: [...prev.tools, tool],
               steps: [...prev.steps, { kind: "tool", id: callId, tool }],
             };
@@ -833,12 +878,19 @@ function useCopilotChatState() {
           const p = (data?.payload || {}) as Record<string, unknown>;
           const callId = String(p.call_id || "");
           const resultText = extractToolResultText(p);
-          patchStream(sid, (prev) => ({
-            ...prev,
-            tools: prev.tools.map((t) => t.callId === callId ? { ...t, status: "done", resultText } : t),
-            steps: prev.steps.map((st) => st.kind === "tool" && st.tool.callId === callId
-              ? { ...st, tool: { ...st.tool, status: "done" as const, resultText } } : st),
-          }));
+          const degraded = detectDegraded(p);
+          patchStream(sid, (prev) => {
+            const finish = (t: StreamToolCall): StreamToolCall => {
+              if (t.callId !== callId) return t;
+              const durationMs = t.startedAt ? Date.now() - t.startedAt : undefined;
+              return { ...t, status: "done", resultText, durationMs, degraded };
+            };
+            return {
+              ...prev,
+              tools: prev.tools.map(finish),
+              steps: prev.steps.map((st) => st.kind === "tool" ? { ...st, tool: finish(st.tool) } : st),
+            };
+          });
         } catch { /* empty */ }
       });
 

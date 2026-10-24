@@ -5139,6 +5139,81 @@ html.mobile .turn-failure { padding: 0 4px; }
   padding: 0 0 6px;
   white-space: normal;
 }
+/* ── Agent loop 外壳：折叠头 + 正文 ───────────────────────────── */
+.agent-loop { margin: 2px 0 6px; }
+.agent-loop .loop-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 5px 8px;
+  background: none; border: none; border-radius: 7px; cursor: pointer;
+  font: inherit; color: var(--ink-2); text-align: left;
+}
+.agent-loop .loop-head:hover { background: var(--hover, rgba(0,0,0,.05)); }
+.agent-loop .loop-icon { flex: none; display: flex; color: var(--blue); }
+.agent-loop .loop-icon.live { color: var(--blue); }
+.loop-spin {
+  width: 11px; height: 11px; border: 1.5px solid var(--line);
+  border-top-color: var(--blue); border-radius: 50%;
+  display: inline-block; animation: loop-spin .8s linear infinite;
+}
+@keyframes loop-spin { to { transform: rotate(360deg); } }
+.agent-loop .loop-title { font-size: 13px; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-loop .loop-rounds {
+  flex: none; font-size: 11px; font-family: var(--mono); color: var(--faint);
+  border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; line-height: 1.6;
+}
+.agent-loop .loop-chev {
+  margin-left: auto; flex: none; font-size: 9px; color: var(--faint);
+  transition: transform .15s;
+}
+.agent-loop.open .loop-chev { transform: rotate(90deg); }
+.agent-loop .loop-body { display: none; padding: 2px 0 2px; }
+.agent-loop.open .loop-body { display: block; }
+/* 轨迹视图（expandAll）不显示折叠头，正文常显 */
+.agent-loop .loop-body { display: none; }
+.agent-loop.open .loop-body { display: block; }
+
+/* ── 工具节点：名字 + 参数 + 耗时 + 状态 ─────────────────────── */
+.tool-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.tool-name { font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--ink-2); flex: none; }
+.tool-tail {
+  margin-left: auto; flex: none; display: flex; align-items: center; gap: 7px;
+  font-size: 11px; font-family: var(--mono); color: var(--faint);
+}
+.tl-state-dot { font-family: var(--mono); font-size: 11px; }
+.tl-state-dot.ok { color: var(--green); }
+.tl-state-dot.warn { color: var(--amber, #b45309); }
+.tl-state-dot.bad { color: var(--red); }
+.tl-state-dot.busy { color: var(--faint); }
+
+/* 工具输出块：默认 3 行，点开展开 */
+.out {
+  margin-top: 5px; padding: 7px 10px; border-radius: 7px;
+  background: var(--soft, rgba(0,0,0,.035));
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.6;
+  color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.out.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+.out-more {
+  display: block; text-align: left;
+  background: none; border: none; padding: 2px 0 0; margin: 0;
+  font: inherit; font-size: 11.5px; color: var(--faint); cursor: pointer;
+}
+.out-more:hover { color: var(--blue); }
+
+/* ── 命令执行：命令行 + 深色 stdout + exit ───────────────────── */
+.cmd-line { display: flex; align-items: baseline; gap: 7px; min-width: 0; font-family: var(--mono); font-size: 12px; }
+.cmd-line .prompt { flex: none; color: var(--faint); }
+.cmd-line .cmd-text { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmd-out {
+  margin: 6px 0 0; padding: 8px 10px; border-radius: 7px;
+  background: #0f1115; color: #e6e8eb;
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.6;
+  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow: auto;
+}
+.cmd-out.failed { box-shadow: inset 2px 0 0 var(--red); }
+.cmd-exit { margin-top: 4px; font-family: var(--mono); font-size: 11px; color: var(--faint); }
+.tl-step-icon.cmd { color: var(--faint); }
+
 /* 思考行（DSH 现状）：图标 + 思考 · 文本，平铺在步骤流里 */
 .tl-think { align-items: baseline; }
 .tl-think .tl-step-icon { margin-top: 1px; }

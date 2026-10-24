@@ -214,8 +214,8 @@ describe("CopilotStreamingMessage", () => {
       tools: [{ callId: "c1", name: "get_stock_context", status: "done" }],
     });
     const { container } = render(<CopilotStreamingMessage streamMessage={sm} />);
-    // 时间线里完成态显示 ✓(紧凑步行,非文字标签)
-    expect(container.querySelector(".tl-step-state.ok")?.textContent).toContain("✓");
+    // 时间线里完成态显示 ✓（紧凑状态点，非文字标签）
+    expect(container.querySelector(".tl-state-dot.ok")?.textContent).toContain("✓");
   });
 
   it("流式中在气泡下方显示本轮已执行时长", () => {
