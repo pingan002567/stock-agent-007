@@ -30,12 +30,52 @@ def _pair(symbol: str, quote: str = "USDT") -> str:
     return f"{str(symbol).strip().upper()}_{quote}"
 
 
+#: 连续失败 N 次就熔断：Gate 挂了的时候不要让每次对话都等 5s 超时
+BREAKER_THRESHOLD = 3
+BREAKER_OPEN_SECONDS = 60
+_breaker: dict[str, float] = {"failures": 0.0, "open_until": 0.0}
+
+
+class CryptoSourceUnavailable(RuntimeError):
+    """Gate 熔断中：直接降级，不再打源。"""
+
+
+def breaker_state() -> dict[str, Any]:
+    now = time.monotonic()
+    return {
+        "failures": int(_breaker["failures"]),
+        "open": _breaker["open_until"] > now,
+        "open_for_seconds": round(max(0.0, _breaker["open_until"] - now), 1),
+        "threshold": BREAKER_THRESHOLD,
+    }
+
+
+def reset_breaker() -> None:
+    _breaker["failures"] = 0.0
+    _breaker["open_until"] = 0.0
+
+
 def _get(path: str, params: dict[str, Any] | None = None) -> Any:
     import httpx
 
-    resp = httpx.get(f"{GATE_BASE}{path}", params=params, timeout=QUOTE_TIMEOUT_SECONDS)
-    resp.raise_for_status()
-    return resp.json()
+    now = time.monotonic()
+    if _breaker["open_until"] > now:
+        raise CryptoSourceUnavailable(
+            f"Gate 连续失败已熔断，{breaker_state()['open_for_seconds']:.0f}s 后重试"
+        )
+    try:
+        resp = httpx.get(f"{GATE_BASE}{path}", params=params, timeout=QUOTE_TIMEOUT_SECONDS)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        _breaker["failures"] += 1
+        if _breaker["failures"] >= BREAKER_THRESHOLD:
+            _breaker["open_until"] = now + BREAKER_OPEN_SECONDS
+            _breaker["failures"] = 0
+            logger.warning("gate breaker opened for %ss", BREAKER_OPEN_SECONDS)
+        raise
+    _breaker["failures"] = 0
+    return data
 
 
 def fetch_quote(symbol: str) -> dict[str, Any] | None:

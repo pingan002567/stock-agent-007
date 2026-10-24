@@ -601,6 +601,10 @@ class RebalanceDraft(BaseModel):
     counter_reasons: List[str] = Field(default_factory=list)
     evidence_refs: List[str] = Field(default_factory=list)
     auto_trade: bool = False
+    #: 该标的是否有可执行的交易通道。加密货币永远 False（只给权重建议，不下单）。
+    executable: bool = True
+    #: 资产类别（stock / etf / crypto），前端据此提示「仅权重建议」
+    asset_class: str = "stock"
     valid_until: str
     validity_source: str = "risk_policy.rules.draft_valid_hours"
     risk_policy_ref: Optional[RiskPolicyRef] = None

@@ -583,3 +583,107 @@ def test_crypto_tasks_auto_seed_on_existing_install(tmp_path) -> None:
     assert "sched_weekly_review" not in ids
     # auto_seed 标记不会泄漏到存储里
     assert all("auto_seed" not in t for t in items)
+
+
+# ── 11. P3：可靠性（FX 双源 + Gate 熔断）──────────────────
+def test_fx_falls_back_to_secondary_source(monkeypatch) -> None:
+    """主源挂 → 备源顶上，仍然不降级（degraded=False）。"""
+    def primary_boom():
+        raise RuntimeError("primary down")
+
+    monkeypatch.setattr(fx, "_fetch_primary", primary_boom)
+    monkeypatch.setattr(fx, "_fetch_fallback", lambda: (6.67, 7.8, "frankfurter.app"))
+    fx.invalidate_cache()
+    payload = fx.get_rates(refresh=True)
+    assert payload["source"] == "frankfurter.app"
+    assert payload["usd_cny"] == 6.67
+    assert payload["degraded"] is False
+    # 备源给的 1HKD=?CNY 由 USD 交叉汇率算出
+    assert payload["hkd_cny"] == round(6.67 / 7.8, 6)
+    fx.invalidate_cache()
+
+
+def test_fx_degrades_when_both_sources_fail(monkeypatch) -> None:
+    monkeypatch.setattr(fx, "_fetch_primary", lambda: (_ for _ in ()).throw(RuntimeError("a")))
+    monkeypatch.setattr(fx, "_fetch_fallback", lambda: (_ for _ in ()).throw(RuntimeError("b")))
+    fx.invalidate_cache()
+    payload = fx.get_rates(refresh=True)
+    assert payload["degraded"] is True
+    assert payload["usd_cny"] is None
+    assert fx.rates_for_conversion(payload) is None
+    fx.invalidate_cache()
+
+
+def test_gate_breaker_opens_after_threshold_failures(monkeypatch) -> None:
+    """连续失败 3 次后熔断：第 4 次不再打源（对话不该每次等 5s 超时）。"""
+    import httpx
+
+    from backend.stock_domain import crypto_providers as cp
+
+    cp.reset_breaker()
+    calls = {"n": 0}
+    real_get = httpx.get
+
+    def failing_get(*args, **kwargs):
+        calls["n"] += 1
+        raise httpx.ConnectTimeout("timeout")
+
+    monkeypatch.setattr(httpx, "get", failing_get)
+    try:
+        for i in range(3):
+            with pytest.raises(httpx.ConnectTimeout):
+                cp.fetch_quote(f"X{i}")
+        with pytest.raises(cp.CryptoSourceUnavailable):
+            cp.fetch_quote("X9")
+        assert calls["n"] == 3, f"熔断后不该再打源，实际打了 {calls['n']} 次"
+        assert cp.breaker_state()["open"] is True
+    finally:
+        monkeypatch.setattr(httpx, "get", real_get)
+        cp.reset_breaker()
+
+
+# ── 12. P3：再平衡纳入加密（只给权重建议，不下单）──────────
+def test_rebalance_draft_uses_converted_weight_and_marks_crypto(tmp_path, monkeypatch) -> None:
+    from tests.test_api import make_client
+
+    monkeypatch.setattr(
+        fx,
+        "_fetch_rates",
+        lambda: {
+            "as_of": "2026-10-24", "fetched_at": "2026-10-24T00:00:00+00:00",
+            "source": "open.er-api.com", "usd_cny": 6.68, "hkd_cny": 0.86,
+            "usdt_usd": 1.0, "degraded": False, "degraded_reason": None,
+        },
+    )
+    fx.invalidate_cache()
+    client = make_client(tmp_path)
+    client.post("/api/holdings/clear-demo")
+    client.post(
+        "/api/holdings/import-confirm",
+        json=[
+            {"symbol": "600519", "name": "贵州茅台", "quantity": 100, "market_value": 100000, "weight_pct": 0, "cost": 1600},
+            {"symbol": "BTC", "name": "Bitcoin", "quantity": 1, "market_value": 10000, "weight_pct": 0, "cost": 9000},
+        ],
+    )
+
+    stock_draft = client.post(
+        "/api/holdings/rebalance-draft", json={"symbol": "600519", "target_weight_pct": 30}
+    ).json()
+    crypto_draft = client.post(
+        "/api/holdings/rebalance-draft", json={"symbol": "BTC", "target_weight_pct": 20}
+    ).json()
+
+    # 当前权重必须是折算后的真实占比（库里的 weight_pct 恒为 0）
+    assert stock_draft["current_weight_pct"] > 50
+    assert crypto_draft["current_weight_pct"] > 30
+    # 股票可执行；加密货币不可执行，且标明资产类别
+    assert stock_draft["executable"] is True
+    assert stock_draft["asset_class"] == "stock"
+    assert crypto_draft["executable"] is False
+    assert crypto_draft["asset_class"] == "crypto"
+    assert "权重建议" in crypto_draft["conclusion"]
+    # 草案详情接口也要带这两个字段（前端卡片据此改文案）
+    detail = client.get(f"/api/rebalance-drafts/{crypto_draft['draft_id']}").json()
+    assert detail["executable"] is False
+    assert detail["asset_class"] == "crypto"
+    fx.invalidate_cache()

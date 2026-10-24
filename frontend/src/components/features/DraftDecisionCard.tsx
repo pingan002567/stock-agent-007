@@ -17,6 +17,9 @@ interface DraftDetail {
   target_weight_pct?: number;
   delta_weight_pct?: number;
   status?: string;
+  asset_class?: string;
+  /** 是否有可执行交易通道；加密货币永远 false（只给权重建议） */
+  executable?: boolean;
   conclusion?: string;
   reasons?: string[];
   counter_reasons?: string[];
@@ -83,7 +86,9 @@ export function DraftDecisionCard({ draftId }: { draftId: string }) {
         <span className="num decision-card-sym">{draft.symbol}</span>
         {draft.name && <span className="decision-card-name">{draft.name}</span>}
         {pending
-          ? <span className="decision-card-badge">待确认</span>
+          ? <span className="decision-card-badge">
+              {draft.executable === false ? "待确认 · 仅权重建议" : "待确认"}
+            </span>
           : done && <span style={{ marginLeft: "auto" }}><StatusDot tone={done.tone}>{done.label}</StatusDot></span>}
       </div>
       <div className="decision-card-fields">
@@ -98,11 +103,18 @@ export function DraftDecisionCard({ draftId }: { draftId: string }) {
         </div>
       </div>
       {draft.conclusion && <div className="decision-card-conclusion">{draft.conclusion}</div>}
+      {draft.executable === false && (
+        <div className="decision-card-hint" style={{ marginTop: 6 }}>
+          {draft.asset_class === "crypto"
+            ? "加密货币无交易通道：确认只登记权重意图，不会产生任何订单"
+            : "该标的无交易通道，确认只登记权重意图"}
+        </div>
+      )}
       {pending && (
         <div className="decision-card-actions">
           <button type="button" className="decision-confirm" disabled={busy != null}
             onClick={() => void decide("confirm")}>
-            {busy === "confirm" ? "确认中…" : "确认草案"}
+            {busy === "confirm" ? "确认中…" : draft.executable === false ? "确认意图" : "确认草案"}
           </button>
           <button type="button" className="decision-reject" disabled={busy != null}
             onClick={() => void decide("reject")}>

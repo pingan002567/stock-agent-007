@@ -18,7 +18,10 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+#: 主源：免 key、含 CNY/HKD
 FX_SOURCE = "https://open.er-api.com/v6/latest/USD"
+#: 备源：ECB 数据（frankfurter 会 301 到 api.frankfurter.dev，必须跟随重定向）
+FX_FALLBACK_SOURCE = "https://api.frankfurter.app/latest?from=USD&to=CNY,HKD"
 FX_TIMEOUT_SECONDS = 8
 
 #: 我们支持的币种 → 这里存「1 单位该币 = ? CNY」
@@ -35,10 +38,11 @@ def _today() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
 
-def _fetch_rates() -> dict[str, Any]:
+def _fetch_primary() -> tuple[float, float, str]:
+    """主源 open.er-api.com → (usd_cny, usd_hkd, source)。"""
     import httpx
 
-    resp = httpx.get(FX_SOURCE, timeout=FX_TIMEOUT_SECONDS)
+    resp = httpx.get(FX_SOURCE, timeout=FX_TIMEOUT_SECONDS, follow_redirects=True)
     resp.raise_for_status()
     data = resp.json()
     if str(data.get("result") or "").lower() != "success":
@@ -48,12 +52,48 @@ def _fetch_rates() -> dict[str, Any]:
     usd_hkd = float(rates.get("HKD") or 0)
     if usd_cny <= 0:
         raise ValueError("fx source missing CNY rate")
+    return usd_cny, usd_hkd, "open.er-api.com"
+
+
+def _fetch_fallback() -> tuple[float, float, str]:
+    """备源 frankfurter（ECB）→ (usd_cny, usd_hkd, source)。"""
+    import httpx
+
+    resp = httpx.get(
+        FX_FALLBACK_SOURCE, timeout=FX_TIMEOUT_SECONDS, follow_redirects=True
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    rates = data.get("rates") or {}
+    usd_cny = float(rates.get("CNY") or 0)
+    usd_hkd = float(rates.get("HKD") or 0)
+    if usd_cny <= 0:
+        raise ValueError("fx fallback missing CNY rate")
+    return usd_cny, usd_hkd, "frankfurter.app"
+
+
+def _fetch_rates() -> dict[str, Any]:
+    """主源 → 备源 → 降级。两个源都挂才算降级。"""
+    errors: list[str] = []
+    usd_cny = usd_hkd = 0.0
+    source = ""
+    for fetcher in (_fetch_primary, _fetch_fallback):
+        try:
+            usd_cny, usd_hkd, source = fetcher()
+            break
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{fetcher.__name__}:{type(exc).__name__}")
+            logger.warning("fx %s failed: %s", fetcher.__name__, exc)
+            continue
+    if usd_cny <= 0:
+        raise ValueError("no fx source available: " + ", ".join(errors))
+
     # 1 HKD 值多少 CNY = (CNY per USD) / (HKD per USD)
     hkd_cny = round(usd_cny / usd_hkd, 6) if usd_hkd > 0 else 0.0
     return {
         "as_of": _today(),
         "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "source": "open.er-api.com",
+        "source": source,
         "usd_cny": round(usd_cny, 6),
         "hkd_cny": hkd_cny,
         "usdt_usd": 1.0,

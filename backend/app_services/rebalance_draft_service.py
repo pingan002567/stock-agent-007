@@ -7,6 +7,8 @@ from backend.app_services.audit_service import AuditService
 from backend.app_services.context_builder import ContextBuilder
 from backend.app_services.decision_journal_service import DecisionJournalService
 from backend.execution_guard import canonical_execution_guard
+from backend.stock_domain import fx as fx_service
+from backend.stock_domain.catalog import get_stock
 from backend.app_services.risk_policy_service import RiskPolicyService
 from backend.persistence.repositories import WorkbenchRepository
 from backend.schemas import (
@@ -44,6 +46,23 @@ class RebalanceDraftService:
         self.risk_policy_service = risk_policy_service
         self.decision_journal_service = decision_journal_service
 
+    def _current_weight_pct(self, symbol: str, holding) -> float:
+        """当前仓位（%）。按**折算后的人民币市值 / NAV** 算。
+
+        库里 holding.weight_pct 恒为 0，直接用它会让所有草案都变成「从 0% 加到 X%」。
+        """
+        from backend.stock_domain.portfolio_tools import summarize_portfolio
+
+        payload = fx_service.get_rates()
+        rates = fx_service.rates_for_conversion(payload)
+        summary = summarize_portfolio(
+            self.repo.list_holdings(), rates=rates, fx=payload
+        )
+        weights = summary.get("weights") or {}
+        if symbol in weights:
+            return float(weights[symbol])
+        return float(getattr(holding, "weight_pct", 0.0) or 0.0)
+
     def create(
         self,
         payload: RebalanceDraftRequest | RebalanceDraftCreateRequest | dict,
@@ -54,7 +73,10 @@ class RebalanceDraftService:
             payload = RebalanceDraftCreateRequest(**payload)
         context = self.context_builder.build_stock_context(payload.symbol)
         policy = self.risk_policy_service.get_active_policy()
-        current_weight = round(context.holding.weight_pct, 2)
+        stock = get_stock(context.symbol) or {}
+        asset_class = str(stock.get("instrument_type") or "stock")
+        is_crypto = str(stock.get("market") or "") == "CRYPTO"
+        current_weight = round(self._current_weight_pct(context.symbol, context.holding), 2)
         target_weight = round(float(payload.target_weight_pct), 2)
         action = "REDUCE" if target_weight < current_weight else "ADD" if target_weight > current_weight else "HOLD"
         valid_until = (_utc_now() + timedelta(hours=policy.rules.draft_valid_hours)).isoformat()
@@ -67,7 +89,11 @@ class RebalanceDraftService:
             current_weight_pct=current_weight,
             target_weight_pct=target_weight,
             delta_weight_pct=round(target_weight - current_weight, 2),
-            conclusion=f"{context.symbol} 调仓草案：{current_weight:.1f}% -> {target_weight:.1f}%",
+            conclusion=(
+                f"{context.symbol} "
+                f"{'权重建议（加密货币无交易通道）' if is_crypto else '调仓草案'}："
+                f"{current_weight:.1f}% -> {target_weight:.1f}%"
+            ),
             reasons=[
                 f"当前仓位 {current_weight:.1f}%，目标仓位 {target_weight:.1f}%",
                 f"当前风险标签：{context.ai_state.risk_label}",
@@ -82,6 +108,9 @@ class RebalanceDraftService:
             validity_source="risk_policy.rules.draft_valid_hours",
             risk_policy_ref=self.risk_policy_service.build_ref(policy),
             source_mode=source_mode,
+            # 加密货币没有交易通道：只给权重建议，前端不该出现"确认下单"
+            executable=not is_crypto,
+            asset_class=asset_class,
         )
         draft.output = self._draft_output(draft)
         saved = self.repo.save_rebalance_draft(draft)
@@ -169,6 +198,13 @@ class RebalanceDraftService:
         payload = model_to_dict(summary)
         payload["draft_id"] = draft.draft_id
         payload["draft_status"] = draft.status.value
+        payload["auto_trade"] = draft.auto_trade
+        # 加密货币没有交易通道：前端据此显示「仅权重建议」，不要出现"确认下单"
+        payload["executable"] = draft.executable
+        payload["asset_class"] = draft.asset_class
+        payload["current_weight_pct"] = draft.current_weight_pct
+        payload["target_weight_pct"] = draft.target_weight_pct
+        payload["delta_weight_pct"] = draft.delta_weight_pct
         return payload
 
     def to_tool_result(self, draft: RebalanceDraft) -> dict:
@@ -176,6 +212,8 @@ class RebalanceDraftService:
             "draft_id": draft.draft_id,
             "draft_status": draft.status.value,
             "auto_trade": draft.auto_trade,
+            "executable": draft.executable,
+            "asset_class": draft.asset_class,
             "draft_order": self._draft_order_payload(draft),
         }
 
@@ -208,6 +246,8 @@ class RebalanceDraftService:
             "delta_weight_pct": draft.delta_weight_pct,
             "status": draft.status.value,
             "auto_trade": draft.auto_trade,
+            "executable": draft.executable,
+            "asset_class": draft.asset_class,
             "note": draft.note,
             "valid_until": draft.valid_until,
             "validity_source": draft.validity_source,
