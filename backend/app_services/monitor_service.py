@@ -464,6 +464,8 @@ class MonitorService:
             return []
         if rule.rule_type == "single_position_weight_gt":
             return self._match_single_position_weight(rule)
+        if rule.rule_type == "crypto_funding_rate_gt":
+            return self._match_crypto_funding_rate(rule)
         if rule.rule_type == "price_change_pct_gt":
             return self._match_price_change(rule, ctx_cache=ctx_cache)
         if rule.rule_type == "data_provider_degraded":
@@ -481,28 +483,96 @@ class MonitorService:
         raise ValueError(f"unsupported monitor rule_type: {rule.rule_type}")
 
     def _match_single_position_weight(self, rule: MonitorRule) -> list[dict[str, Any]]:
+        """仓位超限。权重按**折算后的人民币市值 / NAV** 实时算。
+
+        库里的 `weight_pct` 恒为 0（历史遗留），用它判断会导致这条规则永不触发。
+        """
         threshold = float(rule.threshold if rule.threshold is not None else self.risk_policy_service.get_monitor_defaults()["threshold"])
         holdings = self.repo.list_holdings()
         if rule.symbol:
             holdings = [item for item in holdings if item.symbol.upper() == rule.symbol.upper()]
+        if not holdings:
+            return []
+
+        from backend.stock_domain import fx as fx_service
+        from backend.stock_domain.portfolio_tools import (
+            holding_currency,
+            summarize_portfolio,
+            to_cny_amount,
+        )
+
+        payload = fx_service.get_rates()
+        rates = fx_service.rates_for_conversion(payload)
+        summary = summarize_portfolio(holdings, rates=rates, fx=payload)
+        weights = (summary.get("weights") or {}) if summary.get("converted") else {}
+
         matches = []
         for item in holdings:
-            if item.weight_pct <= threshold:
+            weight = float(weights.get(item.symbol, 0.0) or 0.0)
+            if weight <= threshold:
                 continue
             matches.append(
                 {
                     "symbol": item.symbol.upper(),
                     "title": rule.title or f"{item.symbol.upper()} 仓位超过规则上限",
-                    "severity": "high" if item.weight_pct >= threshold + 2 else rule.severity,
+                    "severity": "high" if weight >= threshold + 2 else rule.severity,
                     "trigger_rule": rule.trigger_rule or f"single_position_weight > {threshold:g}%",
                     "dedupe_key": f"{rule.rule_id}:{item.symbol.upper()}:single_position_weight_gt:{threshold:g}",
                     "evidence": [
-                        {"type": "holding_weight_pct", "value": item.weight_pct},
+                        {"type": "holding_weight_pct", "value": weight},
                         {"type": "threshold_pct", "value": threshold},
                         {"type": "portfolio_snapshot", "ref": "holding_position"},
                     ],
                     "suggested_actions": ["open_stock_context", "run_risk_review", "generate_rebalance_plan"],
-                    "payload": {"symbol": item.symbol.upper(), "weight_pct": item.weight_pct, "threshold": threshold},
+                    "payload": {"symbol": item.symbol.upper(), "weight_pct": weight, "threshold": threshold},
+                }
+            )
+        return matches
+
+    def _match_crypto_funding_rate(self, rule: MonitorRule) -> list[dict[str, Any]]:
+        """加密货币资金费率异常。阈值单位 = 百分比（如 0.02 表示单次 0.02%）。
+
+        资金费率是币圈最直接的「杠杆拥挤度」信号：>0.02%/8h（年化 ~22%）通常意味着
+        多头在付高额成本，容易多头踩踏。
+        """
+        from backend.stock_domain.crypto_providers import fetch_derivatives
+        from backend.stock_domain.crypto_universe import crypto_meta
+
+        threshold = float(rule.threshold if rule.threshold is not None else 0.02)
+        symbols = [s for s in self._rule_symbols(rule) if crypto_meta(s)]
+        matches = []
+        for symbol in symbols:
+            try:
+                data = fetch_derivatives(symbol)
+            except Exception:  # noqa: BLE001 - 外部源，失败就当这条规则这次没有信号
+                continue
+            rate_pct = float(data.get("funding_rate") or 0.0) * 100
+            if abs(rate_pct) <= threshold:
+                continue
+            direction = "正费率（多头付费）" if rate_pct > 0 else "负费率（空头付费）"
+            matches.append(
+                {
+                    "symbol": symbol,
+                    "title": rule.title or f"{symbol} 资金费率 {rate_pct:.4f}% 超过 {threshold:g}%",
+                    "severity": "high" if abs(rate_pct) >= threshold * 2 else rule.severity,
+                    "trigger_rule": rule.trigger_rule or f"abs(funding_rate) > {threshold:g}%",
+                    "dedupe_key": (
+                        f"{rule.rule_id}:{symbol}:crypto_funding_rate_gt:{threshold:g}:{direction}"
+                    ),
+                    "evidence": [
+                        {"type": "crypto_funding_rate_pct", "value": round(rate_pct, 6)},
+                        {"type": "funding_annualized_pct", "value": data.get("funding_annualized_pct")},
+                        {"type": "funding_percentile_90d", "value": data.get("funding_percentile_90d")},
+                        {"type": "threshold_pct", "value": threshold},
+                    ],
+                    "suggested_actions": ["open_stock_context", "run_crypto_review"],
+                    "payload": {
+                        "symbol": symbol,
+                        "funding_rate_pct": round(rate_pct, 6),
+                        "funding_percentile_90d": data.get("funding_percentile_90d"),
+                        "threshold": threshold,
+                        "direction": direction,
+                    },
                 }
             )
         return matches

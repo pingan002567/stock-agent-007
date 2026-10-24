@@ -478,3 +478,79 @@ def test_risk_flags_crypto_total_exposure(tmp_path, monkeypatch) -> None:
     assert crypto_risk["threshold_value"] == 30
     assert crypto_risk["severity"] == "high"
     fx.invalidate_cache()
+
+
+# ── 10. 币圈定时任务与盯盘（P2）──────────────────────────
+def test_crypto_duty_tasks_use_crypto_preamble_and_skip_cn_calendar() -> None:
+    from backend.app_services import scheduler_service as sched
+
+    crypto_tasks = [t for t in sched.DEFAULT_TASKS if sched.is_crypto_task(t)]
+    assert {t["task_id"] for t in crypto_tasks} == {
+        "sched_crypto_daily",
+        "sched_crypto_asia",
+        "sched_crypto_late",
+    }
+    for task in crypto_tasks:
+        # 用加密货币专属 preamble：禁 A 股概念、要求衍生品与全市场情绪
+        assert sched.preamble_for(task) is sched.CRYPTO_DUTY_PREAMBLE
+        # 24/7：不走 CN 交易日历
+        assert sched.uses_cn_session_calendar(task) is False
+        assert sched.skip_reason_for(task) is None
+        assert task.get("market") == "CRYPTO"
+    # A 股任务不受影响
+    cn = next(t for t in sched.DEFAULT_TASKS if t["task_id"] == "sched_premarket")
+    assert sched.preamble_for(cn) is sched.DUTY_PREAMBLE
+    assert sched.uses_cn_session_calendar(cn) is True
+
+
+def test_crypto_preamble_bans_a_share_concepts() -> None:
+    from backend.app_services.scheduler_service import CRYPTO_DUTY_PREAMBLE
+
+    assert "禁止使用 A 股概念" in CRYPTO_DUTY_PREAMBLE
+    assert "get_crypto_derivatives" in CRYPTO_DUTY_PREAMBLE
+    assert "固定四段" in CRYPTO_DUTY_PREAMBLE
+    # 四段契约里的收口工具必须still在
+    assert "submit_duty_briefing" in CRYPTO_DUTY_PREAMBLE
+
+
+class _RuleStub:
+    """只为调用 matcher 提供一个 self（matcher 只用到 _rule_symbols）。"""
+
+    def _rule_symbols(self, rule):
+        return [rule.symbol] if rule.symbol else []
+
+
+def test_monitor_funding_rate_rule(monkeypatch) -> None:
+    from backend.app_services.monitor_service import MonitorService
+    from backend.stock_domain import crypto_providers
+    from backend.schemas import MonitorRule
+
+    monkeypatch.setattr(
+        crypto_providers,
+        "fetch_derivatives",
+        lambda symbol: {
+            "symbol": symbol,
+            "funding_rate": 0.0005,          # 0.05% 单次，超过 0.02% 阈值
+            "funding_annualized_pct": 54.75,
+            "funding_percentile_90d": 96.0,
+        },
+    )
+    rule = MonitorRule(
+        rule_id="r1", rule_type="crypto_funding_rate_gt", symbol="BTC", threshold=0.02
+    )
+    matches = MonitorService._match_crypto_funding_rate(_RuleStub(), rule)
+    assert len(matches) == 1
+    hit = matches[0]
+    assert hit["symbol"] == "BTC"
+    assert hit["payload"]["funding_rate_pct"] == 0.05
+    assert hit["evidence"][2]["value"] == 96.0
+    # 阈值以上 2 倍才算 high
+    assert hit["severity"] == "high"
+
+
+def test_monitor_funding_rate_rule_ignores_non_crypto_symbol(monkeypatch) -> None:
+    from backend.app_services.monitor_service import MonitorService
+    from backend.schemas import MonitorRule
+
+    rule = MonitorRule(rule_id="r2", rule_type="crypto_funding_rate_gt", symbol="600519")
+    assert MonitorService._match_crypto_funding_rate(_RuleStub(), rule) == []

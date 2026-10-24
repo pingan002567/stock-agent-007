@@ -49,6 +49,19 @@ DUTY_OUTPUT_CONTRACT = (
     "正文与工具提交必须一致；表格合计 ≤8 行。"
 )
 
+# 加密货币值班：24/7 无休市，锚点对齐资金费率结算（UTC 00/08/16）。
+CRYPTO_DUTY_PREAMBLE = (
+    "你是加密货币值班研究员。禁止自动交易，也禁止讨论杠杆（只做现货仓位）。\n"
+    f"{_DATA_DISCIPLINE}\n"
+    "必须调用：get_portfolio_snapshot、get_monitor_events、get_market_sentiment(market=\"CRYPTO\")。\n"
+    "持仓/自选里的币要逐个调 get_crypto_derivatives 看资金费率与持仓量；"
+    "没有合约的小币跳过并把「无合约数据」写进数据健康。\n"
+    "禁止使用 A 股概念：不看涨停、连板、炸板、龙虎榜、两融、解禁、筹码分布。"
+    "币圈的「筹码」是资金费率 / 持仓量 / 多空比 / 清算。\n"
+    f"{DUTY_OUTPUT_CONTRACT}\n"
+    "不要调用 generate_report，系统会在运行结束后自动落盘值班简报。"
+)
+
 DUTY_PREAMBLE = (
     "你是值班研究员。禁止自动交易。\n"
     f"{_DATA_DISCIPLINE}\n"
@@ -199,6 +212,69 @@ DEFAULT_TASKS: list[dict[str, Any]] = [
         "calendar": "CN",
     },
     {
+        "task_id": "sched_crypto_daily",
+        "name": "加密货币日线复盘",
+        "prompt": (
+            "【任务】加密货币日线复盘（每日 08:00，对应 UTC 00:00 —— 币圈日线在此切分，"
+            "也是资金费率结算点）。只做加密货币持仓/自选，不写 A 股。\n"
+            "【取数】持仓/自选走本地缓存；每个持有或关注的币调 get_crypto_derivatives，"
+            "看资金费率（含 90 天分位）、持仓量、散户与大户多空比、近 24h 清算；"
+            "全市场用 get_market_sentiment(market=\"CRYPTO\")。\n"
+            "【输出】固定四段（见 preamble 的四段契约）：\n"
+            "1. 结论：今天对币的仓位做不做调整，一句话。\n"
+            "2. 依据：≤5 条，覆盖过去 24h 价格结构与关键位、资金费率是否拥挤（给分位）、"
+            "持仓量与清算哪边在挨打、全市场主导率与稳定币总量变化。\n"
+            "3. 动作：≤5 条，标的+分批区间/减仓条件/止损位；没有动作写「无需操作」。"
+            "只谈现货仓位，不谈杠杆。\n"
+            "4. 数据健康：只写会影响本场结论的缺口（单一交易所、无链上、无合约数据的币）。\n"
+            "【约束】禁止使用 A 股概念（涨停/连板/龙虎榜/两融/解禁/筹码分布）。"
+        ),
+        "page": "chat",
+        "authority_level": "A3",
+        "schedule": "daily@08:00",
+        "enabled": True,
+        "market": "CRYPTO",
+    },
+    {
+        "task_id": "sched_crypto_asia",
+        "name": "加密货币亚洲时段前瞻",
+        "prompt": (
+            "【任务】加密货币亚洲时段前瞻（每日 16:00，对应 UTC 08:00，资金费率结算点）。\n"
+            "【取数】同「加密货币日线复盘」；重点看过去 8 小时的变化，不要复述日线结论。\n"
+            "【输出】固定四段（见 preamble 的四段契约）：\n"
+            "1. 结论：这一个时段要不要动，一句话。\n"
+            "2. 依据：≤5 条，覆盖 8h 价格变化、资金费率变化方向、持仓量增减、"
+            "是否出现单边清算。\n"
+            "3. 动作：≤5 条；没有动作写「无需操作」。\n"
+            "4. 数据健康：同前。\n"
+            "【约束】只写这一段的新增变化，不复述日线复盘。"
+        ),
+        "page": "chat",
+        "authority_level": "A3",
+        "schedule": "daily@16:00",
+        "enabled": True,
+        "market": "CRYPTO",
+    },
+    {
+        "task_id": "sched_crypto_late",
+        "name": "加密货币美洲时段前检查",
+        "prompt": (
+            "【任务】加密货币美洲时段前检查（每日 00:00，对应 UTC 16:00，资金费率结算点）。\n"
+            "【取数】同前；重点看欧美资金进场前的持仓量与资金费率是否异常。\n"
+            "【输出】固定四段（见 preamble 的四段契约）：\n"
+            "1. 结论：睡前要不要动仓，一句话。\n"
+            "2. 依据：≤3 条，只写异常（资金费率跳升、清算失衡、关键位破位）。\n"
+            "3. 动作：≤3 条；没有异常写「无需操作」。\n"
+            "4. 数据健康：同前。\n"
+            "【约束】默认关闭；开启后只在有异常时才值得看。"
+        ),
+        "page": "chat",
+        "authority_level": "A3",
+        "schedule": "daily@00:00",
+        "enabled": False,
+        "market": "CRYPTO",
+    },
+    {
         "task_id": "sched_weekly_review",
         "name": "周度复盘",
         "prompt": "【任务】本周周度复盘（周日 17:00）。\n【取数】持仓/自选走本地缓存；归因用决策日志与结果汇总；板块/行业走行业能力。\n【输出】固定四段（见 preamble 的四段契约）：\n1. 结论：本周做对/做错了什么、下周怎么打，一句话。\n2. 依据：≤5 条，覆盖组合收益 vs 基准（不可得则说明）与最大回撤、前 3 大正/负贡献标的及原因、决策建议与实际走势是否一致及偏差、风险变化（集中度/单票超限/行业集中/距硬限环比）。\n3. 动作：≤5 条，下周关注方向与回避方向，含催化剂时点。\n4. 数据健康：只写会影响本场结论的缺口。\n【约束】只写结论与动作，不复述每日简报。",
@@ -208,6 +284,23 @@ DEFAULT_TASKS: list[dict[str, Any]] = [
         "enabled": False,
     },
 ]
+
+
+def is_crypto_task(task: dict[str, Any]) -> bool:
+    """加密货币值班任务：market 标了 CRYPTO，或 task_id/名称里带 crypto/加密。"""
+    if str(task.get("market") or "").upper() == "CRYPTO":
+        return True
+    task_id = str(task.get("task_id") or "").lower()
+    name = str(task.get("name") or "")
+    return task_id.startswith("sched_crypto") or "加密" in name or "crypto" in task_id
+
+
+def preamble_for(task: dict[str, Any]) -> str:
+    if is_crypto_task(task):
+        return CRYPTO_DUTY_PREAMBLE
+    if is_discovery_task(task):
+        return DISCOVERY_PREAMBLE
+    return DUTY_PREAMBLE
 
 
 def is_discovery_task(task: dict[str, Any]) -> bool:
@@ -239,6 +332,9 @@ def infer_ops_session(task: dict[str, Any]) -> str:
 def uses_cn_session_calendar(task: dict[str, Any]) -> bool:
     # 机会发现看的是下一开市日，周末和节假日也要出清单。
     if is_discovery_task(task):
+        return False
+    # 加密货币 7×24，没有休市
+    if is_crypto_task(task):
         return False
     calendar = str(task.get("calendar") or "").upper()
     if calendar == "CN":
@@ -471,7 +567,7 @@ class SchedulerService:
                 return outcome
         stamp = datetime.now().strftime("%m-%d %H:%M")
         discovery = is_discovery_task(task)
-        preamble = DISCOVERY_PREAMBLE if discovery else DUTY_PREAMBLE
+        preamble = preamble_for(task)
         profile_block = ""
         if discovery:
             from backend.config.investor_profile import (

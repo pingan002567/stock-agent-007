@@ -276,7 +276,8 @@ class MonitorRuleUpsertInput(BaseModel):
         description=(
             "规则类型（创建时必填）：price_change_pct_gt(涨跌幅超阈值%) / volume_spike(放量) / "
             "intel_keyword_match(情报关键词) / ma_crossover(均线交叉) / single_position_weight_gt(单仓超限%) / "
-            "sector_correlation(板块联动) / data_provider_degraded(数据源降级) / combined_condition(组合条件)"
+            "sector_correlation(板块联动) / data_provider_degraded(数据源降级) / combined_condition(组合条件) / "
+            "crypto_funding_rate_gt(加密货币资金费率超阈值%，如 0.02 表示单次 0.02%)"
         ),
     )
     symbol: str | None = Field(default=None, description="股票代码，如 AAPL、600519（组合/持仓类规则可不填）")

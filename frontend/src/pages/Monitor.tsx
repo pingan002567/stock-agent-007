@@ -39,6 +39,7 @@ const RULE_TYPE_OPTIONS = [
   { value: "combined_condition", label: "复合条件" },
   { value: "data_provider_degraded", label: "数据源降级" },
   { value: "intel_keyword_match", label: "情报关键词" },
+  { value: "crypto_funding_rate_gt", label: "币资金费率超限" },
 ];
 
 function ruleTypeLabel(t: string | undefined) {
