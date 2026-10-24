@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Copilot · Agent Loop 展示升级 · 原型</title>
+<style>
+  /* 与产品浅色主题对齐（:root.light 的 token） */
+  :root {
+    --canvas:#ffffff; --sidebar:#f9fafb; --surface:#ffffff; --surface-2:#f5f6f7;
+    --ink:#0f1115; --ink-2:#1f2126; --muted:#61666b; --faint:#81858c;
+    --line:rgba(0,0,0,.10); --line-soft:rgba(0,0,0,.05);
+    --blue:#3b82f6; --blue-soft:rgba(59,130,246,.10);
+    --green:#16a34a; --green-soft:rgba(22,163,74,.12);
+    --red:#dc2626; --red-soft:rgba(220,38,38,.08);
+    --amber:#b45309; --amber-soft:rgba(180,83,9,.10);
+    --mono:"SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#f4f5f7;color:var(--ink);font:13px/1.65 -apple-system,"PingFang SC",sans-serif;padding:40px 48px 90px}
+  .doc{max-width:980px;margin:0 auto}
+  h1{font-size:21px;font-weight:600;letter-spacing:-.01em}
+  .sub{color:var(--faint);margin-top:7px;font-size:13px}
+  .intro{margin:18px 0 40px;padding:13px 16px;background:#fff;border:1px solid var(--line);border-radius:10px;font-size:12.5px;color:var(--muted);line-height:1.9}
+  .intro b{color:var(--ink)}
+  code{font-family:var(--mono);font-size:11.5px;background:var(--surface-2);padding:1px 5px;border-radius:4px;color:var(--ink-2)}
+
+  .block{margin-bottom:42px}
+  .bh{margin-bottom:10px;display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+  .bh b{font-size:15px;font-weight:600}
+  .bh span{color:var(--faint);font-size:12.5px}
+
+  .chat{background:var(--canvas);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+
+  /* ── 步骤流（沿用现有 .tl-steps 的结构）── */
+  .tl-steps{position:relative;display:flex;flex-direction:column}
+  .tl-steps::before{content:"";position:absolute;left:8px;top:10px;bottom:10px;width:1px;background:var(--line-soft)}
+  .step{position:relative;display:flex;align-items:flex-start;gap:8px;padding:5px 0;font-size:13px;min-width:0}
+  .ico{flex:none;width:17px;display:flex;justify-content:center;color:var(--faint);padding-top:2px}
+  .ico svg{width:13px;height:13px}
+  .main{flex:1;min-width:0}
+
+  /* 思考 */
+  .think{color:var(--muted);line-height:1.75;white-space:pre-wrap}
+  .think.clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer}
+  .think-label{color:var(--ink-2);font-weight:500}
+  .sep{color:var(--faint);margin:0 6px}
+
+  /* 工具节点 */
+  .tool-head{display:flex;align-items:baseline;gap:8px;min-width:0;cursor:pointer}
+  .tool-name{font-family:var(--mono);font-size:12.5px;font-weight:600;color:var(--ink-2);flex:none}
+  .tool-args{font-family:var(--mono);font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .tool-tail{margin-left:auto;flex:none;display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--faint);font-family:var(--mono)}
+  .dot{width:12px;text-align:center}
+  .ok{color:var(--green)} .bad{color:var(--red)} .warn{color:var(--amber)}
+
+  .out{margin-top:6px;background:#f7f8fa;border:none;border-radius:7px;padding:7px 10px;
+       font-family:var(--mono);font-size:11.5px;line-height:1.65;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere}
+  .out.clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer}
+  .out-more{font-size:11.5px;color:var(--faint);margin-top:3px;cursor:pointer}
+  .out-more:hover{color:var(--blue)}
+
+  /* 命令执行 */
+  .cmd-line{display:flex;align-items:baseline;gap:7px;font-family:var(--mono);font-size:12px;min-width:0}
+  .prompt{color:var(--faint);flex:none}
+  .cmd-text{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cmd-out{margin-top:6px;background:#0f1115;color:#e6e8eb;border-radius:7px;padding:9px 11px;
+           font-family:var(--mono);font-size:11.5px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+  .cmd-out .err{color:#f87171}
+  .cmd-exit{margin-top:5px;font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+
+  /* 并行工具 */
+  .fanout{display:flex;flex-direction:column;gap:5px;margin-top:2px;padding-left:1px}
+
+  /* 流式 */
+  .spin{width:11px;height:11px;border:1.5px solid var(--line);border-top-color:var(--blue);border-radius:50%;
+        display:inline-block;animation:spin .8s linear infinite;vertical-align:-1px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .caret{display:inline-block;width:6px;height:13px;background:var(--blue);vertical-align:-2px;margin-left:2px;animation:blink 1s steps(2) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  /* Loop 外壳：折叠头 + 正文 */
+  .loop{border:1px solid transparent;border-radius:9px;transition:background .15s}
+  .loop:hover{border-color:var(--line-soft)}
+  .loop-head{display:flex;align-items:center;gap:9px;width:100%;background:none;border:none;padding:7px 8px;
+             border-radius:8px;cursor:pointer;font:inherit;color:var(--ink-2);text-align:left}
+  .loop-head:hover{background:var(--surface-2)}
+  .loop-head .ico{color:var(--blue);padding-top:1px}
+  .loop-title{font-size:13px;font-weight:500}
+  .loop-stats{color:var(--faint);font-size:12px;font-family:var(--mono)}
+  .loop-chev{margin-left:auto;color:var(--faint);font-size:11px;transition:transform .15s}
+  .loop.open .loop-chev{transform:rotate(90deg)}
+  .loop-body{display:none;padding:2px 8px 6px}
+  .loop.open .loop-body{display:block}
+
+  /* 最终答复 */
+  .answer{margin-top:14px;padding-top:14px;border-top:1px solid var(--line-soft);line-height:1.85;color:var(--ink-2)}
+  .answer b{color:var(--ink)}
+
+  .user{display:flex;justify-content:flex-end;margin-bottom:14px}
+  .bubble{background:var(--surface-2);border-radius:12px 12px 3px 12px;padding:9px 13px;max-width:70%;font-size:13px}
+
+  .legend{color:var(--faint);font-size:12px;margin-top:10px;line-height:1.85}
+  .legend b{color:var(--muted)}
+
+  table.spec{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  table.spec th{text-align:left;padding:9px 12px;background:var(--surface-2);font-weight:600;font-size:11.5px;color:var(--muted);border-bottom:1px solid var(--line)}
+  table.spec td{padding:9px 12px;border-bottom:1px solid var(--line-soft);vertical-align:top}
+  table.spec td:first-child{font-family:var(--mono);font-size:11.5px;white-space:nowrap;color:var(--ink-2)}
+  table.spec tr:last-child td{border-bottom:none}
+</style>
+</head>
+<body>
+<div class="doc">
+
+<h1>Copilot · Agent Loop 展示升级</h1>
+<div class="sub">从「平铺步骤流」升级为「可折叠的思考→工具→观察 循环」，对齐 DSH / Claude Code 的 agent loop 表现。</div>
+
+<div class="intro">
+  <b>要解决什么</b>：现在思考、工具、结果是一条条平铺下来的，没有「这一个问题到底转了几圈」的概念。
+  一轮回答可能有 5 次工具调用、8 段思考，全部铺开会把答案挤到屏幕外；全部折叠又看不见 agent 在干什么。<br>
+  <b>升级点</b>：① 整条 loop 折成一行统计；② 展开后是「思考 → 工具 → 思考 → 命令 → 思考」的交错流；
+  ③ 工具输出默认 3 行可展开；④ 命令执行单独用终端块；⑤ 失败/降级一眼可见。
+</div>
+
+<!-- ══════ 1. 现状 ══════ -->
+<div class="block">
+  <div class="bh"><b>① 现状</b><span>平铺：看不出轮次，也看不出每条工具的结果</span></div>
+  <div class="chat">
+    <div class="user"><div class="bubble">比特币现在能买吗</div></div>
+    <div class="tl-steps">
+      <div class="step">
+        <div class="ico">✦</div>
+        <div class="main"><div class="think"><span class="think-label">思考</span><span class="sep">·</span>先看价格和合约面，再看全市场情绪够不够热。</div></div>
+      </div>
+      <div class="step">
+        <div class="ico">>_</div>
+        <div class="main"><div class="tool-head"><span class="tool-name">get_crypto_derivatives</span><span class="tool-args">{"symbol":"BTC"}</span><span class="tool-tail"><span class="dot ok">✓</span></span></div></div>
+      </div>
+      <div class="step">
+        <div class="ico">✦</div>
+        <div class="main"><div class="think"><span class="think-label">思考</span><span class="sep">·</span>费率 81 分位、大户偏空，散户偏多 —— 追多的人在挨打。</div></div>
+      </div>
+      <div class="step">
+        <div class="ico">>_</div>
+        <div class="main"><div class="tool-head"><span class="tool-name">get_market_sentiment</span><span class="tool-args">{"market":"CRYPTO"}</span><span class="tool-tail"><span class="dot ok">✓</span></span></div></div>
+      </div>
+      <div class="step">
+        <div class="ico">✦</div>
+        <div class="main"><div class="think"><span class="think-label">思考</span><span class="sep">·</span>主导率 60%、稳定币没明显流入，全市场没有增量资金。</div></div>
+      </div>
+    </div>
+    <div class="legend">问题：<b>「什么时候用完的工具？」「那次调用返回了什么？」</b> 全看不出来 —— 只能看到工具名。</div>
+  </div>
+</div>
+
+<!-- ══════ 2. 完成后（折叠态） ══════ -->
+<div class="block">
+  <div class="bh"><b>② 完成后 · 折叠成一行</b><span>默认状态：不抢答案的位置，但一眼知道 agent 干了多少活</span></div>
+  <div class="chat">
+    <div class="user"><div class="bubble">比特币现在能买吗</div></div>
+
+    <div class="loop" data-loop>
+      <button class="loop-head" data-toggle>
+        <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg></span>
+        <span class="loop-title">思考 5 步 · 调用 2 个工具 · 12.4s</span>
+        <span class="loop-stats">3 轮</span>
+        <span class="loop-chev">▶</span>
+      </button>
+      <div class="loop-body"><!-- 展开内容见 ③ --></div>
+    </div>
+
+    <div class="answer">
+      <b>能买，但别追高</b> —— 现在属于「跌不深、也涨不快」的震荡区，分批接比一次打进好。<br>
+      依据：① 80,895 在 80,515–82,054 窄幅震荡；② 资金费率 0.0055%（81 分位），杠杆偏挤；③ 散户多空 1.94 / 大户 0.77，多头清算 596 万 vs 空头 45 万。<br>
+      动作：78,000–79,500 分批；跌破 78,000 减半。
+    </div>
+  </div>
+  <div class="legend">展开标题里的 <b>3 轮</b> = 模型「思考→用工具→再思考」转了几圈。这是判断 agent 有没有在瞎折腾的唯一线索。</div>
+</div>
+
+<!-- ══════ 3. 展开（完整 loop） ══════ -->
+<div class="block">
+  <div class="bh"><b>③ 展开 · 思考 → 工具 → 思考 → 命令 → 思考</b><span>点开放大看 agent 的每一步（这个默认是展开的，点标题可折叠）</span></div>
+  <div class="chat">
+    <div class="user"><div class="bubble">比特币现在能买吗</div></div>
+
+    <div class="loop open" data-loop>
+      <button class="loop-head" data-toggle>
+        <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg></span>
+        <span class="loop-title">思考 5 步 · 调用 2 个工具 · 1 条命令 · 12.4s</span>
+        <span class="loop-stats">3 轮</span>
+        <span class="loop-chev">▶</span>
+      </button>
+      <div class="loop-body">
+        <div class="tl-steps">
+
+          <!-- 第 1 轮 -->
+          <div class="step">
+            <div class="ico">✦</div>
+            <div class="main"><div class="think"><span class="think-label">思考</span><span class="sep">·</span>先看价格和合约面：费率挤不挤、大户和散户站哪边。</div></div>
+          </div>
+
+          <div class="step">
+            <div class="ico">>_</div>
+            <div class="main">
+              <div class="tool-head" data-expand="o1">
+                <span class="tool-name">get_crypto_derivatives</span>
+                <span class="tool-args">{"symbol": "BTC"}</span>
+                <span class="tool-tail"><span>0.8s</span><span class="dot ok">✓</span></span>
+              </div>
+              <div class="out clamp" id="o1">{"funding_rate": 0.000055, "funding_annualized_pct": 6.02, "funding_percentile_90d": 81.1,
+ "open_interest_usd": 553686232.0, "long_short_account_ratio": 1.94, "top_trader_long_short_ratio": 0.77,
+ "liquidations_24h": {"long_usd": 5960211.8, "short_usd": 450414.4}, "degraded": false}</div>
+              <div class="out-more" data-expand="o1">展开全部（12 行）</div>
+            </div>
+          </div>
+
+          <div class="step">
+            <div class="ico">✦</div>
+            <div class="main"><div class="think"><span class="think-label">思考</span><span class="sep">·</span>费率 81 分位偏挤，但没到极端；大户 0.77 偏空、散户 1.94 偏多 —— 这种背离通常意味着追多的人在挨打。</div></div>
+          </div>
+
+          <!-- 第 2 轮：并行工具 -->
+          <div class="step">
+            <div class="ico">>_</div>
+            <div class="main">
+              <div class="tool-head" data-expand="o2">
+                <span class="tool-name">get_market_sentiment</span>
+                <span class="tool-args">{"market": "CRYPTO"}</span>
+                <span class="tool-tail"><span>1.2s</span><span class="dot ok">✓</span></span>
+              </div>
+              <div class="out clamp" id="o2">{"total_market_cap_usd": 2681659130363.6, "btc_dominance_pct": 60.28, "stablecoin_total_usd": 304281053181.1,
+ "fear_greed": {"value": 51, "label_zh": "中性", "previous": 50}, "degraded": false}</div>
+              <div class="out-more" data-expand="o2">展开全部（8 行）</div>
+
+              <div class="fanout">
+                <div class="tool-head" data-expand="o3">
+                  <span class="tool-name">get_stock_context</span>
+                  <span class="tool-args">{"symbol": "BTC"}</span>
+                  <span class="tool-tail"><span>0.4s</span><span class="dot ok">✓</span></span>
+                </div>
+                <div class="out clamp" id="o3">{"price": {"last": 80895.7, "change_pct": -0.93, "source": "gate_spot"},
+ "coverage": {"high_24h": 82054.2, "low_24h": 80515.7, "quote_volume": 591313198.9}}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="step">
+            <div class="ico">✦</div>
+            <div class="main"><div class="think"><span class="think-label">思考</span><span class="sep">·</span>主导率 60% 但没继续走高，稳定币 3,043 亿没有明显流入 —— 全市场缺增量资金，所以只能「跌不深也涨不快」。这个结论要用历史数据验证一下波动区间。</div></div>
+          </div>
+
+          <!-- 第 3 轮：命令执行 -->
+          <div class="step">
+            <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v14H4z"/><path d="M7 10l2.5 2L7 14"/><path d="M12.5 14H17"/></svg></span>
+            <div class="main">
+              <div class="cmd-line" data-expand="o4">
+                <span class="prompt">$</span>
+                <span class="cmd-text">python -c "import json;print(json.dumps([{'d':r['date'],'c':r['close']} for r in __import__('sqlite3').connect('wb.db').execute('select * from kline order by date desc limit 3')]))"</span>
+                <span class="tool-tail" style="margin-left:auto"><span>1.4s</span><span class="dot ok">✓</span></span>
+              </div>
+              <div class="cmd-out">[{&quot;d&quot;: &quot;2026-10-24&quot;, &quot;c&quot;: 81190.4}, {&quot;d&quot;: &quot;2026-10-23&quot;, &quot;c&quot;: 81415.5}, {&quot;d&quot;: &quot;2026-10-22&quot;, &quot;c&quot;: 84097.7}]</div>
+              <div class="cmd-exit">exit 0</div>
+            </div>
+          </div>
+
+          <div class="step">
+            <div class="ico">✦</div>
+            <div class="main"><div class="think"><span class="think-label">思考</span><span class="sep">·</span>三日收盘 84,097 → 81,415 → 81,190，确实是逐级走低但没加速。日内区间 80,515–82,054 可以作为分批下沿参考。</div></div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <div class="answer">
+      <b>能买，但别追高</b> —— 现在属于「跌不深、也涨不快」的震荡区，分批接比一次打进好。
+    </div>
+  </div>
+  <div class="legend">
+    <b>刻意的不对称</b>：思考是灰的、工具是等宽的、命令是深色终端 —— 三种信息密度不同，靠视觉区分，不用加标签。
+  </div>
+</div>
+
+<!-- ══════ 4. 流式中 ══════ -->
+<div class="block">
+  <div class="bh"><b>④ 流式中</b><span>当前步有光标/转圈，已完成步保留但不再抢注意力</span></div>
+  <div class="chat">
+    <div class="user"><div class="bubble">帮我看下 ETH 的合约是不是太挤了</div></div>
+
+    <div class="loop open" data-loop>
+      <button class="loop-head" data-toggle>
+        <span class="ico"><span class="spin"></span></span>
+        <span class="loop-title">正在思考…</span>
+        <span class="loop-stats">第 2 轮 · 1 个工具</span>
+        <span class="loop-chev">▶</span>
+      </button>
+      <div class="loop-body">
+        <div class="tl-steps">
+          <div class="step">
+            <div class="ico">✦</div>
+            <div class="main"><div class="think"><span class="think-label">思考</span><span class="sep">·</span>直接拉 ETH 的合约面看费率分位。</div></div>
+          </div>
+          <div class="step">
+            <div class="ico">>_</div>
+            <div class="main">
+              <div class="tool-head" data-expand="o5">
+                <span class="tool-name">get_crypto_derivatives</span>
+                <span class="tool-args">{"symbol": "ETH"}</span>
+                <span class="tool-tail"><span>0.6s</span><span class="dot ok">✓</span></span>
+              </div>
+              <div class="out clamp" id="o5">{"funding_rate": 0.000021, "funding_percentile_90d": 44.0, "open_interest_usd": 182340000.0, "degraded": false}</div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="ico">✦</div>
+            <div class="main"><div class="think">费率 44 分位，中性偏低，持仓量也没放大 —— 不算挤，但还得看多空比站哪边<span class="caret"></span></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="legend">流式时标题变成 <b>正在思考…</b>，右边的统计实时更新（第几轮、已调用几个工具）。</div>
+</div>
+
+<!-- ══════ 5. 异常态 ══════ -->
+<div class="block">
+  <div class="bh"><b>⑤ 异常</b><span>工具失败 / 降级 / 命令非零退出，必须一眼看出来</span></div>
+  <div class="chat">
+    <div class="tl-steps">
+      <div class="step">
+        <div class="ico">>_</div>
+        <div class="main">
+          <div class="tool-head" data-expand="e1">
+            <span class="tool-name">get_daily_history</span>
+            <span class="tool-args">{"symbol": "AAPL", "days": 30}</span>
+            <span class="tool-tail"><span>32.0s</span><span class="dot bad">✕</span></span>
+          </div>
+          <div class="out" id="e1" style="border-color:rgba(220,38,38,.25);background:var(--red-soft);color:var(--red)">yfinance: Connection timed out after 30002 ms —— 已降级，本轮不使用日线数据</div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="ico">✦</div>
+        <div class="main"><div class="think"><span class="think-label">思考</span><span class="sep">·</span>日线拿不到，改用本地缓存；结论里要写明「没用到日线」。</div></div>
+      </div>
+
+      <div class="step">
+        <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v14H4z"/><path d="M7 10l2.5 2L7 14"/><path d="M12.5 14H17"/></svg></span>
+        <div class="main">
+          <div class="cmd-line" data-expand="e2">
+            <span class="prompt">$</span>
+            <span class="cmd-text">python scripts/check_kline.py --symbol AAPL</span>
+            <span class="tool-tail" style="margin-left:auto"><span>0.3s</span><span class="dot bad">1</span></span>
+          </div>
+          <div class="cmd-out"><span class="err">Traceback (most recent call last):
+  File "scripts/check_kline.py", line 4, in &lt;module&gt;
+KeyError: 'AAPL'</span></div>
+          <div class="cmd-exit">exit 1 · 0.3s</div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="ico">>_</div>
+        <div class="main">
+          <div class="tool-head" data-expand="e3">
+            <span class="tool-name">get_market_sentiment</span>
+            <span class="tool-args">{"market": "CRYPTO"}</span>
+            <span class="tool-tail"><span>0.9s</span><span class="dot warn">!</span></span>
+          </div>
+          <div class="out" id="e3" style="border-color:rgba(180,83,9,.25);background:var(--amber-soft);color:var(--amber)">degraded: true —— fear_greed 源超时，其余字段正常（总市值 / 主导率 / 稳定币可用）</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="legend"><b>三档状态</b>：✓ 成功（绿）/ ! 降级（琥珀，部分可用）/ ✕ 失败（红）。降级不能当失败藏起来 —— 它意味着「结论有一部分不成立」。</div>
+</div>
+
+<!-- ══════ 6. 落地 ══════ -->
+<div class="block">
+  <div class="bh"><b>⑥ 怎么落地到现有代码</b><span>不推倒重来：在 <code>steps</code> 上扩两种节点 + 一层 loop 外壳</span></div>
+  <table class="spec">
+    <tr><th style="width:190px">现状</th><th>升级后</th></tr>
+    <tr>
+      <td>steps: {kind:"reasoning" | "tool"}[]</td>
+      <td>加 <code>kind:"command"</code>（sandbox bash）+ 每个节点带 <code>status</code> / <code>durationMs</code> / <code>output</code> / <code>args</code></td>
+    </tr>
+    <tr>
+      <td>平铺渲染（<code>.tl-steps</code>）</td>
+      <td>外面套一层 <code>.loop</code>：标题栏（步数/工具数/时长/轮次）+ 可折叠正文</td>
+    </tr>
+    <tr>
+      <td>工具只显示名字</td>
+      <td>工具行 = 名字 + 单行参数摘要 + 耗时 + 状态；输出默认 3 行，点开全文</td>
+    </tr>
+    <tr>
+      <td>bash 也当普通工具</td>
+      <td>单独 <code>.cmd-node</code>：命令行 + 深色 stdout 块 + exit code</td>
+    </tr>
+    <tr>
+      <td>无轮次概念</td>
+      <td>后端 <code>reasoning</code> 事件带 <code>round</code>（或前端按「思考→工具」序列自行切分）</td>
+    </tr>
+  </table>
+  <div class="legend">
+    需要的后端配合很小：<b>reasoning 事件补 <code>round</code></b>、<b>tool_result 补 <code>duration_ms</code> 与结构化 <code>output</code></b>、
+    <b>bash 调用标记 <code>kind:"command"</code></b>。其余都是前端渲染层。
+  </div>
+</div>
+
+<script>
+  const loops = [...document.querySelectorAll('[data-loop]')];
+  // ②「折叠态」复用③的正文：克隆后把 id 前缀化，避免重复 id
+  // 注意索引：① 没有 loop，所以 ②=loops[0]、③=loops[1]、④=loops[2]
+  if (loops[0] && loops[1]) {
+    const src = loops[1].querySelector('.loop-body');
+    const dst = loops[0].querySelector('.loop-body');
+    const clone = src.cloneNode(true);
+    clone.querySelectorAll('[id]').forEach((el) => {
+      const old = el.id;
+      el.id = 'c-' + old;
+      clone.querySelectorAll(`[data-expand="${old}"]`).forEach((b) => b.setAttribute('data-expand', 'c-' + old));
+    });
+    dst.appendChild(clone);
+  }
+
+  function bind() {
+    document.querySelectorAll('[data-toggle]').forEach((btn) => {
+      if (btn.dataset.bound) return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', () => btn.closest('[data-loop]').classList.toggle('open'));
+    });
+    document.querySelectorAll('[data-expand]').forEach((el) => {
+      if (el.dataset.bound) return;
+      el.dataset.bound = '1';
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const target = document.getElementById(el.getAttribute('data-expand'));
+        if (!target) return;
+        target.classList.toggle('clamp');
+        if (el.classList.contains('out-more')) {
+          el.textContent = target.classList.contains('clamp') ? '展开全部（12 行）' : '收起';
+        }
+      });
+    });
+  }
+  bind();
+</script>
+</div>
+</body>
+</html>
