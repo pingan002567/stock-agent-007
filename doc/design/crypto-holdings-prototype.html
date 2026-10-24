@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>阶段一 · 持仓与自选接入加密资产 · 原型</title>
+<title>阶段一 · 持仓与自选接入加密货币 · 原型</title>
 <style>
   :root {
     --canvas:#151517; --sidebar:#232324; --surface:#2c2c2e; --surface-2:#353638;
@@ -88,8 +88,8 @@
 <body>
 <div class="doc">
 
-<h1>阶段一 · 持仓与自选接入加密资产</h1>
-<div class="sub">目标只有一个：股票和加密资产能放在同一张表里、数字算对。汇率用实测值 USD/CNY = 6.6849。</div>
+<h1>阶段一 · 持仓与自选接入加密货币</h1>
+<div class="sub">目标只有一个：股票和加密货币能放在同一张表里、数字算对。汇率用实测值 USD/CNY = 6.6849。</div>
 
 <div class="note">
   <b>三个关键决定</b>：① 币的市值<b>折算成人民币</b>再算权重（否则总仓位永远是错的）；
@@ -99,7 +99,7 @@
 
 <!-- ══════ 1. 持仓 ══════ -->
 <div class="block">
-  <div class="bh"><b>① 持仓（混排）</b><span>股票与加密资产同表，权重按人民币折算统算</span></div>
+  <div class="bh"><b>① 持仓（混排）</b><span>股票与加密货币同表，权重按人民币折算统算</span></div>
   <div class="win">
     <div class="win-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span style="margin-left:8px">持仓</span></div>
     <div class="body">
@@ -107,7 +107,7 @@
       <div class="kpis">
         <div class="kpi"><div class="k">总市值</div><div class="v">¥194,158</div><div class="s">含现金 ¥47,000</div></div>
         <div class="kpi"><div class="k">股票</div><div class="v">¥84,804</div><div class="s">3 只 · 43.7%</div></div>
-        <div class="kpi"><div class="k">加密资产</div><div class="v amb">¥62,354</div><div class="s">2 只 · 32.1%</div></div>
+        <div class="kpi"><div class="k">加密货币</div><div class="v amb">¥62,354</div><div class="s">2 只 · 32.1%</div></div>
         <div class="kpi"><div class="k">浮盈</div><div class="v up">+¥4,616</div><div class="s">+2.38%</div></div>
       </div>
 
@@ -122,7 +122,7 @@
         <span class="chip" data-m="CN">A股<span class="n">2</span></span>
         <span class="chip" data-m="US">美股<span class="n">1</span></span>
         <span class="chip" data-m="HK">港股<span class="n">0</span></span>
-        <span class="chip" data-m="CRYPTO">加密<span class="n">2</span></span>
+        <span class="chip" data-m="CRYPTO">加密货币<span class="n">2</span></span>
       </div>
 
       <table>
@@ -192,13 +192,13 @@
   </div>
   <div class="legend">
     <b>权重</b>用人民币折算后的市值算 —— BTC 这 22.3% 是真金白银的占比，不是"$6,471 除以 ¥市值"的错值。<br>
-    <b>排序</b>按折算市值降序，所以加密资产和股票会交叉出现 —— 这才看得出"钱压在哪"。
+    <b>排序</b>按折算市值降序，所以加密货币和股票会交叉出现 —— 这才看得出"钱压在哪"。
   </div>
 </div>
 
 <!-- ══════ 2. 自选 ══════ -->
 <div class="block">
-  <div class="bh"><b>② 自选</b><span>分组里加「加密资产」，徽章区分市场</span></div>
+  <div class="bh"><b>② 自选</b><span>分组里加「加密货币」，徽章区分市场</span></div>
   <div class="win">
     <div class="win-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span style="margin-left:8px">自选</span></div>
     <div class="body">
@@ -207,21 +207,21 @@
         <span class="chip on">全部</span>
         <span class="chip">核心持仓</span>
         <span class="chip">观察池</span>
-        <span class="chip">加密</span>
+        <span class="chip">加密货币</span>
       </div>
       <table>
         <thead><tr><th>标的</th><th>市场</th><th class="n">现价</th><th class="n">24h</th><th class="n">成交额</th><th>分组</th></tr></thead>
         <tbody>
-          <tr><td><span class="sym">BTC</span><div class="sub2">Bitcoin</div></td><td><span class="badge b-CRYPTO">CRYPTO</span></td><td class="n num">$80,895.7</td><td class="n num down">-0.93%</td><td class="n num m">$6.06 亿</td><td class="f">加密</td></tr>
-          <tr><td><span class="sym">ETH</span><div class="sub2">Ethereum</div></td><td><span class="badge b-CRYPTO">CRYPTO</span></td><td class="n num">$2,380.43</td><td class="n num down">-0.76%</td><td class="n num m">$2.21 亿</td><td class="f">加密</td></tr>
-          <tr><td><span class="sym">SOL</span><div class="sub2">Solana</div></td><td><span class="badge b-CRYPTO">CRYPTO</span></td><td class="n num">$102.49</td><td class="n num down">-1.60%</td><td class="n num m">$6,250 万</td><td class="f">加密</td></tr>
+          <tr><td><span class="sym">BTC</span><div class="sub2">Bitcoin</div></td><td><span class="badge b-CRYPTO">CRYPTO</span></td><td class="n num">$80,895.7</td><td class="n num down">-0.93%</td><td class="n num m">$6.06 亿</td><td class="f">加密货币</td></tr>
+          <tr><td><span class="sym">ETH</span><div class="sub2">Ethereum</div></td><td><span class="badge b-CRYPTO">CRYPTO</span></td><td class="n num">$2,380.43</td><td class="n num down">-0.76%</td><td class="n num m">$2.21 亿</td><td class="f">加密货币</td></tr>
+          <tr><td><span class="sym">SOL</span><div class="sub2">Solana</div></td><td><span class="badge b-CRYPTO">CRYPTO</span></td><td class="n num">$102.49</td><td class="n num down">-1.60%</td><td class="n num m">$6,250 万</td><td class="f">加密货币</td></tr>
           <tr><td><span class="sym">贵州茅台</span><div class="sub2 num">600519</div></td><td><span class="badge b-CN">CN</span></td><td class="n num">¥1,680.00</td><td class="n num up">+0.82%</td><td class="n num m">¥42.1 亿</td><td class="f">核心持仓</td></tr>
           <tr><td><span class="sym">AAPL</span><div class="sub2">Apple</div></td><td><span class="badge b-US">US</span></td><td class="n num">$190.50</td><td class="n num up">+1.24%</td><td class="n num m">$38.2 亿</td><td class="f">观察池</td></tr>
         </tbody>
       </table>
     </div>
   </div>
-  <div class="legend">自选表结构完全不用改 —— 只要 <code>stock_master</code> 里有 <b>BTC/ETH/SOL 的 market=CRYPTO 行</b>，分组下拉天然支持「加密资产」。</div>
+  <div class="legend">自选表结构完全不用改 —— 只要 <code>stock_master</code> 里有 <b>BTC/ETH/SOL 的 market=CRYPTO 行</b>，分组下拉天然支持「加密货币」。</div>
 </div>
 
 <!-- ══════ 3. 新增持仓 ══════ -->
@@ -231,7 +231,7 @@
     <h3>新增持仓</h3>
     <div class="field">
       <label>市场</label>
-      <div class="seg"><span>A股</span><span>港股</span><span>美股</span><span class="on">加密资产</span></div>
+      <div class="seg"><span>A股</span><span>港股</span><span>美股</span><span class="on">加密货币</span></div>
     </div>
     <div class="field"><label>标的</label><div class="input" style="display:flex;justify-content:space-between"><span>BTC · Bitcoin</span><span class="f">已选</span></div></div>
     <div class="row" style="gap:10px">
@@ -255,7 +255,7 @@
     <div class="body">
       <div class="warnbar">
         <span>⚠</span>
-        <span>汇率源不可用 —— 加密资产市值暂不折算，权重计算已排除加密资产；股票部分不受影响。</span>
+        <span>汇率源不可用 —— 加密货币市值暂不折算，权重计算已排除加密货币；股票部分不受影响。</span>
       </div>
       <table>
         <thead><tr><th>标的</th><th>市场</th><th class="n">数量</th><th class="n">现价</th><th class="n">市值</th><th class="n">权重</th></tr></thead>
