@@ -232,14 +232,6 @@ class DeerFlowEventMapper:
             role = self._get(message, "type") or self._get(message, "role")
             content = self._get(message, "content")
             if role in ("ai", "assistant"):
-                _ak = self._get(message, "additional_kwargs")
-                print(
-                    "MSG-AI-PROBE",
-                    {"ak_keys": sorted(_ak.keys()) if isinstance(_ak, dict) else type(_ak).__name__,
-                     "has_content": bool(self._get(message, "content")),
-                     "tool_calls": len(self._get(message, "tool_calls") or [])},
-                    flush=True,
-                )
                 # 思维链要在工具调用之前推出来，前端才渲染成「思考 → 工具」
                 reasoning = self._reasoning_text(message)
                 if reasoning and reasoning not in self._emitted_reasoning:

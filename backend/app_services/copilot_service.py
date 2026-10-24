@@ -1375,11 +1375,6 @@ class CopilotService:
                     # reasoning 也落库：不存的话，翻历史对话只剩工具调用，看不到「为什么调」。
                     # 但 values 快照会反复推同一段文本，只存**新的**那一条，避免灌水。
                     if event["type"] == "reasoning":
-                        print(
-                            "REASONING-PERSIST-CHECK",
-                            {k: str(v)[:50] for k, v in (payload or {}).items()},
-                            flush=True,
-                        )
                         text = str(
                             (payload or {}).get("text") or (payload or {}).get("latest_text") or ""
                         ).strip()
