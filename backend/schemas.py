@@ -546,10 +546,13 @@ class HoldingPosition(BaseModel):
     symbol: str
     name: str
     quantity: float
+    #: **原币**市值（不是折算值）。折算只在读取时按当天汇率算，不落库。
     market_value: float
     weight_pct: float
     cost: Optional[float] = None
     pnl_pct: Optional[float] = None
+    #: 原币币种；空 = 未显式设置，按 market 推断（CN→CNY / HK→HKD / US→USD / CRYPTO→USDT）
+    currency: str = ""
 
 
 class RebalanceDraftRequest(BaseModel):

@@ -6,7 +6,7 @@ import { ErrorMessage, TableSkeleton } from "@/components/ui/Loading";
 import { PageHead } from "@/components/ui/PageHead";
 import { useAppState } from "@/hooks/useAppState";
 import { AskAiButton } from "@/components/ui/AskAiButton";
-import { changeCls, computeWeights, formatCost, formatPnlAmount, inferMarket, marketMoney, pct, stockInitial } from "@/utils/market";
+import { changeCls, computeWeights, currencyMoney, currencySign, inferMarket, pct, stockInitial } from "@/utils/market";
 
 // === Types ===
 
@@ -20,6 +20,10 @@ interface HoldingItem {
   pnl_amount?: number | null;
   pnl_pct?: number | null;
   market?: string;
+  /** 原币币种：CNY/HKD/USD/USDT */
+  currency?: string;
+  /** 原币市值（真相）；market_value 是折算后的人民币，拿不到汇率为 null */
+  market_value_native?: number | null;
   quote?: {
     last?: number | null;
     change_pct?: number | null;
@@ -29,14 +33,36 @@ interface HoldingItem {
   };
 }
 
+interface CurrencyBucket {
+  currency: string;
+  native: number;
+  cny?: number | null;
+  count: number;
+}
+
+interface FxPayload {
+  as_of?: string;
+  usd_cny?: number | null;
+  hkd_cny?: number | null;
+  usdt_usd?: number | null;
+  degraded?: boolean;
+  degraded_reason?: string | null;
+  to_cny?: Record<string, number> | null;
+}
+
 interface HoldingsResponse {
   items: HoldingItem[];
   demo?: boolean;
   quotes_degraded_count?: number;
   quotes_total?: number;
   channel?: string;
+  fx?: FxPayload;
   summary?: {
-    total_value?: number;
+    total_value?: number | null;
+    converted?: boolean;
+    by_currency?: CurrencyBucket[];
+    weights?: Record<string, number> | null;
+    market_value?: number | null;
     positions?: number;
     max_weight_pct?: number;
     available_cash?: number | null;
@@ -243,11 +269,14 @@ export default function Holdings() {
         )}
         <PageHead
           kpis={[
-            { label: "总资产", value: money(holdings?.summary?.total_value),
-              prompt: "我的持仓总资产构成如何?" },
+            { label: "总资产（折合）", value: money(holdings?.summary?.total_value ?? undefined),
+              hint: holdings?.summary?.total_value == null ? "无当日汇率，暂不折算" : undefined,
+              prompt: "我的持仓总资产构成如何?分币种分别是多少?" },
             { label: "持仓", value: `${holdings?.summary?.positions ?? holdings?.items.length ?? 0} 只` },
-            { label: "最大权重", value: `${derived.maxWeight.toFixed(2)}%`,
-              tone: derived.maxWeight >= 15 ? "down" : undefined,
+            { label: "最大权重", value: holdings?.summary?.converted === false
+                ? "—"
+                : `${(holdings?.summary?.max_weight_pct ?? derived.maxWeight).toFixed(2)}%`,
+              tone: (holdings?.summary?.max_weight_pct ?? derived.maxWeight) >= 15 ? "down" : undefined,
               prompt: "我的持仓集中度是否过高?哪只需要减仓?" },
             { label: "可用资金", value: (
               <AvailableCashValue
@@ -275,6 +304,42 @@ export default function Holdings() {
           </>}
         />
 
+        {holdings ? (
+          <div className="fx-strip">
+            <div className="curbar">
+              {(holdings.summary?.by_currency ?? []).map((b) => {
+                const pctOfBook =
+                  b.cny != null && holdings.summary?.market_value
+                    ? (b.cny / holdings.summary.market_value) * 100
+                    : null;
+                return (
+                  <div className="cur-chip" key={b.currency}>
+                    <span className="cur-sign">{currencySign(b.currency)}</span>
+                    <span className="cur-name">{b.currency}</span>
+                    <span className="cur-val num">{currencyMoney(b.native, b.currency)}</span>
+                    {pctOfBook != null ? <span className="cur-pct num">{pctOfBook.toFixed(1)}%</span> : null}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="fx-line">
+              {holdings.fx?.degraded ? (
+                <span style={{ color: "var(--amber)" }}>
+                  ⚠ 汇率不可用（{holdings.fx?.degraded_reason ?? "上游失败"}）—— 分币种小计照常，折合总额与跨币种权重失效
+                </span>
+              ) : (
+                <>
+                  <span>当日汇率 {holdings.fx?.as_of ?? "—"}</span>
+                  <span>USD/CNY {holdings.fx?.usd_cny?.toFixed(4) ?? "—"}</span>
+                  <span>HKD/CNY {holdings.fx?.hkd_cny?.toFixed(4) ?? "—"}</span>
+                  <span>USDT/USD {holdings.fx?.usdt_usd?.toFixed(4) ?? "—"}</span>
+                  <span className="muted">折算不落库，按当日汇率实时计算</span>
+                </>
+              )}
+            </div>
+          </div>
+        ) : null}
+
         <div className="two-col">
           <div className="panel">
             <div className="panel-header">
@@ -292,7 +357,7 @@ export default function Holdings() {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>股票</th>
+                      <th>标的</th>
                       <th>数量</th>
                       <th>成本</th>
                       <th>现价</th>
@@ -304,10 +369,13 @@ export default function Holdings() {
                   </thead>
                   <tbody>
                     {holdings.items.map((item, idx) => {
-                      const market = item.market || inferMarket(item.symbol);
-                      // 后端 weight_pct 恒为 0，用市值占比自算（computeWeights）
-                      const weightPct = derived.weights[idx] ?? 0;
-                      const weightBad = !(Number(item.market_value) > 0);
+                      const market = inferMarket(item.symbol, item.market);
+                      const currency = item.currency || "CNY";
+                      const nativeValue = item.market_value_native ?? null;
+                      // 权重优先用后端（人民币口径）；降级时后端为 null，退回自算兜底
+                      const serverWeights = holdings?.summary?.weights;
+                      const weightPct = serverWeights?.[item.symbol] ?? derived.weights[idx] ?? 0;
+                      const weightBad = !(Number(item.market_value) > 0) || weightPct <= 0;
                       const day = item.quote?.degraded ? null : item.quote?.change_pct;
                       return (
                       <tr
@@ -320,24 +388,34 @@ export default function Holdings() {
                           <div className="stock-info">
                             <div className="stock-icon default">{stockInitial(item.name, item.symbol)}</div>
                             <div>
-                              <div className="stock-name">{item.name ?? item.symbol}</div>
+                              <div className="stock-name">
+                                {item.name ?? item.symbol}
+                                <span className={`mkt-badge mkt-${market}`}>{market}</span>
+                              </div>
                               <div className="stock-code">{item.symbol}</div>
                             </div>
                           </div>
                         </td>
                         <td className="num">{item.quantity ?? 0}</td>
-                        <td className="num">{formatCost(item.cost, market)}</td>
+                        <td className="num">{item.cost == null ? "未记录" : currencyMoney(item.cost, currency)}</td>
                         <td className="num">
                           {item.quote?.degraded || item.quote?.last == null
                             ? "—"
-                            : marketMoney(item.quote.last, market)}
+                            : currencyMoney(item.quote.last, currency)}
                         </td>
-                        <td className="price-value">{money(item.market_value)}</td>
+                        <td className="price-value">
+                          {nativeValue == null ? money(undefined) : currencyMoney(nativeValue, currency)}
+                          {item.market_value != null && currency !== "CNY" ? (
+                            <div className="muted" style={{ fontSize: 11, fontWeight: 400 }}>
+                              ≈ {money(item.market_value)}
+                            </div>
+                          ) : null}
+                        </td>
                         <td className="num">
                           {item.pnl_amount == null && item.pnl_pct == null ? "—" : (
                             <>
                               {item.pnl_amount != null && (
-                                <div className={changeCls(item.pnl_amount)}>{formatPnlAmount(item.pnl_amount, market)}</div>
+                                <div className={changeCls(item.pnl_amount)}>{item.pnl_amount == null ? "—" : `${item.pnl_amount > 0 ? "+" : ""}${currencyMoney(item.pnl_amount, currency)}`}</div>
                               )}
                               {item.pnl_pct != null && (
                                 <div className={changeCls(item.pnl_pct)} style={{ fontSize: 12 }}>{pct(item.pnl_pct)}</div>

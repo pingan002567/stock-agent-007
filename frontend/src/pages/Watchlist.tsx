@@ -222,7 +222,7 @@ export default function Watchlist() {
             <table>
               <thead>
                 <tr>
-                  <th>股票</th>
+                  <th>标的</th>
                   <th>现价</th>
                   <th>涨跌幅</th>
                   <th>分组</th>
@@ -250,14 +250,17 @@ export default function Watchlist() {
                   </tr>
                 ) : filteredItems.map((item) => {
                   const cp = item.price?.change_pct ?? 0;
-                  const market = inferMarket(item.symbol);
+                  const market = inferMarket(item.symbol, item.market);
                   return (
                     <tr key={item.symbol} className="row" style={{ cursor: "pointer" }} onClick={() => openStock(item.symbol)}>
                       <td>
                         <div className="stock-info">
                           <div className="stock-icon default">{stockInitial(item.name, item.symbol)}</div>
                           <div>
-                            <div className="stock-name">{item.name ?? item.symbol}</div>
+                            <div className="stock-name">
+                              {item.name ?? item.symbol}
+                              <span className={`mkt-badge mkt-${market}`}>{market}</span>
+                            </div>
                             <div className="stock-code">{item.symbol}</div>
                           </div>
                         </div>

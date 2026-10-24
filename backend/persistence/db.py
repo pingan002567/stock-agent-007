@@ -32,7 +32,8 @@ SCHEMA: Iterable[str] = (
       market_value REAL NOT NULL,
       weight_pct REAL NOT NULL,
       cost REAL,
-      pnl_pct REAL
+      pnl_pct REAL,
+      currency TEXT NOT NULL DEFAULT ''
     )
     """,
     """
@@ -434,6 +435,7 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_strategy_spec_columns(conn)
     _ensure_backtest_run_columns(conn)
     _ensure_risk_policy_columns(conn)
+    _ensure_holding_position_columns(conn)
     _ensure_report_columns(conn)
     _ensure_report_template_columns(conn)
     _ensure_report_quality_check_columns(conn)
@@ -443,6 +445,20 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_stock_quote_columns(conn)
     _ensure_stock_master_columns(conn)
     conn.commit()
+
+
+def _ensure_holding_position_columns(conn: sqlite3.Connection) -> None:
+    """持仓新增 currency（原币币种）。
+
+    空字符串表示"未显式设置"，读取时按 market 推断
+    （CN→CNY / HK→HKD / US→USD / CRYPTO→USDT），避免要求用户迁移旧数据。
+    """
+    columns = {
+        row["name"] if isinstance(row, sqlite3.Row) else row[1]
+        for row in conn.execute("PRAGMA table_info(holding_position)").fetchall()
+    }
+    if "currency" not in columns:
+        conn.execute("ALTER TABLE holding_position ADD COLUMN currency TEXT NOT NULL DEFAULT ''")
 
 
 def _ensure_stock_master_columns(conn: sqlite3.Connection) -> None:

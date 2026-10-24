@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Request
 from backend.api.deps import get_services
 from backend.bootstrap import AppServices
 from backend.schemas import HoldingPosition, Report, model_to_dict
+from backend.stock_domain import fx as fx_service
 from backend.stock_domain.portfolio_tools import mark_to_market, read_available_cash, summarize_portfolio
 from backend.stock_domain.provider_router import provider_router
 
@@ -40,6 +41,7 @@ def _holding_card(item: HoldingPosition) -> tuple[dict, HoldingPosition]:
     card["market_value"] = market_value
     card["pnl_amount"] = pnl_amount
     card["pnl_pct"] = pnl_pct
+    card["currency"] = str(getattr(item, "currency", "") or "")
     return card, item.model_copy(update={"market_value": market_value, "pnl_pct": pnl_pct})
 
 
@@ -80,7 +82,10 @@ def get_overview(request: Request, services: AppServices = Depends(get_services)
         "watchlist": [model_to_dict(item) for item in watchlist[:5]],
         "holdings": holding_cards,
         "portfolio_summary": summarize_portfolio(
-            valued, available_cash=read_available_cash(services.repo)
+            valued,
+            available_cash=read_available_cash(services.repo),
+            rates=fx_service.rates_for_conversion(fx_service.get_rates()),
+            fx=fx_service.get_rates(),
         ),
         "focus_stock": model_to_dict(focus_context),
         "market_review": provider_router.get_market_review(),

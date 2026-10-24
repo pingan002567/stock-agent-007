@@ -112,8 +112,29 @@ def set_repo(repo: Any) -> None:
     _repo = repo
 
 
+def _normalize_crypto(raw: str) -> str | None:
+    """把 BTCUSDT / BTC/USDT / BTC-USDT / btc 归一到币种代码 BTC。"""
+    from backend.stock_domain.crypto_universe import CRYPTO_UNIVERSE, QUOTE_CURRENCIES
+
+    text = raw.strip().upper().replace("-", "/").replace("_", "/")
+    if text in CRYPTO_UNIVERSE:
+        return text
+    # 带计价：BTC/USDT、BTCUSDT
+    for quote in QUOTE_CURRENCIES:
+        for sep in ("/", ""):
+            suffix = f"{sep}{quote}"
+            if text.endswith(suffix) and len(text) > len(suffix):
+                head = text[: -len(suffix)]
+                if head in CRYPTO_UNIVERSE:
+                    return head
+    return None
+
+
 def normalize_symbol(symbol: str) -> str:
     raw = symbol.strip().upper()
+    crypto = _normalize_crypto(raw)
+    if crypto:
+        return crypto
     if raw in {"00700", "700"}:
         return "HK00700"
     if raw in STOCKS:
@@ -145,7 +166,7 @@ def _overlay_stock_dict(master: Any, stock_dict: Dict[str, object] | None = None
         alias_seed = []
     aliases = list(dict.fromkeys([*(master.aliases or []), *alias_seed]))
     instrument_type = str(getattr(master, "instrument_type", None) or "").strip().lower()
-    if instrument_type not in {"stock", "etf", "fund", "other"}:
+    if instrument_type not in {"stock", "etf", "fund", "crypto", "other"}:
         instrument_type = infer_instrument_type(
             str(master.symbol),
             name=str(master.name or ""),
@@ -249,6 +270,20 @@ def get_stock(symbol: str) -> Optional[Dict[str, object]]:
         if stock_dict is not None:
             return stock_dict
         return stock
+    # 加密货币：stock_master 未种上时也能识别（canonical = 币种代码）
+    from backend.stock_domain.crypto_universe import crypto_master_payload
+
+    crypto = crypto_master_payload(normalized)
+    if crypto is not None:
+        return {
+            **crypto,
+            "price": 0.0,
+            "change_pct": 0.0,
+            "score": 0,
+            "risk_label": "",
+            "stance": "",
+            "confidence": "",
+        }
     # P3: For valid numeric formats, return a synthetic entry so providers
     # can attempt data lookup even without a catalog entry.
     # This unblocks unknown A-share / HK stocks at the cost of mock quality.

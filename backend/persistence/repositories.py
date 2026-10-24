@@ -192,6 +192,7 @@ class WorkbenchRepository(
             ]:
                 self.upsert_stock_master(item)
         self._ensure_etf_master_rows()
+        self._ensure_crypto_master_rows()
 
         if not self.list_monitor_rules():
             seed_rules: list[MonitorRule] = [
@@ -343,6 +344,34 @@ class WorkbenchRepository(
                         }
                     )
                 )
+
+    def _ensure_crypto_master_rows(self) -> None:
+        """把加密货币种子写进 stock_master（market=CRYPTO）。
+
+        只在缺行时插入；已存在则只补齐 instrument_type / sector，
+        不覆盖用户改过的 name/aliases。
+        """
+        from backend.stock_domain.crypto_universe import (
+            CRYPTO_UNIVERSE,
+            crypto_master_payload,
+        )
+
+        for symbol in CRYPTO_UNIVERSE:
+            payload = crypto_master_payload(symbol)
+            if payload is None:
+                continue
+            existing = self.get_stock_master(payload["symbol"])
+            if existing is None:
+                self.upsert_stock_master(StockMaster(**payload))
+                continue
+            patch: dict[str, Any] = {}
+            if (existing.instrument_type or "stock") != "crypto":
+                patch["instrument_type"] = "crypto"
+            if existing.market != "CRYPTO":
+                patch["market"] = "CRYPTO"
+            if patch:
+                patch["updated_at"] = now_iso()
+                self.upsert_stock_master(existing.model_copy(update=patch))
 
     def seed_demo_portfolio(self) -> None:
         """Test-only sample book. Production startup never calls this."""

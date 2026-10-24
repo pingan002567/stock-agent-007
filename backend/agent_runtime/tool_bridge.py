@@ -1143,9 +1143,14 @@ class WorkbenchToolBridge:
         )
 
     def _get_portfolio_snapshot(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from backend.stock_domain import fx as fx_service
+
+        payload = fx_service.get_rates()
         return summarize_portfolio(
             self.repo.list_holdings(),
             available_cash=read_available_cash(self.repo),
+            rates=fx_service.rates_for_conversion(payload),
+            fx=payload,
         )
 
     def _get_active_risk_policy(self, arguments: dict[str, Any]) -> dict[str, Any]:

@@ -3,9 +3,21 @@
  *  - Pure alpha (AAPL, MSFT) → "US"
  *  - Numeric (600519, 000001) → "CN"
  */
-export function inferMarket(symbol?: string): string {
+/** 已知加密货币代码（后端 stock_master 有 market=CRYPTO 时应优先用后端值，
+ *  这里只作兜底：纯字母 1-5 位会被下面判成美股，BTC/ETH 必须拦下来）。 */
+const CRYPTO_CODES = new Set([
+  "BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "TRX", "AVAX", "TON", "LINK", "DOT",
+  "LTC", "BCH", "SHIB", "PEPE", "UNI", "AAVE", "MKR", "CRV", "ATOM", "NEAR", "APT", "SUI",
+  "ARB", "OP", "INJ", "SEI", "TIA", "FIL", "ETC", "XLM", "HBAR", "ICP", "WLD", "FET",
+  "RENDER", "GRT", "ALGO", "VET", "STX", "JUP", "WIF", "BONK", "ORDI", "USDT", "USDC",
+]);
+
+export function inferMarket(symbol?: string, market?: string): string {
+  // 后端给了 market 就以它为准（crypto 不在 CN/HK/US 三分类里）
+  if (market) return market;
   if (!symbol) return "CN";
   const s = symbol.toUpperCase();
+  if (CRYPTO_CODES.has(s)) return "CRYPTO";
   if (s.startsWith("HK")) return "HK";
   // 5 or 6 digit numeric → CN (A-share)
   if (/^\d{5,6}$/.test(s)) return "CN";
@@ -14,9 +26,37 @@ export function inferMarket(symbol?: string): string {
   return "CN";
 }
 
+/** market → 原币币种 */
+export function marketCurrency(market?: string): string {
+  if (market === "HK") return "HKD";
+  if (market === "US") return "USD";
+  if (market === "CRYPTO") return "USDT";
+  return "CNY";
+}
+
+/** 币种符号。USDT 用 ₮（不要用 $，那是美元）。 */
+export function currencySign(currency?: string): string {
+  switch ((currency || "CNY").toUpperCase()) {
+    case "USD": return "$";
+    case "HKD": return "HK$";
+    case "USDT": return "₮";
+    default: return "¥";
+  }
+}
+
+/** 按币种格式化金额；缺值给「—」（不要显示 0）。 */
+export function currencyMoney(v: number | null | undefined, currency?: string): string {
+  if (v == null || Number.isNaN(v)) return "—";
+  const digits = Math.abs(v) >= 1000 ? 0 : 2;
+  return `${currencySign(currency)}${v.toLocaleString("zh-CN", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })}`;
+}
+
 /** Format a numeric value with the appropriate currency prefix for a given market. */
 export function marketMoney(v?: number, market?: string): string {
-  const prefix = market === "HK" ? "HK$" : market === "US" ? "$" : "¥";
+  const prefix = market === "HK" ? "HK$" : market === "US" ? "$" : market === "CRYPTO" ? "₮" : "¥";
   return `${prefix}${(v ?? 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 

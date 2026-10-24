@@ -10,10 +10,13 @@ from pydantic import BaseModel, Field
 
 from backend.schemas import HoldingPosition, RebalanceDraftRequest, model_to_dict
 from backend.stock_domain.catalog import get_stock
+from backend.stock_domain import fx as fx_service
 from backend.stock_domain.portfolio_tools import (
+    holding_currency,
     mark_to_market,
     read_available_cash,
     summarize_portfolio,
+    to_cny_amount,
     write_available_cash,
 )
 
@@ -24,14 +27,27 @@ class AvailableCashUpdate(BaseModel):
     amount: float | None = Field(default=None, description="可用资金；null 表示未记录")
 
 
+def _fx_rates() -> tuple[dict | None, dict]:
+    """当日汇率（按日缓存）。返回 (折算系数, 原始 payload)。"""
+    payload = fx_service.get_rates()
+    return fx_service.rates_for_conversion(payload), payload
+
+
 def _portfolio_summary(services: AppServices, holdings: list[HoldingPosition]) -> dict:
-    return summarize_portfolio(holdings, available_cash=read_available_cash(services.repo))
+    rates, payload = _fx_rates()
+    return summarize_portfolio(
+        holdings,
+        available_cash=read_available_cash(services.repo),
+        rates=rates,
+        fx=payload,
+    )
 
 
 def _presented_holdings(services: AppServices) -> tuple[list[dict], list[HoldingPosition], int]:
     """Attach a quote and compute market value / unrealized P&L for the response."""
     from backend.stock_domain.provider_router import provider_router
 
+    rates, _fx_payload = _fx_rates()
     items: list[dict] = []
     valued: list[HoldingPosition] = []
     degraded_count = 0
@@ -65,11 +81,15 @@ def _presented_holdings(services: AppServices) -> tuple[list[dict], list[Holding
                 "channel": "mode_b",
             }
             degraded_count += 1
-        market_value, pnl_amount, pnl_pct = mark_to_market(item, None if d["quote"]["degraded"] else last)
-        d["market_value"] = market_value
-        d["pnl_amount"] = pnl_amount
+        native, pnl_amount, pnl_pct = mark_to_market(item, None if d["quote"]["degraded"] else last)
+        currency = holding_currency(item)
+        d["currency"] = currency
+        # 原币市值（真相）；折算值只在能拿到汇率时给，拿不到就是 None → 前端显示「—」
+        d["market_value_native"] = native
+        d["market_value"] = to_cny_amount(native, currency, rates)
+        d["pnl_amount"] = pnl_amount       # 价格损益，原币口径，不受汇率影响
         d["pnl_pct"] = pnl_pct
-        valued.append(item.model_copy(update={"market_value": market_value, "pnl_pct": pnl_pct}))
+        valued.append(item.model_copy(update={"market_value": native, "pnl_pct": pnl_pct, "currency": currency}))
         items.append(d)
     return items, valued, degraded_count
 
@@ -85,6 +105,7 @@ def list_holdings(request: Request, services: AppServices = Depends(get_services
         "quotes_degraded_count": degraded_count,
         "quotes_total": len(items),
         "channel": "mode_b",
+        "fx": _fx_rates()[1],
     }
 
 

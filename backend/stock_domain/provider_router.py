@@ -378,6 +378,8 @@ class ProviderRouter:
                             return result
                 except Exception:
                     pass
+        if market == "CRYPTO":
+            return self._crypto_quote(normalized, ck)
         provider = self._provider_for_market(market)
         result = self._call_with_provider(
             "quote",
@@ -391,6 +393,71 @@ class ProviderRouter:
             if not result.degraded:
                 self._mem_cache.set(ck, result, ttl=_CACHE_TTL["quote"])
         return result
+
+    def _crypto_history(
+        self, symbol: str, days: int, cache_key: str, now: datetime | None = None
+    ) -> dict:
+        """加密货币日线（Gate.io，UTC 切分）。失败返回空 items + degraded，不跨源重试。"""
+        from backend.stock_domain import crypto_providers
+
+        try:
+            bars = crypto_providers.fetch_klines(symbol, interval="1d", limit=max(days + 5, 30))
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "symbol": symbol,
+                "items": [],
+                "degraded": True,
+                "degraded_reason": f"加密货币 K 线不可用：{str(exc)[:120]}",
+                "market": "CRYPTO",
+            }
+        items = bars[-days:] if days else bars
+        payload = {
+            "symbol": symbol,
+            "items": items,
+            "degraded": False,
+            "source": "gate_spot",
+            "market": "CRYPTO",
+            "coverage": {"source": "gate_spot", "mode": "live", "market": "CRYPTO"},
+        }
+        self._mem_cache.set(cache_key, payload, ttl=_CACHE_TTL["history"])
+        return payload
+
+    def _crypto_quote(self, symbol: str, cache_key: str) -> PriceSnapshot:
+        """加密货币报价：单一数据源（Gate.io），失败就是 degraded，不做跨源重试。
+
+        不做重试的原因：备选源在境内全都不可达（实测），重试只会把持仓页拖到超时。
+        """
+        from backend.stock_domain import crypto_providers
+
+        try:
+            quote = crypto_providers.fetch_quote(symbol)
+        except Exception as exc:  # noqa: BLE001
+            return PriceSnapshot(
+                last=0.0,
+                change_pct=0.0,
+                updated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                source="gate_spot",
+                degraded=True,
+                degraded_reason=f"加密货币行情不可用：{str(exc)[:120]}",
+                coverage={"source": "gate_spot", "mode": "live", "market": "CRYPTO"},
+            )
+        snapshot = PriceSnapshot(
+            last=float(quote["last"]),
+            change_pct=float(quote["change_pct"]),
+            updated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            source=str(quote.get("source") or "gate_spot"),
+            degraded=False,
+            coverage={
+                "source": quote.get("source"),
+                "mode": "live",
+                "market": "CRYPTO",
+                "high_24h": quote.get("high_24h"),
+                "low_24h": quote.get("low_24h"),
+                "quote_volume": quote.get("quote_volume"),
+            },
+        )
+        self._mem_cache.set(cache_key, snapshot, ttl=_CACHE_TTL["quote"])
+        return snapshot
 
     def get_history(
         self,
@@ -411,6 +478,8 @@ class ProviderRouter:
             if sqlite_hit is not None:
                 self._mem_cache.set(ck, sqlite_hit, ttl=_CACHE_TTL["history"])
                 return sqlite_hit
+        if market == "CRYPTO":
+            return self._crypto_history(normalized, days, ck, now)
         provider = self._provider_for_market(market)
         result = self._call_with_provider(
             "history",

@@ -81,7 +81,7 @@ def _instrument_type_from_row(row: sqlite3.Row) -> str:
     except (KeyError, IndexError):
         value = None
     text = str(value or "stock").strip().lower()
-    return text if text in {"stock", "etf", "fund", "other"} else "stock"
+    return text if text in {"stock", "etf", "fund", "crypto", "other"} else "stock"
 
 
 class CatalogRepoMixin:
