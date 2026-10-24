@@ -120,6 +120,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [themeMode, setThemeModeState] = useState<ThemeMode>(getInitialThemeMode);
   const [isInitialized, setIsInitialized] = useState(false);
   const [lastRefreshTime, setLastRefreshTime] = useState<string | null>(null);
+  /** 设置拉取失败后的补拉计数（只补一次） */
+  const [settingsRetryTick, setSettingsRetryTick] = useState(0);
+  const settingsRetriedRef = useRef(false);
   const [copilotContextVersion, setCopilotContextVersion] = useState(0);
   const appDataCache = useRef<AppDataCache>({});
   const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -209,6 +212,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     if (tsk.status === "fulfilled") cache.tasks = tsk.value;
     if (rpt.status === "fulfilled") cache.reports = rpt.value;
     if (rptt.status === "fulfilled") cache.reportTemplates = rptt.value;
+    if (stg.status === "rejected" && !settingsRetriedRef.current) {
+      // 后端重启/网络抖动时设置会拉不到，界面就会误报「未配置模型」。
+      // 自动再拉一次（只重试一轮，避免后端真的挂了时无限重试）。
+      settingsRetriedRef.current = true;
+      window.setTimeout(() => setSettingsRetryTick((n) => n + 1), 3000);
+    }
     if (stg.status === "fulfilled") {
       cache.settings = stg.value;
       const pageSeconds = (stg.value as { market_refresh?: { page_refresh_seconds?: number } } | null)?.market_refresh?.page_refresh_seconds;
@@ -226,9 +235,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setIsInitialized(true);
   }, []);
 
-  // Trigger initial load once on mount — setState is intentional for initialization
-  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
-  useEffect(() => { void refreshAll(); }, []);
+  // Trigger initial load once on mount（+ 设置拉取失败后的补拉）。
+  // 放进宏任务里调用：effect 内同步 setState 会触发级联渲染告警。
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void refreshAll(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [settingsRetryTick]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const onWorkspaceChanged = () => { void refreshAll(); };

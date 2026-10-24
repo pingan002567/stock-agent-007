@@ -1,6 +1,7 @@
 import React, { useRef, useCallback, useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/hooks/useAppState";
 import type { StreamStep } from "@/hooks/useCopilotChat";
+import { fetchRunStatus } from "@/api/copilot";
 import { parseCopilotEvent, EVENT_FINAL, EVENT_ERROR, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, EVENT_PARTIAL_ANSWER, EVENT_CLARIFICATION, EVENT_REASONING } from "@/api/copilot";
 import { parseTaskToolPayload } from "@/components/features/taskToolMeta";
 import { persistedToolResultText } from "@/lib/persistedToolResult";
@@ -295,6 +296,9 @@ export function CopilotPanel() {
   const {
     messages,
     sending, streamMessage,
+    currentSessionId,
+    loadMessages,
+    attachRunStream,
     handleSend, handleRetry,
   } = useCopilotChat();
 
@@ -397,6 +401,38 @@ export function CopilotPanel() {
     () => pairMessages(messages, streamMessage?.runId),
     [messages, streamMessage?.runId],
   );
+
+  /** 与服务器对账：本地看到「有工具没回答」时，可能只是快照早于 final 落库
+   *  （定时任务在后台跑，前端打开会话时只拿到了半截）。
+   *  先问一次 run 状态：还在跑就等，已收口就重新拉历史，别留一个假的「本轮未完成」。 */
+  const reconciledRuns = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const pending = paired.find(
+      (item) => item.t === "msg"
+        && (item.aborted || item.incomplete)
+        && item.msg.run_id
+        && item.msg.run_id !== streamMessage?.runId,
+    );
+    const runId = pending && pending.t === "msg" ? pending.msg.run_id : null;
+    const sessionId = currentSessionId;
+    if (!runId || !sessionId || reconciledRuns.current.has(runId)) return;
+    reconciledRuns.current.add(runId);
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const status = await fetchRunStatus(sessionId, runId);
+          if (status.alive) {
+            // 后端还在跑：接回实时流，恢复「执行中」气泡——不能给它判「本轮未完成」
+            await attachRunStream(sessionId, runId);
+            return;
+          }
+          // 已收口：重新拉历史，final 会替代这个占位
+        } catch { /* 网络抖动就不动，用户手动刷新即可 */ }
+      })();
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [paired, currentSessionId, streamMessage?.runId, loadMessages, attachRunStream]);
+
 
   const messageElements = useMemo(() => {
     const dateFlags = new Array<boolean>(paired.length);

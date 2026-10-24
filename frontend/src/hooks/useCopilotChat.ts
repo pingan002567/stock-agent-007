@@ -276,6 +276,8 @@ function useCopilotChatState() {
   const streamsRef = useRef(new Map<string, EventSource>());
   const streamSnapshotsRef = useRef(new Map<string, StreamMessage>());
   const activeRunIdRef = useRef(new Map<string, string>());
+  /** 接回进行中 run 的轮询定时器（会话切走/卸载时要清掉） */
+  const reattachTimersRef = useRef(new Map<string, number>());
   /** 后台 error 在 snapshot 清掉后仍短暂留在左栏 */
   const stickyActivityRef = useRef<Record<string, SessionActivity>>({});
   const [sessionActivity, setSessionActivity] = useState<Record<string, SessionActivity>>({});
@@ -1202,6 +1204,171 @@ function useCopilotChatState() {
     });
   }, [releaseStream, streamMessage?.runId]);
 
+  /** 接回一个**正在进行**的 run：打开会话时后端还在跑，要恢复「执行中」气泡，
+   *  而不是给它判一个「本轮未完成」。
+   *
+   *  这里不复制 runStream 的全套 SSE handler（那会导致两套逻辑分叉）：
+   *  - 工具步已经在历史消息里（tool_call/tool_result 边跑边落库），
+   *    由 pairMessages + 本气泡共同呈现；
+   *  - 接上 SSE 只为拿 final/reasoning/partial_answer 的实时尾巴；
+   *  - 兜底用轮询：状态一收口就拉历史，答案与工具过程一次性对齐。
+   */
+  const attachRunStream = useCallback(async (sid: string, runId: string) => {
+    if (streamsRef.current.has(sid)) return;
+    const existing = streamSnapshotsRef.current.get(sid);
+    if (existing?.runId === runId) return;
+    const initial: StreamMessage = {
+      runId,
+      phase: "tools",
+      reasoningText: "AI 正在执行…",
+      reasoningLog: [],
+      skillTrace: [],
+      todos: [],
+      tools: [],
+      steps: [],
+      rounds: 0,
+      answerText: "",
+      clarificationText: null,
+      clarificationRequest: null,
+      finalPayload: null,
+      errorText: null,
+      startedAt: Date.now(),
+    };
+    bindStream(sid, initial);
+
+    const finish = async () => {
+      try { streamsRef.current.get(sid)?.close(); } catch { /* empty */ }
+      streamsRef.current.delete(sid);
+      activeRunIdRef.current.delete(sid);
+      streamSnapshotsRef.current.delete(sid);
+      removePendingStream(sid);
+      if (currentSessionIdRef.current === sid) {
+        setStreamMessage(null);
+        setSending(false);
+      }
+      syncGlobalStreaming();
+      try {
+        const items = await fetchSessionMessages(sid);
+        if (currentSessionIdRef.current === sid) setMessages(items);
+      } catch { /* 拉不到就保留现状 */ }
+      loadSessions();
+    };
+
+    const es = new EventSource(createStreamUrl(sid, runId));
+    streamsRef.current.set(sid, es);
+    es.addEventListener("progress", (ev: Event) => {
+      try {
+        const data = JSON.parse((ev as MessageEvent).data || "{}");
+        const payload = (data?.payload || data || {}) as Record<string, unknown>;
+        setStreamLiveness({
+          lastAt: Date.now(),
+          status: String(payload.status || "running"),
+          phase: String(payload.phase || "llm"),
+          currentTool: payload.current_tool != null ? String(payload.current_tool) : null,
+          alive: payload.alive !== false,
+        });
+      } catch { /* 心跳解析失败不影响 */ }
+    });
+    es.addEventListener("reasoning", (ev: Event) => {
+      try {
+        const data = JSON.parse((ev as MessageEvent).data);
+        const t = String((data?.payload || {}).text || "");
+        if (!t) return;
+        patchStream(sid, (prev) => {
+          const last = prev.steps[prev.steps.length - 1];
+          const steps = last?.kind === "reasoning"
+            ? [...prev.steps.slice(0, -1), { ...last, text: t }]
+            : placeReasoningStep(prev.steps, { kind: "reasoning" as const, id: `r-${prev.steps.length}`, text: t });
+          return { ...prev, phase: "reasoning", reasoningText: t, steps };
+        });
+      } catch { /* empty */ }
+    });
+    es.addEventListener("partial_answer", (ev: Event) => {
+      try {
+        const data = JSON.parse((ev as MessageEvent).data);
+        const t = String((data?.payload || {}).text || "");
+        if (t) patchStream(sid, (prev) => ({ ...prev, phase: "answering", answerText: prev.answerText + t }));
+      } catch { /* empty */ }
+    });
+    // 后端会把该 run 的 live_buffer 整体重放：工具卡靠这两个事件重建
+    es.addEventListener("tool_call", (ev: Event) => {
+      try {
+        const data = JSON.parse((ev as MessageEvent).data);
+        const p = (data?.payload || {}) as Record<string, unknown>;
+        const name = String(p.tool || "tool");
+        if (name === "write_todos") return;
+        const callId = String(p.call_id || `${name}-${Date.now()}`);
+        let subagentType: string | undefined;
+        let taskDescription: string | undefined;
+        let taskPrompt: string | undefined;
+        if (name === "task") {
+          const meta = parseTaskToolArgs(p.arguments);
+          subagentType = meta.subagentType;
+          taskDescription = meta.description;
+          taskPrompt = meta.prompt;
+        }
+        patchStream(sid, (prev) => {
+          if (prev.tools.some((t) => t.callId === callId)) return prev;
+          const anyRunning = prev.tools.some((t) => t.status === "running");
+          const round = prev.tools.length === 0 ? 1 : anyRunning ? prev.rounds : prev.rounds + 1;
+          const tool: StreamToolCall = {
+            callId, name, status: "running", subagentType, taskDescription, taskPrompt,
+            round, kind: isCommandTool(name) ? "command" : "tool", startedAt: Date.now(),
+          };
+          return {
+            ...prev,
+            phase: "tools",
+            rounds: round,
+            tools: [...prev.tools, tool],
+            steps: [...prev.steps, { kind: "tool", id: callId, tool }],
+          };
+        });
+      } catch { /* empty */ }
+    });
+    es.addEventListener("tool_result", (ev: Event) => {
+      try {
+        const data = JSON.parse((ev as MessageEvent).data);
+        const p = (data?.payload || {}) as Record<string, unknown>;
+        const callId = String(p.call_id || "");
+        const resultText = extractToolResultText(p);
+        const degraded = detectDegraded(p);
+        patchStream(sid, (prev) => {
+          const finishTool = (t: StreamToolCall): StreamToolCall => {
+            if (t.callId !== callId) return t;
+            return {
+              ...t, status: "done", resultText, degraded,
+              durationMs: t.startedAt ? Date.now() - t.startedAt : undefined,
+            };
+          };
+          return {
+            ...prev,
+            tools: prev.tools.map(finishTool),
+            steps: prev.steps.map((st) => st.kind === "tool" ? { ...st, tool: finishTool(st.tool) } : st),
+          };
+        });
+      } catch { /* empty */ }
+    });
+    es.addEventListener("final", () => { void finish(); });
+    es.addEventListener("error", (ev: Event) => {
+      if ((ev as MessageEvent).data != null) { void finish(); return; }
+      // 连接层抖动交给下面的轮询兜底
+    });
+
+    // 轮询兜底：SSE 断了也要在收口时把历史对齐
+    const timer = window.setInterval(() => {
+      void (async () => {
+        if (streamsRef.current.get(sid) !== es) { window.clearInterval(timer); return; }
+        try {
+          const status = await fetchRunStatus(sid, runId);
+          if (status.alive) return;
+        } catch { return; }
+        window.clearInterval(timer);
+        await finish();
+      })();
+    }, 5000);
+    reattachTimersRef.current.set(sid, timer);
+  }, [bindStream, loadSessions, patchStream, syncGlobalStreaming]);
+
   const refreshRunStatus = useCallback(async () => {
     const sid = currentSessionIdRef.current;
     if (!sid || !sending) return;
@@ -1320,6 +1487,7 @@ function useCopilotChatState() {
     toolOpen,
     loadSessions,
     loadMessages,
+    attachRunStream,
     ensureSession,
     switchSession,
     handleNewSession,
