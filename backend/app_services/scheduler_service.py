@@ -29,9 +29,7 @@ _DATA_DISCIPLINE = (
     "取数：优先本地缓存；遇 degraded / stale / 缺字段先 list_data_sources 再换可用 provider"
     "（行业优先同花顺）；仍失败写「未获取+原因」，禁止编造。不索要完整持仓明细、不回显密钥、不做真实下单。"
 )
-_DISCLAIMER_TAIL = (
-    "结尾附固定句：可含目标价与操作指令，仅供研究参考，不构成投资建议。"
-)
+
 _DATA_HEALTH_RULE = (
     "数据健康：只写会影响本场结论的缺口，每项一行「缺什么 → 哪条判断作废」；"
     "不写熔断次数、provider 名、内部字段名；与本场结论无关的标的不写；"
@@ -58,7 +56,6 @@ DUTY_PREAMBLE = (
     "持仓+自选合计超过 15 只时，只深拉权重最高与今日异动 Top 8，其余一行涨跌，禁止逐只深研。\n"
     "A 股讨论抛压/套牢时必须 get_market_structure；港美股禁止写获利/套牢比例。\n"
     f"{DUTY_OUTPUT_CONTRACT}\n"
-    f"{_DISCLAIMER_TAIL}\n"
     "不要调用 generate_report，系统会在运行结束后自动落盘值班简报。"
 )
 
@@ -69,7 +66,6 @@ DISCOVERY_PREAMBLE = (
     "必须先拉市场面：invoke_data_capability 或快捷工具获取 market_review、sectors、"
     "industry_boards（必要时 Mode A 换源）；再按**上方已注入**的风险画像筛选候选。\n"
     f"{DUTY_OUTPUT_CONTRACT}\n"
-    f"{_DISCLAIMER_TAIL}\n"
     "不要调用 generate_report，系统会在运行结束后自动落盘机会发现报告。"
 )
 
