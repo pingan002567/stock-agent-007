@@ -111,7 +111,7 @@
     <div class="body">
 
       <div class="kpis">
-        <div class="kpi"><div class="k">总资产（折合）</div><div class="v">¥194,158</div><div class="s">权重与风控用这个数</div></div>
+        <div class="kpi"><div class="k">总资产（折合）</div><div class="v">¥194,158</div><div class="s">按 <b style="color:var(--muted)">2026-10-24 当日汇率</b>折算 · 权重的分母</div></div>
         <div class="kpi"><div class="k">持仓</div><div class="v">5 只</div><div class="s">A股 2 · 美股 1 · 加密货币 2</div></div>
         <div class="kpi"><div class="k">最大权重</div><div class="v amb">22.3%</div><div class="s">BTC · 单标的上限 25%</div></div>
         <div class="kpi"><div class="k">浮盈（分币种）</div><div class="v up">+¥300</div><div class="s">+$369 · +$52.18</div></div>
@@ -124,10 +124,10 @@
       </div>
 
       <div class="fxbar">
-        <b>汇率</b> USD/CNY <span class="num">6.6849</span> · USDT/USD <span class="num">1.0000</span>
-        <span>· 1 小时前</span>
-        <span style="color:var(--blue);cursor:pointer">刷新</span>
-        <span class="f">｜分币种小计不依赖汇率，折合总额才依赖</span>
+        <b>当日汇率</b> <span class="num">2026-10-24</span> ·
+        USD/CNY <span class="num">6.6849</span> · USDT/USD <span class="num">1.0000</span>
+        <span class="f">（较昨日 6.6795 <span class="up">+0.08%</span> → 折合资产 <span class="up">+¥81</span>）</span>
+        <span style="color:var(--blue);cursor:pointer;margin-left:2px">刷新</span>
       </div>
 
       <div class="chips">
@@ -206,7 +206,7 @@
   <div class="legend">
     <b>分币种</b>：人民币 ¥93,600（A股 2 只 + 现金 47,000）、美元 $5,715（美股）、USDT ₮9,328（加密货币）——
     这三笔钱本来就不可直接相加，分开列才对。<br>
-    <b>折合总额</b> ¥194,158 只作分母（权重 / 单标的上限 / 组合体检）；汇率挂掉时它显示 —，但上面三个小计照常。<br>
+    <b>折合总额</b> ¥194,158 按<b>当天汇率</b>实时折算，只作分母（权重 / 单标的上限 / 组合体检）；折算值<b>不落库</b> —— 汇率变了总资产跟着变，才是对的。汇率挂掉时它显示 —，三个小计照常。<br><b>盈亏口径</b>：价格损益按原币算（+¥300 / +$369 / +$52.18），汇率变动只影响折合，不混进价格盈亏。<br>
     <b>排序</b>按折算市值降序，所以加密货币和股票会交叉出现 —— 这才看得出"钱压在哪"。
   </div>
 </div>
