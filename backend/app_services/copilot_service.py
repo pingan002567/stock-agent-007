@@ -104,8 +104,9 @@ class CopilotRunState:
     current_tool: str | None = None
     last_event_at: str = field(default_factory=now_iso)
     last_event_type: str | None = None
-    #: 最后一条已落库的推理文本：同一个 values 快照会反复推同样的文本，去重后才落库
-    last_reasoning_text: str | None = None
+    #: 当前这一段推理的**最新**文本：思维链是分片增量推送的，
+    #: 攒到这段结束（下一条非 reasoning 事件）再落库，只存一条完整的。
+    pending_reasoning: str | None = None
     started_at: str = field(default_factory=now_iso)
     updated_at: str = field(default_factory=now_iso)
     # Fan-out: agent runs in a background task; SSE clients subscribe.
@@ -1375,16 +1376,27 @@ class CopilotService:
                     # reasoning 也落库：不存的话，翻历史对话只剩工具调用，看不到「为什么调」。
                     # 但 values 快照会反复推同一段文本，只存**新的**那一条，避免灌水。
                     if event["type"] == "reasoning":
+                        # 思维链是分片增量推的（"User asks…" → "User asks… rate."）：
+                        # 每片都落库会得到一串前缀重复行。这里只记住最新文本，
+                        # 等这段结束、下一条非 reasoning 事件到来时落一条完整的。
                         text = str(
                             (payload or {}).get("text") or (payload or {}).get("latest_text") or ""
                         ).strip()
-                        if text and text != state.last_reasoning_text:
-                            state.last_reasoning_text = text
-                            self._persist_stream_event(state, sse_event)
-                            continue_persist = True
-                        else:
-                            continue_persist = False
+                        if text:
+                            state.pending_reasoning = text
+                        continue_persist = False
                     else:
+                        if state.pending_reasoning:
+                            self._persist_stream_event(
+                                state,
+                                SSEEvent(
+                                    run_id=run_id,
+                                    task_id=resolved_task_id,
+                                    type="reasoning",
+                                    payload={"text": state.pending_reasoning},
+                                ),
+                            )
+                            state.pending_reasoning = None
                         continue_persist = event["type"] not in (
                             "partial_answer",
                             "skill_trace",
