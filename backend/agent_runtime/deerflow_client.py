@@ -300,6 +300,12 @@ class DeerFlowEventMapper:
         if messages:
             latest_text = None
             for message in self._messages_from_payload(messages):
+                # 续聊时首个 values 快照会**重放整条线程的历史消息**。不过滤的话，
+                # 上一轮的答复会被当成这一轮的 reasoning.latest_text 推进「思考」气泡
+                # （界面上表现为「思考」里显示上一次的答案）。
+                msg_id = self._get(message, "id")
+                if msg_id and msg_id in self._historical_msg_ids:
+                    continue
                 role = self._get(message, "type") or self._get(message, "role")
                 content = self._get(message, "content")
                 # Only assistant content is reasoning/answer text. Skip human (the

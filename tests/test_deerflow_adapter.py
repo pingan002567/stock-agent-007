@@ -460,3 +460,42 @@ def test_turn_upload_files_marked_on_envelope_human_message():
         plain = HumanMessage(content="not an envelope")
     assert tagged.additional_kwargs["files"] == files
     assert plain.additional_kwargs["files"] == files
+
+
+# ── 续聊时不能把上一轮答复当成本轮「思考」──────────────────────
+def _values_event(messages):
+    return ("values", {"messages": messages, "status": "running"})
+
+
+def _ai(msg_id: str, text: str):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(type="ai", id=msg_id, content=text)
+
+
+def test_values_skips_historical_messages_for_reasoning():
+    """续聊首个 values 快照会重放历史消息，不能当成这一轮的思考文本。
+
+    这是真实反馈：第二问时「思考」里显示的是上一轮的完整答复。
+    """
+    from backend.agent_runtime.deerflow_client import DeerFlowEventMapper
+
+    mapper = DeerFlowEventMapper(historical_msg_ids={"m1"})
+    events = mapper.map(_values_event([_ai("m1", "上一轮的答复：已删除 BTC 记录")]))
+    reasoning = [e for e in events if e["type"] == "reasoning"]
+    assert reasoning, "仍应发一条 values 阶段的 reasoning（只是不带文本）"
+    assert "latest_text" not in reasoning[-1]["payload"]
+    # final 的结论也不能是历史文本
+    final = mapper.map(("end", {}))[0]["payload"]
+    assert "上一轮的答复" not in str(final.get("conclusion") or "")
+
+
+def test_values_still_emits_new_message_text():
+    from backend.agent_runtime.deerflow_client import DeerFlowEventMapper
+
+    mapper = DeerFlowEventMapper(historical_msg_ids={"m1"})
+    events = mapper.map(
+        _values_event([_ai("m1", "旧答复"), _ai("m2", "本轮的新推理")])
+    )
+    reasoning = [e for e in events if e["type"] == "reasoning"][-1]
+    assert reasoning["payload"]["latest_text"] == "本轮的新推理"
