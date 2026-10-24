@@ -398,3 +398,83 @@ def test_add_holding_rejects_zero_quantity(tmp_path) -> None:
     client = make_client(tmp_path)
     res = client.post("/api/holdings", json={"symbol": "BTC", "quantity": 0})
     assert res.status_code == 422
+
+
+# ── 9. 风控：权重按折算值实时算（P0 修复）────────────────
+def _risk_client(tmp_path, monkeypatch, holdings):
+    from tests.test_api import make_client
+
+    monkeypatch.setattr(
+        fx,
+        "_fetch_rates",
+        lambda: {
+            "as_of": "2026-10-24", "fetched_at": "2026-10-24T00:00:00+00:00",
+            "source": "open.er-api.com", "usd_cny": 6.68, "hkd_cny": 0.86,
+            "usdt_usd": 1.0, "degraded": False, "degraded_reason": None,
+        },
+    )
+    fx.invalidate_cache()
+    client = make_client(tmp_path)
+    client.post("/api/holdings/clear-demo")
+    client.post("/api/holdings/import-confirm", json=holdings)
+    return client
+
+
+def test_risk_flags_concentration_with_real_weights(tmp_path, monkeypatch) -> None:
+    """单票超限必须真的报警 —— 以前 weight_pct 恒 0，这条永远不触发。"""
+    client = _risk_client(
+        tmp_path,
+        monkeypatch,
+        [
+            {"symbol": "600519", "name": "贵州茅台", "quantity": 100, "market_value": 900000, "weight_pct": 0, "cost": 1600},
+            {"symbol": "000963", "name": "华东医药", "quantity": 100, "market_value": 20000, "weight_pct": 0, "cost": 26},
+        ],
+    )
+    risk = client.get("/api/holdings/risk").json()
+    kinds = {(r["kind"], r.get("symbol")) for r in risk["risks"]}
+    assert ("single_position_max", "600519") in kinds
+    hit = next(r for r in risk["risks"] if r["kind"] == "single_position_max")
+    assert hit["severity"] == "high"
+    # NAV = 900000 + 20000（都是人民币）
+    assert risk["portfolio_nav"] == 920000
+    assert hit["actual_value"] == round(900000 / 920000 * 100, 2)
+    fx.invalidate_cache()
+
+
+def test_risk_nav_converts_foreign_currency(tmp_path, monkeypatch) -> None:
+    """NAV 必须折算：BTC 的 USDT 市值不能直接加进人民币 NAV。"""
+    client = _risk_client(
+        tmp_path,
+        monkeypatch,
+        [
+            {"symbol": "600519", "name": "贵州茅台", "quantity": 100, "market_value": 100000, "weight_pct": 0, "cost": 1600},
+            {"symbol": "BTC", "name": "Bitcoin", "quantity": 1, "market_value": 10000, "weight_pct": 0, "cost": 9000},
+        ],
+    )
+    risk = client.get("/api/holdings/risk").json()
+    # 100000 + 10000×6.68 = 166800（不是 110000）
+    assert risk["portfolio_nav"] == round(100000 + 10000 * 6.68, 2)
+    assert risk["nav_converted"] is True
+    # BTC 折算后占 40.05%
+    assert risk["crypto_weight_pct"] == round(10000 * 6.68 / (100000 + 10000 * 6.68) * 100, 2)
+    fx.invalidate_cache()
+
+
+def test_risk_flags_crypto_total_exposure(tmp_path, monkeypatch) -> None:
+    """加密资产合计超过 crypto_max_weight_pct（默认 30%）要报，即使单币不超限。"""
+    client = _risk_client(
+        tmp_path,
+        monkeypatch,
+        [
+            {"symbol": "600519", "name": "贵州茅台", "quantity": 100, "market_value": 600000, "weight_pct": 0, "cost": 1600},
+            {"symbol": "BTC", "name": "Bitcoin", "quantity": 1, "market_value": 20000, "weight_pct": 0, "cost": 20000},
+            {"symbol": "ETH", "name": "Ethereum", "quantity": 1, "market_value": 20000, "weight_pct": 0, "cost": 20000},
+        ],
+    )
+    risk = client.get("/api/holdings/risk").json()
+    kinds = [r["kind"] for r in risk["risks"]]
+    assert "crypto_exposure_max" in kinds
+    crypto_risk = next(r for r in risk["risks"] if r["kind"] == "crypto_exposure_max")
+    assert crypto_risk["threshold_value"] == 30
+    assert crypto_risk["severity"] == "high"
+    fx.invalidate_cache()

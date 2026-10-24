@@ -1002,10 +1002,12 @@ def test_risk_policy_api_active_create_update_activate_and_audit(tmp_path):
             "policy_id": "balanced-growth",
             "name": "Balanced Growth",
             "description": "lighter concentration guard",
+            # 权重按折算后市值实时算（AAPL 约占 NAV 34%），
+            # 想让「更宽松的策略不报警」，阈值必须高于它。
             "rules": {
-                "single_position_max_weight_pct": 20,
-                "single_position_warning_weight_pct": 16,
-                "sector_max_weight_pct": 45,
+                "single_position_max_weight_pct": 50,
+                "single_position_warning_weight_pct": 45,
+                "sector_max_weight_pct": 60,
                 "draft_valid_hours": 12,
                 "rebalance_min_delta_pct": 1.5,
                 "monitor_default_cooldown_seconds": 900,
@@ -1022,9 +1024,9 @@ def test_risk_policy_api_active_create_update_activate_and_audit(tmp_path):
             "name": "Balanced Growth Plus",
             "description": "updated",
             "rules": {
-                "single_position_max_weight_pct": 20,
-                "single_position_warning_weight_pct": 17,
-                "sector_max_weight_pct": 45,
+                "single_position_max_weight_pct": 50,
+                "single_position_warning_weight_pct": 45,
+                "sector_max_weight_pct": 60,
                 "draft_valid_hours": 18,
                 "rebalance_min_delta_pct": 1.25,
                 "monitor_default_cooldown_seconds": 1200,

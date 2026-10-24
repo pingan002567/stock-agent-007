@@ -88,6 +88,18 @@ interface HoldingsRiskResponse {
 
 // === Helpers ===
 
+/** 风险类型 → 中文标签（直接显示 kind 对用户没有信息量）。 */
+const RISK_LABELS: Record<string, string> = {
+  single_position_max: "单票超限",
+  single_position_warning: "单票接近上限",
+  single_position_loss_of_nav: "单票浮亏超限",
+  sector_exposure_max: "板块集中",
+  crypto_exposure_max: "加密资产合计超限",
+  min_holdings: "持仓数不足",
+  etf_position_max: "ETF 超限",
+  etf_position_warning: "ETF 接近上限",
+};
+
 const money = (v?: number) =>
   v != null ? `¥${v.toLocaleString("zh-CN", { maximumFractionDigits: 2 })}` : "—";
 
@@ -469,7 +481,10 @@ export default function Holdings() {
                   <div key={i} className="intel-item">
                     <div className={`intel-dot ${r.severity === "high" ? "warning" : r.severity === "medium" ? "info" : "success"}`} />
                     <div className="intel-content">
-                      <div className="intel-title">{r.symbol ?? r.kind ?? "风险项"}</div>
+                      <div className="intel-title">
+                        {(r.kind && RISK_LABELS[r.kind]) || r.kind || "风险项"}
+                        {r.symbol && r.symbol !== r.kind ? ` · ${r.symbol}` : ""}
+                      </div>
                       <div className="intel-desc">{r.message ?? "暂无描述"}</div>
                     </div>
                     <div className="intel-time">{r.severity ?? "info"}</div>

@@ -125,8 +125,23 @@ class RiskPolicyService:
         )
 
     def portfolio_nav(self, holdings: Iterable[HoldingPosition] | None = None) -> float:
+        """组合 NAV（人民币折算）。
+
+        不能让 USDT/USD/HKD 直接和人民币相加 —— 那样资金分层和权重都是错的。
+        拿不到汇率时退回原币直加（调用方会拿到 nav_converted=False）。
+        """
+        from backend.stock_domain import fx as fx_service
+        from backend.stock_domain.portfolio_tools import holding_currency, to_cny_amount
+
         items = list(holdings) if holdings is not None else self.repo.list_holdings()
-        return round(sum(float(item.market_value or 0.0) for item in items), 2)
+        rates = fx_service.rates_for_conversion(fx_service.get_rates())
+        if rates is None:
+            return round(sum(float(item.market_value or 0.0) for item in items), 2)
+        total = 0.0
+        for item in items:
+            cny = to_cny_amount(float(item.market_value or 0.0), holding_currency(item), rates)
+            total += cny if cny is not None else float(item.market_value or 0.0)
+        return round(total, 2)
 
     def analyze_portfolio_risk(
         self,

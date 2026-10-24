@@ -318,6 +318,8 @@ class RiskPolicyRules(BaseModel):
     etf_max_weight_pct: float = 100
     # 单票浮亏金额 / NAV 上限（%）
     single_position_max_loss_pct_of_nav: float = 3
+    # 加密资产合计上限（% NAV）：币波动远大于股票，单独设上限
+    crypto_max_weight_pct: float = 30
     capital_tiers: List[CapitalTierRule] = Field(default_factory=default_capital_tiers)
 
     @model_validator(mode="after")
@@ -363,6 +365,7 @@ class EffectiveRiskRules(BaseModel):
     min_holdings_count: int
     etf_max_weight_pct: float
     single_position_max_loss_pct_of_nav: float
+    crypto_max_weight_pct: float = 30
     draft_valid_hours: int
     rebalance_min_delta_pct: float
     monitor_default_cooldown_seconds: int
