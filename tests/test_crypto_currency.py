@@ -554,3 +554,32 @@ def test_monitor_funding_rate_rule_ignores_non_crypto_symbol(monkeypatch) -> Non
 
     rule = MonitorRule(rule_id="r2", rule_type="crypto_funding_rate_gt", symbol="600519")
     assert MonitorService._match_crypto_funding_rate(_RuleStub(), rule) == []
+
+
+def test_crypto_tasks_auto_seed_on_existing_install(tmp_path) -> None:
+    """老安装升级时必须补上新默认任务，但用户删掉的旧任务不能被re-add。"""
+    from backend.app_services.scheduler_service import CONFIG_KEY, DEFAULT_TASKS
+    from tests.test_api import make_client
+
+    client = make_client(tmp_path)
+    svc = client.app.state.services if hasattr(client.app.state, "services") else None
+    # 直接操作 config：模拟只有 A 股任务、且用户删掉了 weekly 的老安装
+    import json as _json
+
+    legacy = [
+        dict(t)
+        for t in DEFAULT_TASKS
+        if t["task_id"] in {"sched_premarket", "sched_close", "sched_intraday"}
+    ]
+    repo = client.app.state.services.repo if svc else None
+    assert repo is not None
+    repo.set_config(CONFIG_KEY, {"items": legacy})
+
+    items = client.get("/api/scheduled-tasks").json()["items"]
+    ids = {t["task_id"] for t in items}
+    # 新的加密货币任务被补上
+    assert {"sched_crypto_daily", "sched_crypto_asia", "sched_crypto_late"} <= ids
+    # 用户删掉的旧任务（weekly）不会被re-add
+    assert "sched_weekly_review" not in ids
+    # auto_seed 标记不会泄漏到存储里
+    assert all("auto_seed" not in t for t in items)

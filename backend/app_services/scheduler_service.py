@@ -213,6 +213,7 @@ DEFAULT_TASKS: list[dict[str, Any]] = [
     },
     {
         "task_id": "sched_crypto_daily",
+        "auto_seed": True,
         "name": "加密货币日线复盘",
         "prompt": (
             "【任务】加密货币日线复盘（每日 08:00，对应 UTC 00:00 —— 币圈日线在此切分，"
@@ -237,6 +238,7 @@ DEFAULT_TASKS: list[dict[str, Any]] = [
     },
     {
         "task_id": "sched_crypto_asia",
+        "auto_seed": True,
         "name": "加密货币亚洲时段前瞻",
         "prompt": (
             "【任务】加密货币亚洲时段前瞻（每日 16:00，对应 UTC 08:00，资金费率结算点）。\n"
@@ -257,6 +259,7 @@ DEFAULT_TASKS: list[dict[str, Any]] = [
     },
     {
         "task_id": "sched_crypto_late",
+        "auto_seed": True,
         "name": "加密货币美洲时段前检查",
         "prompt": (
             "【任务】加密货币美洲时段前检查（每日 00:00，对应 UTC 16:00，资金费率结算点）。\n"
@@ -434,12 +437,19 @@ class SchedulerService:
             known = {item.get("task_id") for item in items}
             dirty = False
             for seed in DEFAULT_TASKS:
-                if seed["task_id"] not in known and seed["task_id"] in {
-                    "sched_close",
-                    "sched_premarket_discovery",
-                    "sched_intraday",
-                }:
-                    items.append(dict(seed))
+                # 新版本新增的默认任务用 auto_seed 标记：老安装升级时补上，
+                # 但用户删掉过的旧任务（无 auto_seed）不会被re-add。
+                is_new_seed = bool(seed.get("auto_seed"))
+                if seed["task_id"] not in known and (
+                    is_new_seed
+                    or seed["task_id"]
+                    in {
+                        "sched_close",
+                        "sched_premarket_discovery",
+                        "sched_intraday",
+                    }
+                ):
+                    items.append({k: v for k, v in seed.items() if k != "auto_seed"})
                     dirty = True
             seed_by_id = {seed["task_id"]: seed for seed in DEFAULT_TASKS}
             for item in items:
