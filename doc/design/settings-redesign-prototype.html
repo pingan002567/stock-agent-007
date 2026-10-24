@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="zh-CN" class="light">
+<head>
+<meta charset="utf-8">
+<title>配置页重构 · 原型</title>
+<style>
+  :root {
+    --canvas: #ffffff; --surface: #fbfbfc; --surface-2: #f4f5f7;
+    --ink: #191a1c; --ink-2: #3d4044; --muted: #6b7075; --faint: #9aa0a6;
+    --line: #e4e6e9; --line-soft: #eef0f2;
+    --blue: #2f6feb; --green: #17863a; --red: #c4302b; --amber: #b45309;
+    --green-soft: #e9f6ee; --red-soft: #fdeceb; --amber-soft: #fdf3e4; --blue-soft: #eef4ff;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    --shadow: 0 1px 2px rgba(16,24,40,.04), 0 8px 24px rgba(16,24,40,.06);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 40px 32px 72px; background: #f6f7f9; color: var(--ink);
+    font: 13.5px/1.6 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: -.01em; }
+  .lede { color: var(--muted); margin: 0 0 28px; font-size: 13.5px; }
+  .block { margin-bottom: 34px; }
+  .block > h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .09em; color: var(--faint);
+    margin: 0 0 12px; font-weight: 600;
+  }
+  .card { background: var(--canvas); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
+  .pad { padding: 18px 20px; }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .muted { color: var(--muted); }
+  .faint { color: var(--faint); }
+  .tag { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .tag.ok { color: var(--green); background: var(--green-soft); border-color: #bfe3cd; }
+  .tag.warn { color: var(--amber); background: var(--amber-soft); border-color: #f0dcbc; }
+  .tag.bad { color: var(--red); background: var(--red-soft); border-color: #f6cfcc; }
+  .tag.blue { color: var(--blue); background: var(--blue-soft); border-color: #cfe0fb; }
+
+  /* ── 现状：14 项平铺 ─────────────────────────── */
+  .current { display: grid; grid-template-columns: 216px 1fr; gap: 0; }
+  .cur-nav { border-right: 1px solid var(--line-soft); background: var(--surface); padding: 14px 10px; }
+  .cur-nav .g { font-size: 11px; color: var(--faint); padding: 10px 8px 4px; letter-spacing: .05em; }
+  .cur-nav .i { padding: 5px 8px; border-radius: 7px; color: var(--ink-2); font-size: 13px; display: flex; justify-content: space-between; }
+  .cur-nav .i.on { background: var(--surface-2); font-weight: 600; }
+  .cur-nav .badge { font-size: 10.5px; color: var(--faint); font-family: var(--mono); }
+  .cur-main { padding: 18px 20px; }
+  .anno { display: grid; gap: 9px; margin-top: 16px; }
+  .anno .row { display: grid; grid-template-columns: 20px 1fr; gap: 10px; align-items: start; }
+  .anno .n {
+    width: 20px; height: 20px; border-radius: 50%; background: var(--red-soft); color: var(--red);
+    font: 600 11px/20px var(--mono); text-align: center;
+  }
+  .anno .t strong { font-weight: 600; }
+  .anno .t span { color: var(--muted); }
+
+  /* ── 新 IA ───────────────────────────────────── */
+  .ia { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .ia .col { border: 1px solid var(--line); border-radius: 10px; padding: 13px 14px; background: var(--canvas); }
+  .ia .col h3 { margin: 0 0 3px; font-size: 13px; }
+  .ia .col p { margin: 0 0 9px; font-size: 12px; color: var(--muted); }
+  .ia .col ul { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 5px; }
+  .ia .col li { font-size: 12.5px; color: var(--ink-2); display: flex; gap: 7px; align-items: baseline; }
+  .ia .col li .k { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .ia .col li.adv { color: var(--faint); }
+
+  /* ── 应用外壳 mock ───────────────────────────── */
+  .app { display: grid; grid-template-columns: 208px 1fr 236px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--canvas); box-shadow: var(--shadow); }
+  .app-nav { border-right: 1px solid var(--line-soft); background: var(--surface); padding: 16px 10px; }
+  .app-nav .grp { font-size: 11px; color: var(--faint); padding: 12px 9px 5px; letter-spacing: .05em; }
+  .app-nav .item { display: flex; align-items: center; gap: 8px; padding: 6px 9px; border-radius: 7px; color: var(--ink-2); }
+  .app-nav .item.on { background: var(--canvas); box-shadow: 0 0 0 1px var(--line); font-weight: 600; color: var(--ink); }
+  .app-nav .item .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line); flex: none; }
+  .app-nav .item .dot.ok { background: var(--green); }
+  .app-nav .item .dot.warn { background: var(--amber); }
+  .app-nav .item .n { margin-left: auto; font: 10.5px var(--mono); color: var(--faint); }
+  .app-main { padding: 20px 22px; min-width: 0; }
+  .app-side { border-left: 1px solid var(--line-soft); background: var(--surface); padding: 18px 16px; }
+
+  .page-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+  .page-h h2 { margin: 0; font-size: 16px; letter-spacing: -.01em; }
+  .page-sub { color: var(--muted); font-size: 12.5px; margin: 0 0 16px; }
+
+  .sec { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px; overflow: hidden; }
+  .sec-h { display: flex; align-items: center; gap: 9px; padding: 11px 14px; background: var(--surface); border-bottom: 1px solid var(--line-soft); }
+  .sec-h .ttl { font-weight: 600; }
+  .sec-h .hint { font-size: 12px; color: var(--muted); }
+  .sec-h .right { margin-left: auto; }
+  .sec-b { padding: 4px 14px 12px; }
+
+  .field { display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line-soft); }
+  .field:last-child { border-bottom: 0; }
+  .field .lbl { font-size: 13px; }
+  .field .sub { font-size: 11.5px; color: var(--faint); margin-top: 2px; }
+  .field .val { font-family: var(--mono); font-size: 12px; color: var(--ink-2); text-align: right; }
+  .field .val.big { font-size: 13px; color: var(--ink); font-weight: 600; }
+
+  .sw { width: 34px; height: 20px; border-radius: 999px; background: var(--line); position: relative; flex: none; }
+  .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+  .sw.on { background: var(--blue); }
+  .sw.on::after { left: 16px; }
+
+  .prov { display: flex; align-items: center; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--line-soft); }
+  .prov:last-child { border-bottom: 0; }
+  .prov .logo { width: 26px; height: 26px; border-radius: 7px; background: var(--surface-2); border: 1px solid var(--line); display: grid; place-items: center; font: 600 11px var(--mono); color: var(--muted); flex: none; }
+  .prov .meta { min-width: 0; }
+  .prov .nm { font-weight: 600; font-size: 13px; }
+  .prov .url { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .prov .state { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+  .btn { border: 1px solid var(--line); background: var(--canvas); color: var(--ink-2); border-radius: 7px; padding: 4px 10px; font-size: 12px; font-family: inherit; }
+  .btn.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+  .btn.danger { color: var(--red); border-color: #f0c9c6; background: #fff; }
+
+  .impact { display: flex; gap: 7px; align-items: baseline; font-size: 11.5px; color: var(--muted); padding: 3px 0 0; }
+  .impact .k { color: var(--faint); }
+
+  .health { display: grid; gap: 9px; }
+  .health .row { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: center; font-size: 12.5px; }
+  .dot16 { width: 8px; height: 8px; border-radius: 50%; }
+  .d-ok { background: var(--green); } .d-warn { background: var(--amber); } .d-bad { background: var(--red); }
+
+  .need { display: grid; gap: 8px; }
+  .need .task { border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; background: var(--canvas); }
+  .need .task .tt { font-weight: 600; font-size: 12.5px; display: flex; align-items: center; gap: 7px; }
+  .need .task .dd { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
+  .danger { border-color: #f2cdca; }
+  .danger .sec-h { background: #fef7f6; border-bottom-color: #f6dcd9; }
+
+  .code { font-family: var(--mono); font-size: 11.5px; background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 6px; padding: 1px 6px; }
+
+  /* ── 对照表 ─────────────────────────────────── */
+  table.map { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.map th, table.map td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  table.map th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); font-weight: 600; }
+  table.map tr:last-child td { border-bottom: 0; }
+  table.map td.old { color: var(--faint); font-family: var(--mono); font-size: 11.5px; }
+  table.map td .eff { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>配置页重构 · 原型</h1>
+  <p class="lede">现状 14 项平铺 → 「配置概览 + 五大分区」。目标：新人知道从哪开始、老手一眼看到当前生效状态、危险配置改之前先看到影响。</p>
+
+  <!-- ═══ 1. 现状 ═══ -->
+  <div class="block">
+    <h2>1 · 现状：14 项平铺，没有主次</h2>
+    <div class="card">
+      <div class="current">
+        <div class="cur-nav">
+          <div class="g">工作台</div>
+          <div class="i on">外观</div>
+          <div class="i">工作区</div>
+          <div class="i">通知通道</div>
+          <div class="g">AI Copilot</div>
+          <div class="i">提供商</div>
+          <div class="i">默认模型</div>
+          <div class="i">技能</div>
+          <div class="i adv">记忆</div>
+          <div class="i adv">MCP</div>
+          <div class="g">数据服务</div>
+          <div class="i">数据源</div>
+          <div class="i">情报</div>
+          <div class="g">交易合规</div>
+          <div class="i">交易</div>
+          <div class="i">风控</div>
+          <div class="g">系统</div>
+          <div class="i">运行诊断</div>
+        </div>
+        <div class="cur-main">
+          <div class="muted">当前默认落在「外观」——和一进设置最该确认的「模型有没有连上」没有关系。</div>
+          <div class="anno">
+            <div class="row"><div class="n">1</div><div class="t"><strong>「提供商」和「默认模型」拆两页。</strong> <span>连完 Key 要跳另一页选模型；两页各有一个「测试连接」，能力开关（思考模式）夹在模型页里。</span></div></div>
+            <div class="row"><div class="n">2</div><div class="t"><strong>没有「当前生效状态」的入口。</strong> <span>用哪个模型、有没有 key、哪些数据源缺凭证、runtime 是否降级 —— 只散落在第 14 项「运行诊断」。</span></div></div>
+            <div class="row"><div class="n">3</div><div class="t"><strong>危险配置和日常配置同级。</strong> <span>风控上限（直接影响建议仓位）、MCP（能接外部工具）、交易护栏（只读）和「外观」同一个层级。</span></div></div>
+            <div class="row"><div class="n">4</div><div class="t"><strong>数据源 / 情报边界糊。</strong> <span>数据源页管 provider 开关，情报页又管「新闻搜索 / 舆情」开关，同一件事两个入口。</span></div></div>
+            <div class="row"><div class="n">5</div><div class="t"><strong>保存心智不统一。</strong> <span>有的即时生效、有的「保存生效」、MCP 还标着「下一轮对话生效」，用户不知道刚才那下到底生效没有。</span></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 2. 新 IA ═══ -->
+  <div class="block">
+    <h2>2 · 新信息架构：按「要不要配 / 敢不敢动」分层</h2>
+    <div class="ia">
+      <div class="col">
+        <h3>必配（新人三步）</h3>
+        <p>不配就没法用，概览页直接列出来。</p>
+        <ul>
+          <li><span class="k">1</span>连接模型</li>
+          <li><span class="k">2</span>校验数据源</li>
+          <li><span class="k">3</span>确认风控档位</li>
+        </ul>
+      </div>
+      <div class="col">
+        <h3>日常（五个分区）</h3>
+        <p>每区顶部一句话说明「这页影响什么」。</p>
+        <ul>
+          <li><span class="k">◇</span>模型与智能</li>
+          <li><span class="k">◇</span>数据与情报</li>
+          <li><span class="k">◇</span>画像与风控</li>
+          <li><span class="k">◇</span>通知与提醒</li>
+          <li><span class="k">◇</span>系统与诊断</li>
+        </ul>
+      </div>
+      <div class="col">
+        <h3>收进「高级」</h3>
+        <p>低频 + 改了容易出事的，默认折叠。</p>
+        <ul>
+          <li><span class="k">·</span>技能 / 记忆 / MCP</li>
+          <li><span class="k">·</span>外观 / 工作区</li>
+          <li><span class="k">·</span>原始配置 JSON</li>
+          <li><span class="k">·</span>回归用例 / 工具注册表</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 3. 概览页 ═══ -->
+  <div class="block">
+    <h2>3 · 配置概览（新的默认页）</h2>
+    <div class="app">
+      <div class="app-nav">
+        <div class="grp">配置</div>
+        <div class="item on"><span class="dot ok"></span>概览<span class="n">3</span></div>
+        <div class="item"><span class="dot ok"></span>模型与智能</div>
+        <div class="item"><span class="dot warn"></span>数据与情报</div>
+        <div class="item"><span class="dot ok"></span>画像与风控</div>
+        <div class="item"><span class="dot ok"></span>通知与提醒</div>
+        <div class="item"><span class="dot"></span>系统与诊断</div>
+        <div class="grp">本机</div>
+        <div class="item"><span class="dot"></span>外观</div>
+        <div class="item"><span class="dot"></span>工作区</div>
+      </div>
+      <div class="app-main">
+        <div class="page-h"><h2>配置概览</h2><span class="tag ok">可正常使用</span></div>
+        <p class="page-sub">五项必配里 2 项已完成，1 项待确认。按顺序点完即可开始。</p>
+
+        <div class="sec">
+          <div class="sec-h"><span class="ttl">待你确认</span><span class="hint">只列会阻塞使用的项</span></div>
+          <div class="sec-b">
+            <div class="need">
+              <div class="task">
+                <div class="tt"><span class="tag warn">待确认</span>加密数据源缺凭证</div>
+                <div class="dd">Gate.io 可用，但 CoinGecko 未配置 —— 影响加密摘要的「全市场市值」。<span class="btn ghost">去配置 →</span></div>
+              </div>
+              <div class="task">
+                <div class="tt"><span class="tag blue">建议</span>风控档位仍是默认值</div>
+                <div class="dd">单票上限 20% / 加密上限 30%，未按你的资金来源调整。<span class="btn ghost">看一眼 →</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="sec-h"><span class="ttl">当前生效</span><span class="hint">只读，改去对应分区</span></div>
+          <div class="sec-b">
+            <div class="field"><div><div class="lbl">对话模型</div><div class="sub">含思维链，工具调用已启用</div></div><div class="val big">DeepSeek · V4 Flash</div></div>
+            <div class="field"><div class="lbl">思考模式</div><div class="val">已开启</div></div>
+            <div class="field"><div class="lbl">风控档位</div><div class="val">默认档 · 单票 20%</div></div>
+            <div class="field"><div class="lbl">定时任务</div><div class="val">8 个启用 · 3 个加密</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="app-side">
+        <div class="muted" style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px">健康度</div>
+        <div class="health">
+          <div class="row"><span class="dot16 d-ok"></span>运行时<span class="mono faint">embedded</span></div>
+          <div class="row"><span class="dot16 d-ok"></span>模型连通<span class="mono faint">180ms</span></div>
+          <div class="row"><span class="dot16 d-warn"></span>数据源<span class="mono faint">5/6</span></div>
+          <div class="row"><span class="dot16 d-ok"></span>定时任务<span class="mono faint">8</span></div>
+          <div class="row"><span class="dot16 d-ok"></span>交易护栏<span class="mono faint">只读</span></div>
+        </div>
+        <div style="border-top:1px solid var(--line-soft);margin:14px 0 12px"></div>
+        <div class="muted" style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;margin-bottom:9px">最近变更</div>
+        <div class="faint" style="font-size:11.5px;line-height:1.7">
+          10-25 00:24 模型客户端升级<br>
+          10-24 20:12 新增加密定时任务<br>
+          10-23 18:40 风控上限 25% → 20%
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 4. 模型与智能 ═══ -->
+  <div class="block">
+    <h2>4 · 模型与智能（合并原「提供商」+「默认模型」）</h2>
+    <div class="app">
+      <div class="app-nav">
+        <div class="grp">配置</div>
+        <div class="item"><span class="dot ok"></span>概览</div>
+        <div class="item on"><span class="dot ok"></span>模型与智能</div>
+        <div class="item"><span class="dot warn"></span>数据与情报</div>
+        <div class="item"><span class="dot ok"></span>画像与风控</div>
+        <div class="item"><span class="dot ok"></span>通知与提醒</div>
+        <div class="item"><span class="dot"></span>系统与诊断</div>
+      </div>
+      <div class="app-main">
+        <div class="page-h"><h2>模型与智能</h2><span class="tag ok">已连接</span></div>
+        <p class="page-sub">这一页决定「谁来回答」和「能不能思考」。改动即时生效，进行中的对话不受影响。</p>
+
+        <div class="sec">
+          <div class="sec-h"><span class="ttl">当前模型</span><span class="hint">一页选完，不用跳转</span></div>
+          <div class="sec-b">
+            <div class="field">
+              <div><div class="lbl">对话模型</div><div class="sub">下拉只列已连接提供商下的模型</div></div>
+              <div class="val big">DeepSeek · V4 Flash ▾</div>
+            </div>
+            <div class="field">
+              <div><div class="lbl">思考模式</div><div class="sub">开启后会在工具调用前展示推理；关闭则只给结论</div></div>
+              <div class="sw on"></div>
+            </div>
+            <div class="field">
+              <div><div class="lbl">连接测试</div><div class="sub">上次通过：刚刚 · 180ms</div></div>
+              <div style="display:flex;gap:8px;align-items:center"><span class="tag ok">通过</span><button class="btn">重新测试</button></div>
+            </div>
+            <div class="impact"><span class="k">影响</span>所有对话、定时任务与技能都会用这个模型；切换后新的一轮才生效。</div>
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="sec-h"><span class="ttl">提供商</span><span class="hint">Key 只存在本机</span><div class="right"><button class="btn">+ 添加</button></div></div>
+          <div class="sec-b">
+            <div class="prov">
+              <div class="logo">DS</div>
+              <div class="meta"><div class="nm">DeepSeek</div><div class="url">api.deepseek.com · sk-••••952</div></div>
+              <div class="state"><span class="tag ok">已连接</span><button class="btn ghost">管理</button></div>
+            </div>
+            <div class="prov">
+              <div class="logo">OA</div>
+              <div class="meta"><div class="nm">OpenAI</div><div class="url">api.openai.com/v1 · 未填 Key</div></div>
+              <div class="state"><span class="tag">未配置</span><button class="btn ghost">连接</button></div>
+            </div>
+            <div class="prov">
+              <div class="logo">KM</div>
+              <div class="meta"><div class="nm">Kimi</div><div class="url">api.moonshot.cn/v1</div></div>
+              <div class="state"><span class="tag">未配置</span><button class="btn ghost">连接</button></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="sec-h"><span class="ttl">高级</span><span class="hint">默认折叠，改了可能影响稳定性</span><div class="right"><button class="btn ghost">展开 ⌄</button></div></div>
+        </div>
+      </div>
+      <div class="app-side">
+        <div class="muted" style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px">连接详情</div>
+        <div class="health">
+          <div class="row"><span class="dot16 d-ok"></span>Key 有效<span class="mono faint">sk-••952</span></div>
+          <div class="row"><span class="dot16 d-ok"></span>思维链<span class="mono faint">已透传</span></div>
+          <div class="row"><span class="dot16 d-ok"></span>工具调用<span class="mono faint">22 个</span></div>
+          <div class="row"><span class="dot16 d-ok"></span>上下文<span class="mono faint">300k</span></div>
+        </div>
+        <div style="border-top:1px solid var(--line-soft);margin:14px 0 12px"></div>
+        <div class="faint" style="font-size:11.5px;line-height:1.65">
+          无法出「思考」通常是因为网关没有返回思维链字段。切换模型后先在这里看「思维链」是否显示已透传。
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 5. 危险区 ═══ -->
+  <div class="block">
+    <h2>5 · 画像与风控：危险配置独立成区 + 改前看影响</h2>
+    <div class="card pad">
+      <div class="sec">
+        <div class="sec-h"><span class="ttl">投资画像</span><span class="hint">决定风险预算与建议口径</span></div>
+        <div class="sec-b">
+          <div class="field"><div><div class="lbl">风险偏好</div><div class="sub">影响建议仓位的激进程度</div></div><div class="val">稳健 ▾</div></div>
+          <div class="field"><div><div class="lbl">持有周期</div><div class="sub">影响做 T 与波段建议的比例</div></div><div class="val">1–3 个月 ▾</div></div>
+        </div>
+      </div>
+
+      <div class="sec danger" style="margin-top:12px">
+        <div class="sec-h"><span class="ttl">风控上限</span><span class="hint">直接决定建议仓位的大小</span></div>
+        <div class="sec-b">
+          <div class="field">
+            <div><div class="lbl">单票上限</div><div class="sub">超过这个比例的建议会被拦下</div></div>
+            <div class="val big">20% <span class="faint" style="font-size:11px">可选 20 / 25 / 30</span></div>
+          </div>
+          <div class="impact"><span class="k">影响</span>把上限从 20% 调到 30%：当前 4 只持仓里会有 1 只从「超限」变为「正常」。</div>
+          <div class="field">
+            <div><div class="lbl">加密资产上限</div><div class="sub">全局上限，不随资金分层变化</div></div>
+            <div class="val big">30%</div>
+          </div>
+          <div class="field">
+            <div><div class="lbl">恢复默认</div><div class="sub">默认档：单票 20% / 行业 35% / 加密 30%</div></div>
+            <button class="btn">恢复默认</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec danger" style="margin-top:12px">
+        <div class="sec-h"><span class="ttl">危险操作</span><span class="hint">二次确认 + 影响预览</span></div>
+        <div class="sec-b">
+          <div class="field">
+            <div><div class="lbl">清空 AI 记忆</div><div class="sub">AI 记住的用户事实会全部丢失</div></div>
+            <button class="btn danger">清空</button>
+          </div>
+          <div class="field">
+            <div><div class="lbl">删除 MCP 服务器</div><div class="sub">依赖它的工具会立刻不可用</div></div>
+            <button class="btn danger">管理</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 6. 交互规范 ═══ -->
+  <div class="block">
+    <h2>6 · 三条交互规范（全站统一）</h2>
+    <div class="ia">
+      <div class="col">
+        <h3>保存模型：即时生效</h3>
+        <p>行内显示「已保存 ✓」，不再有底部大保存按钮。</p>
+        <ul>
+          <li><span class="k">·</span>例外必须写明时机：<br><span class="code">下一轮对话生效</span></li>
+        </ul>
+      </div>
+      <div class="col">
+        <h3>每个值都带影响</h3>
+        <p>改之前就知道会动到什么，而不是改完才看结果。</p>
+        <ul>
+          <li><span class="k">·</span>百分比类：列出受影响的持仓</li>
+          <li><span class="k">·</span>开关类：一句话说清开/关差别</li>
+        </ul>
+      </div>
+      <div class="col">
+        <h3>危险操作前置</h3>
+        <p>红框区 + 二次确认弹窗列出「将失去什么」。</p>
+        <ul>
+          <li><span class="k">·</span>不可逆的排在最后</li>
+          <li><span class="k">·</span>按钮不放在常规行内</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 7. 落地对照 ═══ -->
+  <div class="block">
+    <h2>7 · 落地对照：现有组件怎么搬</h2>
+    <div class="card">
+      <table class="map">
+        <thead><tr><th style="width:26%">现有</th><th style="width:26%">新位置</th><th style="width:32%">改动</th><th>工作量</th></tr></thead>
+        <tbody>
+          <tr><td class="old">提供商</td><td>模型与智能 → 提供商</td><td>与「默认模型」合并同页</td><td class="eff">小：搬组件</td></tr>
+          <tr><td class="old">默认模型</td><td>模型与智能 → 当前模型</td><td>加影响说明、测试结果内联</td><td class="eff">中</td></tr>
+          <tr><td class="old">技能 / 记忆 / MCP</td><td>模型与智能 → 高级</td><td>默认折叠，保持原组件</td><td class="eff">小</td></tr>
+          <tr><td class="old">数据源 + 情报</td><td>数据与情报</td><td>合并成一个 provider 目录；新闻/舆情降为该目录能力</td><td class="eff">中偏大</td></tr>
+          <tr><td class="old">风控 + 交易</td><td>画像与风控</td><td>上限类 + 危险操作分区；加影响预览</td><td class="eff">中</td></tr>
+          <tr><td class="old">通知通道</td><td>通知与提醒</td><td>补「什么事件触发」清单</td><td class="eff">小</td></tr>
+          <tr><td class="old">运行诊断</td><td>系统与诊断</td><td>健康度上移到概览；这里只留排障</td><td class="eff">小</td></tr>
+          <tr><td class="old">外观 / 工作区</td><td>本机（导航下方独立组）</td><td>不与业务配置混排</td><td class="eff">小</td></tr>
+          <tr><td class="old">—</td><td>概览（新页）</td><td>健康度 + 必配清单 + 最近变更，需新接口聚合</td><td class="eff">中</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+</body>
+</html>

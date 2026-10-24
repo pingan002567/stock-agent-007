@@ -1,3 +1,94 @@
+/* ── 配置概览（设置页新的默认落点）───────────────────────── */
+.ov { display: flex; flex-direction: column; gap: 12px; }
+.ov-hero {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-lg, 10px);
+  background: var(--surface);
+}
+.ov-hero-title { font-size: 14px; font-weight: 650; color: var(--ink); }
+.ov-hero-desc { margin: 3px 0 0; font-size: 12.5px; color: var(--muted); line-height: 1.6; }
+.ov-pill {
+  margin-left: auto; flex: none; font-size: 11px; padding: 2px 9px; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--muted);
+}
+.ov-pill.ok { color: var(--green); background: var(--green-soft, #e9f6ee); border-color: color-mix(in srgb, var(--green) 30%, var(--line)); }
+.ov-pill.warn { color: var(--amber); background: var(--amber-soft, #fdf3e4); border-color: color-mix(in srgb, var(--amber) 30%, var(--line)); }
+
+.ov-card { border: 1px solid var(--line); border-radius: var(--radius-lg, 10px); background: var(--paper, var(--panel)); overflow: hidden; }
+.ov-card-head {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 10px 14px; background: var(--surface); border-bottom: 1px solid var(--line-soft);
+}
+.ov-card-title { font-size: 13px; font-weight: 650; color: var(--ink); }
+.ov-card-hint { font-size: 11.5px; color: var(--faint); }
+
+.ov-tasks { display: flex; flex-direction: column; }
+.ov-task {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 14px; border-bottom: 1px solid var(--line-soft);
+}
+.ov-task:last-child { border-bottom: 0; }
+.ov-task-main { min-width: 0; }
+.ov-task-title { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--ink); }
+.ov-task-detail { margin-top: 3px; font-size: 12px; color: var(--muted); line-height: 1.55; }
+.ov-task-go { margin-left: auto; flex: none; font-size: 12px; color: var(--blue); white-space: nowrap; }
+
+.ov-fields { display: flex; flex-direction: column; }
+.ov-field {
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px 14px; border-bottom: 1px solid var(--line-soft);
+}
+.ov-field:last-child { border-bottom: 0; }
+.ov-field-label { font-size: 13px; color: var(--ink); }
+.ov-field-sub { margin-top: 2px; font-size: 11.5px; color: var(--faint); line-height: 1.5; }
+.ov-field-value {
+  margin-left: auto; flex: none; text-align: right;
+  font-family: var(--mono); font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums;
+}
+.ov-field-value.strong { font-size: 13px; font-weight: 600; color: var(--ink); }
+
+.ov-health { display: flex; flex-direction: column; }
+.ov-health-row {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 9px 14px; background: none; border: none; border-bottom: 1px solid var(--line-soft);
+  font: inherit; font-size: 12.5px; color: var(--ink-2); text-align: left; cursor: pointer;
+}
+.ov-health-row:last-child { border-bottom: 0; }
+.ov-health-row:hover { background: var(--hover, rgba(0,0,0,.03)); }
+.ov-health-val { margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--faint); }
+.ov-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--line); }
+.ov-dot.d-ok { background: var(--green); }
+.ov-dot.d-warn { background: var(--amber); }
+.ov-dot.d-bad { background: var(--red); }
+
+/* ── 高级折叠区（技能/记忆/MCP）───────────────────────────── */
+.settings-advanced {
+  border: 1px solid var(--line); border-radius: var(--radius-lg, 10px);
+  background: var(--paper, var(--panel)); overflow: hidden;
+}
+.settings-advanced > summary {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 10px 14px; cursor: pointer; list-style: none;
+  background: var(--surface);
+}
+.settings-advanced > summary::-webkit-details-marker { display: none; }
+.settings-advanced-title { font-size: 13px; font-weight: 650; color: var(--ink); }
+.settings-advanced-hint { font-size: 11.5px; color: var(--faint); }
+.settings-advanced-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; }
+
+/* ── 危险配置区（风控上限）───────────────────────────────── */
+.settings-danger-zone {
+  border: 1px solid color-mix(in srgb, var(--red) 26%, var(--line));
+  border-radius: var(--radius-lg, 10px);
+  background: color-mix(in srgb, var(--red) 4%, var(--paper, var(--panel)));
+  overflow: hidden;
+}
+.settings-danger-head { padding: 9px 14px; background: color-mix(in srgb, var(--red) 7%, var(--paper, var(--panel))); }
+.settings-danger-title { font-size: 12.5px; font-weight: 650; color: color-mix(in srgb, var(--red) 78%, var(--ink)); }
+.settings-danger-body { padding: 11px 14px; font-size: 12.5px; color: var(--ink-2); line-height: 1.65; }
+.settings-danger-body b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.settings-danger-hint { margin-top: 5px; font-size: 11.5px; color: var(--muted); line-height: 1.6; }
+
 /* ═══ 设计 token · Cursor/Codex 中性灰阶（见 doc/design/three-column-theme-mockup.html）═══
    语义：canvas=中栏  sidebar=左/右栏  surface=卡片/纸面  surface-2=悬停块
    旧名 --bg/--bg-secondary/--panel 等为兼容别名，逐步可收敛到语义名 */

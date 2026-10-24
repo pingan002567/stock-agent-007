@@ -18,6 +18,7 @@ import { formatConnectionLabel, isRemoteMode, loadConnection } from "@/lib/conne
 import ChannelsTab from "./Channels";
 import { ModelProvidersTab } from "@/components/settings/ai/ModelProvidersTab";
 import { ModelCatalogTab } from "@/components/settings/ai/ModelCatalogTab";
+import { SettingsOverview } from "@/components/settings/SettingsOverview";
 import type { LlmProvidersSnapshot } from "@/api/llmProviders";
 
 /* ---------- Types ---------- */
@@ -226,6 +227,7 @@ function MarketRefreshCard({
 }
 
 type SettingTab =
+  | "overview"
   | "appearance"
   | "workspace"
   | "channels"
@@ -242,19 +244,20 @@ type SettingTab =
 
 /** 右栏顶部说明（每个分区一句，降低「不知道改哪」的困惑） */
 const TAB_META: Record<SettingTab, { title: string; desc: string }> = {
+  overview: { title: "配置概览", desc: "还差什么才能用、现在生效的是什么。" },
   appearance: { title: "外观", desc: "界面明暗与系统跟随。" },
   workspace: { title: "工作区", desc: "档案、数据目录与投资画像（风险承受等级）。" },
-  channels: { title: "通知通道", desc: "盯盘告警、邮件/Webhook 等外发渠道。" },
-  ai: { title: "提供商", desc: "连接多家 OpenAI 兼容提供商。" },
+  channels: { title: "通知与提醒", desc: "盯盘告警、邮件/Webhook 等外发渠道。" },
+  ai: { title: "模型与智能", desc: "谁来回答、能不能思考。改动即时生效，进行中的对话不受影响。" },
   "ai-models": { title: "默认模型", desc: "从已连接提供商中选择 Copilot 默认模型与 Thinking 偏好。" },
   "agent-skills": { title: "技能", desc: "控制 AI 可委派的子代理技能开关。" },
   "agent-memory": { title: "记忆", desc: "AI 长期记住的用户事实，可纠偏或清空。" },
   "agent-mcp": { title: "MCP", desc: "无代码接入外部数据源与工具（保存后下一轮对话生效）。" },
-  data: { title: "数据源", desc: "本配置同时供系统仪表盘（自选/持仓/盯盘）与对话 Agent 使用；启停与凭证只维护一处。" },
+  data: { title: "数据与情报", desc: "行情、财务、新闻与舆情的数据来源；启用与凭证都在这页维护。" },
   intel: { title: "情报", desc: "新闻搜索、舆情分析 provider 与 API Key。" },
-  trade: { title: "交易", desc: "V1 交易护栏（只读）与纸上交易模式。" },
-  risk: { title: "风控", desc: "单票上限、行业集中度、冷却期等可编辑策略规则。" },
-  diag: { title: "运行诊断", desc: "运行时状态、对话记录与排障信息（只读）。" },
+  trade: { title: "交易护栏", desc: "V1 只读锁定与纸上交易模式。" },
+  risk: { title: "画像与风控", desc: "投资画像决定风险预算，上限决定建议仓位被拦在哪里。改前请看影响说明。" },
+  diag: { title: "系统与诊断", desc: "运行时状态、对话记录与排障信息（只读）。" },
 };
 
 /* ---------- Helpers ---------- */
@@ -1462,6 +1465,31 @@ function TradeOnlyTab({ settings }: { settings: SettingsData }) {
   );
 }
 
+/** 风控上限的影响说明：改之前先知道会动到什么，而不是改完才看结果。 */
+function RiskImpactNote({ rules, name }: {
+  rules?: Record<string, unknown>;
+  name?: string;
+}) {
+  const single = rules?.single_position_max_weight_pct;
+  const sector = rules?.sector_max_weight_pct;
+  const stopLoss = rules?.single_position_stop_loss_nav_pct ?? rules?.stop_loss_nav_pct;
+  return (
+    <div className="settings-danger-zone">
+      <div className="settings-danger-head">
+        <span className="settings-danger-title">改这里会直接影响建议仓位</span>
+      </div>
+      <div className="settings-danger-body">
+        当前生效「{name ?? "默认档"}」：单票上限 <b>{String(single ?? "—")}%</b>
+        、行业集中度 <b>{String(sector ?? "—")}%</b>
+        {stopLoss !== undefined ? <>、单票浮亏 <b>{String(stopLoss)}% NAV</b> 触发止损</> : null}。
+        <div className="settings-danger-hint">
+          上限调低 → 超限的持仓会从「正常」变「超限」，相关建议被拦下；调高 → 单票权重会被允许更大，风险同步放大。
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RiskOnlyTab({
   riskPolicies, showCreateForm, setShowCreateForm, editPolicyId, setEditPolicyId,
   savingPolicy, submitCreatePolicy, submitEditPolicy, activatePolicy, deletePolicy,
@@ -1702,38 +1730,42 @@ function DiagTab({ settings, copilotRuns, runtimeMetrics, regressionCases, provi
 type NavItem = { key: SettingTab; label: string };
 type NavGroupDef = { group: string; items: NavItem[] };
 
-/** 左导航分区（TeamClaw 式设置页：左侧分区列表 + 右侧内容 + 底部版本） */
+/** 左导航分区：13 项平铺 → 6 项主链 + 2 项本机。
+ *
+ *  分区依据是「要不要配 / 敢不敢动」：概览放必配清单，技能/记忆/MCP 折进
+ *  「模型与智能 → 高级」，外观/工作区是纯本机偏好，不跟业务配置混排。 */
 const NAV_GROUPS: NavGroupDef[] = [
-  { group: "工作台", items: [
+  { group: "配置", items: [
+    { key: "overview", label: "概览" },
+    { key: "ai", label: "模型与智能" },
+    { key: "data", label: "数据与情报" },
+    { key: "risk", label: "画像与风控" },
+    { key: "channels", label: "通知与提醒" },
+    { key: "diag", label: "系统与诊断" },
+  ]},
+  { group: "本机", items: [
     { key: "appearance", label: "外观" },
     { key: "workspace", label: "工作区" },
-    { key: "channels", label: "通知通道" },
-  ]},
-  { group: "AI Copilot", items: [
-    { key: "ai", label: "提供商" },
-    { key: "ai-models", label: "默认模型" },
-    { key: "agent-skills", label: "技能" },
-    { key: "agent-memory", label: "记忆" },
-    { key: "agent-mcp", label: "MCP" },
-  ]},
-  { group: "数据服务", items: [
-    { key: "data", label: "数据源" },
-    { key: "intel", label: "情报" },
-  ]},
-  { group: "交易合规", items: [
-    { key: "trade", label: "交易" },
-    { key: "risk", label: "风控" },
-  ]},
-  { group: "系统", items: [
-    { key: "diag", label: "运行诊断" },
   ]},
 ];
+
+/** 旧深链/旧入口 key → 新分区（避免浏览器历史与外部链接失效） */
+const LEGACY_TAB_ALIAS: Record<string, SettingTab> = {
+  "ai-models": "ai",
+  "agent-skills": "ai",
+  "agent-memory": "ai",
+  "agent-mcp": "ai",
+  intel: "data",
+  trade: "risk",
+};
 
 const APP_VERSION = "0.1.0";
 const SETTING_TAB_KEYS = new Set<string>(NAV_GROUPS.flatMap((g) => g.items.map((i) => i.key)));
 
 function initialSettingTab(tab?: string): SettingTab {
-  return tab && SETTING_TAB_KEYS.has(tab) ? (tab as SettingTab) : "appearance";
+  if (!tab) return "overview";
+  const resolved = LEGACY_TAB_ALIAS[tab] ?? tab;
+  return SETTING_TAB_KEYS.has(resolved) ? (resolved as SettingTab) : "overview";
 }
 
 export default function Settings({ initialTab }: { initialTab?: string } = {}) {
@@ -1859,6 +1891,12 @@ export default function Settings({ initialTab }: { initialTab?: string } = {}) {
   const renderTab = () => {
     if (!settings) return null;
     switch (activeTab) {
+      case "overview": return (
+        <SettingsOverview
+          settings={settings}
+          onNavigate={(tab) => setActiveTab(tab as SettingTab)}
+        />
+      );
       case "appearance": return <AppearanceTab />;
       case "workspace": return (
         <WorkspaceTab
@@ -1868,14 +1906,31 @@ export default function Settings({ initialTab }: { initialTab?: string } = {}) {
         />
       );
       case "channels": return <ChannelsTab />;
-      case "ai": return settings.llm_providers ? (
-        <ModelProvidersTab
-          snapshot={settings.llm_providers}
-          onRefresh={loadAll}
-          onAfterConnect={() => setActiveTab("ai-models")}
-        />
-      ) : (
-        <div className="llm-empty">无法加载提供商目录。</div>
+      case "ai": return (
+        <div className="page-stack">
+          {/* 合并「提供商 + 默认模型」：一页选完，不再跳转 */}
+          <DefaultModelTab settings={settings} onRefresh={loadAll} />
+          {settings.llm_providers ? (
+            <ModelProvidersTab
+              snapshot={settings.llm_providers}
+              onRefresh={loadAll}
+            />
+          ) : (
+            <div className="llm-empty">无法加载提供商目录。</div>
+          )}
+          {/* 低频 + 改了容易出事：默认折叠 */}
+          <details className="settings-advanced">
+            <summary>
+              <span className="settings-advanced-title">高级</span>
+              <span className="settings-advanced-hint">技能 / 记忆 / MCP —— 默认折叠，改了可能影响稳定性</span>
+            </summary>
+            <div className="settings-advanced-body">
+              <SkillsTab settings={settings} />
+              <MemoryTab />
+              <McpTab />
+            </div>
+          </details>
+        </div>
       );
       case "ai-models": return <DefaultModelTab settings={settings} onRefresh={loadAll} />;
       case "agent-skills": return <SkillsTab settings={settings} />;
@@ -1905,7 +1960,9 @@ export default function Settings({ initialTab }: { initialTab?: string } = {}) {
       );
       case "trade": return <TradeOnlyTab settings={settings} />;
       case "risk": return (
-        <RiskOnlyTab
+        <div className="page-stack">
+          <RiskImpactNote rules={settings.risk_policy?.active?.rules} name={settings.risk_policy?.active?.name} />
+          <RiskOnlyTab
           riskPolicies={riskPolicies}
           showCreateForm={showCreateForm}
           setShowCreateForm={setShowCreateForm}
@@ -1914,9 +1971,10 @@ export default function Settings({ initialTab }: { initialTab?: string } = {}) {
           savingPolicy={savingPolicy}
           submitCreatePolicy={submitCreatePolicy}
           submitEditPolicy={submitEditPolicy}
-          activatePolicy={activatePolicy}
-          deletePolicy={deletePolicy}
-        />
+            activatePolicy={activatePolicy}
+            deletePolicy={deletePolicy}
+          />
+        </div>
       );
       case "diag": return <DiagTab settings={settings} copilotRuns={copilotRuns} runtimeMetrics={runtimeMetrics} regressionCases={regressionCases} providerEvents={providerEvents} />;
     }
