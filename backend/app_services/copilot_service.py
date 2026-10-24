@@ -1680,11 +1680,13 @@ class CopilotService:
             data = {"text": payload.get("text", "")}
             return "assistant", "partial_answer", data["text"], data
         if event_type == "reasoning":
+            # text 与 latest_text 只是来源不同（thinking 走 text、values 快照走 latest_text）；
+            # 落库统一收进 `text`，历史回放才能直接读，不用猜字段。
+            text = payload.get("text") or payload.get("latest_text")
             data = {
-                "text": payload.get("text"),
+                "text": text,
                 "phase": payload.get("phase"),
                 "status": payload.get("status"),
-                "latest_text": payload.get("latest_text"),
             }
             return (
                 "system",
