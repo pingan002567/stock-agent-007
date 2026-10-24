@@ -19,6 +19,8 @@ import ChannelsTab from "./Channels";
 import { ModelProvidersTab } from "@/components/settings/ai/ModelProvidersTab";
 import { ModelCatalogTab } from "@/components/settings/ai/ModelCatalogTab";
 import { SettingsOverview } from "@/components/settings/SettingsOverview";
+import { DataSourcesOverview } from "@/components/settings/DataSourcesOverview";
+import { NotifyTriggers } from "@/components/settings/NotifyTriggers";
 import type { LlmProvidersSnapshot } from "@/api/llmProviders";
 
 /* ---------- Types ---------- */
@@ -1905,7 +1907,12 @@ export default function Settings({ initialTab }: { initialTab?: string } = {}) {
           savingInvestorProfile={savingInvestorProfile}
         />
       );
-      case "channels": return <ChannelsTab />;
+      case "channels": return (
+        <div className="page-stack">
+          <NotifyTriggers />
+          <ChannelsTab />
+        </div>
+      );
       case "ai": return (
         <div className="page-stack">
           {/* 合并「提供商 + 默认模型」：一页选完，不再跳转 */}
@@ -1937,26 +1944,39 @@ export default function Settings({ initialTab }: { initialTab?: string } = {}) {
       case "agent-memory": return <MemoryTab />;
       case "agent-mcp": return <McpTab />;
       case "data": return (
-        <MarketDataTab
-          settings={settings}
-          dataSources={settings.data_sources ?? { providers: { CN: { provider: "eastmoney" }, HK: { provider: "eastmoney" }, US: { provider: "yfinance" } }, provider_credentials: {}, provider_states: {} }}
-          availableProviders={settings.available_data_providers ?? []}
-          credentialSchema={settings.provider_credential_schema ?? {}}
-          onSaveDataSources={submitDataSources}
-          savingDataSources={savingDataSources}
-          marketRefresh={settings.market_refresh ?? { page_refresh_seconds: 60, warmup_seconds: 300, manual_cooldown_seconds: 120 }}
-          onSaveMarketRefresh={submitMarketRefresh}
-          savingMarketRefresh={savingMarketRefresh}
-        />
-      );
-      case "intel": return (
-        <IntelTab
-          intelSources={settings.intel_sources ?? { providers: {} }}
-          availableIntelProviders={settings.available_intel_providers ?? []}
-          availableSentimentProviders={settings.available_sentiment_providers ?? []}
-          onSaveIntelSources={submitIntelSources}
-          savingIntelSources={savingIntelSources}
-        />
+        <div className="page-stack">
+          {/* 一页看全：行情/财务 provider + 新闻/舆情 provider，同页两区 */}
+          <DataSourcesOverview
+            providerStates={settings.data_sources?.provider_states}
+            availableProviders={settings.available_data_providers ?? []}
+            intelSources={settings.intel_sources}
+            availableIntelProviders={settings.available_intel_providers ?? []}
+            availableSentimentProviders={settings.available_sentiment_providers ?? []}
+            jumpTo={(id) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+          />
+          <div id="data-market">
+            <MarketDataTab
+              settings={settings}
+              dataSources={settings.data_sources ?? { providers: { CN: { provider: "eastmoney" }, HK: { provider: "eastmoney" }, US: { provider: "yfinance" } }, provider_credentials: {}, provider_states: {} }}
+              availableProviders={settings.available_data_providers ?? []}
+              credentialSchema={settings.provider_credential_schema ?? {}}
+              onSaveDataSources={submitDataSources}
+              savingDataSources={savingDataSources}
+              marketRefresh={settings.market_refresh ?? { page_refresh_seconds: 60, warmup_seconds: 300, manual_cooldown_seconds: 120 }}
+              onSaveMarketRefresh={submitMarketRefresh}
+              savingMarketRefresh={savingMarketRefresh}
+            />
+          </div>
+          <div id="data-intel">
+            <IntelTab
+              intelSources={settings.intel_sources ?? { providers: {} }}
+              availableIntelProviders={settings.available_intel_providers ?? []}
+              availableSentimentProviders={settings.available_sentiment_providers ?? []}
+              onSaveIntelSources={submitIntelSources}
+              savingIntelSources={savingIntelSources}
+            />
+          </div>
+        </div>
       );
       case "trade": return <TradeOnlyTab settings={settings} />;
       case "risk": return (
