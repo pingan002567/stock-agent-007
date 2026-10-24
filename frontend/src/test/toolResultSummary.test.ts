@@ -44,4 +44,23 @@ describe("summarizeToolResult", () => {
   it("returns null for unknown free text", () => {
     expect(summarizeToolResult("web_search", "hello world")).toBeNull();
   });
+
+  it("包装型 payload 无可读字段时不返回「已完成」", () => {
+    // 回归：兜底曾把状态词当摘要，轨迹里会与右侧 ✓ 重复
+    const text = JSON.stringify({
+      tool: "list_data_sources",
+      execution_mode: "inline",
+      result: { providers: [] },
+    });
+    expect(summarizeToolResult("list_data_sources", text)).toBeNull();
+  });
+
+  it("包装型 payload 有可读字段时仍取摘要", () => {
+    const text = JSON.stringify({
+      tool: "list_data_sources",
+      execution_mode: "inline",
+      result_preview: "3 个数据源可用",
+    });
+    expect(summarizeToolResult("list_data_sources", text)).toBe("3 个数据源可用");
+  });
 });

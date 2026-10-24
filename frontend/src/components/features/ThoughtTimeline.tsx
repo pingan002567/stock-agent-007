@@ -50,7 +50,10 @@ function toolResultLine(tool: StreamToolCall): string | null {
   const summary = summarizeToolResult(tool.name, tool.resultText);
   if (summary) return summary;
   const raw = tool.resultText.replace(/\s+/g, " ").trim();
-  return raw ? truncateText(raw, 72) : null;
+  // 结构化 payload 但取不到可读字段 → 不显示这一行：
+  // 状态已由右侧 ✓/失败 表达，重复一遍「已完成」没有信息量，露原始 JSON 更糟
+  if (!raw || raw.startsWith("{") || raw.startsWith("[")) return null;
+  return truncateText(raw, 72);
 }
 
 function ToolStepRow({ tool, onClick }: { tool: StreamToolCall; onClick?: (t: StreamToolCall) => void }) {

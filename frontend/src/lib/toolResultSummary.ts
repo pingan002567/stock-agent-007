@@ -149,8 +149,10 @@ export function summarizeToolResult(toolName: string, resultText?: string): stri
     return summarizeHistory(data);
   }
   if (looksLikeWrapper(data)) {
-    // 包装型 payload：能取到可读字段就用，否则不要展示原始 JSON
-    return summarizeGeneric(data) ?? "已完成";
+    // 包装型 payload：能取到可读字段就用，否则返回 null。
+    // 曾经兜底成「已完成」，但那是**状态**不是**结果摘要** ——
+    // 轨迹里会有右侧 ✓ 与这行「→ 已完成」并排的重复（用户反馈）。
+    return summarizeGeneric(data);
   }
   return null;
 }
