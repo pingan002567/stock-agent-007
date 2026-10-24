@@ -550,3 +550,67 @@ def test_reasoning_content_is_mapped_before_tool_call():
     assert events[0]["payload"]["text"] == "费率偏挤，先看持仓量再决定"
     assert events[0]["payload"]["phase"] == "thinking"
 
+
+
+def test_reasoning_content_dict_and_summary_shapes():
+    """官方 OpenAI / Codex 的 reasoning 可能是 dict 或 summary 列表。"""
+    from backend.agent_runtime.deerflow_client import DeerFlowEventMapper
+
+    mapper = DeerFlowEventMapper()
+    msg = SimpleNamespace(
+        type="ai", id="m1", content="",
+        additional_kwargs={"reasoning": {"summary": [{"text": "先看估值"}, {"text": "再看情绪"}]}},
+        tool_calls=[{"id": "c1", "name": "get_stock_context", "args": {}}],
+    )
+    events = mapper.map(("messages-tuple", [msg]))
+    assert events[0]["type"] == "reasoning"
+    assert events[0]["payload"]["text"] == "先看估值再看情绪"
+
+
+def test_anthropic_thinking_blocks_become_reasoning_not_answer():
+    """Claude 的思考是 content 块（type=thinking），不能漏进答案。"""
+    from types import ModuleType, SimpleNamespace as NS
+
+    from backend.agent_runtime.deerflow_client import DeerFlowEventMapper
+
+    mapper = DeerFlowEventMapper()
+    msg = NS(
+        type="ai", id="m1",
+        content=[
+            {"type": "thinking", "thinking": "费率偏高，先别追"},
+            {"type": "text", "text": "结论：观望"},
+        ],
+        additional_kwargs={},
+        tool_calls=[],
+    )
+    events = mapper.map(("messages-tuple", [msg]))
+    types = [e["type"] for e in events]
+    reasoning = [e for e in events if e["type"] == "reasoning"]
+    answers = [e for e in events if e["type"] == "partial_answer"]
+    assert reasoning and reasoning[0]["payload"]["text"] == "费率偏高，先别追"
+    assert answers and answers[0]["payload"]["text"] == "结论：观望"
+    assert "费率偏高" not in answers[0]["payload"]["text"]
+    assert "reasoning" in types
+
+
+def test_gemini_thought_blocks_become_reasoning():
+    """Gemini 的思考是 {"thought": True, "text": ...} 块。"""
+    from types import SimpleNamespace as NS
+
+    from backend.agent_runtime.deerflow_client import DeerFlowEventMapper
+
+    mapper = DeerFlowEventMapper()
+    msg = NS(
+        type="ai", id="m1",
+        content=[
+            {"thought": True, "text": "先算一下估值分位"},
+            {"text": "分位 62%，偏贵"},
+        ],
+        additional_kwargs={},
+        tool_calls=[],
+    )
+    events = mapper.map(("messages-tuple", [msg]))
+    reasoning = [e for e in events if e["type"] == "reasoning"]
+    answers = [e for e in events if e["type"] == "partial_answer"]
+    assert reasoning[0]["payload"]["text"] == "先算一下估值分位"
+    assert answers[0]["payload"]["text"] == "分位 62%，偏贵"

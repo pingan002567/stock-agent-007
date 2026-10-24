@@ -388,23 +388,73 @@ class DeerFlowEventMapper:
 
     #: 思维链字段名：langchain-deepseek / vLLM / 自建 thinking 模型各不相同
     _REASONING_KEYS = ("reasoning_content", "thinking", "reasoning")
+    #: content 里代表「思考」的块类型（Anthropic / 官方 OpenAI Responses）
+    _REASONING_BLOCK_TYPES = ("thinking", "redacted_thinking", "reasoning", "reasoning_content")
+
+    def _is_reasoning_block(self, block: Any) -> bool:
+        """判断 content 里的一个块是不是思考块。
+
+        各家形状不同：
+        - Anthropic：``{"type": "thinking", "thinking": "..."}``
+        - Gemini：``{"thought": True, "text": "..."}``
+        - 官方 OpenAI Responses：``{"type": "reasoning", ...}``
+        """
+        block_type = self._get(block, "type")
+        if isinstance(block_type, str) and block_type.lower() in self._REASONING_BLOCK_TYPES:
+            return True
+        return bool(self._get(block, "thought"))
+
+    def _block_text(self, block: Any) -> str:
+        """思考块的正文：thinking / text / content 三种字段名都见得到"""
+        for key in ("thinking", "text", "content", "summary"):
+            value = self._get(block, key)
+            if isinstance(value, str) and value.strip():
+                return value
+        return ""
 
     def _reasoning_text(self, message: Any) -> str:
-        """从 AI 消息里取思维链（thinking 模型的 reasoning_content）。
+        """从 AI 消息里取思维链，兼容各家字段形状。
 
-        DeepSeek 等 thinking 模型把思维链放在 `AIMessage.additional_kwargs.reasoning_content`，
-        正文 content 里只有最终答复。不读这个字段就永远看不到「调工具之前在想什么」。
+        1. ``additional_kwargs``（DeepSeek / vLLM / Codex：reasoning_content；
+           OpenAI 系列可能是 dict 或 summary 列表）
+        2. ``content`` 里的思考块（Anthropic thinking / Gemini thought）
+
+        不读这些就永远看不到「调工具之前在想什么」。
         """
         extra = self._get(message, "additional_kwargs")
         if not isinstance(extra, dict):
             extra = {}
         for key in self._REASONING_KEYS:
             value = extra.get(key) or self._get(message, key)
-            text = self._text(value) if value is not None else ""
-            text = (text or "").strip()
+            text = self._reasoning_value_text(value)
             if text:
                 return text
+
+        content = self._get(message, "content")
+        if isinstance(content, list):
+            parts = [self._block_text(b) for b in content if self._is_reasoning_block(b)]
+            joined = "".join(p for p in parts if p).strip()
+            if joined:
+                return joined
         return ""
+
+    def _reasoning_value_text(self, value: Any) -> str:
+        """reasoning 字段可能是 str / dict / list，统一成文本"""
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, list):
+            parts = [self._reasoning_value_text(v) for v in value]
+            return "".join(p for p in parts if p).strip()
+        if isinstance(value, dict):
+            for key in ("text", "thinking", "content", "summary"):
+                inner = value.get(key)
+                text = self._reasoning_value_text(inner)
+                if text:
+                    return text
+            return ""
+        return str(value).strip()
 
     def _has_tool_calls(self, message: Any) -> bool:
         calls = self._get(message, "tool_calls")
@@ -423,6 +473,10 @@ class DeerFlowEventMapper:
         if isinstance(content, list):
             parts = []
             for item in content:
+                # 思考块不能进答案：Claude/Gemini 的 content 是块列表，
+                # 拼进来会让思维链漏进正文气泡（换 provider 就会踩到）。
+                if self._is_reasoning_block(item):
+                    continue
                 parts.append(
                     str(self._get(item, "text") or self._get(item, "content") or item)
                 )

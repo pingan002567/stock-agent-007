@@ -245,11 +245,11 @@ def test_generated_config_enables_skill_evolution_and_write_file(tmp_path, monke
     assert config_off["skill_evolution"]["enabled"] is False
 
 
-def test_deepseek_model_uses_chatdeepseek(monkeypatch):
-    """DeepSeek 必须走 PatchedChatDeepSeek。
+def test_model_uses_reasoning_client(monkeypatch):
+    """所有 OpenAI 兼容网关都要走保真客户端。
 
-    langchain_openai:ChatOpenAI 不解析 reasoning_content，思维链会被静默丢弃，
-    界面上就永远看不到「思考」—— 这是线上实测到的真实故障。
+    langchain_openai:ChatOpenAI 只处理官方规范，第三方网关的 reasoning_content
+    在解析阶段就被丢掉 —— 换任何模型都看不到「思考」。
     """
     from backend.agent_runtime import deerflow_config as cfg
 
@@ -257,23 +257,36 @@ def test_deepseek_model_uses_chatdeepseek(monkeypatch):
     monkeypatch.setenv("OPENAI_BASE_URL", "https://api.deepseek.com")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     model = cfg._build_model_config()
-    assert model["use"] == "deerflow.models.patched_deepseek:PatchedChatDeepSeek"
+    assert model["use"] == "backend.agent_runtime.reasoning_openai:ReasoningChatOpenAI"
     assert model["supports_thinking"] is True
-    # ChatDeepSeek 自己声明 api_key / api_base，不能用 openai_* 别名
-    assert model["api_base"] == "https://api.deepseek.com"
-    assert model["api_key"] == "sk-test"
-    assert "openai_api_base" not in model
+    assert model["openai_api_base"] == "https://api.deepseek.com"
+    assert model["openai_api_key"] == "sk-test"
 
 
-def test_non_deepseek_model_keeps_chat_openai(monkeypatch):
-    """其它 OpenAI 兼容网关保持原样，别扩大改动面。"""
+def test_other_gateway_also_uses_reasoning_client(monkeypatch):
+    """其它 OpenAI 兼容网关（Kimi/Qwen/GLM/MiMo…）同样要保真。"""
     from backend.agent_runtime import deerflow_config as cfg
 
     monkeypatch.setenv("WORKBENCH_AI_MODEL", "gpt-4o")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://api.example.com/v1")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     model = cfg._build_model_config()
-    assert model["use"] == "langchain_openai:ChatOpenAI"
-    assert model["supports_thinking"] is False
+    assert model["use"] == "backend.agent_runtime.reasoning_openai:ReasoningChatOpenAI"
+    assert model["supports_thinking"] is True
     assert model["openai_api_base"] == "https://api.example.com/v1"
     assert model["openai_api_key"] == "sk-test"
+
+
+def test_reasoning_client_preserves_gateway_fields():
+    """保真客户端要能从各家字段形状里捞出思维链。"""
+    from backend.agent_runtime.reasoning_openai import extract_reasoning, reasoning_text_of
+
+    # DeepSeek / Kimi / Qwen / GLM / MiMo / SiliconFlow
+    assert extract_reasoning({"reasoning_content": "先看费率"})["reasoning_content"] == "先看费率"
+    # OpenRouter
+    assert extract_reasoning({"reasoning": "先看费率"})["reasoning_content"] == "先看费率"
+    # 官方 Responses 的 summary 列表
+    summary = {"reasoning": {"summary": [{"text": "先看"}, {"text": "再看"}]}}
+    assert reasoning_text_of(summary["reasoning"]) == "先看再看"
+    # 空值不产生字段
+    assert extract_reasoning({"reasoning_content": ""}) == {}

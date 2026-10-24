@@ -71,29 +71,24 @@ def _build_model_config() -> dict[str, Any]:
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("WORKBENCH_AI_API_KEY") or ""
     base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("WORKBENCH_AI_BASE_URL") or ""
 
-    deepseek = _is_deepseek(model_name, base_url)
+    # 原生 OpenAI 客户端会把第三方网关的 reasoning_content 丢掉，统一换成本项目的
+    # 保真客户端（覆盖流式 / 非流式 / 多轮回放），这样 DeepSeek、Kimi、Qwen、
+    # GLM、MiMo、SiliconFlow、OpenRouter 都能出「思考」。
     model_cfg: dict[str, Any] = {
         "name": model_name,
         "display_name": model_name,
-        # DeepSeek 必须走 ChatDeepSeek：langchain_openai:ChatOpenAI **不解析**
-        # reasoning_content，思维链会被静默丢掉 → 界面上永远看不到「思考」。
-        "use": (
-            "deerflow.models.patched_deepseek:PatchedChatDeepSeek"
-            if deepseek
-            else "langchain_openai:ChatOpenAI"
-        ),
+        "use": "backend.agent_runtime.reasoning_openai:ReasoningChatOpenAI",
         "model": model_name,
-        "supports_thinking": deepseek,
+        "supports_thinking": True,
         "supports_vision": _model_supports_vision(model_name),
         # 声明上下文窗口。summarization 的 fraction 触发器与 keep 策略都读
         # model.profile["max_input_tokens"]，缺了就只能退回固定 token 阈值。
         "profile": {"max_input_tokens": _context_window()},
     }
     if api_key:
-        # ChatDeepSeek 自己声明 api_key/api_base，ChatOpenAI 走 openai_* 别名
-        model_cfg["api_key" if deepseek else "openai_api_key"] = api_key
+        model_cfg["openai_api_key"] = api_key
     if base_url:
-        model_cfg["api_base" if deepseek else "openai_api_base"] = base_url
+        model_cfg["openai_api_base"] = base_url
     return model_cfg
 
 
