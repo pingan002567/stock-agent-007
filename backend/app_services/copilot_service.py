@@ -104,6 +104,8 @@ class CopilotRunState:
     current_tool: str | None = None
     last_event_at: str = field(default_factory=now_iso)
     last_event_type: str | None = None
+    #: 最后一条已落库的推理文本：同一个 values 快照会反复推同样的文本，去重后才落库
+    last_reasoning_text: str | None = None
     started_at: str = field(default_factory=now_iso)
     updated_at: str = field(default_factory=now_iso)
     # Fan-out: agent runs in a background task; SSE clients subscribe.
@@ -1370,7 +1372,25 @@ class CopilotService:
                     # title 是瞬态事件（会话标题已由前端 title listener 更新），落库会
                     # 走 _serialize_event 的兜底分支变成一条空 final_answer——既污染
                     # 历史，又会让断流恢复的「已收口」判定（any final_answer）误判。
-                    if event["type"] not in ("reasoning", "partial_answer", "skill_trace", "title"):
+                    # reasoning 也落库：不存的话，翻历史对话只剩工具调用，看不到「为什么调」。
+                    # 但 values 快照会反复推同一段文本，只存**新的**那一条，避免灌水。
+                    if event["type"] == "reasoning":
+                        text = str(
+                            (payload or {}).get("text") or (payload or {}).get("latest_text") or ""
+                        ).strip()
+                        if text and text != state.last_reasoning_text:
+                            state.last_reasoning_text = text
+                            self._persist_stream_event(state, sse_event)
+                            continue_persist = True
+                        else:
+                            continue_persist = False
+                    else:
+                        continue_persist = event["type"] not in (
+                            "partial_answer",
+                            "skill_trace",
+                            "title",
+                        )
+                    if continue_persist:
                         self._persist_stream_event(state, sse_event)
                     if self._apply_event_liveness(run_id, state, event["type"], payload if isinstance(payload, dict) else {}):
                         yield SSEEvent(

@@ -1,9 +1,10 @@
 import React, { useRef, useCallback, useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/hooks/useAppState";
-import { parseCopilotEvent, EVENT_FINAL, EVENT_ERROR, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, EVENT_PARTIAL_ANSWER, EVENT_CLARIFICATION } from "@/api/copilot";
+import type { StreamStep } from "@/hooks/useCopilotChat";
+import { parseCopilotEvent, EVENT_FINAL, EVENT_ERROR, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, EVENT_PARTIAL_ANSWER, EVENT_CLARIFICATION, EVENT_REASONING } from "@/api/copilot";
 import { parseTaskToolPayload } from "@/components/features/taskToolMeta";
 import type { CopilotMessage, HealthCheck } from "@/api/client";
-import { useCopilotChat, extractToolResultText, type StreamToolCall } from "@/hooks/useCopilotChat";
+import { useCopilotChat, extractToolResultText, isCommandTool, type StreamToolCall } from "@/hooks/useCopilotChat";
 import { useChatDetail } from "@/hooks/useChatDetail";
 import { CopilotMessageItem, type ToolInfo } from "@/components/features/CopilotMessageItem";
 import { CopilotStreamingMessage } from "@/components/features/CopilotStreamingMessage";
@@ -52,14 +53,17 @@ export type GroupedItem =
       /** 有工具过程但无 final：过程挂在对应用户轮次下 */
       incomplete?: boolean;
       tools?: ToolItem[];
+      /** 历史轮次的完整步骤序列（思考 + 工具），用于还原 agent loop */
+      steps?: StreamStep[];
     }
-  | { t: "ai"; msg: CopilotMessage; tools: ToolItem[]; startedAt?: string };
+  | { t: "ai"; msg: CopilotMessage; tools: ToolItem[]; steps?: StreamStep[]; startedAt?: string };
 
 /** 把未完成 run 的工具过程挂到对应用户消息上，禁止合成空 AI 气泡。 */
 function attachIncompleteToUser(
   out: GroupedItem[],
   rid: string,
   tools: ToolItem[],
+  steps?: StreamStep[],
 ) {
   if (!rid || !tools.length) return;
   for (let j = out.length - 1; j >= 0; j--) {
@@ -70,6 +74,7 @@ function attachIncompleteToUser(
         aborted: false,
         incomplete: true,
         tools: [...(item.tools || []), ...tools],
+        steps: steps ?? item.steps,
       };
       return;
     }
@@ -110,6 +115,11 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
 
   const out: GroupedItem[] = [];
   const pendingTools = new Map<string, ToolItem[]>();
+  /** 每轮的有序步骤（思考 + 工具）：与 tools 并行收集，顺序即到达顺序 */
+  const pendingSteps = new Map<string, StreamStep[]>();
+  /** 每轮已用轮次：与流式同规则（有工具在跑就同轮，否则 +1） */
+  const pendingRounds = new Map<string, number>();
+  const runningTools = new Map<string, Set<string>>();
   // run -> 该轮第一条用户消息的时间（用来算"用时"）
   const runStartedAt = new Map<string, string>();
   for (const m of msgs) {
@@ -122,7 +132,19 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
     const ev = parseCopilotEvent(msg as unknown as Record<string, unknown>);
     const rid = msg.run_id || "";
 
-    if (ev.type === EVENT_TOOL_CALL) {
+    if (ev.type === EVENT_REASONING) {
+      const p = ev.payload as Record<string, unknown>;
+      const text = String(p?.text ?? p?.latest_text ?? "").trim();
+      if (text) {
+        const steps = pendingSteps.get(rid) || [];
+        const last = steps[steps.length - 1];
+        // 相邻重复（同一快照反复推）不重复入列
+        if (!(last && last.kind === "reasoning" && last.text === text)) {
+          steps.push({ kind: "reasoning", id: msg.message_id, text });
+          pendingSteps.set(rid, steps);
+        }
+      }
+    } else if (ev.type === EVENT_TOOL_CALL) {
       const p = ev.payload as Record<string, unknown>;
       const name = String(p?.tool || "tool");
       const cid = p?.call_id ? String(p.call_id) : "";
@@ -147,6 +169,32 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
         args: (p?.arguments ?? p?.arguments_preview) as Record<string, unknown> | undefined,
       });
       pendingTools.set(rid, tools);
+
+      // 轮次：与流式同一规则 —— 并行的工具共用一轮
+      const running = runningTools.get(rid) || new Set<string>();
+      const round = tools.length === 1 ? 1 : running.size > 0 ? (pendingRounds.get(rid) ?? 1) : (pendingRounds.get(rid) ?? 0) + 1;
+      pendingRounds.set(rid, round);
+      if (!matched) running.add(cid || msg.message_id);
+
+      const steps = pendingSteps.get(rid) || [];
+      steps.push({
+        kind: "tool",
+        id: msg.message_id,
+        tool: {
+          callId: cid || msg.message_id,
+          name,
+          status: failed ? "failed" : matched ? "done" : "running",
+          resultText,
+          subagentType,
+          taskDescription,
+          taskPrompt,
+          args: (p?.arguments ?? p?.arguments_preview) as Record<string, unknown> | undefined,
+          kind: isCommandTool(name) ? "command" : "tool",
+          round,
+        },
+      });
+      pendingSteps.set(rid, steps);
+      if (matched) running.delete(cid);
     } else if (ev.type === EVENT_TOOL_RESULT) {
       // 已在预扫描中按 call_id 收集，配对到对应 tool_call；此处跳过，不单独渲染。
       continue;
@@ -173,7 +221,11 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
           for (let j = out.length - 1; j >= 0; j--) {
             const item = out[j];
             if (item.t === "msg" && item.msg.run_id === rid && item.msg.kind === "clarification") {
-              out[j] = { ...item, tools: [...(item.tools || []), ...tools] };
+              out[j] = {
+                ...item,
+                tools: [...(item.tools || []), ...tools],
+                steps: pendingSteps.get(rid) || item.steps,
+              };
               break;
             }
           }
@@ -183,13 +235,15 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
       // 跳过非最后一条 final_answer（修复重复 final 问题）
       if (ev.type === EVENT_FINAL && rid && lastFinalIndex.get(rid) !== i) continue;
       const tools = pendingTools.get(rid) || [];
+      const steps = pendingSteps.get(rid) || [];
       pendingTools.delete(rid);
-      out.push({ t: "ai", msg, tools, startedAt: lastUserAtFor(msg.run_id) });
+      pendingSteps.delete(rid);
+      out.push({ t: "ai", msg, tools, steps, startedAt: lastUserAtFor(msg.run_id) });
     } else if (msg.role === "user") {
       if (msg.run_id) {
         for (const [pendingRid, tools] of [...pendingTools.entries()]) {
           if (pendingRid === msg.run_id || completedRuns.has(pendingRid)) continue;
-          attachIncompleteToUser(out, pendingRid, tools);
+          attachIncompleteToUser(out, pendingRid, tools, pendingSteps.get(pendingRid));
           pendingTools.delete(pendingRid);
         }
       }
@@ -373,7 +427,7 @@ export function CopilotPanel() {
           <React.Fragment key={item.msg.message_id}>
             {showHeader && <div className="date-divider">{dateHeader(msgDate)}</div>}
             <div className="msg-block">
-              <CopilotMessageItem msg={item.msg} tools={item.tools} onToolClick={handleToolClick} runStartedAt={item.startedAt} />
+              <CopilotMessageItem msg={item.msg} tools={item.tools} steps={item.steps} onToolClick={handleToolClick} runStartedAt={item.startedAt} />
               {renderActions({
                 msg: item.msg,
                 showRetry: canRetryFailure && isAiError,
@@ -401,6 +455,7 @@ export function CopilotPanel() {
             <CopilotMessageItem
               msg={item.msg}
               tools={item.incomplete ? undefined : toolInfos}
+              steps={item.incomplete ? undefined : item.steps}
               onToolClick={!item.incomplete && item.tools?.length ? handleToolClick : undefined}
               clarifiedResponse={
                 item.msg.kind === "clarification"

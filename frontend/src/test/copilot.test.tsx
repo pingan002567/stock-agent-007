@@ -346,3 +346,78 @@ describe("pairMessages", () => {
     }
   });
 });
+
+describe("历史轮次的 agent loop（reasoning 落库回放）", () => {
+  function run(messages: CopilotMessage[]) {
+    return pairMessages(messages);
+  }
+
+  it("把 reasoning 与 tool_call 按到达顺序还原成 steps，并算出轮次", () => {
+    const msgs = [
+      makeMsg({ message_id: "u1", role: "user", kind: "user_message", text: "BTC 能买吗", run_id: "run_r" }),
+      makeMsg({
+        message_id: "r1", role: "system", kind: "reasoning", text: "先看价格",
+        run_id: "run_r", payload: { text: "先看价格" },
+      }),
+      makeMsg({
+        message_id: "t1", role: "assistant", kind: "tool_call", text: "",
+        run_id: "run_r", payload: { tool: "get_crypto_derivatives", call_id: "c1" },
+      }),
+      makeMsg({
+        message_id: "x1", role: "tool", kind: "tool_result", text: "get_crypto_derivatives",
+        run_id: "run_r", payload: { tool: "get_crypto_derivatives", call_id: "c1", result: { ok: 1 } },
+      }),
+      makeMsg({
+        message_id: "r2", role: "system", kind: "reasoning", text: "费率偏挤",
+        run_id: "run_r", payload: { text: "费率偏挤" },
+      }),
+      makeMsg({
+        message_id: "t2", role: "assistant", kind: "tool_call", text: "",
+        run_id: "run_r", payload: { tool: "get_market_sentiment", call_id: "c2" },
+      }),
+      makeMsg({
+        message_id: "f1", role: "assistant", kind: "final_answer", text: "能买，别追高",
+        run_id: "run_r", payload: { conclusion: "能买，别追高" },
+      }),
+    ];
+    const ai = run(msgs).find((item) => item.t === "ai");
+    expect(ai?.t).toBe("ai");
+    if (ai?.t !== "ai") return;
+    const steps = ai.steps ?? [];
+    expect(steps.map((s) => s.kind)).toEqual(["reasoning", "tool", "reasoning", "tool"]);
+    // 第一轮 / 第二轮：轮次按「思考→工具」递进
+    const rounds = steps.filter((s) => s.kind === "tool").map((s) => s.kind === "tool" ? s.tool.round : null);
+    expect(rounds).toEqual([1, 2]);
+    // reasoning 文本按序保留
+    expect(steps[0].kind === "reasoning" && steps[0].text).toBe("先看价格");
+    expect(steps[2].kind === "reasoning" && steps[2].text).toBe("费率偏挤");
+  });
+
+  it("相邻重复的 reasoning 不重复入列（values 快照会反复推同一段）", () => {
+    const msgs = [
+      makeMsg({ message_id: "u1", role: "user", kind: "user_message", text: "hi", run_id: "run_d" }),
+      makeMsg({ message_id: "r1", role: "system", kind: "reasoning", text: "同一段", run_id: "run_d", payload: { text: "同一段" } }),
+      makeMsg({ message_id: "r2", role: "system", kind: "reasoning", text: "同一段", run_id: "run_d", payload: { text: "同一段" } }),
+      makeMsg({ message_id: "f1", role: "assistant", kind: "final_answer", text: "好", run_id: "run_d", payload: { conclusion: "好" } }),
+    ];
+    const ai = run(msgs).find((item) => item.t === "ai");
+    if (ai?.t !== "ai") throw new Error("no ai");
+    expect((ai.steps ?? []).filter((s) => s.kind === "reasoning")).toHaveLength(1);
+  });
+
+  it("有 steps 时消息体渲染出「思考」行（不再只有工具）", () => {
+    const steps: import("@/hooks/useCopilotChat").StreamStep[] = [
+      { kind: "reasoning", id: "r1", text: "先看价格和合约面" },
+      { kind: "tool", id: "t1", tool: { callId: "c1", name: "get_stock_context", status: "done", resultText: "最新价 80,895.7" } },
+    ];
+    const { container } = render(
+      <CopilotMessageItem
+        msg={makeMsg({ message_id: "f9", role: "assistant", kind: "final_answer", text: "能买", run_id: "run_z" })}
+        tools={[{ name: "get_stock_context", done: true, failed: false, id: "t1", resultText: "最新价 80,895.7" }]}
+        steps={steps}
+      />,
+    );
+    expect(container.querySelector(".tl-think-label")?.textContent).toBe("思考");
+    expect(container.textContent).toContain("先看价格和合约面");
+  });
+});

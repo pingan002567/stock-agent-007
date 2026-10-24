@@ -40,6 +40,8 @@ export interface ToolInfo {
 interface Props {
   msg: CopilotMessage;
   tools?: ToolInfo[];
+  /** 历史轮次的有序步骤（思考 + 工具）；提供时用它还原完整 agent loop */
+  steps?: StreamStep[];
   /** 提供时工具卡可点击（聊天中心主区 → 右栏详情联动） */
   onToolClick?: (tool: ToolInfo) => void;
   /** 历史澄清卡的已答态（来自后续用户消息的 human_input_response） */
@@ -60,6 +62,7 @@ export function CopilotMessageItem({
   onClarifySubmit,
   clarifyPending,
   runStartedAt,
+  steps,
 }: Props) {
   const ev = parseCopilotEvent(msg as unknown as Record<string, unknown>);
   const isUser = msg.role === "user";
@@ -67,9 +70,11 @@ export function CopilotMessageItem({
   const isErrorEvent = ev.type === "error";
   const isClarification = msg.kind === "clarification" || ev.type === "clarification";
   const hasTools = tools && tools.length > 0;
+  /** 历史轮次的完整步骤序列（思考 + 工具）：有就直接渲染，保住 agent loop 的思考行 */
+  const persistedSteps = steps && steps.length > 0 ? steps : null;
   // 持久化消息与流式共用思维链时间线形态(官方"过程即结果":收口不坍缩成计数条)。
   // 推理文本未落库,历史时间线只有工具步。
-  const toolSteps: StreamStep[] = (tools ?? []).map((t) => ({
+  const toolSteps: StreamStep[] = persistedSteps ?? (tools ?? []).map((t) => ({
     kind: "tool" as const,
     id: t.id,
     tool: {
