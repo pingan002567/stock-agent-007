@@ -3,6 +3,7 @@ import { useAppState } from "@/hooks/useAppState";
 import type { StreamStep } from "@/hooks/useCopilotChat";
 import { parseCopilotEvent, EVENT_FINAL, EVENT_ERROR, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, EVENT_PARTIAL_ANSWER, EVENT_CLARIFICATION, EVENT_REASONING } from "@/api/copilot";
 import { parseTaskToolPayload } from "@/components/features/taskToolMeta";
+import { persistedToolResultText } from "@/lib/persistedToolResult";
 import type { CopilotMessage, HealthCheck } from "@/api/client";
 import { useCopilotChat, extractToolResultText, isCommandTool, type StreamToolCall } from "@/hooks/useCopilotChat";
 import { useChatDetail } from "@/hooks/useChatDetail";
@@ -150,7 +151,8 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
       const cid = p?.call_id ? String(p.call_id) : "";
       const resultPayload = cid ? resultByCallId.get(cid) : undefined;
       const matched = !!resultPayload;
-      const resultText = extractToolResultText(resultPayload);
+      // 落库消息只有 result_preview，直接 extractToolResultText 会把包装当内容
+      const resultText = persistedToolResultText(resultPayload) ?? extractToolResultText(resultPayload);
       const failed = !matched && !!msg.run_id && completedRuns.has(msg.run_id);
       let subagentType: string | undefined;
       let taskDescription: string | undefined;

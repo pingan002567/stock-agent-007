@@ -490,12 +490,62 @@ def test_values_skips_historical_messages_for_reasoning():
     assert "上一轮的答复" not in str(final.get("conclusion") or "")
 
 
-def test_values_still_emits_new_message_text():
+def test_values_does_not_pass_answer_text_as_reasoning():
+    """纯文本 AI 消息是**答复**，不能再冒充「思考」。
+
+    真实故障：thinking 模型在工具调用回合 content 为空，只有最后一条消息有正文，
+    于是「思考」里显示的其实是最终答案的开头 —— 用户看到的就是这个。
+    """
     from backend.agent_runtime.deerflow_client import DeerFlowEventMapper
 
     mapper = DeerFlowEventMapper(historical_msg_ids={"m1"})
     events = mapper.map(
-        _values_event([_ai("m1", "旧答复"), _ai("m2", "本轮的新推理")])
+        _values_event([_ai("m1", "旧答复"), _ai("m2", "**结论：TRX 横盘**")])
     )
     reasoning = [e for e in events if e["type"] == "reasoning"][-1]
-    assert reasoning["payload"]["latest_text"] == "本轮的新推理"
+    assert "latest_text" not in reasoning["payload"]
+    # 结论兜底仍然拿得到答案
+    final = mapper.map(("end", {}))[0]["payload"]
+    assert "TRX 横盘" in str(final.get("conclusion") or "")
+
+
+def test_values_pre_tool_text_is_reasoning():
+    """带 tool_calls 的 AI 正文 = 工具调用前的说明，算思考。"""
+    from types import SimpleNamespace
+
+    from backend.agent_runtime.deerflow_client import DeerFlowEventMapper
+
+    mapper = DeerFlowEventMapper()
+    msg = SimpleNamespace(
+        type="ai", id="m2", content="先看价格和合约面",
+        tool_calls=[{"id": "c1", "name": "get_stock_context", "args": {"symbol": "BTC"}}],
+    )
+    events = mapper.map(_values_event([msg]))
+    reasoning = [e for e in events if e["type"] == "reasoning"][-1]
+    assert reasoning["payload"]["latest_text"] == "先看价格和合约面"
+
+
+def test_reasoning_content_is_mapped_before_tool_call():
+    """thinking 模型的思维链在 additional_kwargs.reasoning_content 里，要单独读。
+
+    这是「调工具之前在思考什么」的正解：正文只放答复，思维链放这里。
+    """
+    from types import SimpleNamespace
+
+    from backend.agent_runtime.deerflow_client import DeerFlowEventMapper
+
+    mapper = DeerFlowEventMapper()
+    msg = SimpleNamespace(
+        type="ai",
+        id="m3",
+        content="",
+        additional_kwargs={"reasoning_content": "费率偏挤，先看持仓量再决定"},
+        tool_calls=[{"id": "c2", "name": "get_crypto_derivatives", "args": {"symbol": "BTC"}}],
+    )
+    events = mapper.map(("messages-tuple", [msg]))
+    types = [e["type"] for e in events]
+    # 思考必须排在工具调用之前
+    assert types == ["reasoning", "tool_call"], types
+    assert events[0]["payload"]["text"] == "费率偏挤，先看持仓量再决定"
+    assert events[0]["payload"]["phase"] == "thinking"
+

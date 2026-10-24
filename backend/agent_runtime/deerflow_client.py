@@ -184,6 +184,8 @@ class DeerFlowEventMapper:
         # replayed message by id — covers historical answer text AND tool cards.
         self._historical_msg_ids: set[str] = set(historical_msg_ids or ())
         self._last_ai_text: str = ""
+        #: 已推送过的思维链文本（同一段会被快照重复携带）
+        self._emitted_reasoning: set[str] = set()
 
     def map(self, raw_event: Any) -> list[dict[str, Any]]:
         event_type, payload = self._split(raw_event)
@@ -227,9 +229,17 @@ class DeerFlowEventMapper:
             # Skip whole messages replayed from a prior run of a resumed thread.
             if msg_id and msg_id in self._historical_msg_ids:
                 continue
-            events.extend(self._map_tool_calls(message))
             role = self._get(message, "type") or self._get(message, "role")
             content = self._get(message, "content")
+            if role in ("ai", "assistant"):
+                # 思维链要在工具调用之前推出来，前端才渲染成「思考 → 工具」
+                reasoning = self._reasoning_text(message)
+                if reasoning and reasoning not in self._emitted_reasoning:
+                    self._emitted_reasoning.add(reasoning)
+                    events.append(
+                        {"type": "reasoning", "payload": {"text": reasoning, "phase": "thinking"}}
+                    )
+            events.extend(self._map_tool_calls(message))
             if role == "tool" or self._get(message, "tool_call_id"):
                 result_call_id = self._get(message, "tool_call_id") or self._get(message, "id")
                 tool_payload: dict[str, Any] = {
@@ -250,7 +260,15 @@ class DeerFlowEventMapper:
                 text = self._text(content)
                 if text and text not in self._streamed_text:
                     self._streamed_text.add(text)
-                    events.append({"type": "partial_answer", "payload": {"text": text}})
+                    if self._has_tool_calls(message):
+                        # 「我先去查一下 X」这类正文是思考，不是答案 ——
+                        # 当成答案会把它写进气泡，loop 里反而没有工具前的思考。
+                        self._emitted_reasoning.add(text)
+                        events.append(
+                            {"type": "reasoning", "payload": {"text": text, "phase": "pre_tool"}}
+                        )
+                    else:
+                        events.append({"type": "partial_answer", "payload": {"text": text}})
         return events
 
     def _map_tool_calls(self, message: Any) -> list[dict[str, Any]]:
@@ -311,13 +329,29 @@ class DeerFlowEventMapper:
                 # Only assistant content is reasoning/answer text. Skip human (the
                 # prompt envelope), system, and tool messages — tool results show as
                 # tool cards; the input envelope must never surface in the bubble.
-                if role not in ("ai", "assistant") or not content:
+                if role not in ("ai", "assistant"):
+                    continue
+                # 思维链优先：thinking 模型的推理在 additional_kwargs 里，正文只是答复
+                reasoning = self._reasoning_text(message)
+                if reasoning and reasoning not in self._emitted_reasoning:
+                    self._emitted_reasoning.add(reasoning)
+                    latest_text = reasoning
+                    continue
+                if not content:
                     continue
                 ai_text = self._text(content)
-                if ai_text:
-                    self._last_ai_text = ai_text
-                    if ai_text not in self._streamed_text:
+                if not ai_text:
+                    continue
+                if self._has_tool_calls(message):
+                    # 工具调用前的说明 = 思考，不是答案
+                    if ai_text not in self._emitted_reasoning:
+                        self._emitted_reasoning.add(ai_text)
                         latest_text = ai_text
+                    continue
+                # 纯文本 AI 消息就是最终答复：记作结论兜底，**不能**当思考推给前端
+                self._last_ai_text = ai_text
+                if ai_text not in self._streamed_text:
+                    latest_text = None
             if latest_text:
                 summary["latest_text"] = latest_text
         events.append({"type": "reasoning", "payload": summary})
@@ -345,6 +379,30 @@ class DeerFlowEventMapper:
         if isinstance(messages, list):
             return messages
         return [payload]
+
+    #: 思维链字段名：langchain-deepseek / vLLM / 自建 thinking 模型各不相同
+    _REASONING_KEYS = ("reasoning_content", "thinking", "reasoning")
+
+    def _reasoning_text(self, message: Any) -> str:
+        """从 AI 消息里取思维链（thinking 模型的 reasoning_content）。
+
+        DeepSeek 等 thinking 模型把思维链放在 `AIMessage.additional_kwargs.reasoning_content`，
+        正文 content 里只有最终答复。不读这个字段就永远看不到「调工具之前在想什么」。
+        """
+        extra = self._get(message, "additional_kwargs")
+        if not isinstance(extra, dict):
+            extra = {}
+        for key in self._REASONING_KEYS:
+            value = extra.get(key) or self._get(message, key)
+            text = self._text(value) if value is not None else ""
+            text = (text or "").strip()
+            if text:
+                return text
+        return ""
+
+    def _has_tool_calls(self, message: Any) -> bool:
+        calls = self._get(message, "tool_calls")
+        return bool(calls)
 
     def _get(self, value: Any, key: str) -> Any:
         if isinstance(value, dict):

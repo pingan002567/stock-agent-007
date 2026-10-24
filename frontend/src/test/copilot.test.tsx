@@ -421,3 +421,26 @@ describe("历史轮次的 agent loop（reasoning 落库回放）", () => {
     expect(container.textContent).toContain("先看价格和合约面");
   });
 });
+
+describe("历史工具结果解包", () => {
+  it("从 result_preview.value 取出真实结果，不显示落库包装", async () => {
+    const { persistedToolResultText } = await import("@/lib/persistedToolResult");
+    const text = persistedToolResultText({
+      tool: "get_daily_history",
+      call_id: "c1",
+      execution_mode: null,
+      risk: null,
+      result_preview: { value: '{"symbol":"TRX","items":[1,2]}' },
+    });
+    expect(text).toContain('"symbol": "TRX"');
+    expect(text).not.toContain("result_preview");
+    expect(text).not.toContain("execution_mode");
+  });
+
+  it("白名单预览对象直接显示，非 JSON 原样返回", async () => {
+    const { persistedToolResultText, prettyMaybeJson } = await import("@/lib/persistedToolResult");
+    expect(persistedToolResultText({ result_preview: { status: "ok", summary: "完成" } }))
+      .toContain('"status": "ok"');
+    expect(prettyMaybeJson("最新价 1680")).toBe("最新价 1680");
+  });
+});
