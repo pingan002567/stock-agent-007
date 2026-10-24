@@ -248,7 +248,7 @@ type SettingTab =
 const TAB_META: Record<SettingTab, { title: string; desc: string }> = {
   overview: { title: "配置概览", desc: "还差什么才能用、现在生效的是什么。" },
   appearance: { title: "外观", desc: "界面明暗与系统跟随。" },
-  workspace: { title: "工作区", desc: "档案、数据目录与投资画像（风险承受等级）。" },
+  workspace: { title: "工作区", desc: "档案名称与数据目录；投资画像已移到「画像与风控」。" },
   channels: { title: "通知与提醒", desc: "盯盘告警、邮件/Webhook 等外发渠道。" },
   ai: { title: "模型与智能", desc: "谁来回答、能不能思考。改动即时生效，进行中的对话不受影响。" },
   "ai-models": { title: "默认模型", desc: "从已连接提供商中选择 Copilot 默认模型与 Thinking 偏好。" },
@@ -451,53 +451,25 @@ function AppearanceTab() {
   );
 }
 
-function WorkspaceTab({
+/** 投资画像：决定风险预算与建议口径。
+ *
+ *  从「工作区」搬过来 —— 它和风控上限一起才构成「画像与风控」，
+ *  放在工作区里等于让用户去档案设置页找风险偏好。 */
+function InvestorProfileCard({
   investorProfile, onSaveInvestorProfile, savingInvestorProfile,
 }: {
   investorProfile: InvestorProfile;
   onSaveInvestorProfile: (next: InvestorProfile) => Promise<void>;
   savingInvestorProfile: boolean;
 }) {
-  const { switchBackend } = useAppActions();
-  const [ws, setWs] = useState<{ name?: string; data_dir?: string } | null>(null);
   const [local, setLocal] = useState<InvestorProfile>(investorProfile);
   const [dirty, setDirty] = useState(false);
-  const profile = loadConnection();
-  const connLabel = formatConnectionLabel(profile ?? { mode: "local" });
-  const remote = isRemoteMode(profile);
-  useEffect(() => {
-    let alive = true;
-    const refresh = () => {
-      apiGet<{ name?: string; data_dir?: string }>("/api/workspace")
-        .then((w) => { if (alive) setWs(w); })
-        .catch(() => { /* 旧后端无此接口 */ });
-    };
-    refresh();
-    window.addEventListener("workspace-changed", refresh);
-    return () => { alive = false; window.removeEventListener("workspace-changed", refresh); };
-  }, []);
   useEffect(() => {
     setLocal(investorProfile);
     setDirty(false);
   }, [investorProfile]);
   return (
     <div className="settings-stack">
-      <SectionCard title="后端连接" description="本地模式使用本机服务；远端模式把请求发到已部署的后端。">
-        <SettingRow label="当前连接">
-          <span className="num" style={{ fontSize: 12 }}>{connLabel}</span>
-        </SettingRow>
-        <SettingRow label="切换">
-          <button type="button" className="small" onClick={switchBackend}>选择后端</button>
-        </SettingRow>
-      </SectionCard>
-      <SectionCard title="工作区" description={remote ? "远端后端上的档案名称与数据目录。" : "档案名称与 SQLite 数据目录；切换入口在左栏底部"}>
-        <SettingRow label="当前工作区">
-          <span className="num" style={{ fontSize: 12 }}>{ws?.name ?? "-"}</span>
-        </SettingRow>
-        <SettingRow label="数据目录">
-          <span className="num" style={{ fontSize: 11, color: "var(--muted)", wordBreak: "break-all", textAlign: "right" }}>{ws?.data_dir ?? "-"}</span>
-        </SettingRow>
-      </SectionCard>
       <SectionCard
         title="投资画像"
         description="盘前机会发现会按风险承受等级筛选全市场候选；自述会原样注入 AI，用于细化偏好。"
@@ -552,6 +524,45 @@ function WorkspaceTab({
             </button>
           </div>
         ) : null}
+      </SectionCard>
+    </div>
+  );
+}
+
+function WorkspaceTab() {
+  const { switchBackend } = useAppActions();
+  const [ws, setWs] = useState<{ name?: string; data_dir?: string } | null>(null);
+  const profile = loadConnection();
+  const connLabel = formatConnectionLabel(profile ?? { mode: "local" });
+  const remote = isRemoteMode(profile);
+  useEffect(() => {
+    let alive = true;
+    const refresh = () => {
+      apiGet<{ name?: string; data_dir?: string }>("/api/workspace")
+        .then((w) => { if (alive) setWs(w); })
+        .catch(() => { /* 旧后端无此接口 */ });
+    };
+    refresh();
+    window.addEventListener("workspace-changed", refresh);
+    return () => { alive = false; window.removeEventListener("workspace-changed", refresh); };
+  }, []);
+  return (
+    <div className="settings-stack">
+      <SectionCard title="后端连接" description="本地模式使用本机服务；远端模式把请求发到已部署的后端。">
+        <SettingRow label="当前连接">
+          <span className="num" style={{ fontSize: 12 }}>{connLabel}</span>
+        </SettingRow>
+        <SettingRow label="切换">
+          <button type="button" className="small" onClick={switchBackend}>选择后端</button>
+        </SettingRow>
+      </SectionCard>
+      <SectionCard title="工作区" description={remote ? "远端后端上的档案名称与数据目录。" : "档案名称与 SQLite 数据目录；切换入口在左栏底部"}>
+        <SettingRow label="当前工作区">
+          <span className="num" style={{ fontSize: 12 }}>{ws?.name ?? "-"}</span>
+        </SettingRow>
+        <SettingRow label="数据目录">
+          <span className="num" style={{ fontSize: 11, color: "var(--muted)", wordBreak: "break-all", textAlign: "right" }}>{ws?.data_dir ?? "-"}</span>
+        </SettingRow>
       </SectionCard>
     </div>
   );
@@ -1900,13 +1911,7 @@ export default function Settings({ initialTab }: { initialTab?: string } = {}) {
         />
       );
       case "appearance": return <AppearanceTab />;
-      case "workspace": return (
-        <WorkspaceTab
-          investorProfile={settings.investor_profile ?? DEFAULT_INVESTOR_PROFILE}
-          onSaveInvestorProfile={submitInvestorProfile}
-          savingInvestorProfile={savingInvestorProfile}
-        />
-      );
+      case "workspace": return <WorkspaceTab />;
       case "channels": return (
         <div className="page-stack">
           <NotifyTriggers />
@@ -1981,6 +1986,11 @@ export default function Settings({ initialTab }: { initialTab?: string } = {}) {
       case "trade": return <TradeOnlyTab settings={settings} />;
       case "risk": return (
         <div className="page-stack">
+          <InvestorProfileCard
+            investorProfile={settings.investor_profile ?? DEFAULT_INVESTOR_PROFILE}
+            onSaveInvestorProfile={submitInvestorProfile}
+            savingInvestorProfile={savingInvestorProfile}
+          />
           <RiskImpactNote rules={settings.risk_policy?.active?.rules} name={settings.risk_policy?.active?.name} />
           <RiskOnlyTab
           riskPolicies={riskPolicies}
