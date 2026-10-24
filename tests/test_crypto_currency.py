@@ -274,3 +274,127 @@ def test_crypto_history_uses_gate_klines(monkeypatch) -> None:
     assert hist["degraded"] is False
     assert hist["market"] == "CRYPTO"
     assert [bar["date"] for bar in hist["items"]] == ["2026-10-23", "2026-10-24"]
+
+
+# ── 7. 衍生品（资金费率/持仓量/多空比/清算）────────────────
+def _fake_gate(path: str, params=None):
+    if path.endswith("/contracts/BTC_USDT"):
+        return {
+            "funding_rate_indicative": "0.000056",
+            "funding_interval": 28800,
+            "maintenance_rate": "0.003",
+            "index_price": "80900.5",
+        }
+    if path.endswith("/tickers"):
+        return [{"funding_rate": "0.0001", "mark_price": "80895.7", "last": "80895.7"}]
+    if path.endswith("/funding_rate"):
+        # 90 次历史，一半低于 0.0001 → 分位约 50%
+        return [{"r": "0.00005" if i % 2 else "0.0002", "t": 1792800000 - i * 28800} for i in range(90)]
+    if path.endswith("/contract_stats"):
+        return [
+            {
+                "open_interest": 553686232,
+                "lsr_account": 1.94,
+                "lsr_taker": 0.97,
+                "top_lsr_size": 0.77,
+                "long_liq_usd": 5960211.8,
+                "short_liq_usd": 450414.4,
+            }
+        ]
+    raise AssertionError(f"unexpected path {path}")
+
+
+def test_fetch_derivatives_computes_derived_fields(monkeypatch) -> None:
+    from backend.stock_domain import crypto_providers
+
+    monkeypatch.setattr(crypto_providers, "_get", _fake_gate)
+    crypto_providers.invalidate_derivatives_cache()
+    d = crypto_providers.fetch_derivatives("BTC")
+    assert d["contract"] == "BTC_USDT"
+    assert d["funding_rate"] == 0.0001
+    assert d["funding_interval_hours"] == 8.0
+    # 年化 = 单次费率 × 每年 1095 次结算
+    assert d["funding_annualized_pct"] == round(0.0001 * 1095 * 100, 2)
+    assert d["funding_percentile_90d"] is not None
+    assert d["funding_samples"] == 90
+    assert d["open_interest_usd"] == 553686232
+    assert d["long_short_account_ratio"] == 1.94
+    assert d["top_trader_long_short_ratio"] == 0.77
+    assert d["liquidations_24h"]["long_usd"] == 5960211.8
+    assert d["degraded"] is False
+    crypto_providers.invalidate_derivatives_cache()
+
+
+def test_derivatives_tool_degrades_on_unknown_coin() -> None:
+    from backend.agent_runtime.tool_bridge import WorkbenchToolBridge
+
+    handler = WorkbenchToolBridge._get_crypto_derivatives
+    out = handler(None, {"symbol": "NOTACOIN"})
+    assert out["degraded"] is True
+    assert "不在加密货币标的表内" in out["degraded_reason"]
+    assert handler(None, {})["degraded"] is True
+
+
+def test_derivatives_tool_normalizes_pair() -> None:
+    from backend.agent_runtime.tool_bridge import WorkbenchToolBridge
+    from backend.stock_domain import crypto_providers
+
+    seen: list[str] = []
+
+    def fake(symbol: str):
+        seen.append(symbol)
+        return {"symbol": symbol, "degraded": False}
+
+    crypto_providers.fetch_derivatives = fake  # type: ignore[assignment]
+    handler = WorkbenchToolBridge._get_crypto_derivatives
+    out = handler(None, {"symbol": "btc/usdt"})
+    assert seen == ["BTC"]
+    assert out["degraded"] is False
+
+
+# ── 8. 新增持仓接口 ────────────────────────────────────────
+def test_add_holding_endpoint_stores_native_currency(tmp_path, monkeypatch) -> None:
+    from tests.test_api import make_client
+
+    monkeypatch.setattr(
+        fx,
+        "_fetch_rates",
+        lambda: {
+            "as_of": "2026-10-24", "fetched_at": "2026-10-24T00:00:00+00:00",
+            "source": "open.er-api.com", "usd_cny": 6.68, "hkd_cny": 0.86,
+            "usdt_usd": 1.0, "degraded": False, "degraded_reason": None,
+        },
+    )
+    fx.invalidate_cache()
+    client = make_client(tmp_path)
+    client.post("/api/holdings/clear-demo")
+
+    from backend.stock_domain.crypto_providers import invalidate_cache
+    from backend.stock_domain.provider_router import provider_router
+
+    invalidate_cache()
+    provider_router._mem_cache.invalidate_prefix("CRYPTO:") if hasattr(
+        provider_router._mem_cache, "invalidate_prefix"
+    ) else None
+
+    res = client.post("/api/holdings", json={"symbol": "btc/usdt", "quantity": 0.08, "cost": 76200})
+    assert res.status_code == 200
+    body = res.json()
+    btc = next(i for i in body["items"] if i["symbol"] == "BTC")
+    assert btc["market"] == "CRYPTO"
+    assert btc["currency"] == "USDT"
+    # market_value 是折算后的人民币，market_value_native 是原币
+    assert btc["market_value_native"] is not None
+    if btc["market_value"] is not None:
+        assert btc["market_value"] == round(btc["market_value_native"] * 6.68, 2)
+    # 未知标的要 400，不能静默建一条
+    assert client.post("/api/holdings", json={"symbol": "ZZZZZZ", "quantity": 1}).status_code == 400
+    fx.invalidate_cache()
+
+
+def test_add_holding_rejects_zero_quantity(tmp_path) -> None:
+    from tests.test_api import make_client
+
+    client = make_client(tmp_path)
+    res = client.post("/api/holdings", json={"symbol": "BTC", "quantity": 0})
+    assert res.status_code == 422

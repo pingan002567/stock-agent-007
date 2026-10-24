@@ -159,6 +159,7 @@ class WorkbenchToolBridge:
             "get_market_structure": self._get_market_structure,
             "refresh_market_data": self._refresh_market_data,
             "get_market_sentiment": self._get_market_sentiment,
+            "get_crypto_derivatives": self._get_crypto_derivatives,
             "submit_duty_briefing": self._submit_duty_briefing,
             "get_monitor_events": self._get_monitor_events,
             "get_monitor_rules": self._get_monitor_rules,
@@ -601,6 +602,15 @@ class WorkbenchToolBridge:
                 True,
                 {},
                 ["market_sentiment", "limit_pool", "market_review"],
+            ),
+            "get_crypto_derivatives": ToolSpec(
+                "get_crypto_derivatives",
+                "crypto",
+                AuthorityLevel.A2,
+                "low",
+                True,
+                {"symbol": "str"},
+                ["crypto_derivatives", "gate_futures", "funding_rate"],
             ),
             "get_monitor_events": ToolSpec(
                 "get_monitor_events",
@@ -1325,6 +1335,31 @@ class WorkbenchToolBridge:
             },
             "note": "已记录结构化值班结论，报告落盘会用它生成固定四段。",
         }
+
+    def _get_crypto_derivatives(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """加密货币永续合约面：资金费率/持仓量/多空比/清算（Gate.io）。"""
+        from backend.stock_domain.catalog import normalize_symbol
+        from backend.stock_domain.crypto_providers import fetch_derivatives
+        from backend.stock_domain.crypto_universe import crypto_meta
+
+        raw = str(arguments.get("symbol") or "").strip()
+        if not raw:
+            return {"degraded": True, "degraded_reason": "缺少 symbol（如 BTC）"}
+        symbol = normalize_symbol(raw)
+        if crypto_meta(symbol) is None:
+            return {
+                "symbol": symbol,
+                "degraded": True,
+                "degraded_reason": f"{symbol} 不在加密货币标的表内，未取合约数据",
+            }
+        try:
+            return fetch_derivatives(symbol)
+        except Exception as exc:  # noqa: BLE001 - 外部源，任何异常都要降级
+            return {
+                "symbol": symbol,
+                "degraded": True,
+                "degraded_reason": f"合约数据不可用：{str(exc)[:120]}",
+            }
 
     def _get_market_sentiment(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """A 股全市场情绪温度计（涨停/连板/炸板/赚钱效应 + 温度与阶段）。"""

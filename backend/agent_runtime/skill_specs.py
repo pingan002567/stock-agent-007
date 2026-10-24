@@ -77,6 +77,12 @@ WORKBENCH_SKILLS: dict[str, WorkbenchSkill] = {
         max_turns=50,
         timeout_seconds=600,
     ),
+    "crypto-dive": WorkbenchSkill(
+        label="AI 加密货币研判",
+        authority="A2",
+        max_turns=40,
+        timeout_seconds=600,
+    ),
     "valuation-check": WorkbenchSkill(
         label="AI 估值分析师",
         authority="A2",

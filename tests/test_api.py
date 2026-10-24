@@ -2730,6 +2730,7 @@ def test_settings_expose_tool_bridge_registry_without_enabling_real_orders(tmp_p
         "generate_report",
         "get_active_risk_policy",
         "get_backtest_result",
+        "get_crypto_derivatives",
         "get_daily_history",
         "get_industry_context",
         "get_market_sentiment",

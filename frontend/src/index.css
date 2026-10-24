@@ -4814,6 +4814,51 @@ input, textarea { cursor: text; }
 }
 .fx-line .muted { color: var(--faint, var(--muted)); }
 
+/* 新增持仓弹窗 */
+.holding-dialog {
+  width: 440px; max-height: 82vh; overflow: auto;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; box-shadow: var(--shadow-lg);
+  padding: 18px 20px 16px;
+}
+.holding-dialog-title { font-size: 15px; font-weight: 600; margin-bottom: 14px; }
+.holding-field { margin-bottom: 11px; position: relative; }
+.holding-field label { display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 5px; }
+.holding-input {
+  width: 100%; box-sizing: border-box;
+  background: var(--bg-soft, rgba(127,127,127,.08));
+  border: 1px solid var(--line); border-radius: 7px;
+  padding: 7px 10px; font-size: 13px; color: var(--ink);
+  font-family: var(--mono, monospace);
+}
+.holding-input:focus { outline: none; border-color: var(--blue); }
+.holding-row { display: flex; gap: 10px; }
+.holding-row .holding-field { flex: 1; }
+.holding-hits {
+  position: absolute; z-index: 5; left: 0; right: 0; top: 100%;
+  margin-top: 3px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: var(--shadow-lg); overflow: hidden;
+}
+.holding-hit {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 10px; background: transparent; border: none;
+  font-size: 12.5px; color: var(--ink); cursor: pointer; text-align: left;
+}
+.holding-hit:hover { background: var(--hover, rgba(127,127,127,.12)); }
+.holding-hit-name { flex: 1; font-weight: 500; }
+.holding-hit-sym { color: var(--muted); font-family: var(--mono, monospace); font-size: 11.5px; }
+.holding-preview {
+  background: rgba(88,166,255,.07); border: 1px solid rgba(88,166,255,.22);
+  border-radius: 8px; padding: 9px 11px; font-size: 12.5px;
+  line-height: 1.9; margin: 4px 0 12px;
+}
+.holding-preview .num { font-family: var(--mono, monospace); }
+.holding-hint { color: var(--muted); font-size: 11.5px; }
+.holding-warn { color: var(--amber); font-size: 11.5px; }
+.holding-error { color: var(--red); font-size: 12px; margin-bottom: 8px; }
+.holding-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
 .mkt-badge {
   display: inline-block; font-size: 9.5px; font-weight: 600; letter-spacing: .04em;
   padding: 0 5px; border-radius: 4px; border: 1px solid; line-height: 1.5;

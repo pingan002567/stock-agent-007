@@ -6,6 +6,7 @@ import { ErrorMessage, TableSkeleton } from "@/components/ui/Loading";
 import { PageHead } from "@/components/ui/PageHead";
 import { useAppState } from "@/hooks/useAppState";
 import { AskAiButton } from "@/components/ui/AskAiButton";
+import { AddHoldingDialog } from "@/components/features/AddHoldingDialog";
 import { changeCls, computeWeights, currencyMoney, currencySign, inferMarket, pct, stockInitial } from "@/utils/market";
 
 // === Types ===
@@ -174,6 +175,7 @@ export default function Holdings() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [adding, setAdding] = useState(false);
 
   // 后端 weight_pct / max_weight_pct 恒为 0（未实现），按持仓市值占比自算兜底
   const derived = computeWeights(holdings?.items ?? []);
@@ -297,6 +299,7 @@ export default function Holdings() {
               prompt: "解读当前持仓风险扫描结果,并给出应对建议" },
           ]}
           actions={<>
+            <button className="small" onClick={() => setAdding(true)} type="button">+ 新增持仓</button>
             <button className="small" disabled={scanning} onClick={() => void handleRiskScan()} type="button">
               {scanning ? "扫描中…" : "风险扫描"}
             </button>
@@ -480,6 +483,19 @@ export default function Holdings() {
         </div>
 
       </div>
+
+      {adding ? (
+        <AddHoldingDialog
+          fx={holdings?.fx}
+          bookCny={holdings?.summary?.market_value ?? null}
+          onClose={() => setAdding(false)}
+          onSaved={(payload) => {
+            setHoldings(payload as HoldingsResponse);
+            setAdding(false);
+            showToast("持仓已保存", "success");
+          }}
+        />
+      ) : null}
     </PageContainer>
   );
 }

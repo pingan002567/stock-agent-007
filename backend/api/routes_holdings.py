@@ -9,7 +9,9 @@ from backend.bootstrap import AppServices
 from pydantic import BaseModel, Field
 
 from backend.schemas import HoldingPosition, RebalanceDraftRequest, model_to_dict
-from backend.stock_domain.catalog import get_stock
+from backend.stock_domain.catalog import get_stock, normalize_symbol
+from backend.stock_domain.provider_router import provider_router
+from backend.stock_domain.portfolio_tools import _MARKET_CURRENCY
 from backend.stock_domain import fx as fx_service
 from backend.stock_domain.portfolio_tools import (
     holding_currency,
@@ -107,6 +109,58 @@ def list_holdings(request: Request, services: AppServices = Depends(get_services
         "channel": "mode_b",
         "fx": _fx_rates()[1],
     }
+
+
+class HoldingUpsert(BaseModel):
+    """新增/修改单笔持仓。市值按「现价优先、否则成本」计算，**存原币**。"""
+
+    symbol: str
+    quantity: float = Field(gt=0, description="数量（股 / 枚），币支持小数")
+    cost: float | None = Field(default=None, ge=0, description="原币成本价")
+    currency: str | None = Field(default=None, description="原币币种；留空按 market 推断")
+
+
+@router.post("")
+def add_or_update_holding(
+    payload: HoldingUpsert,
+    request: Request,
+    services: AppServices = Depends(get_services),
+):
+    """加一笔持仓（同一个 symbol 再提交就是覆盖数量/成本）。"""
+    symbol = normalize_symbol(payload.symbol)
+    stock = get_stock(symbol)
+    if stock is None:
+        raise HTTPException(status_code=400, detail=f"未知标的：{payload.symbol}")
+    market = str(stock.get("market") or "")
+    currency = (payload.currency or "").upper() or _MARKET_CURRENCY.get(market, "CNY")
+
+    last: float | None = None
+    try:
+        quote = provider_router.get_quote(symbol)
+        if not quote.degraded and quote.last:
+            last = float(quote.last)
+    except Exception:  # noqa: BLE001 - 拿不到报价就用成本价
+        last = None
+
+    unit_price = last if last and last > 0 else (payload.cost or 0.0)
+    if unit_price <= 0:
+        raise HTTPException(status_code=400, detail="需要现价或成本价至少一个才能算市值")
+
+    item = HoldingPosition(
+        symbol=symbol,
+        name=str(stock.get("name") or symbol),
+        quantity=float(payload.quantity),
+        market_value=round(unit_price * float(payload.quantity), 2),
+        weight_pct=0.0,
+        cost=payload.cost,
+        currency=currency,
+    )
+    services.repo.upsert_holding(item)
+    services.repo.mark_demo_portfolio_real()
+    services.audit_service.record(
+        "holding added", f"{symbol} qty={payload.quantity} ccy={currency}"
+    )
+    return list_holdings(request=request, services=services)
 
 
 @router.post("/available-cash")

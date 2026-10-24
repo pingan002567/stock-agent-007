@@ -199,7 +199,41 @@ class HoldingPosition(BaseModel):
 
 ## 8. 这一阶段明确不做
 
-- ❌ 加密货币分析（`crypto-dive` / 衍生品 / 链上）→ 阶段二
+- ❌ 加密货币分析（`crypto-dive` / 衍生品 / 链上）→ **阶段二已做（见下）**
 - ❌ WebSocket 实时推流 → 阶段三
 - ❌ 加密货币定时任务（盘前/收盘体检）→ 阶段三
 - ❌ 现货下单 / 交易所 API key（永不）
+
+
+---
+
+## 9. 阶段二（同日完成）
+
+### 9.1 衍生品能力
+`get_crypto_derivatives(symbol)` → Gate 永续：
+
+| 字段 | 说明 |
+|---|---|
+| `funding_rate` / `funding_annualized_pct` | 单次费率与年化（按 8h 结算折算） |
+| `funding_percentile_90d` | 当前费率在近 90 次结算中的分位（>80 = 多头拥挤） |
+| `open_interest_usd` | 持仓量（美元） |
+| `long_short_account_ratio` / `long_short_taker_ratio` | 散户口径 / 主动买卖 |
+| `top_trader_long_short_ratio` | 大户多空比（与散户背离时最有信息量） |
+| `liquidations_24h` | 近 24h 多/空清算（美元） |
+| `maintenance_rate` / `mark_price` / `index_price` | 强平相关 |
+
+派生值（年化、分位）与原始字段一起返回，**不做结论**，由模型自己判断。
+60s 缓存；非标的表内的币直接 `degraded`，不臆造。
+
+### 9.2 `crypto-dive` skill
+A2 子代理，40 轮 / 600s。固定四段：**结论 / 依据（≤3 条）/ 动作（档位） / 数据健康**。
+明确写了与 A 股的分野（不看筹码/龙虎榜/涨跌停）、不做杠杆、流动性门槛 500 万 USDT、
+数据缺就明说。allowed-tools 只给 4 个：`get_crypto_derivatives` / `get_stock_context` /
+`get_daily_history` / `web_search`。
+
+### 9.3 新增持仓弹窗
+- 后端 `POST /api/holdings`：按「现价优先、否则成本价」算**原币**市值入库，币支持小数数量
+- 前端 `AddHoldingDialog`：搜标的（防抖 300ms）→ 选市场自动识别 → 填数量/成本 →
+  **实时预览**原币市值 + 折合人民币 + 占组合比例 → 保存
+- 汇率不可用时预览只显示「按原币记」，**不显示任何折算金额**
+- 提交只带 `{symbol, quantity, cost}` —— 折算值不进请求体（不落库原则的一致性检查）

@@ -150,6 +150,19 @@ CAPABILITIES: dict[str, CapabilitySpec] = {
         limitations="仅 Tushare；近期末上榜时 on_list=false 不算失败",
         rate_limit_hint="回溯交易日会多次调用，勿高频",
     ),
+    "crypto_derivatives": CapabilitySpec(
+        name="crypto_derivatives",
+        description="加密货币永续合约面：资金费率（含 90 天分位）、持仓量、多空比、近 24h 清算",
+        providers=("gate",),
+        params=(CapabilityParam("symbol", "str", True, "币种代码，如 BTC / ETH"),),
+        returns_summary=(
+            "funding_rate, funding_annualized_pct, funding_percentile_90d, open_interest_usd, "
+            "long_short_account_ratio, long_short_taker_ratio, top_trader_long_short_ratio, "
+            "liquidations_24h{long_usd,short_usd}, maintenance_rate"
+        ),
+        limitations="仅 Gate.io 永续；无该合约的币（多数小币）返回 degraded，不要臆造",
+        rate_limit_hint="60s 缓存；资金费率每 8h 结算一次",
+    ),
     "share_float": CapabilitySpec(
         name="share_float",
         description="限售股解禁（近期已解禁 + 未来窗口）",

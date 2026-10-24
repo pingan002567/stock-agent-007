@@ -106,3 +106,81 @@ def fetch_klines(symbol: str, *, interval: str = "1d", limit: int = 60) -> list[
 def invalidate_cache() -> None:
     with _lock:
         _quote_cache.clear()
+
+
+# ── 衍生品（永续）：资金费率 / 持仓量 / 多空比 / 清算 ────────────────
+DERIVATIVES_TTL_SECONDS = 60
+_deriv_cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
+
+
+def _percentile(values: list[float], target: float) -> float | None:
+    """target 在 values 中的分位（0–100）。样本太少返回 None。"""
+    clean = [v for v in values if v is not None]
+    if len(clean) < 10:
+        return None
+    below = sum(1 for v in clean if v <= target)
+    return round(below / len(clean) * 100, 1)
+
+
+def fetch_derivatives(symbol: str) -> dict[str, Any]:
+    """Gate 永续合约面。一次把「币圈的筹码」拿全。
+
+    返回里的 percentile / annualized 都是**派生值**，原始字段一并给出，
+    让模型自己判断，不要替它下结论。
+    """
+    sym = str(symbol).strip().upper()
+    contract = f"{sym}_USDT"
+    now = time.monotonic()
+    with _lock:
+        hit = _deriv_cache.get(sym)
+        if hit is not None and now - hit[0] < DERIVATIVES_TTL_SECONDS:
+            return hit[1]
+
+    info = _get(f"/futures/usdt/contracts/{contract}")
+    tickers = _get("/futures/usdt/tickers", {"contract": contract})
+    funding_hist = _get("/futures/usdt/funding_rate", {"contract": contract, "limit": 90})
+    stats = _get(
+        "/futures/usdt/contract_stats", {"contract": contract, "interval": "1d", "limit": 2}
+    )
+
+    ticker = (tickers or [{}])[0] if isinstance(tickers, list) else {}
+    rates = [
+        float(row["r"]) for row in (funding_hist or []) if isinstance(row, dict) and "r" in row
+    ]
+    live_rate = float(ticker.get("funding_rate") or info.get("funding_rate_indicative") or 0)
+    interval_seconds = int(info.get("funding_interval") or 28800)
+    per_year = (365 * 24 * 3600) / max(interval_seconds, 1)
+
+    latest_stat = (stats or [{}])[0] if isinstance(stats, list) else {}
+    payload = {
+        "symbol": sym,
+        "contract": contract,
+        "funding_rate": live_rate,
+        "funding_rate_indicative": float(info.get("funding_rate_indicative") or 0),
+        "funding_interval_hours": round(interval_seconds / 3600, 1),
+        # 年化 = 单次费率 × 每年结算次数
+        "funding_annualized_pct": round(live_rate * per_year * 100, 2),
+        "funding_percentile_90d": _percentile(rates, live_rate),
+        "funding_samples": len(rates),
+        "mark_price": float(ticker.get("mark_price") or info.get("mark_price") or 0) or None,
+        "index_price": float(info.get("index_price") or 0) or None,
+        "maintenance_rate": float(info.get("maintenance_rate") or 0) or None,
+        "open_interest_usd": float(latest_stat.get("open_interest") or 0) or None,
+        "long_short_account_ratio": float(latest_stat.get("lsr_account") or 0) or None,
+        "long_short_taker_ratio": float(latest_stat.get("lsr_taker") or 0) or None,
+        "top_trader_long_short_ratio": float(latest_stat.get("top_lsr_size") or 0) or None,
+        "liquidations_24h": {
+            "long_usd": float(latest_stat.get("long_liq_usd") or 0) or None,
+            "short_usd": float(latest_stat.get("short_liq_usd") or 0) or None,
+        },
+        "source": "gate_futures",
+        "degraded": False,
+    }
+    with _lock:
+        _deriv_cache[sym] = (now, payload)
+    return payload
+
+
+def invalidate_derivatives_cache() -> None:
+    with _lock:
+        _deriv_cache.clear()
