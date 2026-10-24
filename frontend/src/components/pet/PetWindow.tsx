@@ -45,7 +45,8 @@ const SLEEP_AFTER_MS = 3 * 60 * 1000;
 const STAGE = 132;
 
 const LOOPS = {
-  breathe: { kind: "sprite", src: breatheSrc, frames: 3, ms: 1900 } as Clip,
+  // idle 用待机循环的 8 帧（呼吸下沉→回正→半闭眼→全闭眼→睁眼→歪头）
+  breathe: { kind: "sprite", src: breatheSrc, frames: 8, ms: 2400 } as Clip,
   walk: { kind: "sprite", src: walkSrc, frames: 8, ms: 900 } as Clip,
   run: { kind: "sprite", src: runSrc, frames: 8, ms: 800 } as Clip,
   tail: { kind: "sprite", src: tailSrc, frames: 8, ms: 900 } as Clip,
