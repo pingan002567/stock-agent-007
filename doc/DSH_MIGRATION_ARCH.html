@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Stock Agent 007 · 迁移目标架构（E1：DeerFlow → DSH）</title>
+<style>
+  :root {
+    --ink: #0f172a;
+    --muted: #64748b;
+    --bg: #f6f8fb;
+    --card: #ffffff;
+    --line: #e2e8f0;
+    --mono: "SFMono-Regular", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--bg);
+    background-image:
+      radial-gradient(circle at 1px 1px, rgba(15,23,42,0.045) 1px, transparent 0);
+    background-size: 22px 22px;
+    padding: 28px 20px 60px;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; }
+
+  header.page { margin-bottom: 18px; }
+  header.page h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: -0.2px; }
+  header.page p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.6; }
+
+  .badge-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+  .badge {
+    font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
+    border: 1px solid var(--line); background: #fff; color: #475569;
+  }
+  .badge.hot { background: #fef2f2; border-color: #fecaca; color: #b91c1c; }
+  .badge.blue { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+
+  .diagram { margin-top: 10px; }
+
+  .layer {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 12px 14px 14px;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.05);
+    position: relative;
+  }
+  .layer + .connector { /* spacing handled by connector */ }
+  .layer-head {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+  }
+  .layer-title { font-size: 14.5px; font-weight: 700; }
+  .layer-sub { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 12px; font-weight: 500;
+    padding: 5px 9px; border-radius: 8px;
+    border: 1px solid var(--line); background: #fff; color: #334155;
+  }
+  .chip b { font-weight: 700; color: var(--ink); }
+  .chip code { font-family: var(--mono); font-size: 11px; background: #f1f5f9; padding: 1px 4px; border-radius: 4px; color: #334155; }
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+
+  /* per-layer accent */
+  .L-client { border-top: 3px solid #6366f1; }
+  .L-backend { border-top: 3px solid #10b981; }
+  .L-dsh { border-top: 3px solid #2563eb; }
+  .L-mcp { border-top: 3px solid #f97316; }
+  .L-domain { border-top: 3px solid #a855f7; }
+  .L-data { border-top: 3px solid #64748b; }
+  .L-store { border-top: 3px solid #0ea5e9; }
+
+  .connector {
+    height: 34px; display: flex; align-items: center; justify-content: center; position: relative;
+  }
+  .connector .line {
+    position: absolute; top: 0; bottom: 0; width: 2px;
+    background: linear-gradient(#cbd5e1, #94a3b8);
+    left: 50%; transform: translateX(-50%);
+  }
+  .connector .head {
+    position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%);
+    width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent;
+    border-top: 6px solid #94a3b8;
+  }
+  .connector .tag {
+    position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+    font-family: var(--mono); font-size: 10.5px; color: #64748b;
+    background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px;
+    white-space: nowrap;
+  }
+
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .sub { border: 1px dashed var(--line); border-radius: 10px; padding: 9px 11px; background: #fbfcfe; }
+  .sub .t { font-size: 12px; font-weight: 700; color: #334155; margin-bottom: 6px; }
+  .sub .d { font-size: 11.5px; color: var(--muted); line-height: 1.55; }
+
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+  .cell { border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; background: #fbfcfe; }
+  .cell .k { font-size: 11px; font-weight: 700; color: #334155; }
+  .cell .v { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.5; font-family: var(--mono); }
+
+  .note {
+    margin-top: 16px; border: 1px solid #fde68a; background: #fffbeb; border-radius: 12px; padding: 12px 14px;
+    font-size: 12.5px; line-height: 1.7; color: #78350f;
+  }
+  .note b { color: #92400e; }
+  .legend { margin-top: 16px; font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 14px; }
+  .legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+  .flow-key { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .flow-key span { font-size: 11px; padding: 2px 8px; border-radius: 6px; }
+  .fp { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+  .fc { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+
+  @media (max-width: 720px) {
+    .split, .grid3 { grid-template-columns: 1fr; }
+    .connector .tag { position: static; transform: none; margin-left: 12px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page">
+    <h1>Stock Agent 007 · 迁移目标架构</h1>
+    <p>目标态 <b>E1（引擎替换）</b>：保留 React/Tauri 前端与 FastAPI 域服务，把 DeerFlow Harness 换成 <b>DSH</b>；72 个域工具经 <b>MCP</b> 桥回 Python。</p>
+    <div class="badge-row">
+      <span class="badge hot">变更：DeerFlow → DSH</span>
+      <span class="badge hot">变更：tool_bridge → MCP server</span>
+      <span class="badge hot">变更：deerflow_config → DSH profile</span>
+      <span class="badge blue">不变：前端 SSE 八事件契约</span>
+      <span class="badge blue">不变：stock_domain / SQLite / 数据源</span>
+    </div>
+    <div class="flow-key">
+      <span class="fp">蓝色 = 控制/会话链路</span>
+      <span class="fc">绿色 = 流式(SSE)与工具执行链路</span>
+    </div>
+  </header>
+
+  <div class="diagram">
+
+    <!-- L1 客户端 -->
+    <div class="layer L-client">
+      <div class="layer-head">
+        <span class="layer-title">① 桌面 / Web 客户端</span>
+        <span class="layer-sub">Tauri · React 19 + Vite</span>
+      </div>
+      <div class="chips">
+        <span class="chip"><b>React SPA</b> <code>frontend/dist</code></span>
+        <span class="chip"><b>Tauri 壳</b> WebView 加载 <code>127.0.0.1:8686</code></span>
+        <span class="chip">Copilot 面板 / tool-card / 澄清卡 / plan checklist</span>
+      </div>
+    </div>
+
+    <div class="connector"><div class="line"></div><div class="head"></div><span class="tag">REST /api/* + SSE（契约不变）</span></div>
+
+    <!-- L2 FastAPI -->
+    <div class="layer L-backend">
+      <div class="layer-head">
+        <span class="layer-title">② FastAPI 后端</span>
+        <span class="layer-sub">:8686 · Python 3.12</span>
+      </div>
+      <div class="split">
+        <div class="sub">
+          <div class="t">API 层 <span style="font-weight:400;color:#64748b">（不改）</span></div>
+          <div class="d"><code>routes_copilot.py</code> · REST + SSE · <code>schemas.py</code>（SSEEvent / AgentTask / ToolExecution）</div>
+        </div>
+        <div class="sub">
+          <div class="t">编排层 <span style="font-weight:400;color:#64748b">（部分改）</span></div>
+          <div class="d"><code>copilot_service.py</code> · 会话/成本/多轮记忆 · <code>copilot_errors.py</code></div>
+        </div>
+      </div>
+      <div class="sub" style="margin-top:9px;">
+        <div class="t">agent_runtime <span style="font-weight:400;color:#b91c1c">（重写核心）</span></div>
+        <div class="d"><code>DshClientAdapter</code>（spawn <code>dsh --profile sdk</code>，JSON-RPC 会话管理） → <code>DshEventMapper</code>（DSH 事件 → SSEEvent） → <code>stream_adapter.py</code>（SSE 编码/心跳，复用）</div>
+      </div>
+    </div>
+
+    <div class="connector"><div class="line"></div><div class="head"></div><span class="tag">JSON-RPC stdio（子进程）</span></div>
+
+    <!-- L3 DSH 引擎 -->
+    <div class="layer L-dsh">
+      <div class="layer-head">
+        <span class="layer-title">③ DSH 引擎（子进程）</span>
+        <span class="layer-sub">dsh --profile sdk · TypeScript / Cordis</span>
+      </div>
+      <div class="chips">
+        <span class="chip"><b>agent-loop</b> 工具循环</span>
+        <span class="chip"><b>subagent</b> / <code>subagent_fork</code></span>
+        <span class="chip"><b>workflow</b> JS 扇出</span>
+        <span class="chip"><b>goal</b> 长任务续跑</span>
+        <span class="chip"><b>plan</b> / <b>todo</b></span>
+        <span class="chip"><b>skill</b>（11 个 SKILL.md）</span>
+        <span class="chip"><b>MCP client</b></span>
+      </div>
+      <div class="grid3" style="margin-top:9px;">
+        <div class="cell"><div class="k">安全</div><div class="v">fs sandbox 策略 · approval policy（ask/never）</div></div>
+        <div class="cell"><div class="k">用量 / 上下文</div><div class="v">token-meter · compaction（basic + tool-result-pruner）</div></div>
+        <div class="cell"><div class="k">会话真相</div><div class="v">DSH session（持久化）· SQLite 仅投影</div></div>
+      </div>
+    </div>
+
+    <div class="connector"><div class="line"></div><div class="head"></div><span class="tag">MCP（工具调用，stdio/HTTP）</span></div>
+
+    <!-- L4 MCP server -->
+    <div class="layer L-mcp">
+      <div class="layer-head">
+        <span class="layer-title">④ Python MCP Server</span>
+        <span class="layer-sub">backend/mcp_server/（新）· FastMCP</span>
+      </div>
+      <div class="chips">
+        <span class="chip"><b>72 域工具</b>（A2×27 / A3×38 / A4×6）</span>
+        <span class="chip"><b>permission_guard</b> 内层闸</span>
+        <span class="chip"><b>place_real_order</b> 双闸阻断（A5）</span>
+        <span class="chip">与 FastAPI 共享 <code>create_services()</code> + <code>WorkbenchRepository</code></span>
+      </div>
+    </div>
+
+    <div class="connector"><div class="line"></div><div class="head"></div><span class="tag">Python 直调（进程内）</span></div>
+
+    <!-- L5 域服务 -->
+    <div class="layer L-domain">
+      <div class="layer-head">
+        <span class="layer-title">⑤ 域服务层</span>
+        <span class="layer-sub">不改</span>
+      </div>
+      <div class="split">
+        <div class="sub">
+          <div class="t">stock_domain（11 个 *_tools.py）</div>
+          <div class="d">quote · history · financial · intel · monitor · backtest · risk · portfolio · report · catalog · provider_router</div>
+        </div>
+        <div class="sub">
+          <div class="t">app_services</div>
+          <div class="d">data_collector · strategy · risk_policy · paper_trading · audit · decision_journal · rebalance_draft</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector"><div class="line"></div><div class="head"></div><span class="tag">HTTP / SDK</span></div>
+
+    <!-- L6 数据源 -->
+    <div class="layer L-data">
+      <div class="layer-head">
+        <span class="layer-title">⑥ 数据源</span>
+        <span class="layer-sub">多源降级（provider_router）</span>
+      </div>
+      <div class="chips">
+        <span class="chip">AKShare</span>
+        <span class="chip">Tushare</span>
+        <span class="chip">yfinance</span>
+        <span class="chip">EastMoney</span>
+        <span class="chip">Sina</span>
+        <span class="chip">Mock（测试兜底）</span>
+      </div>
+    </div>
+
+    <div class="connector"><div class="line"></div><div class="head"></div><span class="tag">SQL / 文件</span></div>
+
+    <!-- L7 持久化 -->
+    <div class="layer L-store">
+      <div class="layer-head">
+        <span class="layer-title">⑦ 持久化</span>
+        <span class="layer-sub">SQLite · data/workbench.sqlite3</span>
+      </div>
+      <div class="split">
+        <div class="sub">
+          <div class="t">WorkbenchRepository（业务数据）</div>
+          <div class="d">持仓 / 盯盘 / 策略 / 风控 / 任务 / 决策日志 / 报告 / 配置</div>
+        </div>
+        <div class="sub">
+          <div class="t">会话投影（只读投影）</div>
+          <div class="d">AgentTask / ToolExecution / 消息 / skill_trace —— 由 DSH 事件写回，不反哺 prompt</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="note">
+    <b>关键链路：</b>
+    ① 用户提问 → ② <code>CopilotService</code> 建会话 → ③ <code>DshClientAdapter</code> spawn <code>dsh --profile sdk</code> 并流式拉事件 → ③ DSH 内部 agent-loop 决定调用 <code>skill</code>/<code>subagent</code>/<code>plan</code> 或域工具 → ④ 域工具经 <b>MCP</b> 落到 Python 侧 → ⑤ 执行并（可选）访问 ⑥ 数据源 → 结果原路返回，② 把事件映射回 <code>SSEEvent</code> 经 SSE 推给 ①，并投影到 ⑦ SQLite。
+    <br><br>
+    <b>权限双闸：</b>外层 DSH <code>approval policy</code>（A1–A4 按需 ask / A5 never）+ 内层 Python <code>permission_guard</code>（<code>place_real_order</code> 无条件 <code>block_real_order</code>）。两道都过才算通过。
+  </div>
+
+  <div class="legend">
+    <span><span class="dot" style="background:#6366f1"></span>客户端</span>
+    <span><span class="dot" style="background:#10b981"></span>FastAPI</span>
+    <span><span class="dot" style="background:#2563eb"></span>DSH 引擎</span>
+    <span><span class="dot" style="background:#f97316"></span>MCP 工具桥</span>
+    <span><span class="dot" style="background:#a855f7"></span>域服务</span>
+    <span><span class="dot" style="background:#64748b"></span>数据源</span>
+    <span><span class="dot" style="background:#0ea5e9"></span>持久化</span>
+    <span style="margin-left:8px">图例 / 依据：doc/DSH_MIGRATION_WBS.md</span>
+  </div>
+
+</div>
+</body>
+</html>

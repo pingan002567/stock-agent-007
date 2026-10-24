@@ -2,7 +2,8 @@
 
 > 状态：按「技术成熟度」权重重新定稿；落地前请复核第 5.5 节版本号
 > 日期：2026-10-16
-> 范围：为 Stock Agent 工作台新增 **Android 客户端**，与既有 iOS 客户端（`mobile-native/`）功能对齐
+> 范围：为 Stock Agent 工作台新增 **Android 客户端**
+> 注：iOS 原生客户端（原 `mobile-native/`）已于 2026-10-23 整体移除，本文中涉及 iOS 的描述保留为当时的历史依据
 > 依据：仓库源码实测 + 2026-10-16 外部调研（关键结论已标注来源，未核实项已显式标注）
 
 ---
@@ -40,14 +41,14 @@
 
 | 事实 | 证据 |
 | --- | --- |
-| WebView 方案已被**主动否决** | `mobile/README.md`：Capacitor WebView 方案已废弃，只留一行指向 `mobile-native/` |
-| 已有原生 iOS 客户端（SwiftUI） | `mobile-native/StockAgent/`，10,958 行 Swift，Xcode 工程，Bundle ID `com.stockagent.app` |
+| WebView 方案已被**主动否决** | 原 `mobile/README.md` 仅一行指向 iOS 工程（该文件已随 iOS 客户端一并移除） |
+| ~~已有原生 iOS 客户端（SwiftUI）~~ | 已于 2026-10-23 移除（原 `mobile-native/StockAgent/`） |
 | 客户端不持有业务状态 | 会话真相在 DeerFlow checkpoint，SQLite 只做 UI 投影（`doc/STACK_DECISIONS.md`） |
 | 鉴权是**静态共享密钥**，无账号体系 | `backend/access_auth.py:16-17`：REST 用 `X-Workbench-Token`（或 `Bearer`），SSE 可用 `?access_token=` |
-| 后端常以**自签 HTTPS** 暴露 | iOS 端无条件信任 server trust（`mobile-native/StockAgent/Networking/APIClient.swift:5-34`） |
+| 后端常以**自签 HTTPS** 暴露 | Android 端需自行配置 trust（原 iOS 实现已随客户端移除） |
 | 推送目前**只有 APNs** | `backend/api/routes_devices.py` 仅 `/api/devices/apns` |
 | 告警下发已是**多通道合成** | `backend/bootstrap.py:379`：`CompositeAlertSink(channel_notifier.push, apns_push_service.push)`；IM 通道含 Slack / Telegram / 企业微信（`backend/channels/`） |
-| 后端已提供**服务端推送式监控流** | `backend/api/routes_monitor.py:99` → `MonitorService.stream_snapshot()`（状态变化即推，含心跳）；iOS 端未使用，走轮询 |
+| 后端已提供**服务端推送式监控流** | `backend/api/routes_monitor.py:99` → `MonitorService.stream_snapshot()`（状态变化即推，含心跳）；原 iOS 端未使用，走轮询（客户端已移除） |
 | 团队规模 | 1 人维护 Python 后端 + React Web + Tauri 桌面 + SwiftUI iOS |
 
 ### 2.2 选型必须服从的约束
