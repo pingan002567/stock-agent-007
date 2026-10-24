@@ -7,7 +7,7 @@ from typing import Any
 CONFIG_KEY = "notification_prefs"
 
 DEFAULT_NOTIFICATION_PREFS: dict[str, Any] = {
-    # Success completion for duty / discovery scheduled tasks → alert_sink (IM + APNs).
+    # Success completion for duty / discovery scheduled tasks → alert_sink (IM).
     # Failures always notify regardless of this flag.
     "duty_completion_push": True,
 }

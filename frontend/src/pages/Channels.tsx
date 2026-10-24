@@ -145,7 +145,7 @@ export default function ChannelsTab() {
         </div>
         <div className="panel-body" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           <div>
-            <div style={{ fontSize: 13 }}>完成时推送（IM / APNs）</div>
+            <div style={{ fontSize: 13 }}>完成时推送（IM）</div>
             <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
               盘前简报、机会发现等任务成功后通知；失败始终推送。
             </div>

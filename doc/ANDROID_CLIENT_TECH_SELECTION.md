@@ -46,8 +46,8 @@
 | 客户端不持有业务状态 | 会话真相在 DeerFlow checkpoint，SQLite 只做 UI 投影（`doc/STACK_DECISIONS.md`） |
 | 鉴权是**静态共享密钥**，无账号体系 | `backend/access_auth.py:16-17`：REST 用 `X-Workbench-Token`（或 `Bearer`），SSE 可用 `?access_token=` |
 | 后端常以**自签 HTTPS** 暴露 | Android 端需自行配置 trust（原 iOS 实现已随客户端移除） |
-| 推送目前**只有 APNs** | `backend/api/routes_devices.py` 仅 `/api/devices/apns` |
-| 告警下发已是**多通道合成** | `backend/bootstrap.py:379`：`CompositeAlertSink(channel_notifier.push, apns_push_service.push)`；IM 通道含 Slack / Telegram / 企业微信（`backend/channels/`） |
+| ~~推送目前只有 APNs~~ | 已于 2026-10-23 随 iOS 客户端整体移除（`routes_devices.py`、`apns_push.py`、`apns_device` 表均已删除，当前**没有任何推送通道**） |
+| 告警下发走 **IM 通道** | `backend/bootstrap.py`：`alert_sink = channel_notifier.push`；IM 通道含 Slack / Telegram / 企业微信（`backend/channels/`） |
 | 后端已提供**服务端推送式监控流** | `backend/api/routes_monitor.py:99` → `MonitorService.stream_snapshot()`（状态变化即推，含心跳）；原 iOS 端未使用，走轮询（客户端已移除） |
 | 团队规模 | 1 人维护 Python 后端 + React Web + Tauri 桌面 + SwiftUI iOS |
 
@@ -158,7 +158,7 @@ iOS 客户端共 10,958 行 Swift，分布如下（实测）：
 | 策略 / 回测（4） | `GET /api/strategies`；`GET /api/strategies/{id}/backtests/latest`；`POST /api/strategies/{id}/backtest`；`GET /api/backtests/{run_id}` |
 | 设置 / 运行时（11） | `GET /api/settings`；`PUT /api/settings/skills`；`PUT /api/settings/market-refresh`；`PUT /api/settings/investor-profile`；`PUT /api/settings/notification-prefs`；`PUT /api/settings/data-provider`；`GET /api/settings/llm/providers`；`PUT /api/settings/llm/default-model`；`POST /api/settings/llm/connect`；`DELETE /api/settings/llm/providers/{provider_id}`；`GET /api/runtime/cost-summary` |
 | 定时任务（3） | `GET /api/scheduled-tasks`；`POST /api/scheduled-tasks/{id}/toggle`；`POST /api/scheduled-tasks/{id}/run-now` |
-| 设备 / 推送（2） | `POST /api/devices/apns`；`DELETE /api/devices/apns/{token}` |
+| ~~设备 / 推送~~ | 端点已随 iOS 客户端移除，当前无推送 API |
 | 健康（1） | `GET /api/health` |
 
 **字段风格**：后端为 Python/Pydantic，JSON 一律 `snake_case`（如 `run_id`、`current_tool`、`page_refresh_seconds`）。Android 侧必须显式配置命名策略，不要依赖「默认驼峰」。
@@ -497,6 +497,12 @@ interface PushProvider {
 ## 9. 服务端需要配合的改动
 
 以下是 Android 端上线需要在后端做的改动。**第 1–4 条是必做**（均为小改，但缺一不可），第 5–7 条是可选增强或仅需知晓。
+
+> ⚠️ **2026-10-23 更新**：iOS 客户端与整套 APNs 推送已移除
+> （`routes_devices.py`、`apns_push.py`、`repo_devices.py`、`apns_device` 表、`CompositeAlertSink` 全部删除）。
+> 因此下面第 1、2、6 条描述的"现状"已不存在 —— 推送不是"泛化"，而是**从零新建**：
+> 直接建平台中立的 `push_device` 表 + `/api/devices/push` 端点 + 对应的 push service，
+> 挂到 `bootstrap` 里替代原先的 `CompositeAlertSink`。IM 通道（`channel_notifier.push`）不受影响。
 
 1. **设备注册端点泛化**。现在只有 `POST /api/devices/apns`，且请求体把 `platform` 默认写死为 `ios`、`bundle_id` 默认 `com.stockagent.app`（`backend/api/routes_devices.py:12-16`）。
    - 方案：新增 `POST /api/devices/push`（或 `/api/devices/android`），字段 `provider`(`fcm`/`getui`/`jpush`/厂商)、`device_token`/`registration_id`、`platform`、`app_id`。
