@@ -71,22 +71,41 @@ def _build_model_config() -> dict[str, Any]:
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("WORKBENCH_AI_API_KEY") or ""
     base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("WORKBENCH_AI_BASE_URL") or ""
 
+    deepseek = _is_deepseek(model_name, base_url)
     model_cfg: dict[str, Any] = {
         "name": model_name,
         "display_name": model_name,
-        "use": "langchain_openai:ChatOpenAI",
+        # DeepSeek 必须走 ChatDeepSeek：langchain_openai:ChatOpenAI **不解析**
+        # reasoning_content，思维链会被静默丢掉 → 界面上永远看不到「思考」。
+        "use": (
+            "deerflow.models.patched_deepseek:PatchedChatDeepSeek"
+            if deepseek
+            else "langchain_openai:ChatOpenAI"
+        ),
         "model": model_name,
-        "supports_thinking": False,
+        "supports_thinking": deepseek,
         "supports_vision": _model_supports_vision(model_name),
         # 声明上下文窗口。summarization 的 fraction 触发器与 keep 策略都读
         # model.profile["max_input_tokens"]，缺了就只能退回固定 token 阈值。
         "profile": {"max_input_tokens": _context_window()},
     }
     if api_key:
-        model_cfg["openai_api_key"] = api_key
+        # ChatDeepSeek 自己声明 api_key/api_base，ChatOpenAI 走 openai_* 别名
+        model_cfg["api_key" if deepseek else "openai_api_key"] = api_key
     if base_url:
-        model_cfg["openai_api_base"] = base_url
+        model_cfg["api_base" if deepseek else "openai_api_base"] = base_url
     return model_cfg
+
+
+def _is_deepseek(model_name: str, base_url: str) -> bool:
+    """是否走 DeepSeek 原生客户端（认 reasoning_content）。
+
+    判据：模型名带 deepseek，或 base_url 指向 api.deepseek.com。
+    其它 OpenAI 兼容网关保持原样，避免改动面失控。
+    """
+    if "deepseek" in (model_name or "").lower():
+        return True
+    return "api.deepseek.com" in (base_url or "").lower()
 
 
 A2_TOOLS = [

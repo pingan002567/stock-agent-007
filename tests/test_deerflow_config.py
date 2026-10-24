@@ -243,3 +243,37 @@ def test_generated_config_enables_skill_evolution_and_write_file(tmp_path, monke
     monkeypatch.setenv("WORKBENCH_AI_SKILL_EVOLUTION", "0")
     config_off = _generate(tmp_path)
     assert config_off["skill_evolution"]["enabled"] is False
+
+
+def test_deepseek_model_uses_chatdeepseek(monkeypatch):
+    """DeepSeek 必须走 PatchedChatDeepSeek。
+
+    langchain_openai:ChatOpenAI 不解析 reasoning_content，思维链会被静默丢弃，
+    界面上就永远看不到「思考」—— 这是线上实测到的真实故障。
+    """
+    from backend.agent_runtime import deerflow_config as cfg
+
+    monkeypatch.setenv("WORKBENCH_AI_MODEL", "deepseek-v4-flash")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.deepseek.com")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    model = cfg._build_model_config()
+    assert model["use"] == "deerflow.models.patched_deepseek:PatchedChatDeepSeek"
+    assert model["supports_thinking"] is True
+    # ChatDeepSeek 自己声明 api_key / api_base，不能用 openai_* 别名
+    assert model["api_base"] == "https://api.deepseek.com"
+    assert model["api_key"] == "sk-test"
+    assert "openai_api_base" not in model
+
+
+def test_non_deepseek_model_keeps_chat_openai(monkeypatch):
+    """其它 OpenAI 兼容网关保持原样，别扩大改动面。"""
+    from backend.agent_runtime import deerflow_config as cfg
+
+    monkeypatch.setenv("WORKBENCH_AI_MODEL", "gpt-4o")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.example.com/v1")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    model = cfg._build_model_config()
+    assert model["use"] == "langchain_openai:ChatOpenAI"
+    assert model["supports_thinking"] is False
+    assert model["openai_api_base"] == "https://api.example.com/v1"
+    assert model["openai_api_key"] == "sk-test"
