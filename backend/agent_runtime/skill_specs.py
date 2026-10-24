@@ -122,12 +122,12 @@ WORKBENCH_SKILLS: dict[str, WorkbenchSkill] = {
         timeout_seconds=600,
     ),
     "execution-agent-disabled": WorkbenchSkill(
-        label="执行代理（已禁用）",
+        label="真实下单（已禁用）",
         authority="A5",
         enabled=False,
         locked=True,
         is_subagent=False,
-        synthetic_description="（已禁用）执行代理",
+        synthetic_description="（已禁用）真实下单",
         synthetic_tools=("paper_trade",),
     ),
 }

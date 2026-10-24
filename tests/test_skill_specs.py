@@ -118,3 +118,35 @@ def test_installed_copy_matches_seed(name: str) -> None:
         "ensure_user_custom_skills() 同步"
     )
 
+
+
+def test_skill_labels_are_capability_names():
+    """技能 label 不能是职称。
+
+    用户反馈：设置页技能列表全是「AI 研究员 / AI 风控官」，看不出能做什么。
+    这里守住「不出现职称词」这条线，防止以后按旧规范加回去。
+    """
+    from backend.agent_runtime.skill_specs import WORKBENCH_SKILLS
+
+    titles = ("研究员", "分析师", "风控官", "盯盘员", "报告员", "规划师", "裁判", "执行代理")
+    offenders = [
+        (name, spec.label)
+        for name, spec in WORKBENCH_SKILLS.items()
+        if any(word in spec.label for word in titles)
+    ]
+    assert offenders == [], f"这些 label 还是职称：{offenders}"
+
+
+def test_profiles_use_capability_names():
+    """配置档同样不用职称；旧职称名读取时会被归一。"""
+    from backend.config.profiles import DEFAULT_PROFILES, normalize_profile_names
+
+    titles = ("研究员", "分析师", "风控官", "盯盘员", "规划师")
+    for profile in DEFAULT_PROFILES:
+        assert not any(word in profile["name"] for word in titles), profile["name"]
+
+    migrated = normalize_profile_names([{"name": "AI 风控官", "skills": ["x"]}])
+    assert migrated[0]["name"] == "风险审阅档"
+    assert migrated[0]["skills"] == ["x"]
+    # 幂等：已改过的不再变
+    assert normalize_profile_names(migrated) == migrated

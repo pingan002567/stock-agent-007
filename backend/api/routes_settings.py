@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from backend.api.deps import get_services
 from backend.bootstrap import AppServices
 from backend.config.models import DEFAULT_MODELS
-from backend.config.profiles import DEFAULT_PROFILES
+from backend.config.profiles import DEFAULT_PROFILES, normalize_profile_names
 from backend.config.providers import DEFAULT_PROVIDERS
 from backend.config.runtime import DEFAULT_RUNTIME_CONFIG
 from backend.config.tools import DEFAULT_TOOLS
@@ -63,9 +63,10 @@ def get_settings(request: Request, services: AppServices = Depends(get_services)
         ],
         # 技能启停单一属主 = extensions_config.json（DeerFlow 直接消费）
         "skills": extensions_store.skills_view(),
-        "profiles": services.repo.get_config("profiles", {"items": DEFAULT_PROFILES})[
-            "items"
-        ],
+        # 老安装里存着旧职称名，读取时就地换成能力档名（幂等，不动其它字段）
+        "profiles": normalize_profile_names(
+            services.repo.get_config("profiles", {"items": DEFAULT_PROFILES})["items"]
+        ),
         "tools": tools,
         "risk_policy": services.risk_policy_service.settings_summary(),
         "trading_controls": {
