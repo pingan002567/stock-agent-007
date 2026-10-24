@@ -181,7 +181,8 @@ def test_event_mapper_does_not_repeat_text_from_values_after_partial_answer():
     partials = [event for event in events if event["type"] == "partial_answer"]
     assert len(partials) == 1
     assert partials[0]["payload"]["text"] == "同一段文本"
-    assert any(event["type"] == "reasoning" for event in events)
+    # 空 reasoning（无文本）不再下发：它是 values 快照占位，前端会渲染成空心思考步
+    assert not any(event["type"] == "reasoning" for event in events)
 
 
 def test_adapter_falls_back_to_stub_when_embedded_import_fails(monkeypatch):
@@ -483,8 +484,8 @@ def test_values_skips_historical_messages_for_reasoning():
     mapper = DeerFlowEventMapper(historical_msg_ids={"m1"})
     events = mapper.map(_values_event([_ai("m1", "上一轮的答复：已删除 BTC 记录")]))
     reasoning = [e for e in events if e["type"] == "reasoning"]
-    assert reasoning, "仍应发一条 values 阶段的 reasoning（只是不带文本）"
-    assert "latest_text" not in reasoning[-1]["payload"]
+    # 没有可展示的思考文本就一条都不发（空 reasoning 是纯噪声）
+    assert reasoning == []
     # final 的结论也不能是历史文本
     final = mapper.map(("end", {}))[0]["payload"]
     assert "上一轮的答复" not in str(final.get("conclusion") or "")
@@ -502,8 +503,8 @@ def test_values_does_not_pass_answer_text_as_reasoning():
     events = mapper.map(
         _values_event([_ai("m1", "旧答复"), _ai("m2", "**结论：TRX 横盘**")])
     )
-    reasoning = [e for e in events if e["type"] == "reasoning"][-1]
-    assert "latest_text" not in reasoning["payload"]
+    reasoning = [e for e in events if e["type"] == "reasoning"]
+    assert reasoning == [], "答案不能冒充思考，没有思维链时应当一条都不发"
     # 结论兜底仍然拿得到答案
     final = mapper.map(("end", {}))[0]["payload"]
     assert "TRX 横盘" in str(final.get("conclusion") or "")

@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo, createContext, useContext, createElement, type ReactNode } from "react";
 import { useAppState } from "@/hooks/useAppState";
+import { placeReasoningStep } from "@/lib/agentLoop";
 import {
   createSession,
   fetchSessions,
@@ -802,7 +803,11 @@ function useCopilotChatState() {
                 // 相邻推理步合并更新(快照会增量变长),遇到工具步后才开新推理步
                 steps = last?.kind === "reasoning"
                   ? [...prev.steps.slice(0, -1), { ...last, text: t }]
-                  : [...prev.steps, { kind: "reasoning" as const, id: `r-${prev.steps.length}`, text: t }];
+                  : placeReasoningStep(prev.steps, {
+                      kind: "reasoning" as const,
+                      id: `r-${prev.steps.length}`,
+                      text: t,
+                    });
               }
               return {
                 ...prev,

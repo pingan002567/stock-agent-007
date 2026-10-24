@@ -91,6 +91,8 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
   const clarificationRuns = new Set<string>();
   const lastFinalIndex = new Map<string, number>();
   const resultByCallId = new Map<string, Record<string, unknown>>();
+  /** call_id → 该工具结果出现的下标：用来判断思考步是否应排在这个工具之前 */
+  const resultIndexByCallId = new Map<string, number>();
   for (let idx = 0; idx < msgs.length; idx++) {
     const msg = msgs[idx];
     const ev = parseCopilotEvent(msg as unknown as Record<string, unknown>);
@@ -110,7 +112,10 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
     }
     if (ev.type === EVENT_TOOL_RESULT) {
       const cid = (ev.payload as Record<string, unknown>)?.call_id;
-      if (cid) resultByCallId.set(String(cid), ev.payload as Record<string, unknown>);
+      if (cid) {
+        resultByCallId.set(String(cid), ev.payload as Record<string, unknown>);
+        resultIndexByCallId.set(String(cid), idx);
+      }
     }
   }
 
@@ -141,7 +146,19 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
         const last = steps[steps.length - 1];
         // 相邻重复（同一快照反复推）不重复入列
         if (!(last && last.kind === "reasoning" && last.text === text)) {
-          steps.push({ kind: "reasoning", id: msg.message_id, text });
+          const step: StreamStep = { kind: "reasoning", id: msg.message_id, text };
+          // 后端的思维链挂在「带 tool_calls 的分片」上，落库顺序是
+          // tool_call → reasoning → tool_result。这段思考讲的是**该工具调用之前**
+          // 的判断，所以插到结果还没到的那个工具之前，历史回放才是「思考 → 工具」。
+          const prev = steps[steps.length - 1];
+          const resultIdx = prev?.kind === "tool"
+            ? resultIndexByCallId.get(prev.tool.callId)
+            : undefined;
+          if (prev?.kind === "tool" && resultIdx !== undefined && resultIdx > i) {
+            steps.splice(steps.length - 1, 0, step);
+          } else {
+            steps.push(step);
+          }
           pendingSteps.set(rid, steps);
         }
       }

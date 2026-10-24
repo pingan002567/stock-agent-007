@@ -63,3 +63,18 @@ export function commandOutputOf(tool: StreamToolCall): string {
   return raw;
 }
 
+
+/** 思考步落位：紧跟在「运行中的工具」之后到达的思考，语义上是**该工具调用之前**
+ *  的推理（后端把 additional_kwargs 挂在有 tool_calls 的分片上，所以文本会晚一拍）。
+ *  这种情况插到那个工具步之前，时间线才是「思考 → 工具」。
+ *
+ *  判据只看「尾部工具是否还在跑」：还在跑说明结果没回来，这段思考不可能是对结果的
+ *  分析，只能是发起调用前的判断。工具已完成时追加在后面，不篡改因果顺序。
+ */
+export function placeReasoningStep<T extends StreamStep>(steps: T[], step: T): T[] {
+  const last = steps[steps.length - 1];
+  if (last?.kind === "tool" && last.tool.status === "running") {
+    return [...steps.slice(0, -1), step, last];
+  }
+  return [...steps, step];
+}

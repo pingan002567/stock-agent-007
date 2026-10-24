@@ -354,6 +354,12 @@ class DeerFlowEventMapper:
                     latest_text = None
             if latest_text:
                 summary["latest_text"] = latest_text
+        # 没有文本就不发：values 快照每轮会推好几条空 reasoning，前端会渲染成
+        # 空心的「思考」步，纯噪声（实测一轮 4 条全是 len=0）。
+        if summary.get("latest_text"):
+            summary["text"] = summary["latest_text"]
+        else:
+            return events
         events.append({"type": "reasoning", "payload": summary})
         return events
 

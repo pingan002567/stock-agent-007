@@ -4,6 +4,7 @@ import { CopilotMessageItem } from "@/components/features/CopilotMessageItem";
 import { CopilotToolCard } from "@/components/features/CopilotToolCard";
 import { CopilotStreamingMessage } from "@/components/features/CopilotStreamingMessage";
 import { pairMessages } from "@/components/features/CopilotPanel";
+import { placeReasoningStep } from "@/lib/agentLoop";
 import { toolLabel, type StreamMessage } from "@/hooks/useCopilotChat";
 import type { CopilotMessage } from "@/api/client";
 
@@ -442,5 +443,46 @@ describe("历史工具结果解包", () => {
     expect(persistedToolResultText({ result_preview: { status: "ok", summary: "完成" } }))
       .toContain('"status": "ok"');
     expect(prettyMaybeJson("最新价 1680")).toBe("最新价 1680");
+  });
+});
+
+describe("思考步落位（思考 → 工具）", () => {
+  it("紧跟运行中工具到达的思考，插到该工具之前", () => {
+    const steps = [
+      { kind: "reasoning" as const, id: "r1", text: "先看价格" },
+      { kind: "tool" as const, id: "t1", tool: { callId: "c1", name: "get_stock_context", status: "running" as const } },
+    ];
+    const out = placeReasoningStep(steps, { kind: "reasoning", id: "r2", text: "价格偏高，再看情绪" });
+    expect(out.map((s) => s.kind)).toEqual(["reasoning", "reasoning", "tool"]);
+  });
+
+  it("工具已完成时，思考追加在后面（不篡改因果）", () => {
+    const steps = [
+      { kind: "tool" as const, id: "t1", tool: { callId: "c1", name: "get_stock_context", status: "done" as const } },
+    ];
+    const out = placeReasoningStep(steps, { kind: "reasoning", id: "r1", text: "结论：偏贵" });
+    expect(out.map((s) => s.kind)).toEqual(["tool", "reasoning"]);
+  });
+
+  it("历史回放：tool_call → reasoning → tool_result 重排成 思考 → 工具", () => {
+    const msgs = [
+      makeMsg({ message_id: "u1", role: "user", kind: "user_message", text: "ETH 费率", run_id: "run_o" }),
+      makeMsg({
+        message_id: "t1", role: "assistant", kind: "tool_call", text: "",
+        run_id: "run_o", payload: { tool: "get_crypto_derivatives", call_id: "c1" },
+      }),
+      makeMsg({
+        message_id: "r1", role: "system", kind: "reasoning", text: "这是个事实题，直接查",
+        run_id: "run_o", payload: { text: "这是个事实题，直接查" },
+      }),
+      makeMsg({
+        message_id: "x1", role: "tool", kind: "tool_result", text: "get_crypto_derivatives",
+        run_id: "run_o", payload: { tool: "get_crypto_derivatives", call_id: "c1", result_preview: { value: '{"funding": 0.01}' } },
+      }),
+      makeMsg({ message_id: "f1", role: "assistant", kind: "final_answer", text: "费率 0.01%", run_id: "run_o", payload: { conclusion: "费率 0.01%" } }),
+    ];
+    const ai = pairMessages(msgs).find((item) => item.t === "ai");
+    if (ai?.t !== "ai") throw new Error("no ai");
+    expect((ai.steps ?? []).map((s) => s.kind)).toEqual(["reasoning", "tool"]);
   });
 });

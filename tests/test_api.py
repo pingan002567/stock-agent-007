@@ -256,11 +256,11 @@ def test_copilot_sse_uses_fake_embedded_deerflow_mapper(tmp_path, monkeypatch):
 
     events = parse_sse_events(body)
     biz = meaningful_events(events)
+    # values 快照里没有可展示的思考文本 → 不再发空 reasoning（纯噪声）
     assert [event["type"] for event in biz] == [
         "partial_answer",
         "tool_call",
         "tool_result",
-        "reasoning",
         "final",
     ]
     assert biz[0]["payload"]["text"] == "fake embedded partial"
