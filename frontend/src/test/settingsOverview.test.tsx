@@ -39,3 +39,28 @@ describe("配置概览的待确认项", () => {
     expect(loaded.some((i) => i.title.includes("定时任务"))).toBe(true);
   });
 });
+
+describe("概览组件能渲染", () => {
+  it("渲染不抛异常（曾因缺 RISK_LEVEL_LABEL 整页崩成「页面渲染异常」）", async () => {
+    const { render } = await import("@testing-library/react");
+    const { SettingsOverview } = await import("@/components/settings/SettingsOverview");
+    const { container } = render(
+      <SettingsOverview
+        settings={{
+          agent_runtime: { available: true, active_client: "embedded" },
+          runtime_config: { has_api_key: true, model_name: "deepseek-v4-flash", thinking_enabled: true },
+          risk_policy: { active: { name: "激进全仓型", rules: { single_position_max_weight_pct: 100, sector_max_weight_pct: 100 } } },
+          data_sources: { provider_states: { eastmoney: { enabled: true } } },
+          investor_profile: { risk_level: "aggressive" },
+          trading_controls: { real_order: "blocked" },
+          skills: [{ enabled: true }],
+        }}
+        onNavigate={() => {}}
+      />,
+    );
+    const text = container.textContent ?? "";
+    expect(text).toContain("当前生效");
+    expect(text).toContain("激进");        // 画像标签查表命中
+    expect(text).toContain("激进全仓型");   // 风控档位名
+  });
+});

@@ -2,6 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { apiGet } from "@/api/client";
 import { collectIssues, type OverviewSettings, type OverviewTab } from "@/lib/settingsOverview";
 
+/** 风险等级的中文标签（投资画像那一行用） */
+const RISK_LEVEL_LABEL: Record<string, string> = {
+  conservative: "保守",
+  balanced: "稳健",
+  aggressive: "激进",
+};
+
+type Task = { enabled?: boolean };
+
 /** 配置概览：只回答两个问题 —— 「还差什么才能用」和「现在到底生效的是什么」。
  *
  *  刻意不在这里提供任何可编辑项：能改的都去对应分区，避免同一份配置两个入口。

@@ -3,6 +3,7 @@ import { ThoughtTimeline } from "@/components/features/ThoughtTimeline";
 import type { GroupedItem } from "@/components/features/CopilotPanel";
 import type { StreamMessage, StreamStep, StreamToolCall } from "@/hooks/useCopilotChat";
 import type { CopilotMessage } from "@/api/client";
+import type { ToolInfo } from "@/components/features/CopilotMessageItem";
 
 /** 单轮轨迹：把某一轮的工具调用/推理步按到达顺序排开 */
 type Turn = {
@@ -64,7 +65,7 @@ export function TrajectoryView({
       const tools = item.tools ?? [];
       if (tools.length > 0) {
         turns.push({
-          key: item.msg.msg_id ?? `${item.msg.run_id}-${turns.length}`,
+          key: item.msg.message_id ?? `${item.msg.run_id}-${turns.length}`,
           index: turnNo || turns.length + 1,
           at: item.msg.created_at ?? "",
           prompt: lastPrompt,
@@ -76,7 +77,7 @@ export function TrajectoryView({
     // t === "ai"：这一轮的收口消息，工具挂在这里
     if (item.tools.length > 0) {
       turns.push({
-        key: item.msg.msg_id ?? `${item.msg.run_id}-${turns.length}`,
+        key: item.msg.message_id ?? `${item.msg.run_id}-${turns.length}`,
         index: turnNo || turns.length + 1,
         at: item.msg.created_at ?? "",
         prompt: lastPrompt,

@@ -93,10 +93,10 @@ export function StockHistoryChart({
 
   const stats = useMemo(() => {
     if (series.length === 0) return null;
-    const closes = series.map((b) => b.close ?? 0);
     const highs = series.map((b) => b.high ?? b.close ?? 0);
     const lows = series.map((b) => b.low ?? b.close ?? 0);
     const volumes = series.map((b) => b.volume ?? 0);
+    const closes = series.map((b) => b.close ?? 0);
     const first = closes[0] ?? 0;
     const last = closes[closes.length - 1] ?? 0;
     const changePct = first ? ((last - first) / first) * 100 : 0;
@@ -113,7 +113,6 @@ export function StockHistoryChart({
     if (series.length === 0) return null;
     const lows = series.map((b) => b.low ?? b.close ?? 0);
     const highs = series.map((b) => b.high ?? b.close ?? 0);
-    const closes = series.map((b) => b.close ?? 0);
     const priceMin = Math.min(...lows);
     const priceMax = Math.max(...highs);
     const pad = (priceMax - priceMin || priceMax * 0.02 || 1) * 0.08;

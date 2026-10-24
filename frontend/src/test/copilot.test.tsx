@@ -5,7 +5,7 @@ import { CopilotToolCard } from "@/components/features/CopilotToolCard";
 import { CopilotStreamingMessage } from "@/components/features/CopilotStreamingMessage";
 import { pairMessages } from "@/components/features/CopilotPanel";
 import { placeReasoningStep } from "@/lib/agentLoop";
-import { toolLabel, type StreamMessage } from "@/hooks/useCopilotChat";
+import { toolLabel, type StreamMessage, type StreamStep } from "@/hooks/useCopilotChat";
 import type { CopilotMessage } from "@/api/client";
 
 describe("toolLabel", () => {
@@ -160,6 +160,7 @@ function makeStream(overrides: Partial<StreamMessage> = {}): StreamMessage {
     reasoningLog: [],
     skillTrace: [],
     todos: [],
+    rounds: 0,
     tools: [],
     steps: [],
     answerText: "",
@@ -448,7 +449,7 @@ describe("历史工具结果解包", () => {
 
 describe("思考步落位（思考 → 工具）", () => {
   it("紧跟运行中工具到达的思考，插到该工具之前", () => {
-    const steps = [
+    const steps: StreamStep[] = [
       { kind: "reasoning" as const, id: "r1", text: "先看价格" },
       { kind: "tool" as const, id: "t1", tool: { callId: "c1", name: "get_stock_context", status: "running" as const } },
     ];
@@ -457,7 +458,7 @@ describe("思考步落位（思考 → 工具）", () => {
   });
 
   it("工具已完成时，思考追加在后面（不篡改因果）", () => {
-    const steps = [
+    const steps: StreamStep[] = [
       { kind: "tool" as const, id: "t1", tool: { callId: "c1", name: "get_stock_context", status: "done" as const } },
     ];
     const out = placeReasoningStep(steps, { kind: "reasoning", id: "r1", text: "结论：偏贵" });

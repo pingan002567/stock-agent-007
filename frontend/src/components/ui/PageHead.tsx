@@ -14,6 +14,8 @@ export interface KpiItem {
   tone?: "up" | "down";
   /** 点击该指标时发给 AI 的预填问题 */
   prompt?: string;
+  /** 数值口径说明（例如「无当日汇率，暂不折算」），显示在数值下方 */
+  hint?: string;
 }
 
 export function PageHead({ kpis, actions }: { kpis: KpiItem[]; actions?: ReactNode }) {
@@ -35,6 +37,7 @@ export function PageHead({ kpis, actions }: { kpis: KpiItem[]; actions?: ReactNo
           >
             <div className="k">{k.label}</div>
             <div className={`v num${k.tone ? ` ${k.tone}` : ""}`}>{k.value}</div>
+            {k.hint ? <div className="kpi-hint">{k.hint}</div> : null}
           </div>
         ))}
       </div>

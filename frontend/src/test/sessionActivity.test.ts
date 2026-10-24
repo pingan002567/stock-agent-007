@@ -9,6 +9,7 @@ function base(overrides: Partial<StreamMessage> = {}): StreamMessage {
     reasoningLog: [],
     skillTrace: [],
     todos: [],
+    rounds: 0,
     tools: [],
     steps: [],
     answerText: "",

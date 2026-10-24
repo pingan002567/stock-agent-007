@@ -1906,7 +1906,17 @@ export default function Settings({ initialTab }: { initialTab?: string } = {}) {
     switch (activeTab) {
       case "overview": return (
         <SettingsOverview
-          settings={settings}
+          settings={{
+            agent_runtime: settings.agent_runtime,
+            runtime_config: settings.runtime_config,
+            risk_policy: settings.risk_policy as
+              | { active?: { name?: string; rules?: Record<string, unknown> } }
+              | undefined,
+            data_sources: settings.data_sources,
+            investor_profile: settings.investor_profile,
+            trading_controls: settings.trading_controls,
+            skills: settings.skills,
+          }}
           onNavigate={(tab) => setActiveTab(tab as SettingTab)}
         />
       );
@@ -1991,7 +2001,10 @@ export default function Settings({ initialTab }: { initialTab?: string } = {}) {
             onSaveInvestorProfile={submitInvestorProfile}
             savingInvestorProfile={savingInvestorProfile}
           />
-          <RiskImpactNote rules={settings.risk_policy?.active?.rules} name={settings.risk_policy?.active?.name} />
+          <RiskImpactNote
+            rules={(settings.risk_policy?.active as { rules?: Record<string, unknown> } | undefined)?.rules}
+            name={(settings.risk_policy?.active as { name?: string } | undefined)?.name}
+          />
           <RiskOnlyTab
           riskPolicies={riskPolicies}
           showCreateForm={showCreateForm}
