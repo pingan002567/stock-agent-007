@@ -1,16 +1,17 @@
 /** 子代理技能名 → 中文标签(与 backend skill_specs.WORKBENCH_SKILLS 对齐;
  * 未知名回退 undefined 由调用方兜底显示原名) */
 const SKILL_LABELS: Record<string, string> = {
-  "stock-deep-dive": "AI 研究员",
-  "valuation-check": "AI 估值分析师",
-  "catalyst-scan": "AI 催化剂追踪",
-  "portfolio-risk-audit": "AI 风控官",
-  "strategy-backtest": "AI 策略分析师",
-  "rebalance-plan": "AI 调仓规划师",
-  "watch-rule-monitor": "AI 盯盘员",
-  "report-render": "AI 报告员",
-  "sector-rotation-digest": "AI 板块轮动报告",
-  "market-sentiment": "AI 情绪裁判",
+  "stock-deep-dive": "个股深度研判",
+  "crypto-dive": "加密资产研判",
+  "valuation-check": "估值与财务体检",
+  "catalyst-scan": "催化剂扫描",
+  "portfolio-risk-audit": "持仓风险审查",
+  "strategy-backtest": "策略回测评估",
+  "rebalance-plan": "调仓方案拟制",
+  "watch-rule-monitor": "盯盘规则巡检",
+  "report-render": "报告成稿",
+  "sector-rotation-digest": "板块轮动扫描",
+  "market-sentiment": "市场情绪判读",
   "general-purpose": "通用子代理",
   bash: "命令行子代理",
 };

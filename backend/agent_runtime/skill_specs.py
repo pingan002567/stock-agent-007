@@ -72,57 +72,57 @@ class WorkbenchSkill:
 
 WORKBENCH_SKILLS: dict[str, WorkbenchSkill] = {
     "stock-deep-dive": WorkbenchSkill(
-        label="AI 研究员",
+        label="个股深度研判",
         authority="A2",
         max_turns=50,
         timeout_seconds=600,
     ),
     "crypto-dive": WorkbenchSkill(
-        label="AI 加密货币研判",
+        label="加密资产研判",
         authority="A2",
         max_turns=40,
         timeout_seconds=600,
     ),
     "valuation-check": WorkbenchSkill(
-        label="AI 估值分析师",
+        label="估值与财务体检",
         authority="A2",
         max_turns=40,
         timeout_seconds=600,
     ),
     "catalyst-scan": WorkbenchSkill(
-        label="AI 催化剂追踪",
+        label="催化剂扫描",
         authority="A2",
         max_turns=30,
         timeout_seconds=300,
     ),
     "portfolio-risk-audit": WorkbenchSkill(
-        label="AI 风控官", authority="A3", max_turns=30, timeout_seconds=300,
+        label="持仓风险审查", authority="A3", max_turns=30, timeout_seconds=300,
     ),
     "strategy-backtest": WorkbenchSkill(
-        label="AI 策略分析师", authority="A3", max_turns=30, timeout_seconds=600,
+        label="策略回测评估", authority="A3", max_turns=30, timeout_seconds=600,
     ),
     "rebalance-plan": WorkbenchSkill(
-        label="AI 调仓规划师", authority="A4", max_turns=40, timeout_seconds=600,
+        label="调仓方案拟制", authority="A4", max_turns=40, timeout_seconds=600,
     ),
     "market-sentiment": WorkbenchSkill(
         # 情绪判断是"该不该做"的前置问题，比个股结论更靠前；工具少、轮次少
-        label="AI 情绪裁判", authority="A2", max_turns=16, timeout_seconds=240,
+        label="市场情绪判读", authority="A2", max_turns=16, timeout_seconds=240,
     ),
     "watch-rule-monitor": WorkbenchSkill(
         # 需要 upsert/delete_monitor_rule（A3）—— 提权到 A3，工具集仍由 allowed-tools 限定
-        label="AI 盯盘员", authority="A3", max_turns=20, timeout_seconds=300,
+        label="盯盘规则巡检", authority="A3", max_turns=20, timeout_seconds=300,
     ),
     "report-render": WorkbenchSkill(
-        label="AI 报告员", authority="A2", max_turns=20, timeout_seconds=300,
+        label="报告成稿", authority="A2", max_turns=20, timeout_seconds=300,
     ),
     "sector-rotation-digest": WorkbenchSkill(
-        label="AI 板块轮动报告",
+        label="板块轮动扫描",
         authority="A2",
         max_turns=40,
         timeout_seconds=600,
     ),
     "execution-agent-disabled": WorkbenchSkill(
-        label="AI 执行代理",
+        label="执行代理（已禁用）",
         authority="A5",
         enabled=False,
         locked=True,

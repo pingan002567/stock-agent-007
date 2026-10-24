@@ -80,10 +80,16 @@ allowed-tools:
 
 ---
 
-## 2.5 命名规范：id 功能化，职业名留给 label
+## 2.5 命名规范：id 与 label 都功能化，职业名只留在正文
 
 `name`（目录名 / frontmatter / `subagent_type`）**必须是功能 id**；
-职业称谓只出现在 `label`（UI）和 SKILL.md 正文的「角色」段落里。
+`label`（UI 显示）**也用能力名**，例如「个股深度研判」而不是「AI 研究员」。
+职业称谓只保留在 SKILL.md 正文的「角色」段落里 —— 那是写给模型看的人格，
+不进界面。
+
+> 2026-10 调整：上一版规范是「职业名留给 label」，导致设置页技能列表全是
+> 「AI 研究员 / AI 风控官 / AI 情绪裁判」这类职称，用户看不出这是**能做什么**。
+> 现在统一改成「对象-动作」的能力名。
 
 理由：
 
@@ -95,19 +101,22 @@ allowed-tools:
 - **人格不会丢**：每个 SKILL.md 的「角色」段落 + `label` 都是职业称谓，
   改名不动人设。
 
-| 旧名（职业） | 新名（功能） | label（职业，不变） |
+| 旧名（职业） | 新名（功能 id） | label（UI 显示） |
 |---|---|---|
-| stock-researcher | `stock-deep-dive` | AI 研究员 |
-| valuation-analyst | `valuation-check` | AI 估值分析师 |
-| catalyst-tracker | `catalyst-scan` | AI 催化剂追踪 |
-| risk-officer | `portfolio-risk-audit` | AI 风控官 |
-| strategy-analyst | `strategy-backtest` | AI 策略分析师 |
-| rebalance-planner | `rebalance-plan` | AI 调仓规划师 |
-| stock-monitor | `watch-rule-monitor` | AI 盯盘员 |
-| report-writer | `report-render` | AI 报告员 |
-| sector-rotation-report | `sector-rotation-digest` | AI 板块轮动报告 |
+| stock-researcher | `stock-deep-dive` | 个股深度研判 |
+| valuation-analyst | `valuation-check` | 估值与财务体检 |
+| catalyst-tracker | `catalyst-scan` | 催化剂扫描 |
+| risk-officer | `portfolio-risk-audit` | 持仓风险审查 |
+| strategy-analyst | `strategy-backtest` | 策略回测评估 |
+| rebalance-planner | `rebalance-plan` | 调仓方案拟制 |
+| stock-monitor | `watch-rule-monitor` | 盯盘规则巡检 |
+| report-writer | `report-render` | 报告成稿 |
+| sector-rotation-report | `sector-rotation-digest` | 板块轮动扫描 |
+| (crypto) | `crypto-dive` | 加密资产研判 |
+| (sentiment) | `market-sentiment` | 市场情绪判读 |
 
-新增技能时按此约定：`name` 用「对象-动作」，`label` 用职业称谓。
+新增技能时按此约定：`name` 用英文「对象-动作」，`label` 用中文「对象-动作」；
+两者都不带职称，人格写进 SKILL.md 正文。
 
 ---
 
