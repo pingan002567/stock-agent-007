@@ -1,0 +1,147 @@
+# 阶段一：持仓与自选接入币圈
+
+> 状态：规划（未动代码）
+> 范围：**只做"把币放进已有持仓/自选并正确显示"** —— 不做分析、不做衍生品、不做链上。
+> 前置：`doc/CRYPTO_CAPABILITY_PLAN.md`（数据源已实测：Gate.io 可用，Binance/OKX 不可达）
+
+---
+
+## 1. 一句话目标
+
+用户能在**同一张持仓表**里看到股票和币，权重、盈亏、组合总市值都算对；
+自选能按市场分组；行情按各自节奏刷新。
+
+---
+
+## 2. 六个必须先定的问题
+
+### D1. 币种怎么办（最核心）
+
+股票是 ¥，币是 USDT。**不折算就没法算权重和总市值。**
+
+**决策：内部统一折算成人民币，UI 同时显示原币与折合。**
+
+| 层 | 处理 |
+|---|---|
+| 存储 | `holding_position.market_value` 存 **CNY 折算值**（保持单币种，权重/风控/组合体检全部沿用现有逻辑） |
+| 新增字段 | `currency`（`CNY`/`USDT`）、`market_value_native`（原币金额） |
+| 显示 | 市值列 → `$6,471.66`（主）+ `≈¥43,258`（次） |
+| 汇率 | `USD/CNY`，来源 **open.er-api.com**（实测可达，2026-10-24 = **6.684864**），缓存 1 小时 |
+| 缺失时 | 汇率拿不到 → 币圈市值标 `—`、权重不参与计算，并在页面顶部提示"币圈市值不可用"（**不编数**） |
+
+### D2. 市场识别会误判（这是 bug 点）
+
+现在 `frontend/src/utils/market.ts`：
+
+```ts
+if (/^[A-Z]{1,5}$/.test(s)) return "US";   // ← BTC / ETH / SOL 全被判成 US
+```
+
+**决策**：`inferMarket` 增加 crypto 分支，且**以 `stock_master.market` 为准**（后端已返回 `market` 字段），`inferMarket` 只作兜底。
+crypto 判定顺序：后端 market → 已知币种表 → 正则。
+
+### D3. 数量与价格精度
+
+- 数量：`0.08 BTC`（小数），股票是整数股
+- 价格：BTC `80,895.7`（1 位）；小币 `0.00001234`（8 位）
+- **决策**：价格按量级自适应（≥1000 两位 / ≥1 两位 / <1 保留 6 位有效数字）；数量统一保留最多 8 位小数、去掉尾随 0
+
+### D4. 排序与分组
+
+**决策：默认按市值混排**（不分段），提供**市场 chip 筛选**（全部 / A股 / 港股 / 美股 / 币圈）。
+理由：混排才能看出"钱压在哪"；分段会让"总仓位"失去意义。
+
+### D5. 刷新节奏
+
+股票靠轮询 60s；币圈 7×24 且波动快，60s 太钝。
+
+**决策**：`quote` 缓存按 market 分 TTL —— `CRYPTO: 10s`、其它 `60s`；前端轮询仍 60s（P0 不改轮询），
+币圈页面单独打开时再降频（P2 再考虑 WS）。
+
+### D6. 权重与风控
+
+- 权重：统一用 **CNY 折算后市值** 计算（`computeWeights` 不用改）
+- 单标的权重上限（风险策略 `single_position_max_weight_pct`）：对币**同样生效**
+- 币圈的"行业集中"暂时不映射到赛道（stage 1 不做），只算单标的上限
+
+---
+
+## 3. 数据模型（最小改动）
+
+```python
+class HoldingPosition(BaseModel):
+    symbol: str; name: str
+    quantity: float
+    market_value: float          # ← 改语义：CNY 折算值
+    weight_pct: float
+    cost: Optional[float]        # 原币成本
+    pnl_pct: Optional[float]
+    currency: str = "CNY"        # 新增：CNY | USDT
+    market_value_native: Optional[float] = None   # 新增：原币市值
+```
+
+`stock_master` 加币种行：`symbol="BTC", name="Bitcoin", market="CRYPTO", instrument_type="crypto"`，
+首批 30–50 个（BTC/ETH/SOL/BNB/XRP/DOGE/…），`aliases` 存中文名（比特币/以太坊）。
+
+`watchlist_item` **不用改**（market 从 stock_master 查）。
+
+---
+
+## 4. API 改动
+
+| 接口 | 改动 |
+|---|---|
+| `GET /api/holdings` | items 增加 `currency` / `market_value_native` / `market`（market 已有）；summary 增加 `by_market: {CN, HK, US, CRYPTO}` 与 `fx: {pair:"USDCNY", rate, as_of}` |
+| `POST /api/holdings` | 接受 `currency`（默认 CNY）；币圈标的按 FX 折算后存 `market_value` |
+| `GET /api/watchlist` | items 增加 `market` |
+| 新增 | `GET /api/fx/usdcny`（缓存 1h，带 `as_of` 与 `degraded`） |
+
+---
+
+## 5. UI 改动（两页）
+
+### 持仓页
+1. 顶部指标加一行：**总市值 ¥194,158** ＝ 股票 ¥84,804 + 币圈 ¥62,354 + 现金 ¥47,000
+2. 表格加 **市场** 徽章列（CN/HK/US/**CRYPTO**），并加 chip 筛选
+3. 市值列：`$6,471.66` + 次行 `≈¥43,258`
+4. 币圈行的名称前加币种图标位（`₿`/`Ξ` 或首字母）
+5. 顶部右侧显示 **汇率 `USD/CNY 6.6849 · 1 小时前`**（可点刷新）
+
+### 自选页
+1. 分组下拉里增加 `币圈`（由 `group` 字段天然支持）
+2. 表格加 market 徽章；现价按 `$` 显示
+3. 币圈的 24h 涨跌沿用 `change_pct`（Gate.io 的 `change_percentage`）
+
+---
+
+## 6. 验收标准（DoD）
+
+1. 加 0.08 BTC + 1.2 ETH 到持仓 → 权重、总市值、盈亏与手算一致（误差 < 0.01%）
+2. 汇率源挂掉 → 币圈市值显示 `—`、顶部黄条提示，**不出现 0 或编造值**
+3. `BTC` 不再被识别成美股（`inferMarket` 回归用例）
+4. 自选加 BTC → 分组可选「币圈」，现价显示 `$80,895.7`
+5. 混排排序正确（按 CNY 折算市值），chip 筛选可用
+6. 现有股票持仓行为零回归（全部旧用例通过）
+
+---
+
+## 7. 工作量
+
+| 项 | 量级 |
+|---|---|
+| `stock_master` 币种种子 + `normalize_symbol` crypto 分支 | 0.3 天 |
+| FX 服务（拉取/缓存/降级）+ `/api/fx/usdcny` | 0.3 天 |
+| `mark_to_market` / `summarize_portfolio` / holdings API 改造 | 0.5 天 |
+| 前端：持仓表格 + 指标 + chip + 汇率条 | 0.5 天 |
+| 前端：自选分组 + 徽章 | 0.2 天 |
+| 测试（含 `inferMarket` 回归、FX 降级） | 0.3 天 |
+| **合计** | **≈ 2 天** |
+
+---
+
+## 8. 这一阶段明确不做
+
+- ❌ 币圈分析（`crypto-dive` / 衍生品 / 链上）→ 阶段二
+- ❌ WebSocket 实时推流 → 阶段三
+- ❌ 币圈定时任务（盘前/收盘体检）→ 阶段三
+- ❌ 现货下单 / 交易所 API key（永不）

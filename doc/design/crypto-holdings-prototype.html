@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>阶段一 · 持仓与自选接入币圈 · 原型</title>
+<style>
+  :root {
+    --canvas:#151517; --sidebar:#232324; --surface:#2c2c2e; --surface-2:#353638;
+    --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.06);
+    --ink:#f9fafb; --ink-2:#ebeef2; --muted:#cfd3d6; --faint:#adb2b8;
+    --green:#3fb950; --red:#f85149; --amber:#d29922; --blue:#58a6ff; --purple:#bc8cff;
+    --mono:"SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#0d0d0e;color:var(--ink);font:13px/1.6 -apple-system,"PingFang SC",sans-serif;padding:44px 52px 100px}
+  .doc{max-width:1000px}
+  h1{font-size:22px;font-weight:600;letter-spacing:-.01em}
+  .sub{color:var(--faint);margin-top:8px;font-size:13px}
+  .note{margin:18px 0 38px;padding:12px 16px;background:var(--sidebar);border:1px solid var(--line);border-radius:8px;font-size:12.5px;color:var(--muted);line-height:1.85}
+  .note b{color:var(--ink)}
+  code{font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,.07);padding:1px 5px;border-radius:4px}
+
+  .block{margin-bottom:44px}
+  .bh{margin-bottom:11px;display:flex;align-items:baseline;gap:9px}
+  .bh b{font-size:15px;font-weight:600}
+  .bh span{color:var(--faint);font-size:12.5px}
+
+  .win{background:var(--canvas);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .win-bar{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--sidebar);border-bottom:1px solid var(--line);font-size:12px;color:var(--faint)}
+  .dot{width:9px;height:9px;border-radius:50%;background:#3a3a3c}
+  .body{padding:16px 18px}
+  .row{display:flex;align-items:center;gap:9px}
+  .right{margin-left:auto}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .up{color:var(--green)} .down{color:var(--red)} .amb{color:var(--amber)} .m{color:var(--muted)} .f{color:var(--faint)}
+  .k{font-size:11px;color:var(--faint);letter-spacing:.05em}
+
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+  .kpi{background:var(--surface);border:1px solid var(--line-2);border-radius:8px;padding:10px 12px}
+  .kpi .v{font-size:17px;font-family:var(--mono);margin-top:3px}
+  .kpi .s{font-size:11.5px;color:var(--faint);margin-top:2px}
+
+  .chips{display:flex;gap:7px;margin-bottom:12px;align-items:center}
+  .chip{padding:3px 11px;border-radius:999px;border:1px solid var(--line);font-size:12px;color:var(--muted);cursor:pointer;user-select:none;background:transparent}
+  .chip.on{background:rgba(255,255,255,.12);color:var(--ink);border-color:transparent}
+  .chip .n{color:var(--faint);margin-left:5px;font-size:11px}
+
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{text-align:left;color:var(--faint);font-weight:500;font-size:11px;letter-spacing:.05em;padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:9px 8px;border-bottom:1px solid var(--line-2);vertical-align:middle}
+  td.n{text-align:right}
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .sym{font-weight:600}
+  .sub2{font-size:11px;color:var(--faint);margin-top:1px}
+
+  .badge{display:inline-block;font-size:10px;font-weight:600;letter-spacing:.04em;padding:1px 6px;border-radius:4px;border:1px solid;line-height:1.5}
+  .b-CN{color:#ff7b72;border-color:rgba(255,123,114,.35);background:rgba(255,123,114,.10)}
+  .b-US{color:#79c0ff;border-color:rgba(121,192,255,.35);background:rgba(121,192,255,.10)}
+  .b-HK{color:#d2a8ff;border-color:rgba(210,168,255,.35);background:rgba(210,168,255,.10)}
+  .b-CRYPTO{color:#e3b341;border-color:rgba(227,179,65,.38);background:rgba(227,179,65,.12)}
+
+  .wbar{width:54px;height:4px;border-radius:2px;background:rgba(255,255,255,.10);display:inline-block;vertical-align:middle;margin-right:7px;overflow:hidden}
+  .wbar i{display:block;height:100%;background:var(--blue)}
+
+  .fxbar{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--faint);margin-bottom:12px}
+  .fxbar b{color:var(--muted);font-weight:500}
+
+  .warnbar{display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:8px;font-size:12.5px;
+    background:rgba(210,153,34,.10);border:1px solid rgba(210,153,34,.30);color:#e3b341;margin-bottom:12px}
+
+  /* 弹窗 */
+  .modal{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;max-width:520px}
+  .modal h3{font-size:14px;font-weight:600;margin-bottom:14px}
+  .field{margin-bottom:12px}
+  .field label{display:block;font-size:11.5px;color:var(--faint);margin-bottom:5px}
+  .input{background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:7px;padding:8px 10px;font-size:13px;color:var(--ink);font-family:var(--mono)}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+  .seg span{padding:6px 14px;font-size:12px;color:var(--muted);cursor:pointer}
+  .seg span.on{background:rgba(255,255,255,.12);color:var(--ink)}
+  .calc{background:rgba(88,166,255,.07);border:1px solid rgba(88,166,255,.20);border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.9;margin-top:4px}
+  .calc .num{color:var(--ink)}
+
+  .legend{color:var(--faint);font-size:12px;margin-top:9px;line-height:1.8}
+  .legend b{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="doc">
+
+<h1>阶段一 · 持仓与自选接入币圈</h1>
+<div class="sub">目标只有一个：股票和币能放在同一张表里、数字算对。汇率用实测值 USD/CNY = 6.6849。</div>
+
+<div class="note">
+  <b>三个关键决定</b>：① 币的市值<b>折算成人民币</b>再算权重（否则总仓位永远是错的）；
+  ② 市场徽章区分 <code>CN/HK/US/CRYPTO</code>，默认<b>按市值混排</b>不分组；
+  ③ 市值列<b>同时显示原币和折合</b>（<code>$6,471.66 ≈ ¥43,258</code>）。
+</div>
+
+<!-- ══════ 1. 持仓 ══════ -->
+<div class="block">
+  <div class="bh"><b>① 持仓（混排）</b><span>股票与币同表，权重按人民币折算统算</span></div>
+  <div class="win">
+    <div class="win-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span style="margin-left:8px">持仓</span></div>
+    <div class="body">
+
+      <div class="kpis">
+        <div class="kpi"><div class="k">总市值</div><div class="v">¥194,158</div><div class="s">含现金 ¥47,000</div></div>
+        <div class="kpi"><div class="k">股票</div><div class="v">¥84,804</div><div class="s">3 只 · 43.7%</div></div>
+        <div class="kpi"><div class="k">币圈</div><div class="v amb">¥62,354</div><div class="s">2 只 · 32.1%</div></div>
+        <div class="kpi"><div class="k">浮盈</div><div class="v up">+¥4,616</div><div class="s">+2.38%</div></div>
+      </div>
+
+      <div class="fxbar">
+        <b>汇率</b> USD/CNY <span class="num">6.6849</span>
+        <span>· 1 小时前</span>
+        <span style="color:var(--blue);cursor:pointer">刷新</span>
+      </div>
+
+      <div class="chips">
+        <span class="chip on" data-m="all">全部<span class="n">5</span></span>
+        <span class="chip" data-m="CN">A股<span class="n">2</span></span>
+        <span class="chip" data-m="US">美股<span class="n">1</span></span>
+        <span class="chip" data-m="HK">港股<span class="n">0</span></span>
+        <span class="chip" data-m="CRYPTO">币圈<span class="n">2</span></span>
+      </div>
+
+      <table>
+        <thead><tr>
+          <th>标的</th><th>市场</th><th class="n">数量</th><th class="n">成本</th><th class="n">现价</th>
+          <th class="n">市值</th><th class="n">盈亏</th><th class="n">当日</th><th>权重</th>
+        </tr></thead>
+        <tbody id="rows">
+          <tr data-m="CRYPTO">
+            <td><span class="sym">BTC</span><div class="sub2">Bitcoin</div></td>
+            <td><span class="badge b-CRYPTO">CRYPTO</span></td>
+            <td class="n num">0.08</td>
+            <td class="n num m">$76,200.00</td>
+            <td class="n num">$80,895.7</td>
+            <td class="n"><span class="num">$6,471.66</span><div class="sub2 num">≈ ¥43,258</div></td>
+            <td class="n"><span class="num up">+$375.66</span><div class="sub2 num up">+6.16%</div></td>
+            <td class="n num down">-0.93%</td>
+            <td><span class="wbar"><i style="width:100%"></i></span><span class="num">22.3%</span></td>
+          </tr>
+          <tr data-m="US">
+            <td><span class="sym">AAPL</span><div class="sub2">Apple</div></td>
+            <td><span class="badge b-US">US</span></td>
+            <td class="n num">30</td>
+            <td class="n num m">$178.20</td>
+            <td class="n num">$190.50</td>
+            <td class="n"><span class="num">$5,715.00</span><div class="sub2 num">≈ ¥38,204</div></td>
+            <td class="n"><span class="num up">+$369.00</span><div class="sub2 num up">+6.90%</div></td>
+            <td class="n num up">+1.24%</td>
+            <td><span class="wbar"><i style="width:88%"></i></span><span class="num">19.7%</span></td>
+          </tr>
+          <tr data-m="CN">
+            <td><span class="sym">贵州茅台</span><div class="sub2 num">600519</div></td>
+            <td><span class="badge b-CN">CN</span></td>
+            <td class="n num">20</td>
+            <td class="n num m">¥1,605.00</td>
+            <td class="n num">¥1,680.00</td>
+            <td class="n"><span class="num">¥33,600</span></td>
+            <td class="n"><span class="num up">+¥1,500</span><div class="sub2 num up">+4.67%</div></td>
+            <td class="n num up">+0.82%</td>
+            <td><span class="wbar"><i style="width:78%"></i></span><span class="num">17.3%</span></td>
+          </tr>
+          <tr data-m="CRYPTO">
+            <td><span class="sym">ETH</span><div class="sub2">Ethereum</div></td>
+            <td><span class="badge b-CRYPTO">CRYPTO</span></td>
+            <td class="n num">1.2</td>
+            <td class="n num m">$2,650.00</td>
+            <td class="n num">$2,380.43</td>
+            <td class="n"><span class="num">$2,856.52</span><div class="sub2 num">≈ ¥19,096</div></td>
+            <td class="n"><span class="num down">-$323.48</span><div class="sub2 num down">-10.17%</div></td>
+            <td class="n num down">-0.76%</td>
+            <td><span class="wbar"><i style="width:44%"></i></span><span class="num">9.8%</span></td>
+          </tr>
+          <tr data-m="CN">
+            <td><span class="sym">华东医药</span><div class="sub2 num">000963</div></td>
+            <td><span class="badge b-CN">CN</span></td>
+            <td class="n num">500</td>
+            <td class="n num m">¥28.40</td>
+            <td class="n num">¥26.00</td>
+            <td class="n"><span class="num">¥13,000</span></td>
+            <td class="n"><span class="num down">-¥1,200</span><div class="sub2 num down">-8.45%</div></td>
+            <td class="n num down">-1.35%</td>
+            <td><span class="wbar"><i style="width:30%"></i></span><span class="num">6.7%</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="legend">
+    <b>权重</b>用人民币折算后的市值算 —— BTC 这 22.3% 是真金白银的占比，不是"$6,471 除以 ¥市值"的错值。<br>
+    <b>排序</b>按折算市值降序，所以币和股票会交叉出现 —— 这才看得出"钱压在哪"。
+  </div>
+</div>
+
+<!-- ══════ 2. 自选 ══════ -->
+<div class="block">
+  <div class="bh"><b>② 自选</b><span>分组里加「币圈」，徽章区分市场</span></div>
+  <div class="win">
+    <div class="win-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span style="margin-left:8px">自选</span></div>
+    <div class="body">
+      <div class="chips" style="margin-bottom:14px">
+        <span class="f" style="font-size:11.5px;margin-right:4px">分组</span>
+        <span class="chip on">全部</span>
+        <span class="chip">核心持仓</span>
+        <span class="chip">观察池</span>
+        <span class="chip">币圈</span>
+      </div>
+      <table>
+        <thead><tr><th>标的</th><th>市场</th><th class="n">现价</th><th class="n">24h</th><th class="n">成交额</th><th>分组</th></tr></thead>
+        <tbody>
+          <tr><td><span class="sym">BTC</span><div class="sub2">Bitcoin</div></td><td><span class="badge b-CRYPTO">CRYPTO</span></td><td class="n num">$80,895.7</td><td class="n num down">-0.93%</td><td class="n num m">$6.06 亿</td><td class="f">币圈</td></tr>
+          <tr><td><span class="sym">ETH</span><div class="sub2">Ethereum</div></td><td><span class="badge b-CRYPTO">CRYPTO</span></td><td class="n num">$2,380.43</td><td class="n num down">-0.76%</td><td class="n num m">$2.21 亿</td><td class="f">币圈</td></tr>
+          <tr><td><span class="sym">SOL</span><div class="sub2">Solana</div></td><td><span class="badge b-CRYPTO">CRYPTO</span></td><td class="n num">$102.49</td><td class="n num down">-1.60%</td><td class="n num m">$6,250 万</td><td class="f">币圈</td></tr>
+          <tr><td><span class="sym">贵州茅台</span><div class="sub2 num">600519</div></td><td><span class="badge b-CN">CN</span></td><td class="n num">¥1,680.00</td><td class="n num up">+0.82%</td><td class="n num m">¥42.1 亿</td><td class="f">核心持仓</td></tr>
+          <tr><td><span class="sym">AAPL</span><div class="sub2">Apple</div></td><td><span class="badge b-US">US</span></td><td class="n num">$190.50</td><td class="n num up">+1.24%</td><td class="n num m">$38.2 亿</td><td class="f">观察池</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="legend">自选表结构完全不用改 —— 只要 <code>stock_master</code> 里有 <b>BTC/ETH/SOL 的 market=CRYPTO 行</b>，分组下拉天然支持「币圈」。</div>
+</div>
+
+<!-- ══════ 3. 新增持仓 ══════ -->
+<div class="block">
+  <div class="bh"><b>③ 新增持仓</b><span>选市场 → 搜币 → 实时折算预览</span></div>
+  <div class="modal">
+    <h3>新增持仓</h3>
+    <div class="field">
+      <label>市场</label>
+      <div class="seg"><span>A股</span><span>港股</span><span>美股</span><span class="on">币圈</span></div>
+    </div>
+    <div class="field"><label>标的</label><div class="input" style="display:flex;justify-content:space-between"><span>BTC · Bitcoin</span><span class="f">已选</span></div></div>
+    <div class="row" style="gap:10px">
+      <div class="field" style="flex:1"><label>数量（枚）</label><div class="input">0.08</div></div>
+      <div class="field" style="flex:1"><label>成本（USDT/枚）</label><div class="input">76200</div></div>
+    </div>
+    <div class="calc">
+      现价 <span class="num">$80,895.7</span> × 0.08 = <span class="num">$6,471.66</span><br>
+      按 USD/CNY <span class="num">6.6849</span> 折算 = <span class="num">¥43,258</span><br>
+      浮盈 <span class="num up">+$375.66</span>（<span class="num up">+6.16%</span>）· 占组合 <span class="num">22.3%</span>
+    </div>
+  </div>
+  <div class="legend"><b>折算必须在这里就发生</b> —— 存进库的 <code>market_value</code> 是人民币，否则后面所有汇总都要改。</div>
+</div>
+
+<!-- ══════ 4. 降级态 ══════ -->
+<div class="block">
+  <div class="bh"><b>④ 降级态</b><span>汇率或币价拿不到时，不编数</span></div>
+  <div class="win">
+    <div class="win-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span style="margin-left:8px">持仓（汇率不可用）</span></div>
+    <div class="body">
+      <div class="warnbar">
+        <span>⚠</span>
+        <span>汇率源不可用 —— 币圈市值暂不折算，权重计算已排除币圈；股票部分不受影响。</span>
+      </div>
+      <table>
+        <thead><tr><th>标的</th><th>市场</th><th class="n">数量</th><th class="n">现价</th><th class="n">市值</th><th class="n">权重</th></tr></thead>
+        <tbody>
+          <tr><td><span class="sym">BTC</span></td><td><span class="badge b-CRYPTO">CRYPTO</span></td><td class="n num">0.08</td><td class="n num">$80,895.7</td><td class="n num f">— <span class="sub2">待汇率</span></td><td class="n f">不计入</td></tr>
+          <tr><td><span class="sym">贵州茅台</span></td><td><span class="badge b-CN">CN</span></td><td class="n num">20</td><td class="n num">¥1,680.00</td><td class="n num">¥33,600</td><td class="n num">39.7%</td></tr>
+          <tr><td><span class="sym">AAPL</span></td><td><span class="badge b-US">US</span></td><td class="n num">30</td><td class="n num">$190.50</td><td class="n num">¥38,204</td><td class="n num">45.1%</td></tr>
+          <tr><td><span class="sym">华东医药</span></td><td><span class="badge b-CN">CN</span></td><td class="n num">500</td><td class="n num">¥26.00</td><td class="n num">¥13,000</td><td class="n num">15.3%</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="legend"><b>关键</b>：不显示 <code>$0</code>、不显示 <code>¥0</code>、不按 1:1 硬算。宁可显示 <b>—</b> 并说明"权重已排除"。</div>
+</div>
+
+<script>
+  document.querySelectorAll('.chip[data-m]').forEach(function (c) {
+    c.addEventListener('click', function () {
+      document.querySelectorAll('.chip[data-m]').forEach(function (x) { x.classList.remove('on'); });
+      c.classList.add('on');
+      var m = c.getAttribute('data-m');
+      document.querySelectorAll('#rows tr').forEach(function (tr) {
+        tr.style.display = (m === 'all' || tr.getAttribute('data-m') === m) ? '' : 'none';
+      });
+    });
+  });
+  document.querySelectorAll('.seg span').forEach(function (s) {
+    s.addEventListener('click', function () {
+      s.parentNode.querySelectorAll('span').forEach(function (x) { x.classList.remove('on'); });
+      s.classList.add('on');
+    });
+  });
+</script>
+</div>
+</body>
+</html>
