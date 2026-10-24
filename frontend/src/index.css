@@ -5065,67 +5065,33 @@ html.mobile .turn-failure { padding: 0 4px; }
   padding: 0 0 6px;
   white-space: normal;
 }
-.thinking-block { min-width: 0; width: 100%; }
-.thinking-block-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--muted);
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-.thinking-block-pulse {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--blue);
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--blue) 55%, transparent);
-  animation: pulse 1.2s infinite;
-}
-.thinking-block-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 2px 0;
-  border: none;
-  background: none;
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--muted);
-  text-align: left;
-}
-.thinking-block-toggle:hover { color: var(--ink-2); }
-.thinking-block-chevron { width: 10px; flex: none; }
-.thinking-block-peek {
+/* 思考行（DSH 现状）：图标 + 思考 · 文本，平铺在步骤流里 */
+.tl-think { align-items: baseline; }
+.tl-think .tl-step-icon { margin-top: 1px; }
+.tl-think-label { color: var(--ink-2); flex: none; white-space: nowrap; }
+.tl-think-sep { color: var(--faint); flex: none; }
+.tl-think-text {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 400;
-  font-style: italic;
-  opacity: 0.85;
-}
-.thinking-block-body {
-  max-height: 4.8em;
-  overflow: auto;
-  border: 1px solid var(--line-soft, var(--line));
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--muted) 6%, transparent);
-  padding: 6px 8px;
-}
-.thinking-block.open .thinking-block-body { max-height: 12em; }
-.thinking-block-body pre {
-  margin: 0;
-  white-space: pre-wrap;
-  font-family: var(--mono, ui-monospace, Menlo, monospace);
-  font-size: 12px;
-  line-height: 1.45;
   color: var(--muted);
-  font-style: italic;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
+.tl-think-text[role="button"] { cursor: pointer; border-radius: 4px; }
+.tl-think-text[role="button"]:hover { color: var(--ink-2); }
+.tl-think:not(.open) .tl-think-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tl-think.streaming .tl-think-text {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
 .tl-step-icon {
   position: relative;
   z-index: 1;

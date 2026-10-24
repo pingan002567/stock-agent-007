@@ -3,7 +3,6 @@ import { toolLabel, type StreamStep, type StreamToolCall } from "@/hooks/useCopi
 import { toolParamSummary } from "@/components/features/taskToolMeta";
 import { formatDuration } from "@/utils/format";
 import { skillLabelOf } from "@/components/features/skillLabels";
-import { ThinkingBlock } from "@/components/features/ThinkingBlock";
 import { truncateText } from "@/components/features/taskToolMeta";
 import { summarizeToolResult } from "@/lib/toolResultSummary";
 
@@ -103,6 +102,34 @@ function ToolStepRow({ tool, onClick }: { tool: StreamToolCall; onClick?: (t: St
   );
 }
 
+/** 思考行：照 DSH 现状排版 —— 图标 + 「思考」+ · + 文本，平铺在步骤流里。
+ *  不再是可折叠的「思考过程」黑块：DSH 那样一行更省地方，也能看出它夹在哪两步之间。
+ *  文本过长（>90 字或带换行）时默认收起 3 行，点一下展开。 */
+function ReasoningRow({ text, streaming }: { text: string; streaming: boolean }) {
+  const [open, setOpen] = useState(false);
+  const compact = (text || "").replace(/\n{2,}/g, "\n").trim();
+  if (!compact) return null;
+  const collapsible = compact.length > 90 || compact.includes("\n");
+  const toggle = () => setOpen((v) => !v);
+  return (
+    <div className={`tl-step tl-think${streaming ? " streaming" : ""}${open ? " open" : ""}`}>
+      <span className="tl-step-icon reasoning"><ReasoningIcon /></span>
+      <span className="tl-think-label">思考</span>
+      <span className="tl-think-sep" aria-hidden>·</span>
+      <span
+        className="tl-think-text"
+        role={collapsible ? "button" : undefined}
+        tabIndex={collapsible ? 0 : undefined}
+        title={collapsible && !open ? compact : undefined}
+        onClick={collapsible ? toggle : undefined}
+        onKeyDown={collapsible ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } } : undefined}
+      >
+        {compact}
+      </span>
+    </div>
+  );
+}
+
 /** 步骤行的"对象"：个股代码 / 搜索关键词等，取不到就不显示 */
 function paramOf(tool: StreamToolCall): string {
   return toolParamSummary(tool.args);
@@ -143,15 +170,11 @@ export function ThoughtTimeline({ steps, active, onToolClick, expandAll = false,
           const isLast = i === visible.length - 1;
           if (step.kind === "reasoning") {
             return (
-              <div key={step.id} className="tl-step reasoning">
-                <span className="tl-step-icon reasoning"><ReasoningIcon /></span>
-                <div className="tl-step-main">
-                  <ThinkingBlock
-                    content={step.text}
-                    streaming={active && isLast}
-                  />
-                </div>
-              </div>
+              <ReasoningRow
+                key={step.id}
+                text={step.text}
+                streaming={active && isLast}
+              />
             );
           }
           return <ToolStepRow key={step.id} tool={step.tool} onClick={onToolClick} />;

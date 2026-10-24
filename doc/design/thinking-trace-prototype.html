@@ -100,10 +100,12 @@
 <h1>中间思考过程怎么展示</h1>
 <div class="sub">视觉统一走 DSH（无卡片、mono 图标 + <code>·</code> 分隔、细分割线）。下面是 4 种思考展示方式 + 折叠后的样子。</div>
 
-<div class="note">
-  <b>现状问题</b>：<code>⊠ 思考 · …</code> 是同一条灰色行，跟 12 条 <code>运行命令</code> 平铺在一列，
-  看不出"这段想法对应哪几步操作"，而且一长就整段铺开。<br>
-  <b>目标</b>：思考要能<b>看清但不占地方</b>，并且和它产生的那一步对得上。
+<div class="note" style="border-color:#cbe6d3;background:#f2fbf4">
+  <b>✅ 定稿（2026-10-24）</b>：采用 <b>① 现状</b> —— 就按 DSH 现在的样子排：
+  思考是 <code>图标 + 思考 · 文本</code> 的一行，平铺在工具步骤之间，不做阶段分组、不做卡片。<br>
+  <b>已实现</b>：产品里的 <code>ThoughtTimeline</code> 把原来的「思考过程」折叠块换成了这种一行式
+  （长文默认收 3 行，点一下展开）；同时删掉了不再使用的 <code>ThinkingBlock</code> 与对应样式。<br>
+  <span class="faint">下面 ②③④ 保留为设计过程记录，未采纳。</span>
 </div>
 
 <!-- ══ 1. 现状 ══ -->
