@@ -81,6 +81,20 @@ class StockInput(BaseModel):
     symbol: str = Field(description="股票代码，如 AAPL、600519")
 
 
+class MarketSentimentInput(BaseModel):
+    market: str | None = Field(
+        default=None,
+        description=(
+            "市场。留空=A 股（涨停/连板/炸板/赚钱效应）；"
+            "market='CRYPTO' 返回加密货币全市场（总市值 / BTC·ETH 主导率 / 稳定币总量 / 恐贪指数）"
+        ),
+    )
+
+
+class CryptoDerivativesInput(BaseModel):
+    symbol: str = Field(description="币种代码，如 BTC、ETH、SOL（不要带交易对后缀）")
+
+
 class HistoryInput(BaseModel):
     symbol: str = Field(description="股票代码，如 AAPL、600519")
     days: int = Field(default=30, description="历史天数（默认30天）")
@@ -584,6 +598,21 @@ invoke_data_capability = _tool(
     "按指定数据源直接调用命名能力（Mode A）。凭证由服务端注入，勿在对话中粘贴 Token。"
     "例：invoke_data_capability(provider='tonghuashun', capability='industry_boards')。",
     InvokeDataCapabilityInput, AuthorityLevel.A2,
+)
+get_market_sentiment = _tool(
+    "get_market_sentiment",
+    "全市场情绪原始数据（不给结论）。默认 A 股：涨停家数/连板梯队/炸板率/昨涨停今红盘率/涨跌家数。"
+    "market='CRYPTO' 时返回加密货币全市场：总市值、BTC·ETH 主导率、稳定币总量、恐慌贪婪指数。"
+    "注意：CRYPTO 分支是**全市场**数据，不是单个币的行情。",
+    MarketSentimentInput, AuthorityLevel.A2,
+)
+get_crypto_derivatives = _tool(
+    "get_crypto_derivatives",
+    "加密货币永续合约面（币圈的「筹码」）：资金费率与其 90 天分位、年化、持仓量、"
+    "散户/大户多空比、近 24h 多空清算、维持保证金率。"
+    "判断「多头是否拥挤」看资金费率分位（>80 拥挤），「谁在挨打」看清算两边对比。"
+    "无该合约的小币返回 degraded，不要臆造。",
+    CryptoDerivativesInput, AuthorityLevel.A2,
 )
 get_market_structure = _tool(
     "get_market_structure",

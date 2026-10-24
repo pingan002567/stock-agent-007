@@ -92,6 +92,7 @@ def _build_model_config() -> dict[str, Any]:
 A2_TOOLS = [
     "get_stock_context", "get_stock_financial", "get_daily_history", "search_stock_intel",
     "get_market_sentiment",
+    "get_crypto_derivatives",
     "get_industry_context", "get_market_structure", "refresh_market_data",
     "list_data_sources", "describe_data_capability", "invoke_data_capability",
     "add_watchlist_item", "list_watchlist", "remove_watchlist_item",

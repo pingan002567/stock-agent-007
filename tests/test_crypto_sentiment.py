@@ -236,3 +236,69 @@ def test_bridge_defaults_to_a_share(monkeypatch) -> None:
     assert bridge._get_market_sentiment({"market": ""}) == {"market": "A股"}
     assert bridge._get_market_sentiment({"market": "A股"}) == {"market": "A股"}
     assert calls == ["a_share", "a_share", "a_share"]
+
+
+# ── native schema 覆盖：wrapper 不存在时模型根本看不见工具 ──
+def test_native_wrappers_registered() -> None:
+    """`get_market_sentiment` / `get_crypto_derivatives` 必须有 StructuredTool wrapper。
+
+    只在 tool_bridge 里注册是不够的：模型侧 schema 来自 tools.py 的 wrapper，
+    缺了就会出现「prompt 说必须调用，但工具列表里没有」的哑火。
+    """
+    from backend.agent_runtime.deerflow_config import TOOL_GROUP_MAP
+    from backend.agent_runtime.tools import get_all_workbench_tools
+
+    tools = {t.name: t for t in get_all_workbench_tools()}
+    assert "get_market_sentiment" in tools
+    assert "get_crypto_derivatives" in tools
+    # 子代理按 authority group 取工具，必须在 a2-research 里
+    assert TOOL_GROUP_MAP["get_market_sentiment"] == "a2-research"
+    assert TOOL_GROUP_MAP["get_crypto_derivatives"] == "a2-research"
+    # 入参 schema 要能表达 market / symbol
+    sentiment_fields = set(tools["get_market_sentiment"].args_schema.model_fields)
+    assert "market" in sentiment_fields
+    deriv_fields = set(tools["get_crypto_derivatives"].args_schema.model_fields)
+    assert "symbol" in deriv_fields
+
+
+def test_native_market_sentiment_passes_market_through(monkeypatch) -> None:
+    """wrapper 把 market 参数原样交给 bridge handler（路由逻辑在 handler 里）。"""
+    from types import SimpleNamespace
+
+    from backend.agent_runtime import tools as tools_module
+    from backend.app_services.execution_policy import ExecutionMode
+
+    seen: dict = {}
+
+    class _StubGuard:
+        def require(self, *args, **kwargs):
+            return None
+
+    class _StubPolicy:
+        def decide(self, name):
+            return SimpleNamespace(mode=ExecutionMode.AUTO_SAFE, reason=None, next_action=None)
+
+    class _StubBridge:
+        _specs = {
+            "get_market_sentiment": SimpleNamespace(
+                domain="market-data",
+                required_authority=tools_module.AuthorityLevel.A2,
+                evidence_refs=[],
+            )
+        }
+        execution_policy = _StubPolicy()
+        permission_guard = _StubGuard()
+
+        def __init__(self):
+            self._handlers = {"get_market_sentiment": self._handle}
+
+        def _handle(self, arguments):
+            seen.update(arguments)
+            return {"market": arguments.get("market") or "CN"}
+
+        def _record_execution(self, **kwargs):
+            return None
+
+    monkeypatch.setattr(tools_module, "_get_bridge", lambda: _StubBridge())
+    tools_module.get_market_sentiment.invoke({"market": "CRYPTO"})
+    assert seen.get("market") == "CRYPTO"
