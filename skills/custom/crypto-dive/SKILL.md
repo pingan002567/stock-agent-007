@@ -5,6 +5,7 @@ allowed-tools:
   - get_crypto_derivatives
   - get_stock_context
   - get_daily_history
+  - get_market_sentiment
   - web_search
 ---
 
@@ -58,3 +59,7 @@ A 股看筹码分布、龙虎榜、两融、涨跌停；**这些在这里全部�
 - `liquidations_24h`：多头清算远大于空头 = 杠杆多头在被清洗，反弹前往往还有一跌。
 
 `get_stock_context(symbol)` 给现价与 24h 高低；`get_daily_history(symbol)` 给日线（UTC 切分）。
+
+`get_market_sentiment` 的 `market="CRYPTO"` 分支给的是**全市场数据**（总市值 / 24h 成交额 / BTC、ETH 主导率 / 稳定币总量 / 恐慌贪婪），**不是单币的**，别拿它当某只币的行情：
+- `btc_dominance_pct` 上升通常意味着资金往 BTC 躲；`stablecoin_total_usd` 增长通常意味着场外资金在进场。
+- 这些是**判断素材，不是结论**——必须和价格结构、合约资金面对照看，不能只凭一个数下判断。

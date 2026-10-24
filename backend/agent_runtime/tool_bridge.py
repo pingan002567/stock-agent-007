@@ -600,7 +600,7 @@ class WorkbenchToolBridge:
                 AuthorityLevel.A2,
                 "low",
                 True,
-                {},
+                {"market": "str?"},
                 ["market_sentiment", "limit_pool", "market_review"],
             ),
             "get_crypto_derivatives": ToolSpec(
@@ -1362,7 +1362,16 @@ class WorkbenchToolBridge:
             }
 
     def _get_market_sentiment(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        """A 股全市场情绪温度计（涨停/连板/炸板/赚钱效应 + 温度与阶段）。"""
+        """全市场情绪温度计：默认 A 股；market=CRYPTO 时走加密货币全市场。
+
+        A 股分支（涨停/连板/炸板/赚钱效应）保持原行为不变；CRYPTO 分支只给
+        全市场原始数据（市值/主导率/稳定币总量/恐贪），不是单币行情。
+        """
+        market = str(arguments.get("market") or "").strip().upper()
+        if market in {"CRYPTO", "币", "币圈", "加密货币"}:
+            from backend.stock_domain.crypto_sentiment import get_crypto_market_sentiment
+
+            return get_crypto_market_sentiment()
         from backend.stock_domain.sentiment_tools import get_market_sentiment
 
         return get_market_sentiment()
