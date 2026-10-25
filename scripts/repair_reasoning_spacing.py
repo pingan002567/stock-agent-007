@@ -62,13 +62,31 @@ normal normalized normalized percent percent percentile crowded crowded funding 
 
 #: 不可拆的片段：引号/反引号内容、URL、snake_case 标识符、全大写缩写、数字、
 #: 斜杠分隔的代码（BTC/ETH）。**一次扫描**，避免后一条规则把前一条的占位符再包一层。
+def _known_identifiers() -> list[str]:
+    """工具名等「不能拆」的标识符：用后端工具注册表当白名单，按长度倒序。"""
+    names: set[str] = set()
+    try:
+        from backend.config.tool_labels import TOOL_LABELS
+
+        names.update(TOOL_LABELS)
+    except Exception:  # noqa: BLE001 - 独立运行时后端包不可导入也没关系
+        pass
+    names.update({"write_todos", "web_search", "web_fetch", "read_file", "write_file", "bash", "task"})
+    return sorted((n for n in names if "_" in n), key=len, reverse=True)
+
+
+IDENTIFIERS = _known_identifiers()
+
 PROTECT_RE = re.compile(
     "|".join(
         [
             r"`[^`]*`",
             r'"[^"]*"',
             r"https?://\S+",
-            r"[a-z][a-z0-9]*(?:_[a-z0-9]+)+",
+            # 已知工具/标识符（任意位置，大小写敏感）
+            *(re.escape(name) for name in IDENTIFIERS),
+            # 其余 snake_case 片段（含大写开头，如 Notemarket_review...）
+            r"[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+",
             r"\b[A-Z]{2,}(?:/[A-Z]{2,})+\b",
             r"\b[A-Z]{2,}\b",
             r"\d+(?:[.,]\d+)?",
@@ -180,6 +198,8 @@ def repair_text(text: str, vocab: set[str], max_len: int = 20) -> tuple[str, boo
 
     # 只有「连续字母 >= 10」才是粘连候选：正常单词（derivatives/opportunity）
     # 不该被拆，短串也不值得拆错
+    # 剩下的下划线片段（未命中白名单的）当作分隔符：宁可丢下划线，也要可读
+    work = re.sub(r"[A-Za-z0-9]*_[A-Za-z0-9_]*", lambda m: m.group(0).replace("_", " "), work)
     work = re.sub(r"[A-Za-z]{10,}", split_run, work)
 
     # 5) 还原占位
