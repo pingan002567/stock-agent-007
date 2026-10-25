@@ -208,7 +208,7 @@ def repair_text(text: str, vocab: set[str], max_len: int = 20) -> tuple[str, boo
     # 不该被拆，短串也不值得拆错
     # 剩下的下划线片段（未命中白名单的）当作分隔符：宁可丢下划线，也要可读
     work = re.sub(r"[A-Za-z0-9]*_[A-Za-z0-9_]*", lambda m: m.group(0).replace("_", " "), work)
-    work = re.sub(r"[A-Za-z]{7,}", split_run, work)
+    work = re.sub(r"[A-Za-z]{12,}", split_run, work)
 
     # 5) 还原占位
     def restore(match: re.Match[str]) -> str:
@@ -249,7 +249,7 @@ def main() -> None:
             skipped += 1
             continue
         # 粘连判据：存在 >=12 个连续字母的片段（正常英文单词很少这么长）
-        if not text or not re.search(r"[A-Za-z]{7,}", PROTECT_RE.sub(" ", text)):
+        if not text or not re.search(r"[A-Za-z]{12,}", PROTECT_RE.sub(" ", text)):
             skipped += 1
             continue
         targets.append((message_id, text))
