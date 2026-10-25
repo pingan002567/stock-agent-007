@@ -178,9 +178,9 @@ def repair_text(text: str, vocab: set[str], max_len: int = 20) -> tuple[str, boo
             return run
         return " ".join(pieces)
 
-    # 只有「连续字母 >= 12」才是粘连候选：正常单词（derivatives/opportunity）
+    # 只有「连续字母 >= 10」才是粘连候选：正常单词（derivatives/opportunity）
     # 不该被拆，短串也不值得拆错
-    work = re.sub(r"[A-Za-z]{12,}", split_run, work)
+    work = re.sub(r"[A-Za-z]{10,}", split_run, work)
 
     # 5) 还原占位
     def restore(match: re.Match[str]) -> str:
@@ -221,7 +221,7 @@ def main() -> None:
             skipped += 1
             continue
         # 粘连判据：存在 >=12 个连续字母的片段（正常英文单词很少这么长）
-        if not text or not re.search(r"[A-Za-z]{12,}", PROTECT_RE.sub(" ", text)):
+        if not text or not re.search(r"[A-Za-z]{10,}", PROTECT_RE.sub(" ", text)):
             skipped += 1
             continue
         targets.append((message_id, text))
