@@ -176,11 +176,13 @@ versionCode 2 / versionName 0.2.0，只含 arm64-v8a，JS 已内联，可独立�
 2. 签名沿用 RN 模板的 **debug keystore**（release 也用它）。要发正式包需替换
    `signingConfigs`，否则同包名同签名只能做内测分发。
 
-复现命令：
+复现命令（**只保留最新产物**，旧版本自动删除）：
 
 ```bash
-cd mobile-rn/android
-JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew assembleRelease \
-  -PreactNativeArchitectures=arm64-v8a
-# 产物：android/app/build/outputs/apk/release/app-release.apk
+cd mobile-rn
+npm run package:android
+# 产物：StockAgent-<versionName>-arm64.apk（目录里始终只有这一份）
 ```
+
+脚本 `mobile-rn/scripts/package-android.mjs` 会读 `android/app/build.gradle`
+里的 versionName 命名产物，并在复制前删掉所有旧的 `StockAgent-*.apk`。

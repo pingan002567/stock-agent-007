@@ -41,7 +41,8 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "postinstall": "node scripts/patch-gradle-mirror.mjs"
+    "postinstall": "node scripts/patch-gradle-mirror.mjs",
+    "package:android": "node scripts/package-android.mjs"
   },
   "private": true
 }
