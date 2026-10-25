@@ -146,7 +146,12 @@ function parseSkillTrace(raw: unknown): SkillTraceStep[] {
 export function applyStreamUpdate(state: AssistantState, u: StreamUpdate): void {
   switch (u.kind) {
     case 'reasoning': {
-      state.phase = 'reasoning';
+      // 后端把思维链挂在「带 tool_calls 的分片」上，所以文本会晚一拍到达：
+      // 真实顺序是 tool_call → reasoning → tool_result。这时把状态从
+      // 「调用工具…」改回「思考中…」会让用户以为倒退了，只在还没进工具/回答时才切。
+      if (state.phase !== 'tools' && state.phase !== 'answering' && state.phase !== 'final') {
+        state.phase = 'reasoning';
+      }
       if (state.reasoningText.length === 0) state.reasoningText = u.text;
       else if (state.reasoningText !== u.text) state.reasoningText += '\n' + u.text;
       break;

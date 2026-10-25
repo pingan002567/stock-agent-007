@@ -166,3 +166,21 @@ def test_tool_labels_cover_all_registered_tools():
     assert tool_label("get_crypto_derivatives") == "加密合约"
     # 未登记时不显示「未知」，回退原名
     assert tool_label("not_a_tool") == "not_a_tool"
+
+
+def test_android_parse_keeps_phase_when_reasoning_arrives_late():
+    """安卓端：思维链晚于 tool_call 到达时不能把状态退回 reasoning。
+
+    真实 SSE 顺序是 tool_call → reasoning → tool_result（思维链挂在带 tool_calls
+    的分片上）。安卓 applyStreamUpdate 以前无条件 `phase = 'reasoning'`，
+    界面上会出现「调用工具…」倒回「思考中…」。
+    """
+    import re
+    from pathlib import Path
+
+    src = Path("mobile-rn/src/api/parse.ts").read_text()
+    block = re.search(r"case 'reasoning': \{(.*?)break;", src, re.S)
+    assert block, "找不到 reasoning 分支"
+    body = block.group(1)
+    assert "state.phase !== 'tools'" in body, "reasoning 分支必须避开 tools 状态"
+    assert "state.phase !== 'answering'" in body, "reasoning 分支必须避开 answering 状态"
