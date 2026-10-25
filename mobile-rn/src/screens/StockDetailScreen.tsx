@@ -13,7 +13,7 @@ import {
 import { ErrorState } from '../components/ErrorState';
 import { PriceChart } from '../components/PriceChart';
 import { trendColor } from '../lib/colors';
-import { formatMoney, relativeTime } from '../lib/format';
+import { marketLabel, formatMoney, relativeTime } from '../lib/format';
 import type { RootStackParamList } from '../navigation';
 import { useConnection } from '../store/connection';
 import { usePrefill } from '../store/prefill';
@@ -152,7 +152,7 @@ export default function StockDetailScreen() {
       {/* 概况 */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>概况</Text>
-        {ctx?.market ? <Row label="市场" value={String(ctx.market)} /> : null}
+        {ctx?.market ? <Row label="市场" value={marketLabel(ctx.market)} /> : null}
         {ctx?.industry ? <Row label="行业" value={String(ctx.industry)} /> : null}
         {ctx?.sector ? <Row label="板块" value={String(ctx.sector)} /> : null}
         {ctx?.ai_state?.stance ? <Row label="观点" value={String(ctx.ai_state.stance)} /> : null}

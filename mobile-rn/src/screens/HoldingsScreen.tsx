@@ -73,11 +73,17 @@ export default function HoldingsScreen() {
   const summary = data?.summary;
   const items = data?.items ?? [];
 
-  const totalValue = Number(summary?.total_value ?? 0);
-  const marketValue = Number(summary?.market_value ?? 0);
-  const cash = Number(summary?.available_cash ?? 0);
-  const cashPct = Number(summary?.cash_pct ?? 0);
-  const holdingPct = Math.max(0, Math.min(100, 100 - cashPct));
+  // 无汇率时后端明确给 null（converted=false），**不能**当 0：否则总资产显示 ¥0，
+  // 用户会以为资产清零。用 null 透传到渲染层，显示「—」并给出原因。
+  const totalValue = summary?.total_value ?? null;
+  const marketValue = summary?.market_value ?? null;
+  const cash = summary?.available_cash ?? null;
+  const cashPct = summary?.cash_pct ?? null;
+  const holdingPct = cashPct == null ? null : Math.max(0, Math.min(100, 100 - cashPct));
+  const fx = data?.fx;
+
+  /** 折合金额：null → 「—」 */
+  const cny = (v: number | null | undefined, digits = 0) => (v == null ? '—' : `¥${money(v, digits)}`);
 
   // 后端 weight_pct 目前恒为 0（未计算），这里按持仓市值自己算
   /** 分币种小计（后端已按当天汇率给，缺汇率时 cny 为 null） */
@@ -89,9 +95,11 @@ export default function HoldingsScreen() {
   /** 非人民币持仓：额外显示折合值，避免误以为是人民币计价 */
   const isForeign = (it: HoldingItem) => String(it.currency ?? 'CNY').toUpperCase() !== 'CNY';
 
-  const weightOf = (it: HoldingItem) => {
-    const mv = Number(it.market_value ?? 0);
-    return marketValue > 0 ? (mv / marketValue) * 100 : 0;
+  const weightOf = (it: HoldingItem): number | null => {
+    if (marketValue == null || marketValue <= 0) return null;
+    const mv = it.market_value;
+    if (mv == null) return null;
+    return (mv / marketValue) * 100;
   };
   const totalCost = items.reduce((s, it) => s + Number(it.cost ?? 0) * Number(it.quantity ?? 0), 0);
   const totalPnl = items.reduce((s, it) => s + Number(it.pnl_amount ?? 0), 0);
@@ -101,10 +109,10 @@ export default function HoldingsScreen() {
   const analyze = () => {
     setMenuVisible(false);
     const lines = items
-      .map((it) => `${it.symbol} ${it.name}：${it.quantity} 股，成本 ${it.cost}，现价 ${it.quote?.last ?? '—'}，浮盈亏 ${signed(it.pnl_amount)}（${signed(it.pnl_pct)}%）`)
+      .map((it) => `${it.symbol} ${it.name}：${it.quantity} ${quantityUnit(it.market)}，成本 ${currencyMoney(it.cost, it.currency)}，现价 ${it.quote?.last ?? '—'}，浮盈亏 ${signed(it.pnl_amount)}（${signed(it.pnl_pct)}%）`)
       .join('\n');
     usePrefill.getState().set(
-      `这是我的当前持仓，请做一次组合体检：\n${lines}\n\n总资产 ${money(totalValue)}，持仓市值 ${money(marketValue)}，可用资金 ${money(cash)}，持仓占比 ${holdingPct.toFixed(1)}%。\n请给出：集中度与风险点、每只的处置建议（继续持有/减仓/观察）、以及需要我补充的信息。数字以我给的为准，不要编造。`,
+      `这是我的当前持仓，请做一次组合体检：\n${lines}\n\n总资产 ${totalValue == null ? '无当日汇率，未折算' : `¥${money(totalValue)}`}，持仓市值 ${marketValue == null ? '未折算' : `¥${money(marketValue)}`}，可用资金 ${cash == null ? '未知' : `¥${money(cash)}`}，持仓占比 ${holdingPct == null ? '未知' : `${holdingPct.toFixed(1)}%`}。\n请给出：集中度与风险点、每只的处置建议（继续持有/减仓/观察）、以及需要我补充的信息。数字以我给的为准，不要编造。`,
       { page: 'portfolio' }
     );
     navigation.navigate('Main', { screen: 'Chat' });
@@ -149,7 +157,7 @@ export default function HoldingsScreen() {
   const renderItem = ({ item }: { item: HoldingItem }) => {
     const pnlPct = Number(item.pnl_pct ?? 0);
     const color = trendColor(pnlPct);
-    const weight = weightOf(item);
+    const weight = weightOf(item);  // null = 无汇率，算不出跨币种权重
     const last = item.quote?.last;
     const dayPct = Number(item.quote?.change_pct ?? 0);
     const stale = !!item.quote?.stale || !!item.quote?.degraded;
@@ -188,14 +196,16 @@ export default function HoldingsScreen() {
         </View>
 
         <View style={[styles.barWrap, { backgroundColor: t.sep }]}>
-          <View style={[styles.bar, { width: `${Math.min(100, weight)}%`, backgroundColor: t.accent }]} />
+          <View style={[styles.bar, { width: `${Math.min(100, weight ?? 0)}%`, backgroundColor: t.accent }]} />
         </View>
 
         <View style={styles.cardBot}>
           <Text style={[styles.pnl, { color }]}>
             {signed(item.pnl_amount)} ({signed(pnlPct)}%)
           </Text>
-          <Text style={[styles.meta, { color: t.sub }]}>权重 {weight.toFixed(1)}%</Text>
+          <Text style={[styles.meta, { color: t.sub }]}>
+            权重 {weight == null ? '—' : `${weight.toFixed(1)}%`}
+          </Text>
         </View>
       </Pressable>
     );
@@ -208,7 +218,7 @@ export default function HoldingsScreen() {
         <View style={[styles.island, { backgroundColor: t.cardAlt }]}>
           <Text style={[styles.islandTitle, { color: t.text }]}>持仓</Text>
           {items.length > 0 ? (
-            <Text style={[styles.islandValue, { color: t.sub }]}>¥{money(totalValue)}</Text>
+            <Text style={[styles.islandValue, { color: t.sub }]}>{cny(totalValue)}</Text>
           ) : null}
           {data?.demo ? <Text style={[styles.demoTag, { color: t.sub }]}>演示</Text> : null}
           <View style={styles.spacer} />
@@ -235,22 +245,28 @@ export default function HoldingsScreen() {
             <View style={[styles.summary, { backgroundColor: t.groupBg }]}>
               <View style={styles.sumTop}>
                 <Text style={[styles.sumLabel, { color: t.sub }]}>总资产</Text>
-                <Text style={[styles.sumValue, { color: t.text }]}>¥{money(totalValue, 2)}</Text>
+                <Text style={[styles.sumValue, { color: t.text }]}>{cny(totalValue, 2)}</Text>
               </View>
+              {totalValue == null ? (
+                <Text style={[styles.fxWarn, { color: '#B45309' }]}>
+                  无当日汇率，暂不折算 —— 分币种小计照常，折合总额与跨币种权重失效
+                </Text>
+              ) : null}
               {buckets.length > 1 || (buckets[0] && buckets[0].currency !== 'CNY') ? (
                 <View style={[styles.curRow, { borderTopColor: t.sep }]}>
                   {buckets.map((b) => (
                     <Text key={String(b.currency)} style={[styles.curChip, { color: t.sub }]}>
-                      {currencySign(b.currency)} {money(b.native)} · {b.count ?? 0} 只
+                      {currencySign(b.currency)} {money(b.native)} · {b.count ?? 0} 项
+                      {b.cny != null && marketValue ? ` · ${((b.cny / marketValue) * 100).toFixed(1)}%` : ''}
                       {b.cny == null ? '（无汇率）' : ''}
                     </Text>
                   ))}
                 </View>
               ) : null}
               <View style={[styles.sumGrid, { borderTopColor: t.sep }]}>
-                <Stat label="持仓市值" value={`¥${money(marketValue)}`} />
-                <Stat label="可用资金" value={`¥${money(cash)}`} />
-                <Stat label="持仓占比" value={`${holdingPct.toFixed(1)}%`} />
+                <Stat label="持仓市值" value={cny(marketValue)} />
+                <Stat label="可用资金" value={cny(cash)} />
+                <Stat label="持仓占比" value={holdingPct == null ? '—' : `${holdingPct.toFixed(1)}%`} />
                 <Stat
                   label={`总盈亏（${items.length} 项）`}
                   value={`${signed(totalPnl)} (${signed(totalPnlPct)}%)`}
@@ -258,6 +274,23 @@ export default function HoldingsScreen() {
                 />
               </View>
             </View>
+
+            {fx ? (
+              <View style={styles.fxRow}>
+                {fx.degraded ? (
+                  <Text style={[styles.fxWarn, { color: '#B45309' }]}>
+                    ⚠ 汇率不可用（{fx.degraded_reason ?? '上游失败'}）—— 分币种小计照常，折合总额与跨币种权重失效
+                  </Text>
+                ) : (
+                  <Text style={[styles.fxText, { color: t.sub }]}>
+                    当日汇率 {fx.as_of ?? '—'}
+                    {fx.usd_cny != null ? ` · USD/CNY ${fx.usd_cny.toFixed(4)}` : ''}
+                    {fx.hkd_cny != null ? ` · HKD/CNY ${fx.hkd_cny.toFixed(4)}` : ''}
+                    {fx.usdt_usd != null ? ` · USDT/USD ${fx.usdt_usd.toFixed(4)}` : ''}
+                  </Text>
+                )}
+              </View>
+            ) : null}
 
             {degraded > 0 ? (
               <View style={styles.notice}>
@@ -451,6 +484,9 @@ const baseStyles = StyleSheet.create({
   error: { color: '#d33', fontSize: 12, marginTop: 8 },
   submit: { borderRadius: 10, alignItems: 'center', paddingVertical: 12, marginTop: 12 },
   submitText: { color: '#fff', fontWeight: '600' },
+  fxRow: { marginTop: 6 },
+  fxText: { fontSize: 11, lineHeight: 16 },
+  fxWarn: { fontSize: 11, lineHeight: 16 },
   curRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingTop: 10 },
   curChip: { fontSize: 12, fontVariant: ['tabular-nums'] },
   sumGrid: {

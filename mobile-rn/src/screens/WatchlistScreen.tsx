@@ -19,6 +19,7 @@ import { addWatchlistItem, deleteWatchlistItem, fetchWatchlist, searchStocks } f
 import { ErrorState } from '../components/ErrorState';
 import { Sheet } from '../components/Sheet';
 import { trendColor } from '../lib/colors';
+import { marketLabel } from '../lib/format';
 import { useThemedStyles, useTokens } from '../lib/tokens';
 import type { RootStackParamList } from '../navigation';
 import { useConnection } from '../store/connection';
@@ -188,7 +189,9 @@ export default function WatchlistScreen() {
           </View>
 
           <View style={styles.cardBot}>
-            {item.market ? <Text style={[styles.meta, { color: t.sub }]}>{item.market}</Text> : null}
+            {item.market ? (
+              <Text style={[styles.meta, { color: t.sub }]}>{marketLabel(item.market)}</Text>
+            ) : null}
             {last != null ? (
               <Text style={[styles.change, { color }]}>{signed(pct)}%</Text>
             ) : (

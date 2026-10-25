@@ -196,20 +196,34 @@ export interface CurrencyBucket {
   count?: number;
 }
 
+/** 当日汇率（后端按当天汇率折算，折算值不落库；拿不到汇率时折合类字段为 null） */
+export interface FxInfo {
+  as_of?: string;
+  usd_cny?: number;
+  hkd_cny?: number;
+  usdt_usd?: number;
+  degraded?: boolean;
+  degraded_reason?: string;
+}
+
 export interface HoldingsSummary {
-  total_value?: number;
+  /** 折合 CNY；**无汇率时为 null**，不能当 0 处理 */
+  total_value?: number | null;
+  market_value?: number | null;
+  available_cash?: number | null;
+  cash_pct?: number | null;
   /** 分币种小计：总资产折合的前提，缺汇率时 cny 为 null */
   by_currency?: CurrencyBucket[];
   positions?: number;
   max_weight_pct?: number;
-  available_cash?: number;
-  cash_pct?: number;
   source?: string;
   [key: string]: unknown;
 }
 
 export interface HoldingsResponse {
   summary?: HoldingsSummary;
+  /** 当日汇率与降级信息 */
+  fx?: FxInfo;
   items?: HoldingItem[];
   demo?: boolean;
   quotes_degraded_count?: number;
