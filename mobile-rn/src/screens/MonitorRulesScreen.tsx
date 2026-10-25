@@ -12,6 +12,28 @@ import type { MonitorRule } from '../types';
 
 const SEVERITIES = ['high', 'medium', 'low'] as const;
 
+/** 规则类型：名字与后端一致（monitor_service 按 rule_type 分支） */
+const RULE_TYPES = [
+  { id: 'price_change_pct_gt', label: '涨跌幅', unit: '涨跌幅阈值（%）', placeholder: '3', hint: '例如 600519 / BTC' },
+  { id: 'crypto_funding_rate_gt', label: '资金费率', unit: '资金费率阈值（%）', placeholder: '0.02', hint: '仅加密，例如 BTC' },
+] as const;
+
+/** rule_type 中文化：以前列表直接显示原始英文，其它端建的规则在手机上看不懂 */
+const RULE_TYPE_LABELS: Record<string, string> = {
+  price_change_pct_gt: '涨跌幅',
+  price_above: '突破价位',
+  price_below: '跌破价位',
+  volume_spike: '放量',
+  crypto_funding_rate_gt: '资金费率',
+  single_position_weight_gt: '单票超限',
+  pnl_pct_lt: '浮亏超限',
+};
+
+function ruleTypeLabel(raw?: string): string {
+  const key = String(raw ?? '');
+  return RULE_TYPE_LABELS[key] ?? (key || '规则');
+}
+
 export default function MonitorRulesScreen() {
   const t = useTokens();
   const styles = useThemedStyles(baseStyles);
@@ -26,6 +48,7 @@ export default function MonitorRulesScreen() {
   const [sym, setSym] = useState('');
   const [threshold, setThreshold] = useState('3');
   const [severity, setSeverity] = useState<string>('medium');
+  const [ruleType, setRuleType] = useState<string>(RULE_TYPES[0].id);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -75,11 +98,12 @@ export default function MonitorRulesScreen() {
     const symbol = sym.trim();
     if (!symbol) return;
     try {
+      const meta = RULE_TYPES.find((r) => r.id === ruleType) ?? RULE_TYPES[0];
       await upsertMonitorRule(baseURL, token, {
-        rule_type: 'price_change_pct_gt',
-        title: `${symbol} 涨跌幅`,
-        symbol,
-        threshold: Number(threshold) || 3,
+        rule_type: meta.id,
+        title: `${symbol} ${meta.label}`,
+        symbol: String(symbol).toUpperCase(),
+        threshold: Number(threshold) || (meta.id === 'crypto_funding_rate_gt' ? 0.02 : 3),
         severity,
         enabled: true,
         source: 'android',
@@ -141,7 +165,7 @@ export default function MonitorRulesScreen() {
                     </Text>
                   ) : (
                     <Text style={[styles.trigger, { color: t.sub }]}>
-                      {r.rule_type}
+                      {ruleTypeLabel(r.rule_type)}
                       {r.symbol ? ` · ${r.symbol}` : ''}
                       {r.threshold != null ? ` · 阈值 ${r.threshold}` : ''}
                     </Text>
@@ -166,20 +190,41 @@ export default function MonitorRulesScreen() {
       <Sheet visible={showAdd} onClose={() => setShowAdd(false)}>
         <Text style={[styles.sheetTitle, { color: t.sub }]}>新建盯盘规则</Text>
         <View style={styles.form}>
-          <Text style={[styles.label, { color: t.sub }]}>股票代码</Text>
+          <Text style={[styles.label, { color: t.sub }]}>规则类型</Text>
+          <View style={styles.sevRow}>
+            {RULE_TYPES.map((rt) => {
+              const on = ruleType === rt.id;
+              return (
+                <Pressable
+                  key={rt.id}
+                  style={[styles.sevBtn, { borderColor: on ? t.accent : t.sep, backgroundColor: on ? t.cardAlt : 'transparent' }]}
+                  onPress={() => {
+                    setRuleType(rt.id);
+                    setThreshold(String(rt.placeholder));
+                  }}
+                >
+                  <Text style={[styles.sevText, { color: on ? t.accent : t.sub }]}>{rt.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <Text style={[styles.label, { color: t.sub }]}>标的代码</Text>
           <TextInput
             style={[styles.input, { color: t.text, borderColor: t.sep }]}
-            placeholder="例如 600519"
+            placeholder={(RULE_TYPES.find((r) => r.id === ruleType) ?? RULE_TYPES[0]).hint}
             placeholderTextColor={t.sub}
             value={sym}
             onChangeText={setSym}
-            autoCapitalize="none"
+            autoCapitalize="characters"
             autoCorrect={false}
           />
-          <Text style={[styles.label, { color: t.sub }]}>涨跌幅阈值（%）</Text>
+          <Text style={[styles.label, { color: t.sub }]}>
+            {(RULE_TYPES.find((r) => r.id === ruleType) ?? RULE_TYPES[0]).unit}
+          </Text>
           <TextInput
             style={[styles.input, { color: t.text, borderColor: t.sep }]}
-            placeholder="3"
+            placeholder={(RULE_TYPES.find((r) => r.id === ruleType) ?? RULE_TYPES[0]).placeholder}
             placeholderTextColor={t.sub}
             value={threshold}
             onChangeText={setThreshold}
