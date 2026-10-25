@@ -163,10 +163,24 @@ Web 是 `steps[]` 有序交错。要在安卓对齐需给 `AssistantState` 增�
 | T8 设置概览 | 本次 | 健康度 + 待确认，且「拉不到显示 —」 |
 
 验证方式统一为：`mobile-rn && npm run typecheck`（`tsc --noEmit`）+ 后端接口真跑。
-**APK 需要重新打包**：仓库里的 `StockAgent-0.1.0.apk` 是 10-17 的旧产物，
-本次改动都还没进包。打包命令：
+**APK 已打包**（2026-10-25）：`mobile-rn/StockAgent-0.2.0-arm64.apk`（36.6 MB，
+versionCode 2 / versionName 0.2.0，只含 arm64-v8a，JS 已内联，可独立安装）。
+
+打包过程中踩到并已修掉的两个环境问题：
+
+1. **Gradle 访问 plugins.gradle.org 失败**（curl 能通、Gradle HEAD 不通）→
+   在 `mobile-rn/android/settings.gradle` 的 pluginManagement 前置阿里云镜像；
+   RN 的 included build（`@react-native/gradle-plugin/settings.gradle.kts`）
+   也硬编码了 gradlePluginPortal，用 `scripts/patch-gradle-mirror.mjs` 打补丁，
+   并挂到 `npm run postinstall` 上（`npm install` 后自动重放）。
+2. 签名沿用 RN 模板的 **debug keystore**（release 也用它）。要发正式包需替换
+   `signingConfigs`，否则同包名同签名只能做内测分发。
+
+复现命令：
 
 ```bash
 cd mobile-rn/android
-JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew assembleDebug
+JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew assembleRelease \
+  -PreactNativeArchitectures=arm64-v8a
+# 产物：android/app/build/outputs/apk/release/app-release.apk
 ```
