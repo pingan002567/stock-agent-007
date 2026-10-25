@@ -614,3 +614,36 @@ def test_gemini_thought_blocks_become_reasoning():
     answers = [e for e in events if e["type"] == "partial_answer"]
     assert reasoning[0]["payload"]["text"] == "先算一下估值分位"
     assert answers[0]["payload"]["text"] == "分位 62%，偏贵"
+
+
+def test_reasoning_stream_fragments_keep_spaces():
+    """流式思维链分片必须保留前导空格，否则英文单词会粘成一片。
+
+    真实故障：思考里显示 `Letmestartbygatheringrequireddata`。
+    根因是分片层做了 strip —— 模型原始分片是 `'We'`、`' need'`、`' answer'`。
+    """
+    from backend.agent_runtime.reasoning_openai import extract_reasoning, reasoning_text_of
+
+    assert reasoning_text_of(" need") == " need"
+    assert extract_reasoning({"reasoning_content": " need"})["reasoning_content"] == " need"
+    # 逐片累积（langchain 合并 additional_kwargs 的方式：字符串拼接）
+    acc = ""
+    for piece in ["We", " need", " answer", ".", " Let", "'s", " check"]:
+        acc += str(extract_reasoning({"reasoning_content": piece})["reasoning_content"])
+    assert acc == "We need answer. Let's check"
+
+
+def test_mapper_does_not_strip_each_reasoning_fragment():
+    """mapper 也只能在整段上 trim，不能在分片层 trim。"""
+    from backend.agent_runtime.deerflow_client import DeerFlowEventMapper
+
+    mapper = DeerFlowEventMapper()
+    msg = SimpleNamespace(
+        type="ai", id="m1", content="", additional_kwargs={"reasoning_content": " need to check"},
+        tool_calls=[{"id": "c1", "name": "get_stock_context", "args": {}}],
+    )
+    events = mapper.map(("messages-tuple", [msg]))
+    reasoning = [e for e in events if e["type"] == "reasoning"]
+    assert reasoning, "应产出 reasoning 事件"
+    # 内部空格保留、首尾空白被整段 trim
+    assert reasoning[0]["payload"]["text"] == "need to check"

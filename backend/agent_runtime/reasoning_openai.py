@@ -34,14 +34,19 @@ REASONING_FIELDS = ("reasoning_content", "reasoning", "reasoning_details")
 
 
 def reasoning_text_of(value: Any) -> str:
-    """把任意形状的思维链字段拍成文本（str / dict / list 都见过）。"""
+    """把任意形状的思维链字段拍成文本（str / dict / list 都见过）。
+
+    **不要在这里 strip**：流式分片是 `'We'`、`' need'`、`' answer'` 这种带前导空格的
+    增量，strip 之后拼起来会变成 `Weneedanswer`（真实故障：思考里英文单词全粘在一起）。
+    需要去首尾空白时，只能在「拼好的整段」上做，不能在分片层做。
+    """
     if value is None:
         return ""
     if isinstance(value, str):
-        return value.strip()
+        return value
     if isinstance(value, list):
         parts = [reasoning_text_of(item) for item in value]
-        return "".join(part for part in parts if part).strip()
+        return "".join(part for part in parts if part)
     if isinstance(value, dict):
         for key in ("text", "content", "reasoning", "summary", "thinking"):
             if key in value:
@@ -63,8 +68,9 @@ def extract_reasoning(source: Any) -> dict[str, Any]:
             continue
         out[field] = value
         text = reasoning_text_of(value)
-        if text:
+        if text.strip():
             # 统一再放一份文本版，下游只认 reasoning_content 也能用
+            # （保留原始空白：分片会被后续拼接）
             out["reasoning_content"] = text
             break
     return out

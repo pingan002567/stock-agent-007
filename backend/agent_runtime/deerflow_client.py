@@ -426,15 +426,7 @@ class DeerFlowEventMapper:
             extra = {}
         for key in self._REASONING_KEYS:
             value = extra.get(key) or self._get(message, key)
-            if value:
-                print(
-                    "REASONING-RAW",
-                    key,
-                    type(value).__name__,
-                    repr(value)[:160],
-                    flush=True,
-                )
-            text = self._reasoning_value_text(value)
+            text = self._reasoning_value_text(value).strip()
             if text:
                 return text
 
@@ -447,14 +439,18 @@ class DeerFlowEventMapper:
         return ""
 
     def _reasoning_value_text(self, value: Any) -> str:
-        """reasoning 字段可能是 str / dict / list，统一成文本"""
+        """reasoning 字段可能是 str / dict / list，统一成文本。
+
+        **分片层不 strip**：流式增量形如 `'We'`、`' need'`、`' answer'`，
+        逐个 strip 会拼出 `Weneedanswer`（线上真实故障）。只在整段上 trim。
+        """
         if value is None:
             return ""
         if isinstance(value, str):
-            return value.strip()
+            return value
         if isinstance(value, list):
             parts = [self._reasoning_value_text(v) for v in value]
-            return "".join(p for p in parts if p).strip()
+            return "".join(p for p in parts if p)
         if isinstance(value, dict):
             for key in ("text", "thinking", "content", "summary"):
                 inner = value.get(key)
