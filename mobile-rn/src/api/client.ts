@@ -369,6 +369,50 @@ export async function setThinkingEnabled(baseURL: string, token: string, enabled
   });
 }
 
+/** 当前生效的风控策略（含 rules：单票/行业/ETF/加密上限等） */
+export interface RiskPolicyRules {
+  single_position_max_weight_pct?: number;
+  sector_max_weight_pct?: number;
+  etf_max_weight_pct?: number;
+  crypto_max_weight_pct?: number;
+  single_position_max_loss_pct_of_nav?: number;
+  [key: string]: unknown;
+}
+
+export interface RiskPolicy {
+  policy_id?: string;
+  name?: string;
+  description?: string;
+  is_active?: boolean;
+  rules?: RiskPolicyRules;
+  [key: string]: unknown;
+}
+
+export async function fetchActiveRiskPolicy(baseURL: string, token: string): Promise<RiskPolicy | null> {
+  try {
+    return await request<RiskPolicy>(baseURL, token, '/api/risk-policies/active');
+  } catch {
+    return null;
+  }
+}
+
+/** 更新风控策略：后端 PUT 收整条 RiskPolicy，所以要先取原值再合并 rules */
+export async function updateRiskPolicy(
+  baseURL: string,
+  token: string,
+  policy: RiskPolicy,
+  rulesPatch: RiskPolicyRules,
+): Promise<RiskPolicy> {
+  const id = String(policy.policy_id ?? '');
+  const body = {
+    name: policy.name ?? '默认档',
+    description: policy.description ?? '',
+    is_active: policy.is_active ?? true,
+    rules: { ...(policy.rules ?? {}), ...rulesPatch },
+  };
+  return request<RiskPolicy>(baseURL, token, `/api/risk-policies/${enc(id)}`, { method: 'PUT', json: body });
+}
+
 export function setSkillEnabled(baseURL: string, token: string, name: string, enabled: boolean): Promise<unknown> {
   return request(baseURL, token, '/api/settings/skills', { method: 'PUT', json: { name, enabled } });
 }
