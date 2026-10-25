@@ -32,6 +32,8 @@ export function AssistantBubble({ assistant, turnId, userText, onRetry, onReplyC
   const [showReasoning, setShowReasoning] = useState(false);
   /** 每个思考步单独记展开态：一条消息里可能有多个思考段 */
   const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({});
+  /** 整个过程（思考 + 工具）：null = 跟随流式状态，流式展开、完成折叠 */
+  const [processOpen, setProcessOpen] = useState<boolean | null>(null);
   const [showSkill, setShowSkill] = useState(false);
   const [toolsExpanded, setToolsExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -66,53 +68,77 @@ export function AssistantBubble({ assistant, turnId, userText, onRetry, onReplyC
     <View style={styles.container}>
       {phaseLabel ? <Text style={styles.phase}>{phaseLabel}</Text> : null}
 
-      {/* 过程：思考与工具按序交错 —— 让人看出「为什么调这个工具」。
-          steps 为空时退回旧的纯文本/工具列表（历史老数据）。 */}
+      {/* 整个过程（思考 + 工具）收成一行：流式时展开看进度，完成后折叠，
+          点标题再展开。之前把每一步都铺开，一个 11 次工具的轮次会把回答挤出屏幕。 */}
       {steps.length > 0 ? (
         <View style={styles.steps}>
-          {steps.map((st, i) => {
-            if (st.kind === 'reasoning') {
-              const key = `r-${i}`;
-              // 一律默认折叠：思考是过程，不该把回答挤下去。
-              // 之前只在「超过 280 字」时截断，200 多字的整段会全铺开成一片灰墙。
-              const open = Boolean(expandedSteps[key]);
-              const canToggle = st.text.length > 40;
-              return (
-                <Pressable
-                  key={key}
-                  style={styles.stepRow}
-                  onPress={
-                    canToggle
-                      ? () => setExpandedSteps((prev) => ({ ...prev, [key]: !prev[key] }))
-                      : undefined
-                  }
-                >
-                  <Text style={styles.stepIcon}>✦</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.stepText} numberOfLines={open ? undefined : 3}>
-                      {st.text}
-                    </Text>
-                    {canToggle ? (
-                      <Text style={styles.stepToggle}>{open ? '收起' : '展开思考'}</Text>
-                    ) : null}
-                  </View>
-                </Pressable>
-              );
-            }
-            const tool = assistant.tools.find((t) => t.id === st.id);
-            const running = tool?.status === 'running';
+          {(() => {
+            const open = processOpen ?? streaming;
+            const reasoningCount = steps.filter((st) => st.kind === 'reasoning').length;
+            const toolCount = steps.filter((st) => st.kind === 'tool').length;
+            const parts = [
+              reasoningCount ? `思考 ${reasoningCount} 步` : '',
+              toolCount ? `调用 ${toolCount} 个工具` : '',
+            ].filter(Boolean);
             return (
-              <Pressable
-                key={`t-${st.id}`}
-                style={styles.stepRow}
-                onPress={() => onOpenDetail?.(turnId, 'tools')}
-              >
-                <Text style={styles.stepIcon}>{running ? '⏳' : '🔧'}</Text>
-                <Text style={styles.stepTool}>{toolLabel(st.name)}</Text>
-                <Text style={styles.stepMeta}>{running ? '进行中' : '完成'} ›</Text>
-              </Pressable>
+              <>
+                <Pressable
+                  style={[styles.processHead, open && styles.processHeadOpen]}
+                  onPress={() => setProcessOpen((v) => !(v ?? streaming))}
+                >
+                  <Text style={styles.processTitle}>
+                    {streaming ? '正在执行…' : parts.join(' · ') || `执行 ${steps.length} 步`}
+                  </Text>
+                  <Text style={styles.processChevron}>{open ? '▾' : '▸'}</Text>
+                </Pressable>
+                {open ? (
+                  <View style={styles.processBody}>
+                    {steps.map((st, i) => {
+                      if (st.kind === 'reasoning') {
+                        const key = `r-${i}`;
+                        const stepOpen = Boolean(expandedSteps[key]);
+                        const canToggle = st.text.length > 40;
+                        return (
+                          <Pressable
+                            key={key}
+                            style={styles.stepRow}
+                            onPress={
+                              canToggle
+                                ? () => setExpandedSteps((prev) => ({ ...prev, [key]: !prev[key] }))
+                                : undefined
+                            }
+                          >
+                            <Text style={styles.stepIcon}>✦</Text>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.stepText} numberOfLines={stepOpen ? undefined : 3}>
+                                {st.text}
+                              </Text>
+                              {canToggle ? (
+                                <Text style={styles.stepToggle}>{stepOpen ? '收起' : '展开思考'}</Text>
+                              ) : null}
+                            </View>
+                          </Pressable>
+                        );
+                      }
+                      const tool = assistant.tools.find((t) => t.id === st.id);
+                      const running = tool?.status === 'running';
+                      return (
+                        <Pressable
+                          key={`t-${st.id}`}
+                          style={styles.stepRow}
+                          onPress={() => onOpenDetail?.(turnId, 'tools')}
+                        >
+                          <Text style={styles.stepIcon}>{running ? '⏳' : '🔧'}</Text>
+                          <Text style={styles.stepTool}>{toolLabel(st.name)}</Text>
+                          <Text style={styles.stepMeta}>{running ? '进行中' : '完成'} ›</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : null}
+              </>
             );
-          })}
+          })()}
         </View>
       ) : assistant.reasoningText ? (
         <Pressable style={styles.collapse} onPress={() => setShowReasoning((v) => !v)}>
@@ -281,7 +307,12 @@ const baseStyles = StyleSheet.create({
   collapseText: { fontSize: 13, color: '#007AFF' },
   reasoning: { fontSize: 13, color: '#666', lineHeight: 19, marginTop: 4 },
   skillLine: { fontSize: 12, color: '#555', marginTop: 3 },
-  steps: { marginTop: 8, marginBottom: 4, gap: 6 },
+  steps: { marginTop: 8, marginBottom: 4 },
+  processHead: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6 },
+  processHeadOpen: { marginBottom: 2 },
+  processTitle: { flex: 1, fontSize: 12.5, color: '#6B7075', fontWeight: '600' },
+  processChevron: { fontSize: 11, color: '#9AA0A6' },
+  processBody: { gap: 6, paddingBottom: 2 },
   stepRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   stepIcon: { fontSize: 12, color: '#9AA0A6', lineHeight: 20 },
   stepText: { flex: 1, fontSize: 13, color: '#6B7075', lineHeight: 20 },
