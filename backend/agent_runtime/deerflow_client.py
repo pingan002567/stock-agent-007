@@ -426,6 +426,14 @@ class DeerFlowEventMapper:
             extra = {}
         for key in self._REASONING_KEYS:
             value = extra.get(key) or self._get(message, key)
+            if value:
+                print(
+                    "REASONING-RAW",
+                    key,
+                    type(value).__name__,
+                    repr(value)[:160],
+                    flush=True,
+                )
             text = self._reasoning_value_text(value)
             if text:
                 return text
