@@ -77,7 +77,8 @@ def _known_identifiers() -> list[str]:
         "tushare", "eastmoney", "tonghuashun", "akshare", "yfinance", "longbridge",
         "pytdx", "baostock", "tickflow", "gate_spot", "coingecko", "defillama", "okx",
     })
-    return sorted(names, key=len, reverse=True)
+    # 只用「有辨识度」的：短单词（task/bash/grep）出现在粘连串里会把词切成碎片
+    return sorted((n for n in names if "_" in n or len(n) >= 8), key=len, reverse=True)
 
 
 IDENTIFIERS = _known_identifiers()
