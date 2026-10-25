@@ -243,6 +243,16 @@ export function triggerStockResearch(baseURL: string, token: string, symbol: str
 
 /* ================= 持仓 ================= */
 
+/** 新增/修改单笔持仓。市值按「现价优先、否则成本」计算，**存原币**。
+ *  currency 留空时后端按 market 推断（CN→CNY / HK→HKD / US→USD / CRYPTO→USDT）。 */
+export function upsertHolding(
+  baseURL: string,
+  token: string,
+  payload: { symbol: string; quantity: number; cost?: number; currency?: string },
+): Promise<unknown> {
+  return request(baseURL, token, '/api/holdings', { method: 'POST', json: payload });
+}
+
 export function fetchHoldings(baseURL: string, token: string): Promise<HoldingsResponse> {
   return request<HoldingsResponse>(baseURL, token, '/api/holdings');
 }

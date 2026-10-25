@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fetchHoldings } from '../api/client';
+import { fetchHoldings, searchStocks, upsertHolding } from '../api/client';
 import { ErrorState } from '../components/ErrorState';
 import { Sheet } from '../components/Sheet';
 import { trendColor } from '../lib/colors';
@@ -40,6 +40,15 @@ export default function HoldingsScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [menuVisible, setMenuVisible] = useState(false);
+  /** 加持仓弹层：搜索标的 → 数量 / 成本，货币交给后端按市场推断 */
+  const [addVisible, setAddVisible] = useState(false);
+  const [addQuery, setAddQuery] = useState('');
+  const [addHits, setAddHits] = useState<{ symbol: string; name?: string; market?: string }[]>([]);
+  const [addPick, setAddPick] = useState<{ symbol: string; name?: string; market?: string } | null>(null);
+  const [addQty, setAddQty] = useState('');
+  const [addCost, setAddCost] = useState('');
+  const [addBusy, setAddBusy] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -99,6 +108,42 @@ export default function HoldingsScreen() {
       { page: 'portfolio' }
     );
     navigation.navigate('Main', { screen: 'Chat' });
+  };
+
+  const searchTarget = async (q: string) => {
+    setAddQuery(q);
+    setAddPick(null);
+    if (!q.trim()) { setAddHits([]); return; }
+    try {
+      const hits = await searchStocks(baseURL, token, q.trim());
+      setAddHits(hits.slice(0, 12).map((h) => ({ symbol: h.symbol, name: h.name, market: h.market })));
+    } catch {
+      setAddHits([]);
+    }
+  };
+
+  const submitAdd = async () => {
+    const symbol = String(addPick?.symbol ?? addQuery).trim().toUpperCase();
+    const qty = Number(addQty);
+    if (!symbol) { setAddError('请先选择标的'); return; }
+    if (!Number.isFinite(qty) || qty <= 0) { setAddError('数量要大于 0（币支持小数）'); return; }
+    setAddBusy(true);
+    setAddError(null);
+    try {
+      await upsertHolding(baseURL, token, {
+        symbol,
+        quantity: qty,
+        cost: addCost.trim() ? Number(addCost) : undefined,
+        // currency 留空由后端按 market 推断（CRYPTO → USDT）
+      });
+      setAddVisible(false);
+      setAddQuery(''); setAddHits([]); setAddPick(null); setAddQty(''); setAddCost('');
+      await load();
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAddBusy(false);
+    }
   };
 
   const renderItem = ({ item }: { item: HoldingItem }) => {
@@ -240,6 +285,63 @@ export default function HoldingsScreen() {
         renderItem={renderItem}
       />
 
+      <Sheet visible={addVisible} onClose={() => setAddVisible(false)}>
+        <Text style={[styles.sheetTitle, { color: t.sub }]}>添加持仓</Text>
+        <View style={[styles.searchBox, { borderColor: t.sep }]}>
+          <TextInput
+            style={[styles.searchInput, { color: t.text }]}
+            placeholder="搜索代码或名称，如 600519 / BTC"
+            placeholderTextColor={t.sub}
+            value={addQuery}
+            onChangeText={(v) => void searchTarget(v)}
+            autoCapitalize="characters"
+            autoCorrect={false}
+          />
+        </View>
+        {addPick ? (
+          <Text style={[styles.meta, { color: t.sub }]}>
+            已选 {addPick.symbol} {addPick.name ?? ''} {marketLabel(addPick.market)}
+          </Text>
+        ) : (
+          addHits.map((h) => (
+            <Pressable
+              key={h.symbol}
+              style={styles.addRow}
+              onPress={() => { setAddPick(h); setAddHits([]); }}
+            >
+              <Text style={{ color: t.text }}>{h.symbol}</Text>
+              <Text style={[styles.meta, { color: t.sub }]}>{h.name ?? ''} {marketLabel(h.market)}</Text>
+            </Pressable>
+          ))
+        )}
+        <View style={styles.addForm}>
+          <TextInput
+            style={[styles.searchBox, styles.addInput, { color: t.text, borderColor: t.sep }]}
+            placeholder="数量（币支持小数）"
+            placeholderTextColor={t.sub}
+            keyboardType="decimal-pad"
+            value={addQty}
+            onChangeText={setAddQty}
+          />
+          <TextInput
+            style={[styles.searchBox, styles.addInput, { color: t.text, borderColor: t.sep }]}
+            placeholder="成本价（可选，原币）"
+            placeholderTextColor={t.sub}
+            keyboardType="decimal-pad"
+            value={addCost}
+            onChangeText={setAddCost}
+          />
+        </View>
+        {addError ? <Text style={styles.error}>{addError}</Text> : null}
+        <Pressable
+          style={[styles.submit, { backgroundColor: t.accent }]}
+          onPress={() => void submitAdd()}
+          disabled={addBusy}
+        >
+          {addBusy ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitText}>保存持仓</Text>}
+        </Pressable>
+      </Sheet>
+
       <Sheet visible={menuVisible} onClose={() => setMenuVisible(false)}>
         <Text style={[styles.sheetTitle, { color: t.sub }]}>持仓</Text>
         <MenuItem
@@ -248,6 +350,15 @@ export default function HoldingsScreen() {
           hint="带上当前持仓与资产数字提问"
           disabled={items.length === 0}
           onPress={analyze}
+        />
+        <MenuItem
+          icon="add-circle-outline"
+          label="添加持仓"
+          hint="股票或加密资产都能加；加密按原币记录"
+          onPress={() => {
+            setMenuVisible(false);
+            setAddVisible(true);
+          }}
         />
         <MenuItem
           icon="refresh-outline"
@@ -332,6 +443,14 @@ const baseStyles = StyleSheet.create({
   sumTop: { alignItems: 'flex-start' },
   sumLabel: { fontSize: 12.5 },
   sumValue: { fontSize: 28, fontWeight: '700', marginTop: 4, letterSpacing: -0.5 },
+  searchBox: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginTop: 8 },
+  searchInput: { fontSize: 15, padding: 0 },
+  addForm: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  addRow: { flexDirection: 'row', gap: 8, alignItems: 'baseline', paddingVertical: 8 },
+  addInput: { flex: 1, paddingVertical: 8 },
+  error: { color: '#d33', fontSize: 12, marginTop: 8 },
+  submit: { borderRadius: 10, alignItems: 'center', paddingVertical: 12, marginTop: 12 },
+  submitText: { color: '#fff', fontWeight: '600' },
   curRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingTop: 10 },
   curChip: { fontSize: 12, fontVariant: ['tabular-nums'] },
   sumGrid: {
