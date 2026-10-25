@@ -30,6 +30,8 @@ const COLLAPSE_LINES = 5;
 export function AssistantBubble({ assistant, turnId, userText, onRetry, onReplyClarification, onOpenDetail }: Props) {
   const styles = useThemedStyles(baseStyles);
   const [showReasoning, setShowReasoning] = useState(false);
+  /** 每个思考步单独记展开态：一条消息里可能有多个思考段 */
+  const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({});
   const [showSkill, setShowSkill] = useState(false);
   const [toolsExpanded, setToolsExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -70,18 +72,30 @@ export function AssistantBubble({ assistant, turnId, userText, onRetry, onReplyC
         <View style={styles.steps}>
           {steps.map((st, i) => {
             if (st.kind === 'reasoning') {
-              const long = st.text.length > COLLAPSE_CHARS || st.text.includes('\n');
-              const open = !long || showReasoning;
+              const key = `r-${i}`;
+              // 一律默认折叠：思考是过程，不该把回答挤下去。
+              // 之前只在「超过 280 字」时截断，200 多字的整段会全铺开成一片灰墙。
+              const open = Boolean(expandedSteps[key]);
+              const canToggle = st.text.length > 40;
               return (
                 <Pressable
-                  key={`r-${i}`}
+                  key={key}
                   style={styles.stepRow}
-                  onPress={() => (long ? setShowReasoning((v) => !v) : undefined)}
+                  onPress={
+                    canToggle
+                      ? () => setExpandedSteps((prev) => ({ ...prev, [key]: !prev[key] }))
+                      : undefined
+                  }
                 >
                   <Text style={styles.stepIcon}>✦</Text>
-                  <Text style={styles.stepText} numberOfLines={open ? undefined : 3}>
-                    {st.text}
-                  </Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.stepText} numberOfLines={open ? undefined : 3}>
+                      {st.text}
+                    </Text>
+                    {canToggle ? (
+                      <Text style={styles.stepToggle}>{open ? '收起' : '展开思考'}</Text>
+                    ) : null}
+                  </View>
                 </Pressable>
               );
             }
@@ -272,6 +286,7 @@ const baseStyles = StyleSheet.create({
   stepIcon: { fontSize: 12, color: '#9AA0A6', lineHeight: 20 },
   stepText: { flex: 1, fontSize: 13, color: '#6B7075', lineHeight: 20 },
   stepTool: { flex: 1, fontSize: 13, color: '#3D4044', fontWeight: '600', lineHeight: 20 },
+  stepToggle: { fontSize: 11, color: '#2F6FEB', marginTop: 2 },
   stepMeta: { fontSize: 11, color: '#9AA0A6', lineHeight: 20 },
   tools: { marginBottom: 6 },
   toolCount: { fontSize: 11, color: '#8E8E93', marginBottom: 4 },
