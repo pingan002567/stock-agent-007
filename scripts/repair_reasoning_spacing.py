@@ -138,7 +138,9 @@ def _known(piece: str, vocab: set[str], *, inflection: bool = False) -> bool:
 
 def repair_text(text: str, vocab: set[str], max_len: int = 20) -> tuple[str, bool]:
     """返回 (修复后文本, 是否完全修复)。"""
-    if " " in text or not any(c.isalpha() for c in text):
+    # 不能因为「有空格」就跳过：历史里大量是**部分粘连**
+    # （`Theuserwantsapre-market...Todayis 2026-10-25`），整体有空格但局部还是粘的。
+    if not re.search(r"[A-Za-z]", text):
         return text, True
 
     # 1) 一次扫描完成占位（占位符用 \x01 包裹，后续规则不会把它当单词/数字）
