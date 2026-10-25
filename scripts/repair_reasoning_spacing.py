@@ -87,7 +87,6 @@ PROTECT_RE = re.compile(
     "|".join(
         [
             r"`[^`]*`",
-            r'"[^"]*"',
             r"https?://\S+",
             # 已知工具/标识符（任意位置，大小写敏感）
             *(re.escape(name) for name in IDENTIFIERS),
