@@ -124,13 +124,13 @@ T1 先做：T3/T4/T7 的文案与展示都依赖标签真源。
 
 ## 追加任务（来自「思考链」分析，尚未开始）
 
-### T9 · 思考状态倒退（P0）
+### T9 · 思考状态倒退（P0）✅ 已完成（`e8cc040`）
 真实 SSE 顺序是 `tool_call` → `reasoning` → `tool_result`（思维链挂在带
 tool_calls 的分片上，晚一拍到），而 `applyStreamUpdate` 的 reasoning 分支
 **无条件** `state.phase = 'reasoning'` → 气泡状态从「调用工具…」倒回「思考中…」。
 修法：reasoning 到达时若 phase 已是 tools/answering 不回退。
 
-### T10 · 思考与工具交错（P1）
+### T10 · 思考与工具交错（P1）✅ 已完成（本次）
 安卓把思考塞在独立 tab、工具放另一 tab，看不出「为什么调这个工具」；
 Web 是 `steps[]` 有序交错。要在安卓对齐需给 `AssistantState` 增加 `steps: Step[]`。
 
@@ -141,6 +141,13 @@ Web 是 `steps[]` 有序交错。要在安卓对齐需给 `AssistantState` 增�
 - 桌宠（Tauri 窗口独有）
 
 ---
+
+## 追加完成（T9/T10）
+
+| 任务 | 提交 | 验证 |
+|---|---|---|
+| T9 状态不倒退 | `e8cc040` | reasoning 分支避开 tools/answering/final；加测试守住 |
+| T10 steps 交错 | 本次 | AssistantState.steps；气泡与详情页「过程」tab；历史回放自动重建 |
 
 ## 本次已完成（2026-10-25）
 

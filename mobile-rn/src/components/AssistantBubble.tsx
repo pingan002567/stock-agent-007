@@ -35,6 +35,7 @@ export function AssistantBubble({ assistant, turnId, userText, onRetry, onReplyC
   const [copied, setCopied] = useState(false);
 
   const streaming = assistant.streaming;
+  const steps = assistant.steps ?? [];
   const answer = assistant.answerText;
   const lineCount = answer.split('\n').length;
   const isLong = answer.length > COLLAPSE_CHARS || lineCount > COLLAPSE_LINES;
@@ -63,7 +64,43 @@ export function AssistantBubble({ assistant, turnId, userText, onRetry, onReplyC
     <View style={styles.container}>
       {phaseLabel ? <Text style={styles.phase}>{phaseLabel}</Text> : null}
 
-      {assistant.reasoningText ? (
+      {/* 过程：思考与工具按序交错 —— 让人看出「为什么调这个工具」。
+          steps 为空时退回旧的纯文本/工具列表（历史老数据）。 */}
+      {steps.length > 0 ? (
+        <View style={styles.steps}>
+          {steps.map((st, i) => {
+            if (st.kind === 'reasoning') {
+              const long = st.text.length > COLLAPSE_CHARS || st.text.includes('\n');
+              const open = !long || showReasoning;
+              return (
+                <Pressable
+                  key={`r-${i}`}
+                  style={styles.stepRow}
+                  onPress={() => (long ? setShowReasoning((v) => !v) : undefined)}
+                >
+                  <Text style={styles.stepIcon}>✦</Text>
+                  <Text style={styles.stepText} numberOfLines={open ? undefined : 3}>
+                    {st.text}
+                  </Text>
+                </Pressable>
+              );
+            }
+            const tool = assistant.tools.find((t) => t.id === st.id);
+            const running = tool?.status === 'running';
+            return (
+              <Pressable
+                key={`t-${st.id}`}
+                style={styles.stepRow}
+                onPress={() => onOpenDetail?.(turnId, 'tools')}
+              >
+                <Text style={styles.stepIcon}>{running ? '⏳' : '🔧'}</Text>
+                <Text style={styles.stepTool}>{toolLabel(st.name)}</Text>
+                <Text style={styles.stepMeta}>{running ? '进行中' : '完成'} ›</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : assistant.reasoningText ? (
         <Pressable style={styles.collapse} onPress={() => setShowReasoning((v) => !v)}>
           <Text style={styles.collapseText}>
             {showReasoning ? '▾ 思考过程' : `▸ 思考过程 · ${assistant.reasoningText.slice(0, 40)}…`}
@@ -76,24 +113,7 @@ export function AssistantBubble({ assistant, turnId, userText, onRetry, onReplyC
         </Pressable>
       ) : null}
 
-      {assistant.skillTrace.length > 0 ? (
-        <Pressable style={styles.collapse} onPress={() => setShowSkill((v) => !v)}>
-          <Text style={styles.collapseText}>
-            {showSkill ? '⌃' : '⌄'} 技能链路 · {assistant.skillTrace.length}
-          </Text>
-          {showSkill
-            ? assistant.skillTrace.map((s, i) => (
-                <Text key={i} style={styles.skillLine}>
-                  {s.step != null ? `${s.step}. ` : ''}
-                  {s.label ?? s.skill}
-                  {s.status ? ` · ${s.status}` : ''}
-                </Text>
-              ))
-            : null}
-        </Pressable>
-      ) : null}
-
-      {assistant.tools.length > 0 ? (
+      {steps.length === 0 && assistant.tools.length > 0 ? (
         <View style={styles.tools}>
           {/* 工具调用 · N：默认折叠（对齐 iOS toolsCollapsedSection） */}
           <Pressable style={styles.toolHeader} onPress={() => setToolsExpanded((v) => !v)}>
@@ -247,6 +267,12 @@ const baseStyles = StyleSheet.create({
   collapseText: { fontSize: 13, color: '#007AFF' },
   reasoning: { fontSize: 13, color: '#666', lineHeight: 19, marginTop: 4 },
   skillLine: { fontSize: 12, color: '#555', marginTop: 3 },
+  steps: { marginTop: 8, marginBottom: 4, gap: 6 },
+  stepRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+  stepIcon: { fontSize: 12, color: '#9AA0A6', lineHeight: 20 },
+  stepText: { flex: 1, fontSize: 13, color: '#6B7075', lineHeight: 20 },
+  stepTool: { flex: 1, fontSize: 13, color: '#3D4044', fontWeight: '600', lineHeight: 20 },
+  stepMeta: { fontSize: 11, color: '#9AA0A6', lineHeight: 20 },
   tools: { marginBottom: 6 },
   toolCount: { fontSize: 11, color: '#8E8E93', marginBottom: 4 },
   toolHeader: {

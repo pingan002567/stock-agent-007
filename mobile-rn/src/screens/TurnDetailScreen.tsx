@@ -11,7 +11,7 @@ import { useChat } from '../store/chat';
 import { useThemedStyles } from '../lib/tokens';
 
 type Route = RouteProp<RootStackParamList, 'TurnDetail'>;
-type Tab = 'answer' | 'tools' | 'reasoning';
+type Tab = 'answer' | 'steps' | 'tools' | 'reasoning';
 
 export default function TurnDetailScreen() {
   const styles = useThemedStyles(baseStyles);
@@ -27,9 +27,15 @@ export default function TurnDetailScreen() {
   if (!turn?.assistant) return <ErrorState message="未找到该轮回答" />;
   const a = turn.assistant;
 
+  const steps = a.steps ?? [];
   const tabs: { id: Tab; label: string }[] = [{ id: 'answer', label: '回答' }];
-  if (a.tools.length > 0) tabs.push({ id: 'tools', label: '工具' });
-  if (a.reasoningText.trim()) tabs.push({ id: 'reasoning', label: '思考' });
+  // 有 steps 就只看「过程」：思考和工具交错，能看出因果；
+  // 老数据没有 steps，退回原来的工具/思考两个 tab。
+  if (steps.length > 0) tabs.push({ id: 'steps', label: '过程' });
+  else {
+    if (a.tools.length > 0) tabs.push({ id: 'tools', label: '工具' });
+    if (a.reasoningText.trim()) tabs.push({ id: 'reasoning', label: '思考' });
+  }
 
   const payload = tab === 'answer' ? a.answerText : tab === 'reasoning' ? a.reasoningText : '';
 
@@ -97,6 +103,42 @@ export default function TurnDetailScreen() {
                 ) : null}
               </Pressable>
             ))
+          )
+        ) : null}
+
+        {tab === 'steps' ? (
+          steps.length > 0 ? (
+            <View style={{ gap: 10 }}>
+              {steps.map((st, i) => {
+                if (st.kind === 'reasoning') {
+                  return (
+                    <Text key={`r-${i}`} style={styles.reasoning} selectable>
+                      ✦ {st.text}
+                    </Text>
+                  );
+                }
+                const tool = a.tools.find((t) => t.id === st.id);
+                const running = tool?.status === 'running';
+                return (
+                  <Pressable
+                    key={`t-${st.id}`}
+                    onPress={() => setExpandedTool(expandedTool === st.id ? null : st.id)}
+                  >
+                    <View style={styles.toolHead}>
+                      <Text style={styles.toolStatus}>{running ? '⏳' : '✓'}</Text>
+                      <Text style={styles.toolName}>{toolLabel(st.name)}</Text>
+                    </View>
+                    {expandedTool === st.id ? (
+                      <Text style={styles.toolResult} selectable>
+                        {tool?.resultPreview || '暂无结果预览'}
+                      </Text>
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : (
+            <EmptyState text="本轮没有过程记录" />
           )
         ) : null}
 

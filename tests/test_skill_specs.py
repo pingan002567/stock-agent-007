@@ -184,3 +184,35 @@ def test_android_parse_keeps_phase_when_reasoning_arrives_late():
     body = block.group(1)
     assert "state.phase !== 'tools'" in body, "reasoning 分支必须避开 tools 状态"
     assert "state.phase !== 'answering'" in body, "reasoning 分支必须避开 answering 状态"
+
+
+def test_android_steps_interleave_reasoning_and_tools():
+    """安卓：steps 要把思考与工具按序保留，且「晚到的思考」插到运行中工具之前。
+
+    后端真实顺序是 tool_call → reasoning → tool_result，若不前插，
+    手机上永远是「先工具后思考」，看不出因果。
+    """
+    import re
+    from pathlib import Path
+
+    src = Path("mobile-rn/src/api/parse.ts").read_text()
+    # 只看 applyStreamUpdate 里那一段（上面还有个 parseStreamEvent 也有同名分支）
+    reducer = src[src.index("export function applyStreamUpdate") :]
+
+    # 工具步在 tool_call 时入列
+    tool_call = re.search(r"case 'tool_call': \{(.*?)break;", reducer, re.S)
+    assert tool_call and "state.steps.push({ kind: 'tool'" in tool_call.group(1)
+
+    # 思考步：相邻合并 + 运行中工具前插
+    # pushReasoningStep 定义在 reducer 之前，要在全文里找
+    push = re.search(r"function pushReasoningStep\(.*?\n\}", src, re.S)
+    assert push, "找不到 pushReasoningStep"
+    body = push.group(0)
+    assert "startsWith" in body, "相邻思考要按前缀合并，避免同段重复"
+    assert "running" in body and "splice" in body, "晚到的思考要插到运行中的工具之前"
+
+    # 气泡与详情页都要渲染 steps
+    bubble = Path("mobile-rn/src/components/AssistantBubble.tsx").read_text()
+    assert "assistant.steps ?? []" in bubble
+    detail = Path("mobile-rn/src/screens/TurnDetailScreen.tsx").read_text()
+    assert "id: 'steps'" in detail

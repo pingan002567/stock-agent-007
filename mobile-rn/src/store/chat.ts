@@ -57,7 +57,12 @@ function ctlOf(sessionId: string): StreamCtl {
 }
 
 function cloneAssistant(a: NonNullable<Turn['assistant']>): NonNullable<Turn['assistant']> {
-  return { ...a, tools: a.tools.map((t) => ({ ...t })), skillTrace: a.skillTrace.map((s) => ({ ...s })) };
+  return {
+    ...a,
+    tools: a.tools.map((t) => ({ ...t })),
+    steps: (a.steps ?? []).map((st) => ({ ...st })),
+    skillTrace: a.skillTrace.map((s) => ({ ...s })),
+  };
 }
 
 interface ChatState {

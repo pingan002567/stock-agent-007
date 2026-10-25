@@ -139,6 +139,31 @@ function parseSkillTrace(raw: unknown): SkillTraceStep[] {
     .map((o) => ({ ...o } as SkillTraceStep));
 }
 
+/** 思考步落位：紧随「仍在运行的工具」到达的思考，语义上是**这次调用之前**的判断
+ *  （后端把思维链挂在带 tool_calls 的分片上，所以文本晚一拍到）。
+ *  这种情况插到那个工具步之前，时间线才是「思考 → 工具」。 */
+function pushReasoningStep(state: AssistantState, text: string): void {
+  if (!text) return;
+  const last = state.steps[state.steps.length - 1];
+  // 相邻思考合并（同一段会分几次推，后者通常更长）
+  if (last && last.kind === 'reasoning') {
+    if (last.text === text) return;
+    if (text.startsWith(last.text)) { last.text = text; return; }
+    if (last.text.startsWith(text)) return;
+    last.text += '\n' + text;
+    return;
+  }
+  const step = { kind: 'reasoning' as const, text };
+  const runningTool = last && last.kind === 'tool'
+    ? state.tools.find((t) => t.id === last.id && t.status === 'running')
+    : undefined;
+  if (last && last.kind === 'tool' && runningTool) {
+    state.steps.splice(state.steps.length - 1, 0, step);
+  } else {
+    state.steps.push(step);
+  }
+}
+
 /**
  * 把一条 StreamUpdate 归约到轮次状态。**幂等**：断线重连时先清空状态再逐条重放，
  * 所以这里不依赖任何「上次状态」，只做「追加/覆盖」语义。
@@ -154,12 +179,16 @@ export function applyStreamUpdate(state: AssistantState, u: StreamUpdate): void 
       }
       if (state.reasoningText.length === 0) state.reasoningText = u.text;
       else if (state.reasoningText !== u.text) state.reasoningText += '\n' + u.text;
+      pushReasoningStep(state, u.text);
       break;
     }
     case 'tool_call': {
       state.phase = 'tools';
       if (!state.tools.some((t) => t.id === u.callId)) {
         state.tools.push({ id: u.callId, name: u.name, status: 'running', resultPreview: '' });
+        if (!state.steps.some((st) => st.kind === 'tool' && st.id === u.callId)) {
+          state.steps.push({ kind: 'tool', id: u.callId, name: u.name });
+        }
       }
       break;
     }

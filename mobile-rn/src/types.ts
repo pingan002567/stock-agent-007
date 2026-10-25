@@ -443,10 +443,19 @@ export type AssistantPhase =
   | 'clarification'
   | 'error';
 
+/** 一轮里的有序步骤：思考与工具按到达顺序交错，用来还原「为什么调这个工具」。
+ *
+ *  纯文本字段（reasoningText / tools）保留给旧消费方；steps 是新渲染的真相。 */
+export type AssistantStep =
+  | { kind: 'reasoning'; text: string }
+  | { kind: 'tool'; id: string; name: string };
+
 export interface AssistantState {
   phase: AssistantPhase;
   reasoningText: string;
   tools: ToolChip[];
+  /** 有序步骤流（思考 / 工具交错） */
+  steps: AssistantStep[];
   answerText: string;
   clarification: Clarification | null;
   skillTrace: SkillTraceStep[];
@@ -467,6 +476,7 @@ export function emptyAssistant(): AssistantState {
     phase: 'reasoning',
     reasoningText: '',
     tools: [],
+    steps: [],
     answerText: '',
     clarification: null,
     skillTrace: [],
