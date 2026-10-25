@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { connectLlmProvider, fetchLlmProviders, setDefaultLlmModel } from '../api/client';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { connectLlmProvider, fetchLlmProviders, fetchSettings, setDefaultLlmModel, setThinkingEnabled } from '../api/client';
 import { ErrorState } from '../components/ErrorState';
 import { useConnection } from '../store/connection';
 import type { LlmProviderInfo, LlmProvidersSnapshot } from '../types';
@@ -17,12 +17,18 @@ export default function ModelServiceScreen() {
   const [keyFor, setKeyFor] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [message, setMessage] = useState('');
+  /** 思考模式：Web 设置页同一个开关，走 PUT /api/settings/runtime */
+  const [thinking, setThinking] = useState(true);
+  const [thinkingBusy, setThinkingBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       setSnap(await fetchLlmProviders(baseURL, token));
+      const settings = await fetchSettings(baseURL, token);
+      const enabled = (settings.runtime_config as { thinking_enabled?: boolean } | undefined)?.thinking_enabled;
+      setThinking(enabled !== false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -64,6 +70,21 @@ export default function ModelServiceScreen() {
     }
   };
 
+  const toggleThinking = async (next: boolean) => {
+    setThinking(next);          // 乐观切换，失败再回滚
+    setThinkingBusy(true);
+    setMessage('');
+    try {
+      await setThinkingEnabled(baseURL, token, next);
+      setMessage(next ? '已开启思考：工具调用前会展示推理' : '已关闭思考：只给结论，更快更省');
+    } catch (e) {
+      setThinking(!next);
+      setMessage(e instanceof Error ? e.message : String(e));
+    } finally {
+      setThinkingBusy(false);
+    }
+  };
+
   const confirmDisconnect = (provider: LlmProviderInfo) => {
     const pid = provider.id ?? provider.provider_id ?? '';
     Alert.alert('断开模型服务', `确定断开「${provider.name ?? pid}」？`, [
@@ -86,6 +107,22 @@ export default function ModelServiceScreen() {
       <Text style={styles.section}>当前默认</Text>
       <View style={styles.card}>
         <Text style={styles.defaultModel}>{current ?? '未设置'}</Text>
+      </View>
+
+      <View style={styles.card}>
+        <View style={styles.providerHead}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.providerName}>思考模式</Text>
+            <Text style={styles.muted}>
+              开启后调用工具前会展示推理，便于判断结论依据；关闭更快、更省 token。
+            </Text>
+          </View>
+          {thinkingBusy ? (
+            <ActivityIndicator size="small" />
+          ) : (
+            <Switch value={thinking} onValueChange={(v) => void toggleThinking(v)} disabled={busy != null} />
+          )}
+        </View>
       </View>
 
       {message ? <Text style={styles.message}>{message}</Text> : null}

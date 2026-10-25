@@ -346,6 +346,19 @@ export function fetchSettings(baseURL: string, token: string): Promise<Workbench
   return request<WorkbenchSettings>(baseURL, token, '/api/settings');
 }
 
+/** 思考模式开关：后端 PUT /api/settings/runtime 是**整体覆盖** runtime 配置，
+ *  所以要先取当前值再合并，且不能回传 api_key（凭证走用户级文件）。 */
+export async function setThinkingEnabled(baseURL: string, token: string, enabled: boolean): Promise<unknown> {
+  const settings = await fetchSettings(baseURL, token);
+  const runtime = { ...((settings.runtime_config ?? {}) as Record<string, unknown>) };
+  delete runtime.api_key;
+  delete runtime.has_api_key;
+  return request(baseURL, token, '/api/settings/runtime', {
+    method: 'PUT',
+    json: { ...runtime, thinking_enabled: enabled },
+  });
+}
+
 export function setSkillEnabled(baseURL: string, token: string, name: string, enabled: boolean): Promise<unknown> {
   return request(baseURL, token, '/api/settings/skills', { method: 'PUT', json: { name, enabled } });
 }
