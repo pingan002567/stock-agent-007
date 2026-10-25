@@ -220,6 +220,25 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     }
     if (stg.status === "fulfilled") {
       cache.settings = stg.value;
+      // 工具中文名由后端下发（单一真源），这里缓存给 toolLabel 用
+      const toolRows = (stg.value as { tools?: Array<{ name?: string; label?: string }> } | null)?.tools;
+      if (Array.isArray(toolRows)) {
+        const { primeToolLabels } = await import("@/lib/toolLabels");
+        primeToolLabels(Object.fromEntries(
+          toolRows
+            .filter((t) => t?.name && t?.label)
+            .map((t) => [String(t.name), String(t.label)]),
+        ));
+      }
+      const skillRows = (stg.value as { skills?: Array<{ name?: string; label?: string }> } | null)?.skills;
+      if (Array.isArray(skillRows)) {
+        const { primeSkillLabels } = await import("@/components/features/skillLabels");
+        primeSkillLabels(Object.fromEntries(
+          skillRows
+            .filter((t) => t?.name && t?.label)
+            .map((t) => [String(t.name), String(t.label)]),
+        ));
+      }
       const pageSeconds = (stg.value as { market_refresh?: { page_refresh_seconds?: number } } | null)?.market_refresh?.page_refresh_seconds;
       if (typeof pageSeconds === "number" && pageSeconds >= 30) {
         pageRefreshSecondsRef.current = pageSeconds;

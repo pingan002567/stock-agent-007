@@ -309,6 +309,8 @@ export interface ReportDetail extends ReportSummary {
 
 export interface SkillInfo {
   name?: string;
+  /** 后端下发的中文名（能力名），优先于 name 显示 */
+  label?: string;
   enabled?: boolean;
   locked?: boolean;
   [key: string]: unknown;

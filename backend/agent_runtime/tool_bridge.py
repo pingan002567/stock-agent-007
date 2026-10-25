@@ -50,9 +50,13 @@ class ToolSpec:
     evidence_refs: list[str]
 
     def to_dict(self) -> dict[str, Any]:
+        from backend.config.tool_labels import tool_label
+
         data = asdict(self)
         data["required_authority"] = self.required_authority.value
         data["status"] = "enabled" if self.enabled else "blocked"
+        # 中文名由后端统一下发，客户端不再各存一份映射
+        data["label"] = tool_label(self.name)
         return data
 
 

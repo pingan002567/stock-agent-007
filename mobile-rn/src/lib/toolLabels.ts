@@ -1,6 +1,9 @@
-// 移植自 iOS Features/Chat/ChatCopy.swift（ToolLabels + ChatStarterPrompts）。
+// 工具中文名：**后端是唯一真源**（`/api/settings.tools[].label`）。
+//
+// 这里保留静态表只为兜底（旧后端 / 设置没拉到 / 离线）。以前两端各存一份，
+// 实测 75 个工具里安卓缺 27 个中文名，聊天里直接显示 get_crypto_derivatives 这种英文。
 
-const TOOL_LABELS: Record<string, string> = {
+const STATIC_TOOL_LABELS: Record<string, string> = {
   get_stock_context: '个股分析',
   get_daily_history: '历史行情',
   search_stock_intel: '情报搜索',
@@ -65,8 +68,33 @@ const TOOL_LABELS: Record<string, string> = {
   write_todos: '执行计划',
 };
 
+let remoteToolLabels: Record<string, string> | null = null;
+
+/** 设置加载后调用：把后端下发的工具名装进缓存 */
+export function primeToolLabels(labels: Record<string, string> | null | undefined): void {
+  if (!labels) return;
+  const next: Record<string, string> = {};
+  for (const [name, label] of Object.entries(labels)) {
+    if (name && typeof label === 'string' && label) next[name] = label;
+  }
+  remoteToolLabels = Object.keys(next).length ? next : null;
+}
+
 export function toolLabel(raw: string): string {
-  return TOOL_LABELS[raw] ?? raw;
+  return remoteToolLabels?.[raw] ?? STATIC_TOOL_LABELS[raw] ?? raw;
+}
+
+/** 从 `/api/settings` 的 tools 数组里抽取 name→label */
+export function toolLabelsFromSettings(tools: unknown): Record<string, string> {
+  const rows = Array.isArray(tools) ? tools : [];
+  const out: Record<string, string> = {};
+  for (const row of rows) {
+    const item = (row ?? {}) as { name?: unknown; label?: unknown };
+    if (typeof item.name === 'string' && typeof item.label === 'string' && item.label) {
+      out[item.name] = item.label;
+    }
+  }
+  return out;
 }
 
 export interface StarterPrompt {
@@ -91,3 +119,21 @@ export const STARTER_PROMPTS: StarterPrompt[] = [
       '帮我从当前自选和常见热门股里找出 3 只值得先了解的股票，说明为什么。没有拉到的数字不要编造。',
   },
 ];
+
+
+/** 连接就绪后拉一次设置，把工具中文名缓存起来（一次性，失败不影响使用）。 */
+let labelsLoaded = false;
+export async function ensureToolLabels(
+  baseURL: string,
+  token: string,
+  fetcher: (baseURL: string, token: string) => Promise<unknown>,
+): Promise<void> {
+  if (labelsLoaded) return;
+  try {
+    const settings = (await fetcher(baseURL, token)) as { tools?: unknown } | null;
+    primeToolLabels(toolLabelsFromSettings(settings?.tools));
+    labelsLoaded = true;
+  } catch {
+    /* 拉不到就用静态表兜底 */
+  }
+}

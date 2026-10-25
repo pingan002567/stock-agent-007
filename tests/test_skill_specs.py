@@ -150,3 +150,19 @@ def test_profiles_use_capability_names():
     assert migrated[0]["skills"] == ["x"]
     # 幂等：已改过的不再变
     assert normalize_profile_names(migrated) == migrated
+
+
+def test_tool_labels_cover_all_registered_tools():
+    """工具中文名由后端统一下发，必须覆盖全部注册工具。
+
+    实测遗漏过：75 个工具里 Web 缺 24、安卓缺 27，聊天里直接显示英文工具名。
+    """
+    from backend.config.tool_labels import TOOL_LABELS, tool_label
+    from backend.config.tools import DEFAULT_TOOLS
+
+    names = {str(t.get("name")) for t in DEFAULT_TOOLS if t.get("name")}
+    missing = sorted(n for n in names if n not in TOOL_LABELS)
+    assert missing == [], f"这些工具没有中文名：{missing}"
+    assert tool_label("get_crypto_derivatives") == "加密合约"
+    # 未登记时不显示「未知」，回退原名
+    assert tool_label("not_a_tool") == "not_a_tool"

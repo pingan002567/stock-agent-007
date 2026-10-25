@@ -56,7 +56,7 @@ export default function SkillsScreen() {
         {skills.map((k, i) => (
           <SettingsSwitchRow
             key={k.name}
-            label={String(k.name)}
+            label={String(k.label ?? k.name)}
             hint={k.description ? String(k.description) : undefined}
             value={!!k.enabled}
             disabled={!!k.locked}

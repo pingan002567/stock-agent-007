@@ -49,11 +49,18 @@ def _public_runtime_config(repo) -> dict:
 
 @router.get("")
 def get_settings(request: Request, services: AppServices = Depends(get_services)):
+    from backend.config.tool_labels import tool_label
+
     tools = (
         services.copilot_service.deerflow.tool_bridge.list_tools()
         if services.copilot_service.deerflow.tool_bridge
         else DEFAULT_TOOLS
     )
+    # 兜底列表（无 bridge 时）没有 label，这里统一补上
+    tools = [
+        {**item, "label": item.get("label") or tool_label(str(item.get("name") or ""))}
+        for item in tools
+    ]
     return {
         "providers": services.repo.get_config(
             "providers", {"items": DEFAULT_PROVIDERS}

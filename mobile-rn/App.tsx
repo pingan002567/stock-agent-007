@@ -12,6 +12,8 @@ import ConnectScreen from './src/screens/ConnectScreen';
 import { RootNavigator, routeFromNotification } from './src/navigation';
 import { configureNotificationHandler, ensureAndroidChannel } from './src/lib/notify';
 import { runPushCheckOnce } from './src/lib/pushTask';
+import { ensureToolLabels } from './src/lib/toolLabels';
+import { fetchSettings } from './src/api/client';
 import { usePush } from './src/store/push';
 import { useAppearance } from './src/store/appearance';
 import { useChat } from './src/store/chat';
@@ -37,6 +39,14 @@ export default function App() {
     hydrateUnread();
     hydratePush();
   }, [hydrate, hydrateTheme, hydrateAppearance, hydrateUnread, hydratePush]);
+
+  // 工具中文名：后端是唯一真源，连上后拉一次（失败则用本地静态表兜底）
+  useEffect(() => {
+    if (status !== 'connected') return;
+    const { baseURL, token } = useConnection.getState();
+    if (!baseURL) return;
+    void ensureToolLabels(baseURL, token ?? '', fetchSettings);
+  }, [status]);
 
   // 通知：前台展示策略 + 渠道 + 点击跳转（含冷启动）
   useEffect(() => {

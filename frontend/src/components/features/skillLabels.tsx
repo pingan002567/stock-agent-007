@@ -16,7 +16,19 @@ const SKILL_LABELS: Record<string, string> = {
   bash: "命令行子代理",
 };
 
+let remoteSkillLabels: Record<string, string> | null = null;
+
+/** 设置加载后调用：技能中文名同样以后端为准（`/api/settings.skills[].label`） */
+export function primeSkillLabels(labels: Record<string, string> | null | undefined): void {
+  if (!labels) return;
+  const next: Record<string, string> = {};
+  for (const [name, label] of Object.entries(labels)) {
+    if (name && typeof label === "string" && label) next[name] = label;
+  }
+  remoteSkillLabels = Object.keys(next).length ? next : null;
+}
+
 export function skillLabelOf(name?: string): string | undefined {
   if (!name) return undefined;
-  return SKILL_LABELS[name];
+  return remoteSkillLabels?.[name] ?? SKILL_LABELS[name];
 }
