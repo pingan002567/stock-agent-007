@@ -3,7 +3,7 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'r
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { fetchCostSummary, fetchSettings } from '../api/client';
+import { fetchCostSummary, fetchScheduledTasks, fetchSettings } from '../api/client';
 import { ErrorState } from '../components/ErrorState';
 import { SettingsGroup, SettingsNote, SettingsRow } from '../components/SettingsList';
 import { useTokens } from '../lib/tokens';
@@ -11,7 +11,7 @@ import type { RootStackParamList } from '../navigation';
 import { useConnection } from '../store/connection';
 import { usePush } from '../store/push';
 import { useTheme } from '../store/theme';
-import type { CostSummary, WorkbenchSettings } from '../types';
+import type { CostSummary, ScheduledTask, WorkbenchSettings } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -39,14 +39,21 @@ export default function SettingsScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [probeMsg, setProbeMsg] = useState<string | null>(null);
+  /** 定时任务数：概览里「N 个启用」用；拉不到就显示「—」，不编造 0 */
+  const [taskCount, setTaskCount] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [s, c] = await Promise.all([fetchSettings(baseURL, token), fetchCostSummary(baseURL, token)]);
+      const [s, c, tasks] = await Promise.all([
+        fetchSettings(baseURL, token),
+        fetchCostSummary(baseURL, token),
+        fetchScheduledTasks(baseURL, token).catch(() => null),
+      ]);
       setSettings(s);
       setCost(c);
+      setTaskCount(tasks ? tasks.filter((x: ScheduledTask) => x.enabled !== false).length : null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -65,6 +72,35 @@ export default function SettingsScreen() {
   const totalCost = Number(cost?.total?.total_cost ?? 0);
   const risk = String(settings?.investor_profile?.risk_level ?? 'moderate');
   const pageSec = Number(settings?.market_refresh?.page_refresh_seconds ?? 30);
+
+  // 概览派生：能算的才算，算不出来显示「—」
+  const providerStates = (settings?.data_sources as { provider_states?: Record<string, { enabled?: boolean }> } | undefined)?.provider_states ?? {};
+  const dataTotal = Object.keys(providerStates).length;
+  const dataOn = Object.values(providerStates).filter((v) => v?.enabled).length;
+  const activePolicy = (settings?.risk_policy as { active?: { name?: string; rules?: Record<string, unknown> } } | undefined)?.active;
+  const policyName = activePolicy?.name ?? '默认档';
+  const cryptoCapRaw = activePolicy?.rules?.crypto_max_weight_pct;
+  const cryptoCap = typeof cryptoCapRaw === 'number' ? cryptoCapRaw : null;
+  const singleCapRaw = activePolicy?.rules?.single_position_max_weight_pct;
+
+  /** 待确认项：只列会阻塞使用或明显不合理的，且都能一键跳到对应屏 */
+  const pending: { key: string; title: string; action: string; route: string }[] = [];
+  if (!runtime?.available) {
+    pending.push({ key: 'model', title: '模型未连接', action: '去配置', route: 'ModelService' });
+  } else if (runtime?.degraded) {
+    pending.push({ key: 'degraded', title: '运行降级', action: '看详情', route: 'Runtime' });
+  }
+  if (dataOn === 0 && dataTotal > 0) {
+    pending.push({ key: 'data', title: '没有启用数据源', action: '去启用', route: 'DataSources' });
+  }
+  if (typeof singleCapRaw === 'number' && singleCapRaw >= 50) {
+    pending.push({
+      key: 'risk',
+      title: `风控很激进（单票 ${singleCapRaw}%）`,
+      action: '看一眼',
+      route: 'InvestorProfile',
+    });
+  }
 
   return (
     <ScrollView
@@ -92,6 +128,49 @@ export default function SettingsScreen() {
       {runtime?.degraded ? (
         <SettingsGroup title="运行降级">
           <SettingsNote>⚠️ {String(runtime.degraded_reason ?? '原因未知')}</SettingsNote>
+        </SettingsGroup>
+      ) : null}
+
+      {/* 配置概览：手机上一眼看清「还差什么 / 现在生效什么」，对应 Web 设置首页 */}
+      <SettingsGroup title="配置概览">
+        <SettingsRow
+          icon={runtime?.available ? 'checkmark-circle-outline' : 'alert-circle-outline'}
+          label="模型"
+          value={runtime?.available ? String(runtime?.model_name ?? '已连接') : '未连接'}
+          onPress={() => navigation.navigate('ModelService')}
+        />
+        <SettingsRow
+          icon="server-outline"
+          label="数据源"
+          value={`${dataOn}/${dataTotal} 启用`}
+          onPress={() => navigation.navigate('DataSources')}
+        />
+        <SettingsRow
+          icon="shield-checkmark-outline"
+          label="风控"
+          value={`${policyName} · 加密 ${cryptoCap == null ? '—' : `${cryptoCap}%`}`}
+          onPress={() => navigation.navigate('InvestorProfile')}
+        />
+        <SettingsRow
+          icon="alarm-outline"
+          label="定时任务"
+          value={taskCount == null ? '—' : `${taskCount} 个启用`}
+          last
+          onPress={() => navigation.navigate('ScheduledTasks')}
+        />
+      </SettingsGroup>
+
+      {pending.length > 0 ? (
+        <SettingsGroup title="待确认">
+          {pending.map((p, i) => (
+            <SettingsRow
+              key={p.key}
+              label={p.title}
+              value={p.action}
+              last={i === pending.length - 1}
+              onPress={() => navigation.navigate(p.route as never)}
+            />
+          ))}
         </SettingsGroup>
       ) : null}
 

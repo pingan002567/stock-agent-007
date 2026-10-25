@@ -32,8 +32,8 @@
 **改动**
 - [x] 后端新增 `backend/config/tool_labels.py`（89 条，单一真源）
 - [x] `ToolSpec.to_dict()` 与 `DEFAULT_TOOLS` 兜底路径都带 `label`
-- [ ] Web `toolLabel()` 优先用 `/api/settings.tools[].label`，静态表降级为 fallback
-- [ ] 安卓 `src/lib/toolLabels.ts` 同上；设置加载后 prime
+- [x] Web `toolLabel()` 优先用 `/api/settings.tools[].label`，静态表降级为 fallback
+- [x] 安卓 `src/lib/toolLabels.ts` 同上；连接就绪后 prime
 
 **验收**：聊天工具卡、设置页工具列表全部中文；新加工具只改后端一行。
 
@@ -43,8 +43,8 @@
 安卓没有 —— 手机用户关不掉思考（费钱、慢）。
 
 **改动**
-- [ ] `ModelServiceScreen` 增加开关，调 `PUT /api/settings/runtime`
-- [ ] 与 `runtime_config.thinking_enabled` 双向同步
+- [x] `ModelServiceScreen` 增加开关，调 `PUT /api/settings/runtime`
+- [x] 与 `runtime_config.thinking_enabled` 双向同步
 
 **验收**：手机上关掉后，下一轮对话不再返回 `reasoning`；刷新后开关状态保持。
 
@@ -54,9 +54,9 @@
 后端 `summary.by_currency` 已经给了。
 
 **改动**
-- [ ] 每行显示 `currency`（USD 用 `$`、CNY 用 `¥`）
-- [ ] 顶部增加分币种小计（对齐 Web `Holdings.tsx:325-333`）
-- [ ] `market: "CRYPTO"` 中文化为「加密」
+- [x] 每行显示 `currency`（USD 用 `$`、CNY 用 `¥`）
+- [x] 顶部增加分币种小计（对齐 Web `Holdings.tsx:325-333`）
+- [x] `market: "CRYPTO"` 中文化为「加密」
 
 **验收**：BTC + A 股混合持仓时，行币种正确、小计正确、总资产仍为折合 CNY。
 
@@ -65,8 +65,8 @@
 **问题**：`POST /api/holdings` 本周新增，安卓无入口 → 手机上无法把买的币记进持仓。
 
 **改动**
-- [ ] 持仓页「添加」按钮 → 搜索标的 → 数量/成本/币种
-- [ ] 加密标默认 `currency` = 计价币（USDT/USD），股票默认 CNY
+- [x] 持仓页「添加」按钮 → 搜索标的 → 数量/成本/币种
+- [x] 加密标默认 `currency` = 计价币（USDT/USD），股票默认 CNY
 
 **验收**：手机加一笔 BTC，Web 端持仓立即可见且折合正确。
 
@@ -76,8 +76,8 @@
 加密上限（`crypto_max_weight_pct`，默认 30%）有了币之后最需要能调。
 
 **改动**
-- [ ] 画像页增加上限编辑（单票 / 行业 / ETF / 加密）
-- [ ] 写回 `PUT /api/settings/risk-policy`（或现有 policy 接口）
+- [x] 画像页增加上限编辑（单票 / 行业 / ETF / 加密）
+- [x] 写回 `PUT /api/risk-policies/{id}`（已验证幂等回写）
 
 **验收**：手机把加密上限从 30% 调到 20%，Web 风控页同步显示 20%。
 
@@ -87,7 +87,7 @@
 没有任何新闻/舆情 provider 的设置入口。
 
 **改动**
-- [ ] `DataSourcesScreen` 增加情报区（新闻搜索 / 舆情 provider + Key）
+- [x] `DataSourcesScreen` 增加情报区（新闻搜索 / 舆情 provider + Key）
 
 **验收**：手机上能看到并启用/停用情报源。
 
@@ -97,8 +97,8 @@
 其它类型直接显示原始英文 `rule_type`。
 
 **改动**
-- [ ] 规则类型下拉增加「资金费率超限」
-- [ ] 规则列表把 `rule_type` 中文化（含已有的 `price_above` 等）
+- [x] 规则类型下拉增加「资金费率超限」
+- [x] 规则列表把 `rule_type` 中文化（含已有的 `price_above` 等）
 
 **验收**：手机上能建一条资金费率规则，Web 盯盘页能看到同一条。
 
@@ -107,8 +107,8 @@
 **问题**：Web 有了概览（待确认 / 当前生效 / 健康度），安卓设置是一堆平铺入口。
 
 **改动**
-- [ ] `SettingsScreen` 顶部加健康度卡片（模型连通 / 数据源 / 定时任务 / 护栏）
-- [ ] 待确认项点进去直达对应屏
+- [x] `SettingsScreen` 顶部加「配置概览」组（模型连通 / 数据源 / 定时任务 / 护栏）
+- [x] 待确认项点进去直达对应屏
 
 **验收**：打开设置 3 秒内知道「哪里没配好」。
 
@@ -127,3 +127,27 @@ T1 先做：T3/T4/T7 的文案与展示都依赖标签真源。
 - 设置页 IA 照搬 Web（安卓是独立导航，硬套只会更乱）
 - agent loop 的折叠/命令终端（T2 相关的「思考」形态单独评估）
 - 桌宠（Tauri 窗口独有）
+
+---
+
+## 本次已完成（2026-10-25）
+
+| 任务 | 提交 | 验证 |
+|---|---|---|
+| T1 标签单一真源 | `7487012` | 后端 89 条 label + 覆盖测试；Web/安卓都消费 |
+| T2 思考开关 | `be4db1f` | 接 `PUT /api/settings/runtime`（整体覆盖，先合并） |
+| T3 多币种持仓 | `fe56d44` | 原币 + 折合 + 分币种小计 |
+| T4 加持仓入口 | `2b1f999` | `POST /api/holdings`，搜索支持 BTC |
+| T5 风控上限 | `8ab3aab` | 线上幂等回写验证 body 形状 |
+| T6 情报设置 | `0fbe596` | 线上幂等回写验证 body 形状 |
+| T7 加密盯盘规则 | `2208236` | 线上建了 `crypto_funding_rate_gt` 规则再删除 |
+| T8 设置概览 | 本次 | 健康度 + 待确认，且「拉不到显示 —」 |
+
+验证方式统一为：`mobile-rn && npm run typecheck`（`tsc --noEmit`）+ 后端接口真跑。
+**APK 需要重新打包**：仓库里的 `StockAgent-0.1.0.apk` 是 10-17 的旧产物，
+本次改动都还没进包。打包命令：
+
+```bash
+cd mobile-rn/android
+JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew assembleDebug
+```
