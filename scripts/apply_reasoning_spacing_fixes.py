@@ -2,7 +2,7 @@
 
 自动切分在真实语料上切不动（词表太小、模型用词随意），所以这 13 条是**人工校正**的：
 只补空格，不改词、不动工具名/代码/引号内原文。校正表见
-`scripts/data/reasoning_spacing_fixes.json`（message_id → 修复后文本）。
+`scripts/fixtures/reasoning_spacing_fixes.json`（message_id → 修复后文本）。
 
 安全措施：
 - 写前把**原文备份**到 `data/reasoning_backup_<时间戳>.json`
@@ -22,7 +22,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-FIXES = Path("scripts/data/reasoning_spacing_fixes.json")
+FIXES = Path("scripts/fixtures/reasoning_spacing_fixes.json")
 
 
 def main() -> None:
