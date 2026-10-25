@@ -174,6 +174,11 @@ def repair_text(text: str, vocab: set[str], max_len: int = 20) -> tuple[str, boo
 
     work = PROTECT_RE.sub(stash, text)
 
+    # 1.5) 占位符（标识符/数字/引号）与字母之间补词边界：
+    #      `eastmoneyortonghuashun` → `eastmoney or tonghuashun`
+    work = re.sub(r"(?<=[A-Za-z])(\x01)", r" \1", work)
+    work = re.sub(r"(\x02)(?=[A-Za-z])", r"\1 ", work)
+
     # 2) 标点断句 + 3) 驼峰/缩写边界
     work = PUNCT_AFTER.sub(r"\1 ", work)
     work = CAMEL.sub(r"\1 \2", work)
