@@ -73,3 +73,53 @@ export function shortDate(iso?: string | null): string {
   const parts = s.split('-');
   return parts.length === 3 ? `${parts[1]}/${parts[2]}` : s;
 }
+
+
+/** 币种符号：持仓可能是原币计价（加密常见 USD/USDT） */
+export function currencySign(currency?: string | null): string {
+  const c = String(currency ?? 'CNY').toUpperCase();
+  switch (c) {
+    case 'USD':
+    case 'USDT':
+    case 'USDC':
+      return '$';
+    case 'HKD':
+      return 'HK$';
+    case 'EUR':
+      return '€';
+    case 'JPY':
+      return 'JP¥';
+    case 'BTC':
+      return '₿';
+    default:
+      return '¥';
+  }
+}
+
+/** 原币金额：带币种符号 */
+export function currencyMoney(value: number | undefined | null, currency?: string | null): string {
+  if (value == null) return '—';
+  return `${currencySign(currency)}${formatMoney(value)}`;
+}
+
+/** 市场的中文名（持仓/自选行用；后端 market 是 CN/HK/US/CRYPTO） */
+export function marketLabel(market?: string | null): string {
+  const m = String(market ?? '').toUpperCase();
+  switch (m) {
+    case 'CN':
+      return 'A股';
+    case 'HK':
+      return '港股';
+    case 'US':
+      return '美股';
+    case 'CRYPTO':
+      return '加密';
+    default:
+      return m || '';
+  }
+}
+
+/** 持仓数量单位：币按「枚」，股按「股」 */
+export function quantityUnit(market?: string | null): string {
+  return String(market ?? '').toUpperCase() === 'CRYPTO' ? '枚' : '股';
+}

@@ -8,7 +8,7 @@ import { fetchHoldings } from '../api/client';
 import { ErrorState } from '../components/ErrorState';
 import { Sheet } from '../components/Sheet';
 import { trendColor } from '../lib/colors';
-import { relativeTime } from '../lib/format';
+import { currencyMoney, currencySign, marketLabel, quantityUnit, relativeTime } from '../lib/format';
 import { useThemedStyles, useTokens } from '../lib/tokens';
 import type { RootStackParamList } from '../navigation';
 import { useConnection } from '../store/connection';
@@ -71,6 +71,15 @@ export default function HoldingsScreen() {
   const holdingPct = Math.max(0, Math.min(100, 100 - cashPct));
 
   // 后端 weight_pct 目前恒为 0（未计算），这里按持仓市值自己算
+  /** 分币种小计（后端已按当天汇率给，缺汇率时 cny 为 null） */
+  const buckets = summary?.by_currency ?? [];
+
+  /** 原币市值：优先 market_value_native，老后端没有就退回折合值 */
+  const nativeValue = (it: HoldingItem) => it.market_value_native ?? it.market_value;
+
+  /** 非人民币持仓：额外显示折合值，避免误以为是人民币计价 */
+  const isForeign = (it: HoldingItem) => String(it.currency ?? 'CNY').toUpperCase() !== 'CNY';
+
   const weightOf = (it: HoldingItem) => {
     const mv = Number(it.market_value ?? 0);
     return marketValue > 0 ? (mv / marketValue) * 100 : 0;
@@ -110,13 +119,22 @@ export default function HoldingsScreen() {
           <Text style={[styles.name, { color: t.sub }]} numberOfLines={1}>
             {item.name}
           </Text>
-          <Text style={[styles.mv, { color: t.text }]}>¥{money(item.market_value)}</Text>
+          {/* 原币市值 + 折合 CNY：加密持仓的 market_value 是折算值，光看 ¥ 会以为按人民币计价 */}
+          <Text style={[styles.mv, { color: t.text }]}>
+            {currencyMoney(nativeValue(item), item.currency)}
+          </Text>
         </View>
 
         <View style={styles.cardMid}>
           <Text style={[styles.meta, { color: t.sub }]}>
-            {money(item.quantity)} 股 · 成本 {money(item.cost, 2)}
+            {marketLabel(item.market)} · {money(item.quantity)} {quantityUnit(item.market)} · 成本{' '}
+            {currencyMoney(item.cost, item.currency)}
           </Text>
+          {isForeign(item) ? (
+            <Text style={[styles.meta, { color: t.sub }]}>
+              折合 ¥{money(item.market_value)}
+            </Text>
+          ) : null}
           <Text style={[styles.meta, { color: t.sub }]}>
             现价 {last != null ? money(last, 2) : '—'}
             {last != null && dayPct !== 0 ? `  ${signed(dayPct)}%` : ''}
@@ -174,12 +192,22 @@ export default function HoldingsScreen() {
                 <Text style={[styles.sumLabel, { color: t.sub }]}>总资产</Text>
                 <Text style={[styles.sumValue, { color: t.text }]}>¥{money(totalValue, 2)}</Text>
               </View>
+              {buckets.length > 1 || (buckets[0] && buckets[0].currency !== 'CNY') ? (
+                <View style={[styles.curRow, { borderTopColor: t.sep }]}>
+                  {buckets.map((b) => (
+                    <Text key={String(b.currency)} style={[styles.curChip, { color: t.sub }]}>
+                      {currencySign(b.currency)} {money(b.native)} · {b.count ?? 0} 只
+                      {b.cny == null ? '（无汇率）' : ''}
+                    </Text>
+                  ))}
+                </View>
+              ) : null}
               <View style={[styles.sumGrid, { borderTopColor: t.sep }]}>
                 <Stat label="持仓市值" value={`¥${money(marketValue)}`} />
                 <Stat label="可用资金" value={`¥${money(cash)}`} />
                 <Stat label="持仓占比" value={`${holdingPct.toFixed(1)}%`} />
                 <Stat
-                  label={`总盈亏（${items.length} 只）`}
+                  label={`总盈亏（${items.length} 项）`}
                   value={`${signed(totalPnl)} (${signed(totalPnlPct)}%)`}
                   color={trendColor(totalPnl)}
                 />
@@ -189,7 +217,7 @@ export default function HoldingsScreen() {
             {degraded > 0 ? (
               <View style={styles.notice}>
                 <Text style={[styles.noticeText, { color: t.sub }]}>
-                  ⚠️ {degraded} 只标的的行情降级或过期，数据可能不是最新
+                  ⚠️ {degraded} 个标的的行情降级或过期，数据可能不是最新
                 </Text>
               </View>
             ) : null}
@@ -304,6 +332,8 @@ const baseStyles = StyleSheet.create({
   sumTop: { alignItems: 'flex-start' },
   sumLabel: { fontSize: 12.5 },
   sumValue: { fontSize: 28, fontWeight: '700', marginTop: 4, letterSpacing: -0.5 },
+  curRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingTop: 10 },
+  curChip: { fontSize: 12, fontVariant: ['tabular-nums'] },
   sumGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

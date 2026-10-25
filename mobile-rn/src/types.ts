@@ -171,15 +171,35 @@ export interface HoldingItem {
   symbol?: string;
   name?: string;
   quantity?: number;
+  /** 折合 CNY 的市值（后端按当天汇率折算，**不落库**） */
   market_value?: number;
+  /** 原币市值；加密持仓的 market_value 是折合值，这里才是原币 */
+  market_value_native?: number;
+  /** 原币币种：CNY / USD / HKD… */
+  currency?: string;
+  /** CN / HK / US / CRYPTO */
+  market?: string;
   cost?: number;
   pnl_pct?: number;
+  pnl_amount?: number;
+  weight_pct?: number;
   quote?: Quote;
   [key: string]: unknown;
 }
 
+export interface CurrencyBucket {
+  currency?: string;
+  /** 该币种的原币小计 */
+  native?: number;
+  /** 折合 CNY；无汇率时为 null（不按 1:1 硬算） */
+  cny?: number | null;
+  count?: number;
+}
+
 export interface HoldingsSummary {
   total_value?: number;
+  /** 分币种小计：总资产折合的前提，缺汇率时 cny 为 null */
+  by_currency?: CurrencyBucket[];
   positions?: number;
   max_weight_pct?: number;
   available_cash?: number;
