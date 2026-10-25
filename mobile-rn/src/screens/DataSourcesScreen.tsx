@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
-import { fetchSettings, updateDataSources } from '../api/client';
+import { fetchSettings, updateDataSources, updateIntelSources, type IntelSourcesConfig } from '../api/client';
 import { ErrorState } from '../components/ErrorState';
 import { useConnection } from '../store/connection';
 import { useThemedStyles } from '../lib/tokens';
@@ -37,6 +37,12 @@ export default function DataSourcesScreen() {
   const [schema, setSchema] = useState<Record<string, ProviderCredentialField[]>>({});
   const [config, setConfig] = useState<DataSourcesConfig | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Record<string, string>>>({});
+  /** 情报与舆情：与 Web「数据与情报」同一份配置（intel_sources.providers） */
+  const [intel, setIntel] = useState<IntelSourcesConfig | null>(null);
+  const [intelBase, setIntelBase] = useState<string>('');
+  const [intelProviders, setIntelProviders] = useState<{ id: string; name?: string; free?: boolean; category?: string }[]>([]);
+  const [intelSaving, setIntelSaving] = useState(false);
+  const [intelMessage, setIntelMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -60,6 +66,13 @@ export default function DataSourcesScreen() {
         for (const f of fields) d[pid][f.key] = creds[pid]?.[f.key] ?? '';
       }
       setDrafts(d);
+      const it = (s.intel_sources as IntelSourcesConfig) ?? { providers: {} };
+      setIntel(it);
+      setIntelBase(JSON.stringify(it));
+      setIntelProviders([
+        ...((s.available_intel_providers as { id: string; name?: string; free?: boolean }[]) ?? []),
+        ...((s.available_sentiment_providers as { id: string; name?: string; free?: boolean }[]) ?? []),
+      ]);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -116,6 +129,32 @@ export default function DataSourcesScreen() {
       setMessage('保存失败');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const intelDirty = intel != null && JSON.stringify(intel) !== intelBase;
+
+  const setIntelField = (slot: string, patch: Record<string, unknown>) => {
+    setIntel((prev) => {
+      const base = prev ?? { providers: {} };
+      const cur = base.providers[slot] ?? {};
+      return { ...base, providers: { ...base.providers, [slot]: { ...cur, ...patch } } };
+    });
+  };
+
+  const saveIntel = async () => {
+    if (!intel) return;
+    setIntelSaving(true);
+    setIntelMessage('');
+    try {
+      await updateIntelSources(baseURL, token, intel);
+      setIntelBase(JSON.stringify(intel));
+      setIntelMessage('已保存');
+      setTimeout(() => setIntelMessage(''), 1800);
+    } catch (e) {
+      setIntelMessage(e instanceof Error ? e.message : '保存失败');
+    } finally {
+      setIntelSaving(false);
     }
   };
 
@@ -184,6 +223,75 @@ export default function DataSourcesScreen() {
         );
       })}
 
+      {/* 情报与舆情：Web 已把它和「数据源」合并到一页，安卓此前完全没有入口 */}
+      {intel ? (
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>情报与舆情</Text>
+          <Text style={styles.footerNote}>
+            新闻搜索用于个股情报与「为什么涨」的归因；不启用时情报类结论会标注「精度有限」。
+          </Text>
+          {(['news_search', 'social_sentiment'] as const).map((slot) => {
+            const cfg = intel.providers[slot] ?? {};
+            const options = intelProviders.filter((p) =>
+              slot === 'news_search' ? p.category !== 'social_sentiment' : true
+            );
+            return (
+              <View key={slot} style={{ marginTop: 10 }}>
+                <View style={styles.head}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.name}>{cfg.label ?? (slot === 'news_search' ? '新闻搜索' : '社交舆情')}</Text>
+                    <Text style={styles.desc} numberOfLines={2}>{cfg.description ?? ''}</Text>
+                  </View>
+                  <Switch
+                    value={!!cfg.enabled}
+                    onValueChange={(v) => setIntelField(slot, {
+                      enabled: v,
+                      // 开但没选 provider 时给个默认，避免出现「启用但无源」的状态
+                      provider: cfg.provider && cfg.provider !== 'none' ? cfg.provider : (options[0]?.id ?? 'none'),
+                    })}
+                  />
+                </View>
+                <Text style={styles.fieldLabel}>来源</Text>
+                <View style={styles.optionRow}>
+                  {options.slice(0, 6).map((p) => {
+                    const on = cfg.provider === p.id;
+                    return (
+                      <Pressable
+                        key={p.id}
+                        style={[styles.optionChip, on && styles.optionChipOn]}
+                        onPress={() => setIntelField(slot, { provider: p.id })}
+                      >
+                        <Text style={[styles.optionText, on && styles.optionTextOn]}>
+                          {p.name ?? p.id}{p.free ? ' · 免费' : ''}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={styles.fieldLabel}>API Key（免费源可留空）</Text>
+                <TextInput
+                  style={styles.input}
+                  value={String(cfg.api_key ?? '')}
+                  onChangeText={(v) => setIntelField(slot, { api_key: v })}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholder="留空表示使用免费源"
+                />
+              </View>
+            );
+          })}
+          <Pressable
+            style={[styles.saveBtn, (!intelDirty || intelSaving) && styles.saveDisabled]}
+            onPress={() => void saveIntel()}
+            disabled={!intelDirty || intelSaving}
+          >
+            <Text style={styles.saveText}>{intelSaving ? '保存中…' : intelDirty ? '保存情报设置' : '没有改动'}</Text>
+          </Pressable>
+          {intelMessage ? <Text style={styles.message}>{intelMessage}</Text> : null}
+        </View>
+      ) : null}
+
       {Object.values(drafts).some((d) => Object.values(d).some((v) => v)) ? (
         <Pressable
           style={[styles.saveBtn, (!dirty || saving) && styles.saveDisabled]}
@@ -220,5 +328,10 @@ const baseStyles = StyleSheet.create({
   saveBtn: { backgroundColor: '#007AFF', borderRadius: 8, padding: 14, alignItems: 'center' },
   saveDisabled: { opacity: 0.45 },
   saveText: { color: '#fff', fontWeight: '600' },
+  optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  optionChip: { borderWidth: 1, borderColor: '#ddd', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
+  optionChipOn: { borderColor: '#007AFF', backgroundColor: '#007AFF14' },
+  optionText: { fontSize: 12, color: '#444' },
+  optionTextOn: { color: '#007AFF', fontWeight: '600' },
   message: { textAlign: 'center', color: '#26a69a', marginTop: 8 },
 });

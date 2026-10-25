@@ -413,6 +413,15 @@ export async function updateRiskPolicy(
   return request<RiskPolicy>(baseURL, token, `/api/risk-policies/${enc(id)}`, { method: 'PUT', json: body });
 }
 
+/** 情报与舆情配置：providers = { news_search: {provider,enabled,api_key}, social_sentiment: {...} } */
+export interface IntelSourcesConfig {
+  providers: Record<string, { provider?: string; enabled?: boolean; api_key?: string | null; label?: string; description?: string }>;
+}
+
+export function updateIntelSources(baseURL: string, token: string, config: IntelSourcesConfig): Promise<unknown> {
+  return request(baseURL, token, '/api/settings/intel-sources', { method: 'PUT', json: config });
+}
+
 export function setSkillEnabled(baseURL: string, token: string, name: string, enabled: boolean): Promise<unknown> {
   return request(baseURL, token, '/api/settings/skills', { method: 'PUT', json: { name, enabled } });
 }
