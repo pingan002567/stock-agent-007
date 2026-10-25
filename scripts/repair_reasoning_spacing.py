@@ -28,6 +28,11 @@ import re
 import sqlite3
 from pathlib import Path
 
+try:  # 可选的英文分词器：装了就比词表最长匹配准得多
+    import wordninja
+except ImportError:  # pragma: no cover - 没装时退回词表切分
+    wordninja = None  # type: ignore[assignment]
+
 #: 常见英文词（模型思考里高频），补库里语料没覆盖到的
 COMMON_WORDS = """
 a about after all also an and any are as at be because been before being between both but by
@@ -152,7 +157,8 @@ def repair_text(text: str, vocab: set[str], max_len: int = 20) -> tuple[str, boo
     work = LOWER_THEN_ACRONYM.sub(" ", work)
     work = ACRONYM_THEN_WORD.sub(" ", work)
 
-    # 4) 剩余长串按词表切分
+    # 4) 剩余长串切分：wordninja 优先（按词频切，`Theuserwantsa` → `The user wants a`），
+    #    没装时退回词表最长匹配
     ok = True
 
     def split_run(match: re.Match[str]) -> str:
@@ -160,13 +166,19 @@ def repair_text(text: str, vocab: set[str], max_len: int = 20) -> tuple[str, boo
         run = match.group(0)
         if len(run) <= 2:
             return run
+        if wordninja is not None:
+            pieces = wordninja.split(run)
+            if len(pieces) >= 1:
+                return " ".join(pieces)
         pieces = _segment(run, vocab, max_len) or _segment(run, vocab, max_len, inflection=True)
         if pieces is None:
             ok = False
             return run
         return " ".join(pieces)
 
-    work = re.sub(r"[A-Za-z]{3,}", split_run, work)
+    # 只有「连续字母 >= 12」才是粘连候选：正常单词（derivatives/opportunity）
+    # 不该被拆，短串也不值得拆错
+    work = re.sub(r"[A-Za-z]{12,}", split_run, work)
 
     # 5) 还原占位
     def restore(match: re.Match[str]) -> str:
@@ -206,8 +218,8 @@ def main() -> None:
         except (TypeError, ValueError):
             skipped += 1
             continue
-        letters = sum(1 for c in text if c.isascii() and c.isalpha())
-        if not text or " " in text or len(text) <= 30 or letters <= len(text) * 0.6:
+        # 粘连判据：存在 >=12 个连续字母的片段（正常英文单词很少这么长）
+        if not text or not re.search(r"[A-Za-z]{12,}", PROTECT_RE.sub(" ", text)):
             skipped += 1
             continue
         targets.append((message_id, text))
