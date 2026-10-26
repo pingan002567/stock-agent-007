@@ -3156,9 +3156,29 @@ html.resizing { cursor: col-resize; user-select: none; }
   color: var(--blue);
 }
 .final-meta-usage {
-  margin-left: auto;
   color: var(--muted);
   font-family: var(--mono);
+  white-space: nowrap;
+}
+/* 右侧元数据簇：整体靠右，内部用中点分隔，不再逐个 margin-left:auto 各飞一边 */
+.final-meta-stats {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.final-meta-stats > * + *::before {
+  content: "·";
+  margin-right: 7px;
+  opacity: 0.5;
+}
+/* 「用时」是这行的重点信息：数字提亮一档，但仍是只读样式（无边框、无底色） */
+.final-meta-duration b {
+  color: var(--text-secondary);
+  font-weight: 600;
 }
 .final-meta-list {
   margin: 6px 0 0;

@@ -95,14 +95,21 @@ export function CopilotFinalMeta({ payload, durationMs, completedAt }: { payload
             {openRefs ? "▼" : "▶"} 引用来源 {evidenceRefs.length}
           </button>
         )}
-        {(durationMs ?? 0) > 0 && (
-          <span className="final-meta-usage">用时 {formatDuration(durationMs ?? 0)}</span>
-        )}
-        {completedAt && <span className="final-meta-usage final-meta-time">{completedAt}</span>}
-        {tokensIn + tokensOut > 0 && (
-          <span className="final-meta-usage">
-            {formatTokens(tokensIn)} in / {formatTokens(tokensOut)} out
-            {cost > 0 && ` · ≈$${cost.toFixed(4)}`}
+        {/* 右侧元数据簇：用时 / 完成时间 / token —— 只读信息，不跟左侧可点徽章抢位置 */}
+        {((durationMs ?? 0) > 0 || completedAt || tokensIn + tokensOut > 0) && (
+          <span className="final-meta-stats">
+            {(durationMs ?? 0) > 0 && (
+              <span className="final-meta-usage final-meta-duration">
+                用时 <b>{formatDuration(durationMs ?? 0)}</b>
+              </span>
+            )}
+            {completedAt && <span className="final-meta-usage final-meta-time">{completedAt}</span>}
+            {tokensIn + tokensOut > 0 && (
+              <span className="final-meta-usage">
+                {formatTokens(tokensIn)} in / {formatTokens(tokensOut)} out
+                {cost > 0 && ` · ≈$${cost.toFixed(4)}`}
+              </span>
+            )}
           </span>
         )}
       </div>
