@@ -64,17 +64,31 @@ export function commandOutputOf(tool: StreamToolCall): string {
 }
 
 
-/** 思考步落位：紧跟在「运行中的工具」之后到达的思考，语义上是**该工具调用之前**
- *  的推理（后端把 additional_kwargs 挂在有 tool_calls 的分片上，所以文本会晚一拍）。
- *  这种情况插到那个工具步之前，时间线才是「思考 → 工具」。
+/** 思考步落位：让每个思考块紧贴它所驱动的**第一张**工具卡之前。
  *
- *  判据只看「尾部工具是否还在跑」：还在跑说明结果没回来，这段思考不可能是对结果的
- *  分析，只能是发起调用前的判断。工具已完成时追加在后面，不篡改因果顺序。
+ *  背景：后端把思维链挂在「带 tool_calls 的分片」上，所以 `reasoning` 事件总是晚于
+ *  `tool_call` 到达（实测序列：CALL, CALL, REASON, RESULT, RESULT）。如果按到达顺序
+ *  追加，一段「打算先取数」的计划就会显示在结果之后，把因果讲反。
+ *
+ *  判据是尾部的**工具组**（连续的工具步）：
+ *  - 组里还有工具没返回结果（status === "running"）→ 这是「计划型思考」，插到组首；
+ *    这类思考**一定**早于它自己的 tool_result 到达，所以「没返回结果」足以识别，
+ *    不需要猜。
+ *  - 组里全部已返回 → 这是「结果后的复盘」，追加在后面（唯一该在后面的情况）。
+ *  - 尾部不是工具（思考/空）→ 追加，交给上面的合并逻辑。
+ *
+ *  ⚠️ 只前插**组内位置**，不改工具之间的相对顺序，也不改轮次编号。
  */
 export function placeReasoningStep<T extends StreamStep>(steps: T[], step: T): T[] {
-  const last = steps[steps.length - 1];
-  if (last?.kind === "tool" && last.tool.status === "running") {
-    return [...steps.slice(0, -1), step, last];
-  }
-  return [...steps, step];
+  // 找尾部的连续工具组
+  let start = steps.length;
+  while (start > 0 && steps[start - 1].kind === "tool") start -= 1;
+
+  if (start === steps.length) return [...steps, step];
+
+  const pending = steps.slice(start).some((s) => s.kind === "tool" && s.tool.status === "running");
+  if (!pending) return [...steps, step];
+
+  // 组里还有工具在跑 → 这段思考是发起调用前的判断，插到组首
+  return [...steps.slice(0, start), step, ...steps.slice(start)];
 }

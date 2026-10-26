@@ -216,3 +216,19 @@ def test_android_steps_interleave_reasoning_and_tools():
     assert "assistant.steps ?? []" in bubble
     detail = Path("mobile-rn/src/screens/TurnDetailScreen.tsx").read_text()
     assert "id: 'steps'" in detail
+
+
+def test_android_reasoning_inserts_at_tool_group_head():
+    """安卓：思考要插到「尾部工具组」的第一张之前，而不是只前插一格。
+
+    实测序列是 CALL, CALL, REASON, RESULT —— 两格工具都到了思考才到；
+    只前插一格会得到 [工具1, 思考, 工具2]，因果仍然错位。
+    """
+    from pathlib import Path
+
+    src = Path("mobile-rn/src/api/parse.ts").read_text()
+    fn = src[src.index("function pushReasoningStep") : src.index("/**\n * 把一条 StreamUpdate 归约")]
+    # 从尾部往前扫描连续工具步
+    assert "while (start > 0 && state.steps[start - 1].kind === 'tool')" in fn
+    assert "splice(start, 0, step)" in fn, "应插到组首"
+    assert "status === 'running'" in fn, "判据是组内是否还有未返回的工具"

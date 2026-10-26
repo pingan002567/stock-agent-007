@@ -139,9 +139,16 @@ function parseSkillTrace(raw: unknown): SkillTraceStep[] {
     .map((o) => ({ ...o } as SkillTraceStep));
 }
 
-/** 思考步落位：紧随「仍在运行的工具」到达的思考，语义上是**这次调用之前**的判断
- *  （后端把思维链挂在带 tool_calls 的分片上，所以文本晚一拍到）。
- *  这种情况插到那个工具步之前，时间线才是「思考 → 工具」。 */
+/** 思考步落位：让每个思考块紧贴它所驱动的**第一张**工具步之前。
+ *
+ *  后端把思维链挂在「带 tool_calls 的分片」上，所以 reasoning 总是晚于 tool_call 到达
+ *  （实测：CALL, CALL, REASON, RESULT, RESULT）。按到达顺序追加会把「打算先取数」的
+ *  计划显示在结果之后，因果就讲反了。
+ *
+ *  判据是尾部的**工具组**（连续工具步）：
+ *  - 组里还有工具没返回（status === "running"）→ 计划型思考，插到组首
+ *  - 组里全部已返回 → 结果后的复盘，追加
+ */
 function pushReasoningStep(state: AssistantState, text: string): void {
   if (!text) return;
   const last = state.steps[state.steps.length - 1];
@@ -154,14 +161,13 @@ function pushReasoningStep(state: AssistantState, text: string): void {
     return;
   }
   const step = { kind: 'reasoning' as const, text };
-  const runningTool = last && last.kind === 'tool'
-    ? state.tools.find((t) => t.id === last.id && t.status === 'running')
-    : undefined;
-  if (last && last.kind === 'tool' && runningTool) {
-    state.steps.splice(state.steps.length - 1, 0, step);
-  } else {
-    state.steps.push(step);
-  }
+  // 尾部连续工具组
+  let start = state.steps.length;
+  while (start > 0 && state.steps[start - 1].kind === 'tool') start -= 1;
+  const group = state.steps.slice(start);
+  const pending = group.some((st) => st.kind === 'tool' && state.tools.some((t) => t.id === st.id && t.status === 'running'));
+  if (pending) state.steps.splice(start, 0, step);
+  else state.steps.push(step);
 }
 
 /**

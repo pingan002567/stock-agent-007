@@ -457,12 +457,33 @@ describe("思考步落位（思考 → 工具）", () => {
     expect(out.map((s) => s.kind)).toEqual(["reasoning", "reasoning", "tool"]);
   });
 
-  it("工具已完成时，思考追加在后面（不篡改因果）", () => {
+  it("尾部工具组里还有在跑的工具 → 插到组首（不是只前插一格）", () => {
+    // 真实序列是 CALL, CALL, REASON, RESULT, RESULT：思考到得比两次调用都晚
     const steps: StreamStep[] = [
-      { kind: "tool" as const, id: "t1", tool: { callId: "c1", name: "get_stock_context", status: "done" as const } },
+      { kind: "reasoning" as const, id: "r0", text: "先看盘面" },
+      { kind: "tool" as const, id: "t1", tool: { callId: "c1", name: "invoke_data_capability", status: "done" as const } },
+      { kind: "tool" as const, id: "t2", tool: { callId: "c2", name: "invoke_data_capability", status: "running" as const } },
     ];
-    const out = placeReasoningStep(steps, { kind: "reasoning", id: "r1", text: "结论：偏贵" });
-    expect(out.map((s) => s.kind)).toEqual(["tool", "reasoning"]);
+    const out = placeReasoningStep(steps, { kind: "reasoning", id: "r2", text: "我该取分时数据" });
+    expect(out.map((s) => s.kind)).toEqual(["reasoning", "reasoning", "tool", "tool"]);
+    // 段落在盘面思考之后、两张工具卡之前
+    expect(out[1]).toMatchObject({ kind: "reasoning", text: "我该取分时数据" });
+  });
+
+  it("尾部工具组已全部返回 → 追加在后面（结果后的复盘思考）", () => {
+    const steps: StreamStep[] = [
+      { kind: "reasoning" as const, id: "r1", text: "先看价格" },
+      { kind: "tool" as const, id: "t1", tool: { callId: "c1", name: "get_stock_context", status: "done" as const } },
+      { kind: "tool" as const, id: "t2", tool: { callId: "c2", name: "get_market_sentiment", status: "done" as const } },
+    ];
+    const out = placeReasoningStep(steps, { kind: "reasoning", id: "r2", text: "结果出来了，偏贵" });
+    expect(out.map((s) => s.kind)).toEqual(["reasoning", "tool", "tool", "reasoning"]);
+  });
+
+  it("尾部不是工具时直接追加（交给相邻合并处理）", () => {
+    const steps: StreamStep[] = [{ kind: "reasoning" as const, id: "r1", text: "第一步" }];
+    const out = placeReasoningStep(steps, { kind: "reasoning", id: "r2", text: "第一步续" });
+    expect(out.map((s) => s.kind)).toEqual(["reasoning", "reasoning"]);
   });
 
   it("历史回放：tool_call → reasoning → tool_result 重排成 思考 → 工具", () => {
