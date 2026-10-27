@@ -457,17 +457,25 @@ describe("思考步落位（思考 → 工具）", () => {
     expect(out.map((s) => s.kind)).toEqual(["reasoning", "reasoning", "tool"]);
   });
 
-  it("尾部工具组里还有在跑的工具 → 插到组首（不是只前插一格）", () => {
-    // 真实序列是 CALL, CALL, REASON, RESULT, RESULT：思考到得比两次调用都晚
+  it("逐工具定位：插到「第一个还在跑的工具」之前，已完成的工具留在上面", () => {
+    // 真实序列 CALL,CALL,REASON,RESULT,RESULT + 后续再来一段思考：
+    // 这段思考已经看过了第一张工具的结果，必须排在它之后
     const steps: StreamStep[] = [
       { kind: "reasoning" as const, id: "r0", text: "先看盘面" },
-      { kind: "tool" as const, id: "t1", tool: { callId: "c1", name: "invoke_data_capability", status: "done" as const } },
-      { kind: "tool" as const, id: "t2", tool: { callId: "c2", name: "invoke_data_capability", status: "running" as const } },
+      { kind: "tool" as const, id: "t1", tool: { callId: "c1", name: "get_portfolio_snapshot", status: "done" as const } },
+      { kind: "tool" as const, id: "t2", tool: { callId: "c2", name: "get_crypto_derivatives", status: "running" as const } },
     ];
-    const out = placeReasoningStep(steps, { kind: "reasoning", id: "r2", text: "我该取分时数据" });
-    expect(out.map((s) => s.kind)).toEqual(["reasoning", "reasoning", "tool", "tool"]);
-    // 段落在盘面思考之后、两张工具卡之前
-    expect(out[1]).toMatchObject({ kind: "reasoning", text: "我该取分时数据" });
+    const out = placeReasoningStep(steps, { kind: "reasoning", id: "r2", text: "持仓只有 A 股，那再看币" });
+    expect(out.map((s) => s.kind)).toEqual(["reasoning", "tool", "reasoning", "tool"]);
+  });
+
+  it("全部工具都在跑时，思考插到组首（计划型）", () => {
+    const steps: StreamStep[] = [
+      { kind: "tool" as const, id: "t1", tool: { callId: "c1", name: "get_portfolio_snapshot", status: "running" as const } },
+      { kind: "tool" as const, id: "t2", tool: { callId: "c2", name: "get_monitor_events", status: "running" as const } },
+    ];
+    const out = placeReasoningStep(steps, { kind: "reasoning", id: "r1", text: "先取持仓和监控" });
+    expect(out.map((s) => s.kind)).toEqual(["reasoning", "tool", "tool"]);
   });
 
   it("尾部工具组已全部返回 → 追加在后面（结果后的复盘思考）", () => {
@@ -486,7 +494,32 @@ describe("思考步落位（思考 → 工具）", () => {
     expect(out.map((s) => s.kind)).toEqual(["reasoning", "reasoning"]);
   });
 
-  it("历史回放：一批 3 个工具时，思考插到组首（不是只前插一格）", () => {
+  it("历史回放：一段思考已看过前两个工具的结果、第三个还没回 → 插到第三个之前", () => {
+    // 截图故障：3 段思考全堆在最上面、工具全在下面。
+    // 这里模拟「思考在 c1/c2 结果之后、c3 结果之前到达」——它该落在 c3 之前。
+    const msgs = [
+      makeMsg({ message_id: "u1", role: "user", kind: "user_message", text: "一起看", run_id: "run_p" }),
+      ...["c1", "c2", "c3"].map((cid, i) =>
+        makeMsg({
+          message_id: `t${i}`, role: "assistant", kind: "tool_call", text: "", run_id: "run_p",
+          payload: { tool: "get_portfolio_snapshot", call_id: cid },
+        }),
+      ),
+      makeMsg({ message_id: "x1", role: "tool", kind: "tool_result", text: "ok", run_id: "run_p", payload: { call_id: "c1" } }),
+      makeMsg({ message_id: "x2", role: "tool", kind: "tool_result", text: "ok", run_id: "run_p", payload: { call_id: "c2" } }),
+      makeMsg({
+        message_id: "r1", role: "system", kind: "reasoning", run_id: "run_p",
+        text: "持仓只有 A 股，得再看币", payload: { text: "持仓只有 A 股，得再看币" },
+      }),
+      makeMsg({ message_id: "x3", role: "tool", kind: "tool_result", text: "ok", run_id: "run_p", payload: { call_id: "c3" } }),
+      makeMsg({ message_id: "f1", role: "assistant", kind: "final_answer", text: "结论", run_id: "run_p", payload: { conclusion: "结论" } }),
+    ];
+    const ai = pairMessages(msgs).find((item) => item.t === "ai");
+    if (ai?.t !== "ai") throw new Error("no ai");
+    expect((ai.steps ?? []).map((s) => s.kind)).toEqual(["tool", "tool", "reasoning", "tool"]);
+  });
+
+  it("历史回放：一批 3 个工具、结果都还没到 → 思考插到组首", () => {
     // 截图里的真实错位：3 个工具的调用 + 结果，思考落在第 3 个之前
     const msgs = [
       makeMsg({ message_id: "u1", role: "user", kind: "user_message", text: "一起过一遍", run_id: "run_m" }),

@@ -148,20 +148,26 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
         // 相邻重复（同一快照反复推）不重复入列
         if (!(last && last.kind === "reasoning" && last.text === text)) {
           const step: StreamStep = { kind: "reasoning", id: msg.message_id, text };
-          // 思维链挂在「带 tool_calls 的分片」上，落库时它可能排在**同批工具的结果之后**。
-          // 判据和实时流一致：看尾部那个工具组里有没有工具的结果还没出现 ——
-          // 有，说明这段思考是发起调用前的判断，插到**组首**（只前插一格仍会错位，
-          // 一批 3 个工具时就会落到第 3 个之前）。
+          // 思维链挂在「带 tool_calls 的分片」上，落库顺序不保证在它的工具结果之前。
+          // 落位判据是**逐工具**的：插到「第一个结果还没出现的工具」之前。
+          //
+          // 为什么不能按「整组」判断：一段思考可能已经看过了前两个工具的结果、正要对
+          // 第三个下手；此时若整组有一个没回来就插到组首，会把两个已经返回、且这段
+          // 思考正在讨论的工具也跨过去 —— 表现就是「3 段思考全堆在最上面，下面才是
+          // 工具」（真实故障截图）。
           let start = steps.length;
           while (start > 0 && steps[start - 1].kind === "tool") start -= 1;
-          const pending = steps
-            .slice(start)
-            .some((st) => {
-              if (st.kind !== "tool") return false;
-              const idx = resultIndexByCallId.get(st.tool.callId);
-              return idx === undefined || idx > i;
-            });
-          if (pending) steps.splice(start, 0, step);
+          let insertAt = -1;
+          for (let k = start; k < steps.length; k += 1) {
+            const st = steps[k];
+            if (st.kind !== "tool") continue;
+            const idx = resultIndexByCallId.get(st.tool.callId);
+            if (idx === undefined || idx > i) {
+              insertAt = k;
+              break;
+            }
+          }
+          if (insertAt >= 0) steps.splice(insertAt, 0, step);
           else steps.push(step);
           pendingSteps.set(rid, steps);
         }

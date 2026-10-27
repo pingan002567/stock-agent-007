@@ -70,12 +70,15 @@ export function commandOutputOf(tool: StreamToolCall): string {
  *  `tool_call` 到达（实测序列：CALL, CALL, REASON, RESULT, RESULT）。如果按到达顺序
  *  追加，一段「打算先取数」的计划就会显示在结果之后，把因果讲反。
  *
- *  判据是尾部的**工具组**（连续的工具步）：
- *  - 组里还有工具没返回结果（status === "running"）→ 这是「计划型思考」，插到组首；
- *    这类思考**一定**早于它自己的 tool_result 到达，所以「没返回结果」足以识别，
- *    不需要猜。
- *  - 组里全部已返回 → 这是「结果后的复盘」，追加在后面（唯一该在后面的情况）。
+ *  判据是**逐工具**的，不是整组：
+ *  - 找到尾部工具组里「第一个还在跑（结果没回来）的工具」→ 插到它之前；
+ *    这段思考既然后面还有没返回的调用，说明它发生在那些调用之前。
+ *  - 组里都已返回 → 这是「结果后的复盘」，追加（唯一该在后面的情况）。
  *  - 尾部不是工具（思考/空）→ 追加，交给上面的合并逻辑。
+ *
+ *  为什么不能整组前插：一段思考可能已经看过前两个工具的结果、正要对第三个下手，
+ *  整组前插会把它跨过那两个已经返回、且它正在讨论的工具（真实故障：
+ *  3 段思考全堆在最上面，工具全在下面）。
  *
  *  ⚠️ 只前插**组内位置**，不改工具之间的相对顺序，也不改轮次编号。
  */
@@ -86,9 +89,17 @@ export function placeReasoningStep<T extends StreamStep>(steps: T[], step: T): T
 
   if (start === steps.length) return [...steps, step];
 
-  const pending = steps.slice(start).some((s) => s.kind === "tool" && s.tool.status === "running");
-  if (!pending) return [...steps, step];
-
-  // 组里还有工具在跑 → 这段思考是发起调用前的判断，插到组首
-  return [...steps.slice(0, start), step, ...steps.slice(start)];
+  // **逐工具**定位：插到「第一个还在跑（结果没回来）的工具」之前。
+  // 不能按整组判断 —— 一段思考可能已经看过了前两个工具的结果、正要对第三个下手，
+  // 整组前插会把已经返回、且这段思考正在讨论的工具也跨过去。
+  let insertAt = -1;
+  for (let k = start; k < steps.length; k += 1) {
+    const s = steps[k];
+    if (s.kind === "tool" && s.tool.status === "running") {
+      insertAt = k;
+      break;
+    }
+  }
+  if (insertAt < 0) return [...steps, step];
+  return [...steps.slice(0, insertAt), step, ...steps.slice(insertAt)];
 }
