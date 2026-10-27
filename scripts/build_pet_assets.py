@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 from collections import deque
 from pathlib import Path
@@ -30,6 +31,18 @@ FRAME = 396
 WHITE_TOLERANCE = 26
 #: webp 质量
 QUALITY = 82
+#: 地面基线：所有「踩地」的帧把最低像素对齐到这条线（对齐 ChatGPT 宠物的固定格思路）。
+#: 之前每帧只做等比缩放 + 居中补边，脚底跟着姿势在 361~385 之间漂 24px，快速播放像上下颠。
+BASELINE = FRAME - 16
+#: 目标播放帧率（每帧时长 = 帧数 / fps）。run 有腾空段，不做基线对齐保留弹跳。
+LOOP_FPS = {
+    "loop-idle-breathe": 3.75,
+    "loop-walk": 15.0,
+    "loop-run": 18.0,
+    "loop-tail": 14.5,
+}
+#: 有腾空动作、不能钉住地面的循环
+AIRBORNE = {"loop-run"}
 
 # 循环：目录名 → (输出文件名, 帧数)
 #
@@ -125,6 +138,23 @@ def _fit(img: Image.Image, size: int = FRAME) -> Image.Image:
     return canvas
 
 
+def _align_baseline(img: Image.Image, baseline: int = BASELINE) -> Image.Image:
+    """把帧的最低不透明像素对齐到同一条地面线。
+
+    只做**竖直平移**：等比缩放比例不变（体型一致），水平位置不变（避免横向抖动）。
+    走/坐/站这类「脚一直踩地」的循环，对齐后就不会再上下漂；腾空类（run）跳过。
+    """
+    bbox = img.split()[3].getbbox()
+    if not bbox:
+        return img
+    shift = baseline - bbox[3]
+    if shift == 0:
+        return img
+    out = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    out.alpha_composite(img, (0, shift))
+    return out
+
+
 def _strip(frames: list[Image.Image], out: Path) -> None:
     sheet = Image.new("RGBA", (FRAME * len(frames), FRAME), (0, 0, 0, 0))
     for i, frame in enumerate(frames):
@@ -158,29 +188,50 @@ def main() -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
+    meta: dict[str, dict] = {}
     for folder, (name, expected) in LOOPS.items():
         files = _frame_files(src / folder, expected)
         frames = [_fit(_transparent(Image.open(f))) for f in files]
+        if name not in AIRBORNE:
+            frames = [_align_baseline(f) for f in frames]
         _strip(frames, out / f"{name}.webp")
-        print(f"✅ {name}.webp  ({len(frames)} 帧)")
+        fps = LOOP_FPS[name]
+        meta[name] = {
+            "frames": len(frames),
+            "ms": round(len(frames) / fps * 1000),
+            "baseline": None if name in AIRBORNE else BASELINE,
+        }
+        print(f"✅ {name}.webp  ({len(frames)} 帧 · {meta[name]['ms']}ms · {fps:g}fps"
+              f"{' · 腾空不对齐' if name in AIRBORNE else ' · 脚底对齐'})")
 
-    for prefix, name in STILLS.items():
+    for prefix, name in STILLS.items():  # noqa: PLR1702
         matches = list(src.glob(f"{prefix}*.png")) + list(src.glob(f"{prefix}*.jpg"))
         if not matches:
             raise SystemExit(f"找不到 {prefix}*")
-        _fit(_transparent(Image.open(matches[0]))).save(
-            out / f"{name}.webp", "WEBP", quality=QUALITY, method=6
-        )
+        still = _align_baseline(_fit(_transparent(Image.open(matches[0]))))
+        still.save(out / f"{name}.webp", "WEBP", quality=QUALITY, method=6)
         print(f"✅ {name}.webp  ← {matches[0].name}")
 
     folder, prefix, name = SLEEP_SOURCE
     files = [f for f in _frame_files(src / folder, LOOPS[folder][1]) if f.stem.startswith(prefix)]
     if not files:
         raise SystemExit(f"找不到 {folder}/{prefix}")
-    _fit(_transparent(Image.open(files[0]))).save(
+    _align_baseline(_fit(_transparent(Image.open(files[0])))).save(
         out / f"{name}.webp", "WEBP", quality=QUALITY, method=6
     )
     print(f"✅ {name}.webp  ← {folder}/{files[0].name}")
+
+    # 帧数/时长的单一数据源：前端直接 import 这个 JSON，不再在组件里写死 8/9/12/13
+    meta_path = out / "pet.meta.json"
+    meta_path.write_text(
+        json.dumps(
+            {"cell": FRAME, "stage": 132, "loops": meta, "generated_by": "scripts/build_pet_assets.py"},
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n"
+    )
+    print(f"✅ {meta_path.name}  {json.dumps(meta, ensure_ascii=False)}")
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ import stretch1 from "@/assets/pet/stretch-1.webp";
 import tilt1 from "@/assets/pet/tilt-1.webp";
 import yawn1 from "@/assets/pet/yawn-1.webp";
 import sleep1 from "@/assets/pet/sleep-1.webp";
+import petMeta from "@/assets/pet/pet.meta.json";
 
 type TauriGlobal = {
   core?: { invoke?: <T = unknown>(cmd: string, args?: Record<string, unknown>) => Promise<T> };
@@ -46,15 +47,23 @@ const STAGE = 132;
 
 const LOOPS = {
   // idle 用待机循环的 8 帧（呼吸下沉→回正→半闭眼→全闭眼→睁眼→歪头）
-  // 用满素材帧数（补间也上）：待机 9、走路 12、跑步 13、摇尾 12。
-  // 每帧时长：待机 267ms（呼吸慢动作）、走路 65ms、跑步 54ms、摇尾 68ms。
-  breathe: { kind: "sprite", src: breatheSrc, frames: 9, ms: 2400 } as Clip,
-  walk: { kind: "sprite", src: walkSrc, frames: 12, ms: 780 } as Clip,
-  run: { kind: "sprite", src: runSrc, frames: 13, ms: 700 } as Clip,
-  tail: { kind: "sprite", src: tailSrc, frames: 12, ms: 820 } as Clip,
+  // 帧数与时长来自素材管线产出的 pet.meta.json（scripts/build_pet_assets.py），
+  // 不再在组件里写死 —— 换素材/加减帧时不会和代码对不上。
+  breathe: { kind: "sprite", src: breatheSrc, ...loopsMeta("loop-idle-breathe") } as Clip,
+  walk: { kind: "sprite", src: walkSrc, ...loopsMeta("loop-walk") } as Clip,
+  run: { kind: "sprite", src: runSrc, ...loopsMeta("loop-run") } as Clip,
+  tail: { kind: "sprite", src: tailSrc, ...loopsMeta("loop-tail") } as Clip,
 };
 
 /** 各状态的基础循环 */
+type LoopMeta = { frames: number; ms: number };
+const META_LOOPS = petMeta.loops as Record<string, LoopMeta>;
+function loopsMeta(key: string): LoopMeta {
+  const m = META_LOOPS[key];
+  if (!m) throw new Error(`pet.meta.json 缺少 ${key}`);
+  return { frames: m.frames, ms: m.ms };
+}
+
 const BASE: Record<PetState, Clip> = {
   idle: LOOPS.breathe,
   working: LOOPS.run,
@@ -91,15 +100,35 @@ function readNumber(key: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/** 系统「减少动态效果」：像 ChatGPT 宠物那样退回**静帧**，而不是停在动画最后一帧。
+ *  全局那条 `animation-duration: 0.01ms !important` 会把 sprite 直接跳到末帧
+ *  （可能是抬腿的姿势），所以这里单独处理。 */
+function useReducedMotion(): boolean {
+  const query = "(prefers-reduced-motion: reduce)";
+  const [reduced, setReduced] = useState(
+    () => typeof window !== "undefined" && !!window.matchMedia?.(query).matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia?.(query);
+    if (!mq) return undefined;
+    const onChange = () => setReduced(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return reduced;
+}
+
 /** 播放一段 Clip：sprite 用 CSS steps()，stills 用透明度交叉淡入 */
 function ClipView({ clip, once, playKey }: { clip: Clip; once: boolean; playKey: number }) {
   const [idx, setIdx] = useState(0);
+  const reduced = useReducedMotion();
 
   useEffect(() => {
-    if (clip.kind !== "stills" || clip.frames.length < 2 || clip.ms <= 0) return;
+    if (reduced) return undefined;
+    if (clip.kind !== "stills" || clip.frames.length < 2 || clip.ms <= 0) return undefined;
     const t = window.setInterval(() => setIdx((i) => (i + 1) % clip.frames.length), clip.ms);
     return () => window.clearInterval(t);
-  }, [clip]);
+  }, [clip, reduced]);
 
   if (clip.kind === "sprite") {
     return (
@@ -109,7 +138,9 @@ function ClipView({ clip, once, playKey }: { clip: Clip; once: boolean; playKey:
         style={{
           backgroundImage: `url(${clip.src})`,
           backgroundSize: `${STAGE * clip.frames}px ${STAGE}px`,
-          animation: `pet-strip-${clip.frames} ${clip.ms}ms steps(${clip.frames}) ${once ? 1 : "infinite"}`,
+          animation: reduced
+            ? "none"
+            : `pet-strip-${clip.frames} ${clip.ms}ms steps(${clip.frames}) ${once ? 1 : "infinite"}`,
         }}
       />
     );
@@ -119,7 +150,7 @@ function ClipView({ clip, once, playKey }: { clip: Clip; once: boolean; playKey:
       {clip.frames.map((src, i) => (
         <span
           key={src}
-          className={`pet-frame${i === idx ? " on" : ""}`}
+          className={`pet-frame${i === (reduced ? 0 : idx) ? " on" : ""}`}
           style={{ backgroundImage: `url(${src})` }}
         />
       ))}

@@ -4846,6 +4846,12 @@ input, textarea { cursor: text; }
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+  /* 桌宠例外：上面那条会把 sprite 直接跳到**最后一帧**（可能是抬腿的姿势）。
+     改为停在第 0 帧的静帧 —— 与 ChatGPT 宠物「减少动态时用静态画面」一致。 */
+  .pet-sprite {
+    animation: none !important;
+    background-position: 0 0 !important;
+  }
 }
 
 /* ── 「问 AI ↗」快捷入口(功能页 → 聊天):中性 ghost,hover 才见蓝 ── */
