@@ -89,6 +89,30 @@ function fileUrl(path: string): string {
   return `asset://localhost/${encodeURIComponent(path)}`;
 }
 
+/** 试着真的解码这张图；失败返回 false（asset 协议被权限拦下时会走到这里） */
+function canLoad(url: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = url;
+  });
+}
+
+/** 兜底：让 Rust 把图集字节读出来，前端转 blob URL */
+async function sheetViaBytes(dir: string, file: string): Promise<string | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) return null;
+  try {
+    const bytes = await invoke<number[]>("pet_pack_asset", { dir, file });
+    const blob = new Blob([new Uint8Array(bytes)], { type: "image/webp" });
+    return URL.createObjectURL(blob);
+  } catch (err) {
+    console.warn("[pet] 读取图集失败：", err);
+    return null;
+  }
+}
+
 /**
  * 加载指定包。
  * - 内置：直接用打包产物
@@ -103,7 +127,14 @@ export async function loadPack(id: string): Promise<LoadedPack> {
   try {
     const pack: PetPack = normalizePack(JSON.parse(entry.json));
     const dir = entry.dir.replace(/\/+$/, "");
-    return { pack, sheetUrl: fileUrl(`${dir}/${pack.spritesheet}`), source: "custom", dir: entry.dir };
+    // 先用 asset 协议（流式、省内存）；被权限拦下就退回字节流
+    let sheetUrl = fileUrl(`${dir}/${pack.spritesheet}`);
+    if (!(await canLoad(sheetUrl))) {
+      const fallback = await sheetViaBytes(entry.dir, pack.spritesheet);
+      if (!fallback) return BUILTIN_PACK;
+      sheetUrl = fallback;
+    }
+    return { pack, sheetUrl, source: "custom", dir: entry.dir };
   } catch (err) {
     console.warn("[pet] 自定义宠物包不合法，回退内置：", err);
     return BUILTIN_PACK;

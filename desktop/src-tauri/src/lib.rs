@@ -86,6 +86,17 @@ fn pet_pack_root() -> Result<String, String> {
     Ok(root.to_string_lossy().to_string())
 }
 
+/// 直接读图集字节：asset 协议被 scope 拦下时的兜底（前端转成 blob URL）
+#[tauri::command]
+fn pet_pack_asset(dir: String, file: String) -> Result<Vec<u8>, String> {
+    // 只允许读包目录下的文件，且不允许路径穿越
+    if file.contains("..") || file.contains('/') || file.contains('\\') {
+        return Err("非法的文件名".into());
+    }
+    let path = std::path::Path::new(&dir).join(&file);
+    std::fs::read(&path).map_err(|e| format!("读不到 {}: {e}", path.display()))
+}
+
 /// 在系统文件管理器里打开宠物目录（macOS `open` / Windows `explorer`）
 #[tauri::command]
 fn pet_pack_reveal(path: String) -> Result<(), String> {
@@ -291,7 +302,8 @@ pub fn run() {
             pet_set_frame,
             pet_pack_list,
             pet_pack_root,
-            pet_pack_reveal
+            pet_pack_reveal,
+            pet_pack_asset
         ])
         .setup(|app| {
             let window_cfg = app
