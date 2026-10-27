@@ -19,6 +19,8 @@ import ChannelsTab from "./Channels";
 import { ModelProvidersTab } from "@/components/settings/ai/ModelProvidersTab";
 import { ModelCatalogTab } from "@/components/settings/ai/ModelCatalogTab";
 import { SettingsOverview } from "@/components/settings/SettingsOverview";
+import { SectionCard } from "@/components/settings/SectionCard";
+import { PetPackCard } from "@/components/settings/PetPackCard";
 import { DataSourcesOverview } from "@/components/settings/DataSourcesOverview";
 import { NotifyTriggers } from "@/components/settings/NotifyTriggers";
 import type { LlmProvidersSnapshot } from "@/api/llmProviders";
@@ -266,27 +268,6 @@ const TAB_META: Record<SettingTab, { title: string; desc: string }> = {
 
 /** 设置卡原语（TeamClaw SettingCard/SectionHeader 形态）：
  * 头部 = 可选图标盒 + 标题/描述 + 右侧 mono 徽标；去掉了此前每卡雷同的齿轮图标。 */
-function SectionCard({ title, subtitle, description, icon, children }: {
-  title: string;
-  subtitle?: string;
-  description?: string;
-  icon?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="setting-card">
-      <div className="setting-card-head">
-        {icon && <div className="setting-icon-box">{icon}</div>}
-        <div className="setting-card-heading">
-          <div className="setting-card-title">{title}</div>
-          {description && <div className="setting-card-desc">{description}</div>}
-        </div>
-        {subtitle && <span className="setting-card-badge">{subtitle}</span>}
-      </div>
-      <div className="setting-card-body">{children}</div>
-    </div>
-  );
-}
 
 /* ---------- Risk Policy types ---------- */
 
@@ -447,6 +428,7 @@ function AppearanceTab() {
           </div>
         </SettingRow>
       </SectionCard>
+      <PetPackCard />
     </div>
   );
 }

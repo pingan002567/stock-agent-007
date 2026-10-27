@@ -31,6 +31,78 @@ fn pet_start_drag(window: tauri::WebviewWindow) -> Result<(), String> {
     window.start_dragging().map_err(|e| e.to_string())
 }
 
+/// 一只自定义宠物的包信息（前端据此渲染列表并读取 pet.json）
+#[derive(serde::Serialize)]
+struct PetPackEntry {
+    id: String,
+    dir: String,
+    json: String,
+}
+
+/// 自定义宠物目录：`~/.stockagent/pets/<id>/`
+fn pet_packs_root() -> Result<std::path::PathBuf, String> {
+    let home = std::env::var("HOME").map_err(|e| format!("读不到 HOME：{e}"))?;
+    Ok(std::path::Path::new(&home).join(".stockagent").join("pets"))
+}
+
+/// 扫描本地自定义宠物包。目录里有 pet.json 才算一个包（不合法由前端校验并提示）。
+#[tauri::command]
+fn pet_pack_list() -> Result<Vec<PetPackEntry>, String> {
+    let root = pet_packs_root()?;
+    if !root.exists() {
+        std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(&root).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let manifest = dir.join("pet.json");
+        let Ok(json) = std::fs::read_to_string(&manifest) else {
+            continue;
+        };
+        let id = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        out.push(PetPackEntry {
+            id,
+            dir: dir.to_string_lossy().to_string(),
+            json,
+        });
+    }
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(out)
+}
+
+/// 自定义宠物根目录（设置页显示路径、放示例文件用）
+#[tauri::command]
+fn pet_pack_root() -> Result<String, String> {
+    let root = pet_packs_root()?;
+    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    Ok(root.to_string_lossy().to_string())
+}
+
+/// 在系统文件管理器里打开宠物目录（macOS `open` / Windows `explorer`）
+#[tauri::command]
+fn pet_pack_reveal(path: String) -> Result<(), String> {
+    let target = std::path::Path::new(&path);
+    if !target.exists() {
+        return Err(format!("目录不存在：{path}"));
+    }
+    #[cfg(target_os = "macos")]
+    let mut cmd = std::process::Command::new("open");
+    #[cfg(target_os = "windows")]
+    let mut cmd = std::process::Command::new("explorer");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = std::process::Command::new("xdg-open");
+    cmd.arg(target).spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// 桌宠窗口的调试打点（前端把事件名发回来，打到终端）
 #[tauri::command]
 fn pet_debug(msg: String) {
@@ -216,7 +288,10 @@ pub fn run() {
             pet_set_visible,
             pet_debug,
             pet_metrics,
-            pet_set_frame
+            pet_set_frame,
+            pet_pack_list,
+            pet_pack_root,
+            pet_pack_reveal
         ])
         .setup(|app| {
             let window_cfg = app

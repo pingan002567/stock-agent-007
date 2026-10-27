@@ -10,22 +10,8 @@ import {
   type PetPayload,
   type PetState,
 } from "@/lib/petBridge";
-import breatheSrc from "@/assets/pet/loop-idle-breathe.webp";
-import walkSrc from "@/assets/pet/loop-walk.webp";
-import runSrc from "@/assets/pet/loop-run.webp";
-import tailSrc from "@/assets/pet/loop-tail.webp";
-import alert1 from "@/assets/pet/alert-1.webp";
-import alert2 from "@/assets/pet/alert-2.webp";
-import error1 from "@/assets/pet/error-1.webp";
-import error2 from "@/assets/pet/error-2.webp";
-import clap1 from "@/assets/pet/clap-1.webp";
-import clap2 from "@/assets/pet/clap-2.webp";
-import phone1 from "@/assets/pet/phone-1.webp";
-import stretch1 from "@/assets/pet/stretch-1.webp";
-import tilt1 from "@/assets/pet/tilt-1.webp";
-import yawn1 from "@/assets/pet/yawn-1.webp";
-import sleep1 from "@/assets/pet/sleep-1.webp";
-import petMeta from "@/assets/pet/pet.meta.json";
+import { animationOf, frameInterval, type LoadedPack } from "@/lib/petPack";
+import { BUILTIN_PACK, loadPack, selectedPackId } from "@/lib/petPackStore";
 
 type TauriGlobal = {
   core?: { invoke?: <T = unknown>(cmd: string, args?: Record<string, unknown>) => Promise<T> };
@@ -34,54 +20,33 @@ type TauriGlobal = {
 /** 主窗口 → 桌宠的度量：[x, y, w, h, scale, workX, workY, workW, workH]（物理像素） */
 type Metrics = [number, number, number, number, number, number, number, number, number];
 
-/** 一段可播放的内容：sprite sheet（逐帧，可循环）或静态帧序列（交叉淡入） */
-type Clip =
-  | { kind: "sprite"; src: string; frames: number; ms: number }
-  | { kind: "stills"; frames: string[]; ms: number };
+/** 一个动作引用：真正播什么由资源包（pet.json + atlas.webp）决定 */
+type Clip = { name: string; hold?: number };
 
 const BUBBLE_MS = 8000;
 /** 空闲多久打哈欠准备睡 */
 const SLEEP_AFTER_MS = 3 * 60 * 1000;
-/** 舞台基准边长（sprite 的 px 尺寸按这个来，靠 transform 缩放到档位） */
-const STAGE = 132;
-
-const LOOPS = {
-  // idle 用待机循环的 8 帧（呼吸下沉→回正→半闭眼→全闭眼→睁眼→歪头）
-  // 帧数与时长来自素材管线产出的 pet.meta.json（scripts/build_pet_assets.py），
-  // 不再在组件里写死 —— 换素材/加减帧时不会和代码对不上。
-  breathe: { kind: "sprite", src: breatheSrc, ...loopsMeta("loop-idle-breathe") } as Clip,
-  walk: { kind: "sprite", src: walkSrc, ...loopsMeta("loop-walk") } as Clip,
-  run: { kind: "sprite", src: runSrc, ...loopsMeta("loop-run") } as Clip,
-  tail: { kind: "sprite", src: tailSrc, ...loopsMeta("loop-tail") } as Clip,
-};
-
-/** 各状态的基础循环 */
-type LoopMeta = { frames: number; ms: number };
-const META_LOOPS = petMeta.loops as Record<string, LoopMeta>;
-function loopsMeta(key: string): LoopMeta {
-  const m = META_LOOPS[key];
-  if (!m) throw new Error(`pet.meta.json 缺少 ${key}`);
-  return { frames: m.frames, ms: m.ms };
-}
+/** 舞台基准边长（取自资源包，缺省 132）；渲染时按当前包实时取 */
+const DEFAULT_STAGE = 132;
 
 const BASE: Record<PetState, Clip> = {
-  idle: LOOPS.breathe,
-  working: LOOPS.run,
-  done: LOOPS.tail,
-  alert: { kind: "stills", frames: [alert1, alert2], ms: 900 },
-  error: { kind: "stills", frames: [error1, error2], ms: 1400 },
+  idle: { name: "idle" },
+  working: { name: "run" },
+  done: { name: "tail" },
+  alert: { name: "alert" },
+  error: { name: "error" },
 };
 
 /** 一次性小动作：播完回基础循环 */
 const ONESHOTS: Record<string, { clip: Clip; hold: number }> = {
-  clap: { clip: { kind: "stills", frames: [clap1, clap2], ms: 380 }, hold: 1000 },
-  phone: { clip: { kind: "stills", frames: [phone1], ms: 0 }, hold: 1800 },
-  stretch: { clip: { kind: "stills", frames: [stretch1], ms: 0 }, hold: 1600 },
-  tilt: { clip: { kind: "stills", frames: [tilt1], ms: 0 }, hold: 1400 },
-  yawn: { clip: { kind: "stills", frames: [yawn1], ms: 0 }, hold: 1600 },
+  clap: { clip: { name: "clap" }, hold: 1000 },
+  phone: { clip: { name: "phone" }, hold: 1800 },
+  stretch: { clip: { name: "stretch" }, hold: 1600 },
+  tilt: { clip: { name: "tilt" }, hold: 1400 },
+  yawn: { clip: { name: "yawn" }, hold: 1600 },
 };
 
-const SLEEP_CLIP: Clip = { kind: "stills", frames: [sleep1], ms: 0 };
+const SLEEP_CLIP: Clip = { name: "sleep" };
 
 function readPayload(): PetPayload | null {
   try {
@@ -118,43 +83,65 @@ function useReducedMotion(): boolean {
   return reduced;
 }
 
-/** 播放一段 Clip：sprite 用 CSS steps()，stills 用透明度交叉淡入 */
-function ClipView({ clip, once, playKey }: { clip: Clip; once: boolean; playKey: number }) {
-  const [idx, setIdx] = useState(0);
+/** 播放一个动作：从 atlas 里按 (row, col) 取格，JS 控帧。
+ *
+ *  为什么不再用 CSS `steps()`：自定义宠物的帧数是任意值，CSS 得为每个帧数
+ *  预生成 keyframes；JS 逐帧只需改 background-position，且能精确控制单帧时长。
+ */
+function ClipView({
+  pack,
+  clip,
+  once,
+  playKey,
+}: {
+  pack: LoadedPack;
+  clip: Clip;
+  once: boolean;
+  playKey: number;
+}) {
+  const anim = animationOf(pack.pack, clip.name) ?? pack.pack.animations.idle;
+  const [frame, setFrame] = useState(0);
   const reduced = useReducedMotion();
 
   useEffect(() => {
-    if (reduced) return undefined;
-    if (clip.kind !== "stills" || clip.frames.length < 2 || clip.ms <= 0) return undefined;
-    const t = window.setInterval(() => setIdx((i) => (i + 1) % clip.frames.length), clip.ms);
-    return () => window.clearInterval(t);
-  }, [clip, reduced]);
+    const interval = frameInterval(anim);
+    // 减少动态效果 / 单帧动作 / fps=0 → 停在第一帧（ChatGPT 宠物同款处理）
+    if (reduced || anim.frames <= 1 || interval <= 0) return undefined;
+    let raf = 0;
+    let last = performance.now();
+    let acc = 0;
+    const tick = (now: number) => {
+      acc += now - last;
+      last = now;
+      if (acc >= interval) {
+        const advance = Math.floor(acc / interval);
+        acc -= advance * interval;
+        setFrame((f) => {
+          const next = f + advance;
+          return once ? Math.min(anim.frames - 1, next) : next % anim.frames;
+        });
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [anim, once, reduced, playKey]);
 
-  if (clip.kind === "sprite") {
-    return (
-      <span
-        key={`${clip.src}-${playKey}`}
-        className="pet-sprite"
-        style={{
-          backgroundImage: `url(${clip.src})`,
-          backgroundSize: `${STAGE * clip.frames}px ${STAGE}px`,
-          animation: reduced
-            ? "none"
-            : `pet-strip-${clip.frames} ${clip.ms}ms steps(${clip.frames}) ${once ? 1 : "infinite"}`,
-        }}
-      />
-    );
-  }
+  const stage = pack.pack.stage ?? DEFAULT_STAGE;
+  const { cell, cols, rows } = pack.pack;
+  const shown = Math.min(frame, anim.frames - 1);
   return (
-    <>
-      {clip.frames.map((src, i) => (
-        <span
-          key={src}
-          className={`pet-frame${i === (reduced ? 0 : idx) ? " on" : ""}`}
-          style={{ backgroundImage: `url(${src})` }}
-        />
-      ))}
-    </>
+    <span
+      key={`${pack.pack.id}-${clip.name}-${playKey}`}
+      className="pet-sprite"
+      style={{
+        backgroundImage: `url(${pack.sheetUrl})`,
+        backgroundSize: `${stage * cols}px ${stage * rows}px`,
+        backgroundPosition: `${-shown * stage}px ${-anim.row * stage}px`,
+        // 图集缩放到舞台：atlas 单格 cell px → 舞台 STAGE px
+        imageRendering: cell === stage ? undefined : "auto",
+      }}
+    />
   );
 }
 
@@ -166,6 +153,8 @@ function ClipView({ clip, once, playKey }: { clip: Clip; once: boolean; playKey:
 export function PetWindow() {
   const initial = readPayload();
   const [state, setState] = useState<PetState>(initial?.state ?? "idle");
+  /** 当前生效的宠物包：默认内置，选中自定义包后异步替换 */
+  const [pack, setPack] = useState<LoadedPack>(BUILTIN_PACK);
   const [badge, setBadge] = useState(initial?.badge ?? 0);
   const [bubble, setBubble] = useState<{ title: string; body?: string } | null>(
     initial && BUBBLE_STATES.includes(initial.state) && initial.title
@@ -192,7 +181,7 @@ export function PetWindow() {
   const lastRawRef = useRef<string | null>(null);
 
   const size = PET_SIZES[sizeIdx];
-  const scale = size.base.w / STAGE;
+  const scale = size.base.w / DEFAULT_STAGE;
 
   /** 播一次小动作 */
   const play = (key: string) => {
@@ -248,17 +237,43 @@ export function PetWindow() {
     };
   }, [quiet]);
 
-  // 空闲时预热其余素材：避免第一次切到某状态时闪一下空窗
+  // 加载选中的宠物包：失败自动回退内置（loadPack 内部已经兜底）
   useEffect(() => {
-    const srcs = [
-      breatheSrc, walkSrc, runSrc, tailSrc,
-      alert1, alert2, error1, error2,
-      clap1, clap2, phone1, stretch1, tilt1, yawn1, sleep1,
-    ];
-    const preload = () => srcs.forEach((src) => { const img = new Image(); img.src = src; });
+    let alive = true;
+    const sync = () => {
+      void loadPack(selectedPackId()).then((next) => {
+        if (!alive) return;
+        setPack(next);
+        const img = new Image();
+        img.src = next.sheetUrl; // 预载，避免首帧闪空
+      });
+    };
+    sync();
+    // 设置页切换后立刻生效：同窗口改 localStorage 用 storage 事件收不到，
+    // 这里轮询一个轻量标记（250ms，开销可忽略）
+    let last = selectedPackId();
+    const timer = window.setInterval(() => {
+      const now = selectedPackId();
+      if (now !== last) {
+        last = now;
+        sync();
+      }
+    }, 250);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  // 空闲时预热图集：所有动作共用一张图，只需要预载它（避免第一次切换时闪空窗）
+  useEffect(() => {
+    const preload = () => {
+      const img = new Image();
+      img.src = pack.sheetUrl;
+    };
     const t = window.setTimeout(preload, 2500);
     return () => window.clearTimeout(t);
-  }, []);
+  }, [pack.sheetUrl]);
 
   // 尺寸：随气泡/档位切换。位置按「右下角不动」由缓存推出。
   useEffect(() => {
@@ -394,7 +409,7 @@ export function PetWindow() {
   const clipKey = dragging ? "walk" : oneshot ? oneshot.key : sleeping ? "sleep" : state;
 
   const clip: Clip = dragging
-    ? LOOPS.walk
+    ? { name: "walk" }
     : oneshot
       ? ONESHOTS[oneshot.key].clip
       : sleeping
@@ -432,7 +447,13 @@ export function PetWindow() {
           className={`pet-stage pet-${state}`}
           style={{ transform: `scale(${scale})` }}
         >
-          <ClipView clip={clip} once={Boolean(oneshot) || dragging} playKey={playKey} />
+          <ClipView
+            key={`${clip.name}-${playKey}`}
+            pack={pack}
+            clip={clip}
+            once={Boolean(oneshot) || dragging}
+            playKey={playKey}
+          />
         </span>
         {badge > 0 && <span className="pet-badge">{badge > 9 ? "9+" : badge}</span>}
       </div>

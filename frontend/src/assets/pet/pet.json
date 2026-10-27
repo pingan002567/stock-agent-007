@@ -1,0 +1,73 @@
+{
+  "id": "shiba",
+  "displayName": "柴犬助手",
+  "description": "内置像素风柴犬（耳机 + 领结）",
+  "cell": 396,
+  "stage": 132,
+  "cols": 13,
+  "rows": 12,
+  "spritesheet": "atlas.webp",
+  "animations": {
+    "idle": {
+      "row": 0,
+      "frames": 9,
+      "fps": 3.75
+    },
+    "walk": {
+      "row": 1,
+      "frames": 12,
+      "fps": 15.0
+    },
+    "run": {
+      "row": 2,
+      "frames": 13,
+      "fps": 18.0
+    },
+    "tail": {
+      "row": 3,
+      "frames": 12,
+      "fps": 14.5
+    },
+    "alert": {
+      "row": 4,
+      "frames": 2,
+      "fps": 2.2
+    },
+    "error": {
+      "row": 5,
+      "frames": 2,
+      "fps": 1.4
+    },
+    "sleep": {
+      "row": 6,
+      "frames": 1,
+      "fps": 0
+    },
+    "clap": {
+      "row": 7,
+      "frames": 2,
+      "fps": 5.3
+    },
+    "phone": {
+      "row": 8,
+      "frames": 1,
+      "fps": 0
+    },
+    "stretch": {
+      "row": 9,
+      "frames": 1,
+      "fps": 0
+    },
+    "tilt": {
+      "row": 10,
+      "frames": 1,
+      "fps": 0
+    },
+    "yawn": {
+      "row": 11,
+      "frames": 1,
+      "fps": 0
+    }
+  },
+  "generated_by": "scripts/build_pet_assets.py"
+}

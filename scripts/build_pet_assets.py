@@ -4,12 +4,21 @@
 
     .venv/bin/python scripts/build_pet_assets.py --src ~/Downloads/柴犬关键帧
 
+输出 **一张图集 + 一份 pet.json**（对齐 ChatGPT 宠物的做法：行 = 动作，列 = 帧），
+不再输出一堆横向 sprite 条：
+
+    frontend/src/assets/pet/
+      atlas.webp    12 行 × N 列，单格 396×396
+      pet.json      cell / stage / cols / rows / animations{row,frames,fps}
+
+这样「自定义宠物」只要一个目录里放 pet.json + 一张图集，无需重新编译。
+
 为什么要这个脚本（而不是手工导图）：
-1. 原图是 2026×2069 的白底 JPEG，桌宠要的是 **396×396 透明底 webp**；
-2. 循环动画在代码里是**横向 sprite 条**（8 帧拼一张），不是逐帧图片；
-3. 最关键的一条：**所有帧必须用同一个缩放比例**。逐帧按内容裁剪/缩放会让
+1. 原图是 2026×2069 的白底 JPEG，桌宠要的是 **396×396 透明底**；
+2. 最关键的一条：**所有帧必须用同一个缩放比例**。逐帧按内容裁剪/缩放会让
    宠物体型忽大忽小 —— 这正是上次「体型不连贯」的成因，所以这里只做
-   全图统一缩放 + 居中补边，绝不按帧裁剪。
+   全图统一缩放 + 居中补边，绝不按帧裁剪；
+3. 踩地的帧额外做**基线对齐**（只竖直平移），否则脚底跟着姿势漂，播起来上下颠。
 
 白底抠图用「从四边洪水填充」而不是全图去白：柴犬胸口/爪子本身是白的，
 全图去白会把胸口打穿。洪水填充只吃掉与边缘连通的背景。
@@ -43,6 +52,35 @@ LOOP_FPS = {
 }
 #: 有腾空动作、不能钉住地面的循环
 AIRBORNE = {"loop-run"}
+
+#: 图集行顺序：一行一个动作，行号 = 下标。自定义宠物按同样约定即可被识别。
+ATLAS_ROWS = [
+    "idle", "walk", "run", "tail", "alert", "error",
+    "sleep", "clap", "phone", "stretch", "tilt", "yawn",
+]
+#: 非循环动作的目标帧率（0 = 只播一帧，时长由前端 hold 决定）
+STILL_FPS = {
+    "alert": 2.2, "error": 1.4, "clap": 5.3,
+    "sleep": 0, "phone": 0, "stretch": 0, "tilt": 0, "yawn": 0,
+}
+#: 循环动作 → (行名, 素材循环 key)
+LOOP_ROWS = {
+    "idle": "loop-idle-breathe",
+    "walk": "loop-walk",
+    "run": "loop-run",
+    "tail": "loop-tail",
+}
+#: 单帧动作 → 由哪些 still 组成（多帧则按顺序轮播）
+STILL_ROWS = {
+    "alert": ["alert-1", "alert-2"],
+    "error": ["error-1", "error-2"],
+    "clap": ["clap-1", "clap-2"],
+    "phone": ["phone-1"],
+    "stretch": ["stretch-1"],
+    "tilt": ["tilt-1"],
+    "yawn": ["yawn-1"],
+    "sleep": ["sleep-1"],
+}
 
 # 循环：目录名 → (输出文件名, 帧数)
 #
@@ -162,6 +200,18 @@ def _strip(frames: list[Image.Image], out: Path) -> None:
     sheet.save(out, "WEBP", quality=QUALITY, method=6)
 
 
+def _compose_atlas(rows: dict[str, list[Image.Image]], out: Path) -> tuple[int, int, int]:
+    """把「行名 → 帧列表」合成一张图集，未用的格子保持全透明。"""
+    cols = max(len(frames) for frames in rows.values())
+    height = FRAME * len(ATLAS_ROWS)
+    sheet = Image.new("RGBA", (FRAME * cols, height), (0, 0, 0, 0))
+    for row, name in enumerate(ATLAS_ROWS):
+        for col, frame in enumerate(rows.get(name, [])):
+            sheet.paste(frame, (col * FRAME, row * FRAME), frame)
+    sheet.save(out, "WEBP", quality=QUALITY, method=6)
+    return cols, len(ATLAS_ROWS), FRAME
+
+
 def _frame_files(folder: Path, expected: int) -> list[Path]:
     """按帧号挑帧：同名编号有多个变体时取排序后的第一个。
 
@@ -188,50 +238,68 @@ def main() -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    meta: dict[str, dict] = {}
-    for folder, (name, expected) in LOOPS.items():
+    rows: dict[str, list[Image.Image]] = {}
+
+    # 1) 循环：用满素材全部帧（含补间），踩地的做基线对齐
+    for row_name, loop_key in LOOP_ROWS.items():
+        folder = next(f for f, (name, _n) in LOOPS.items() if name == loop_key)
+        expected = LOOPS[folder][1]
         files = _frame_files(src / folder, expected)
         frames = [_fit(_transparent(Image.open(f))) for f in files]
-        if name not in AIRBORNE:
+        if loop_key not in AIRBORNE:
             frames = [_align_baseline(f) for f in frames]
-        _strip(frames, out / f"{name}.webp")
-        fps = LOOP_FPS[name]
-        meta[name] = {
-            "frames": len(frames),
-            "ms": round(len(frames) / fps * 1000),
-            "baseline": None if name in AIRBORNE else BASELINE,
+        rows[row_name] = frames
+        print(f"✅ {row_name:8s} ← {folder}  {len(frames)} 帧  {LOOP_FPS[loop_key]:g}fps")
+
+    # 2) 单帧动作
+    for row_name, needs in STILL_ROWS.items():
+        frames = []
+        for need in needs:
+            if need == "sleep-1":
+                # 睡觉用待机循环里的全闭眼帧（单张更自然）
+                folder, stem, _name = SLEEP_SOURCE
+                hit = sorted((src / folder).glob(f"{stem}*.png"))
+            else:
+                prefix = next(p for p, name in STILLS.items() if name == need)
+                hit = sorted(src.glob(f"{prefix}*.png")) + sorted(src.glob(f"{prefix}*.jpg"))
+            if not hit:
+                raise SystemExit(f"找不到 {need} 的源图")
+            frames.append(_align_baseline(_fit(_transparent(Image.open(hit[0])))))
+        rows[row_name] = frames
+        print(f"✅ {row_name:8s} ← {', '.join(needs)}  {len(frames)} 帧")
+
+    # 3) 合成图集 + 描述文件
+    cols, n_rows, cell = _compose_atlas(rows, out / "atlas.webp")
+    animations = {}
+    for row_name in ATLAS_ROWS:
+        frames = rows.get(row_name, [])
+        fps = LOOP_FPS[LOOP_ROWS[row_name]] if row_name in LOOP_ROWS else STILL_FPS[row_name]
+        animations[row_name] = {
+            "row": ATLAS_ROWS.index(row_name),
+            "frames": len(frames) or 1,
+            "fps": fps,
         }
-        print(f"✅ {name}.webp  ({len(frames)} 帧 · {meta[name]['ms']}ms · {fps:g}fps"
-              f"{' · 腾空不对齐' if name in AIRBORNE else ' · 脚底对齐'})")
+    meta = {
+        "id": "shiba",
+        "displayName": "柴犬助手",
+        "description": "内置像素风柴犬（耳机 + 领结）",
+        "cell": cell,
+        "stage": 132,
+        "cols": cols,
+        "rows": n_rows,
+        "spritesheet": "atlas.webp",
+        "animations": animations,
+        "generated_by": "scripts/build_pet_assets.py",
+    }
+    (out / "pet.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n")
+    print(f"✅ atlas.webp  {cols} 列 × {n_rows} 行 × {cell}px")
+    print(f"✅ pet.json    {len(animations)} 个动作")
 
-    for prefix, name in STILLS.items():  # noqa: PLR1702
-        matches = list(src.glob(f"{prefix}*.png")) + list(src.glob(f"{prefix}*.jpg"))
-        if not matches:
-            raise SystemExit(f"找不到 {prefix}*")
-        still = _align_baseline(_fit(_transparent(Image.open(matches[0]))))
-        still.save(out / f"{name}.webp", "WEBP", quality=QUALITY, method=6)
-        print(f"✅ {name}.webp  ← {matches[0].name}")
-
-    folder, prefix, name = SLEEP_SOURCE
-    files = [f for f in _frame_files(src / folder, LOOPS[folder][1]) if f.stem.startswith(prefix)]
-    if not files:
-        raise SystemExit(f"找不到 {folder}/{prefix}")
-    _align_baseline(_fit(_transparent(Image.open(files[0])))).save(
-        out / f"{name}.webp", "WEBP", quality=QUALITY, method=6
-    )
-    print(f"✅ {name}.webp  ← {folder}/{files[0].name}")
-
-    # 帧数/时长的单一数据源：前端直接 import 这个 JSON，不再在组件里写死 8/9/12/13
-    meta_path = out / "pet.meta.json"
-    meta_path.write_text(
-        json.dumps(
-            {"cell": FRAME, "stage": 132, "loops": meta, "generated_by": "scripts/build_pet_assets.py"},
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n"
-    )
-    print(f"✅ {meta_path.name}  {json.dumps(meta, ensure_ascii=False)}")
+    # 4) 清掉旧格式产物，避免两套并存
+    for stale in out.glob("*.webp"):
+        if stale.name != "atlas.webp":
+            stale.unlink()
+    (out / "pet.meta.json").unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
