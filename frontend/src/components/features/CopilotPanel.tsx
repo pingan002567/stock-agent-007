@@ -148,18 +148,21 @@ export function pairMessages(msgs: CopilotMessage[], activeRunId?: string | null
         // 相邻重复（同一快照反复推）不重复入列
         if (!(last && last.kind === "reasoning" && last.text === text)) {
           const step: StreamStep = { kind: "reasoning", id: msg.message_id, text };
-          // 后端的思维链挂在「带 tool_calls 的分片」上，落库顺序是
-          // tool_call → reasoning → tool_result。这段思考讲的是**该工具调用之前**
-          // 的判断，所以插到结果还没到的那个工具之前，历史回放才是「思考 → 工具」。
-          const prev = steps[steps.length - 1];
-          const resultIdx = prev?.kind === "tool"
-            ? resultIndexByCallId.get(prev.tool.callId)
-            : undefined;
-          if (prev?.kind === "tool" && resultIdx !== undefined && resultIdx > i) {
-            steps.splice(steps.length - 1, 0, step);
-          } else {
-            steps.push(step);
-          }
+          // 思维链挂在「带 tool_calls 的分片」上，落库时它可能排在**同批工具的结果之后**。
+          // 判据和实时流一致：看尾部那个工具组里有没有工具的结果还没出现 ——
+          // 有，说明这段思考是发起调用前的判断，插到**组首**（只前插一格仍会错位，
+          // 一批 3 个工具时就会落到第 3 个之前）。
+          let start = steps.length;
+          while (start > 0 && steps[start - 1].kind === "tool") start -= 1;
+          const pending = steps
+            .slice(start)
+            .some((st) => {
+              if (st.kind !== "tool") return false;
+              const idx = resultIndexByCallId.get(st.tool.callId);
+              return idx === undefined || idx > i;
+            });
+          if (pending) steps.splice(start, 0, step);
+          else steps.push(step);
           pendingSteps.set(rid, steps);
         }
       }

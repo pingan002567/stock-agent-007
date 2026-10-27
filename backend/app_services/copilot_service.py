@@ -107,6 +107,8 @@ class CopilotRunState:
     #: 当前这一段推理的**最新**文本：思维链是分片增量推送的，
     #: 攒到这段结束（下一条非 reasoning 事件）再落库，只存一条完整的。
     pending_reasoning: str | None = None
+    #: 该段推理**第一片**到达的时间戳（落库时用它，而不是 flush 的时刻）
+    pending_reasoning_at: str | None = None
     started_at: str = field(default_factory=now_iso)
     updated_at: str = field(default_factory=now_iso)
     # Fan-out: agent runs in a background task; SSE clients subscribe.
@@ -1384,6 +1386,11 @@ class CopilotService:
                         ).strip()
                         if text:
                             state.pending_reasoning = text
+                            # 只记第一片的时间：之后 flush 时若用「此刻」，
+                            # 会比它后面那些 tool_result 的上游时间更晚，
+                            # 历史按 created_at 排序时思考就会跑到结果后面。
+                            if not state.pending_reasoning_at:
+                                state.pending_reasoning_at = sse_event.created_at
                         continue_persist = False
                     else:
                         if state.pending_reasoning:
@@ -1394,9 +1401,11 @@ class CopilotService:
                                     task_id=resolved_task_id,
                                     type="reasoning",
                                     payload={"text": state.pending_reasoning},
+                                    created_at=state.pending_reasoning_at or now_iso(),
                                 ),
                             )
                             state.pending_reasoning = None
+                            state.pending_reasoning_at = None
                         continue_persist = event["type"] not in (
                             "partial_answer",
                             "skill_trace",

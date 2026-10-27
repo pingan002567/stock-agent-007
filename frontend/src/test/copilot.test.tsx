@@ -486,6 +486,34 @@ describe("思考步落位（思考 → 工具）", () => {
     expect(out.map((s) => s.kind)).toEqual(["reasoning", "reasoning"]);
   });
 
+  it("历史回放：一批 3 个工具时，思考插到组首（不是只前插一格）", () => {
+    // 截图里的真实错位：3 个工具的调用 + 结果，思考落在第 3 个之前
+    const msgs = [
+      makeMsg({ message_id: "u1", role: "user", kind: "user_message", text: "一起过一遍", run_id: "run_m" }),
+      ...["c1", "c2", "c3"].map((cid, i) =>
+        makeMsg({
+          message_id: `t${i}`, role: "assistant", kind: "tool_call", text: "", run_id: "run_m",
+          payload: { tool: i === 2 ? "get_market_sentiment" : "get_portfolio_snapshot", call_id: cid },
+        }),
+      ),
+      makeMsg({
+        message_id: "r1", role: "system", kind: "reasoning",
+        text: "先取持仓、监控、市场情绪", run_id: "run_m",
+        payload: { text: "先取持仓、监控、市场情绪" },
+      }),
+      ...["c1", "c2", "c3"].map((cid, i) =>
+        makeMsg({
+          message_id: `x${i}`, role: "tool", kind: "tool_result", text: "ok", run_id: "run_m",
+          payload: { call_id: cid, result_preview: { ok: true } },
+        }),
+      ),
+      makeMsg({ message_id: "f1", role: "assistant", kind: "final_answer", text: "结论", run_id: "run_m", payload: { conclusion: "结论" } }),
+    ];
+    const ai = pairMessages(msgs).find((item) => item.t === "ai");
+    if (ai?.t !== "ai") throw new Error("no ai");
+    expect((ai.steps ?? []).map((s) => s.kind)).toEqual(["reasoning", "tool", "tool", "tool"]);
+  });
+
   it("历史回放：tool_call → reasoning → tool_result 重排成 思考 → 工具", () => {
     const msgs = [
       makeMsg({ message_id: "u1", role: "user", kind: "user_message", text: "ETH 费率", run_id: "run_o" }),
