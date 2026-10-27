@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from collections import deque
 from pathlib import Path
 
@@ -103,11 +104,15 @@ def _fit(img: Image.Image, size: int = FRAME) -> Image.Image:
     """统一比例缩放到 size 方框，居中补透明边。
 
     **所有帧都走这同一个函数**，不按内容裁剪 —— 体型一致全靠这条。
+
+    降采样用 BOX（面积平均）而不是 LANCZOS：素材是**像素风**，LANCZOS 的
+    振铃会在色块边缘留下一圈发亮的镶边，像素感就糊了；BOX 只做区间平均，
+    色块边界干净。放大时才用 LANCZOS。
     """
     ratio = min(size / img.width, size / img.height)
     scaled = img.resize(
         (max(1, round(img.width * ratio)), max(1, round(img.height * ratio))),
-        Image.LANCZOS,
+        Image.BOX if ratio < 1 else Image.LANCZOS,
     )
     canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     canvas.paste(scaled, ((size - scaled.width) // 2, (size - scaled.height) // 2), scaled)
@@ -122,10 +127,27 @@ def _strip(frames: list[Image.Image], out: Path) -> None:
 
 
 def _frame_files(folder: Path, expected: int) -> list[Path]:
+    """按帧号挑帧：同名编号有多个变体时取排序后的第一个。
+
+    新素材（像素风）每个编号可能有多张变体，例如
+    `walk_04_前伸帧` / `walk_04_接触帧`、`tail_02_右摆` / `tail_02_右摆30度`。
+    循环要的是「一个编号一帧」，所以按编号分组、每组取第一张，
+    再校验数量 —— 数量对不上直接报错，不做静默裁剪。
+    """
     files = sorted(folder.glob("*.png")) or sorted(folder.glob("*.jpg"))
-    if len(files) != expected:
-        raise SystemExit(f"{folder.name}: 期望 {expected} 帧，实际 {len(files)}")
-    return files
+    by_index: dict[str, Path] = {}
+    for f in files:
+        m = re.match(r"[a-z]+_(\d+)", f.stem)
+        if not m:
+            continue
+        by_index.setdefault(m.group(1), f)  # sorted 后第一个即该编号首张
+    picked = [by_index[k] for k in sorted(by_index)]
+    if len(picked) != expected:
+        raise SystemExit(
+            f"{folder.name}: 期望 {expected} 帧，按编号去重后得到 {len(picked)} 帧"
+            f"（原始文件 {len(files)} 张）"
+        )
+    return picked
 
 
 def main() -> None:
