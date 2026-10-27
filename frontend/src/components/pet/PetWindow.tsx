@@ -46,10 +46,12 @@ const STAGE = 132;
 
 const LOOPS = {
   // idle 用待机循环的 8 帧（呼吸下沉→回正→半闭眼→全闭眼→睁眼→歪头）
-  breathe: { kind: "sprite", src: breatheSrc, frames: 8, ms: 2400 } as Clip,
-  walk: { kind: "sprite", src: walkSrc, frames: 8, ms: 900 } as Clip,
-  run: { kind: "sprite", src: runSrc, frames: 8, ms: 800 } as Clip,
-  tail: { kind: "sprite", src: tailSrc, frames: 8, ms: 900 } as Clip,
+  // 用满素材帧数（补间也上）：待机 9、走路 12、跑步 13、摇尾 12。
+  // 每帧时长：待机 267ms（呼吸慢动作）、走路 65ms、跑步 54ms、摇尾 68ms。
+  breathe: { kind: "sprite", src: breatheSrc, frames: 9, ms: 2400 } as Clip,
+  walk: { kind: "sprite", src: walkSrc, frames: 12, ms: 780 } as Clip,
+  run: { kind: "sprite", src: runSrc, frames: 13, ms: 700 } as Clip,
+  tail: { kind: "sprite", src: tailSrc, frames: 12, ms: 820 } as Clip,
 };
 
 /** 各状态的基础循环 */

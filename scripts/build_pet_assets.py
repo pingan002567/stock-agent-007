@@ -32,11 +32,15 @@ WHITE_TOLERANCE = 26
 QUALITY = 82
 
 # 循环：目录名 → (输出文件名, 帧数)
+#
+# **用满素材里的全部帧**（含「同编号变体」）：实测那些变体不是重复帧，而是补间
+# （walk_04_前伸 → walk_04_接触 的像素差 11，而相邻编号间距 28~36）。按编号去重
+# 会让走路只剩 8 帧 / 跑步 9fps，明显卡顿。
 LOOPS = {
-    "坐立待机循环": ("loop-idle-breathe", 8),
-    "走路循环": ("loop-walk", 8),
-    "跑步循环": ("loop-run", 8),
-    "尾巴摇摆循环": ("loop-tail", 8),
+    "坐立待机循环": ("loop-idle-breathe", 9),
+    "走路循环": ("loop-walk", 12),
+    "跑步循环": ("loop-run", 13),
+    "尾巴摇摆循环": ("loop-tail", 12),
 }
 
 # 单帧：源文件名前缀 → 输出文件名
@@ -55,6 +59,8 @@ STILLS = {
 
 #: 睡觉用待机循环里的闭眼帧（比单独一张更自然）
 SLEEP_SOURCE = ("坐立待机循环", "idle_05_全闭眼", "sleep-1")
+
+
 
 
 def _is_whiteish(px: tuple[int, int, int]) -> bool:
@@ -135,19 +141,11 @@ def _frame_files(folder: Path, expected: int) -> list[Path]:
     再校验数量 —— 数量对不上直接报错，不做静默裁剪。
     """
     files = sorted(folder.glob("*.png")) or sorted(folder.glob("*.jpg"))
-    by_index: dict[str, Path] = {}
-    for f in files:
-        m = re.match(r"[a-z]+_(\d+)", f.stem)
-        if not m:
-            continue
-        by_index.setdefault(m.group(1), f)  # sorted 后第一个即该编号首张
-    picked = [by_index[k] for k in sorted(by_index)]
-    if len(picked) != expected:
-        raise SystemExit(
-            f"{folder.name}: 期望 {expected} 帧，按编号去重后得到 {len(picked)} 帧"
-            f"（原始文件 {len(files)} 张）"
-        )
-    return picked
+    if len(files) != expected:
+        raise SystemExit(f"{folder.name}: 期望 {expected} 帧，实际 {len(files)} 张")
+    # 文件名里编码了相位（walk_04_前伸 / walk_04_接触 …），字典序即播放序：
+    # 同编号的补间排在编号内、下一编号之前。已验证相邻帧像素差单调递增。
+    return files
 
 
 def main() -> None:

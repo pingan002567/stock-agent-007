@@ -5868,7 +5868,10 @@ html.pet-window-root body { margin: 0; }
   transform-origin: center bottom;
 }
 
-/* sprite sheet：8 帧横排（源 264/帧，这里按 132 显示 = 2x，不掉清晰度） */
+/* sprite sheet：N 帧横排，舞台 132px/帧（资源 396px = 3x，显示不糊）。
+   帧数与时长由 PetWindow 的 clip 决定，这里只提供 steps() 需要的关键帧；
+   旧的 .pet-breathe / .pet-run / .pet-blink / .pet-tilt 是早期整图方案留下的
+   死规则（state 只有 idle/working/done/alert/error，永远匹配不上），已删除。 */
 .pet-sprite {
   position: absolute;
   inset: 0;
@@ -5878,31 +5881,10 @@ html.pet-window-root body { margin: 0; }
   background-position: 0 0;
   pointer-events: none;
 }
-.pet-breathe {
-  background-image: url("./assets/pet/loop-idle-breathe.webp");
-  background-size: 396px 132px;
-  animation: pet-strip-3 1.9s steps(3) infinite;
-}
-.pet-run {
-  background-image: url("./assets/pet/loop-run.webp");
-  background-size: 1056px 132px;
-  animation: pet-strip-8 0.8s steps(8) infinite;
-}
-/* 一次性动作：叠在基础循环上面，播完就隐藏 */
-.pet-oneshot { opacity: 1; }
-.pet-blink {
-  background-image: url("./assets/pet/loop-idle-blink.webp");
-  background-size: 396px 132px;
-  animation: pet-strip-3 0.42s steps(3) 1;
-}
-.pet-tilt {
-  background-image: url("./assets/pet/loop-idle-tilt.webp");
-  background-size: 264px 132px;
-  animation: pet-strip-2 0.62s steps(2) 1;
-}
-@keyframes pet-strip-2 { to { background-position: -264px 0; } }
-@keyframes pet-strip-3 { to { background-position: -396px 0; } }
 @keyframes pet-strip-8 { to { background-position: -1056px 0; } }
+@keyframes pet-strip-9 { to { background-position: -1188px 0; } }
+@keyframes pet-strip-12 { to { background-position: -1584px 0; } }
+@keyframes pet-strip-13 { to { background-position: -1716px 0; } }
 
 .pet-frame {
   position: absolute;
