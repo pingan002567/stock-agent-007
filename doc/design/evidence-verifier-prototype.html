@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>证据台账 + 确定性护栏 + 复核模型 · 原型（P0 / P1）</title>
+<style>
+  :root {
+    --canvas: #ffffff; --surface: #fbfbfc; --ink: #191a1c; --muted: #6b7075;
+    --faint: #9aa0a6; --line: #e4e6e9; --line-soft: #eef0f2;
+    --blue: #2f6feb; --green: #17863a; --red: #c4302b; --amber: #b45309;
+    --green-soft: #e9f6ee; --red-soft: #fdeceb; --amber-soft: #fdf3e4; --blue-soft: #eef4ff;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #f4f5f7; color: var(--ink);
+    font: 14px/1.55 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 20px 80px; }
+
+  header.top { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+  header.top h1 { font-size: 19px; margin: 0; letter-spacing: .2px; }
+  header.top .sub { color: var(--muted); font-size: 12.5px; }
+  .tabs { display: flex; gap: 6px; margin: 18px 0 16px; flex-wrap: wrap; }
+  .tabs button {
+    border: 1px solid var(--line); background: #fff; color: var(--muted);
+    padding: 7px 13px; border-radius: 999px; cursor: pointer; font-size: 13px;
+  }
+  .tabs button.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .panel { display: none; }
+  .panel.on { display: block; }
+
+  .card { background: var(--canvas); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 16px 18px; margin-bottom: 14px; }
+  .card > h2 { font-size: 13px; margin: 0 0 10px; color: var(--muted); font-weight: 600;
+    letter-spacing: .3px; text-transform: none; display: flex; align-items: center; gap: 8px; }
+  .card > h2 .tag { font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+    border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; font-weight: 500; }
+
+  /* 场景切换 */
+  .scen { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  .scen button { border: 1px solid var(--line); background: #fff; border-radius: 8px;
+    padding: 8px 12px; cursor: pointer; font-size: 12.5px; color: var(--muted); }
+  .scen button.on { border-color: var(--blue); color: var(--blue); background: var(--blue-soft); font-weight: 600; }
+
+  /* AI 气泡 */
+  .ai { border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
+  .ai-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line-soft); }
+  .ai-head .dot { width: 18px; height: 18px; border-radius: 5px; background: var(--blue-soft); color: var(--blue);
+    display: grid; place-items: center; font-size: 11px; }
+  .ai-head .name { font-weight: 600; font-size: 13px; }
+  .ai-body { padding: 16px; }
+  .concl { font-size: 14px; line-height: 1.75; margin: 0 0 12px; }
+  .concl b { font-weight: 600; }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* 置信度 + 状态条 */
+  .verdict-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    border-top: 1px dashed var(--line); padding-top: 12px; margin-top: 4px; }
+  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px;
+    font-size: 11.5px; font-weight: 600; }
+  .pill.ok { color: var(--green); background: var(--green-soft); }
+  .pill.warn { color: var(--amber); background: var(--amber-soft); }
+  .pill.bad { color: var(--red); background: var(--red-soft); }
+  .pill.neutral { color: var(--muted); background: var(--surface); border: 1px solid var(--line); }
+  .pill.mono { font-family: var(--mono); font-weight: 500; }
+  .spacer { margin-left: auto; }
+  .meta { color: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+
+  /* 护栏列表 */
+  .guards { display: grid; gap: 6px; margin-top: 10px; }
+  .guard { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: start;
+    padding: 8px 10px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--surface); }
+  .guard.fail { border-color: #f0c9c7; background: #fffafa; }
+  .guard .icon { font-size: 12px; line-height: 1.5; }
+  .guard .g-name { font-weight: 600; font-size: 12.5px; }
+  .guard .g-why { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+  .guard .g-code { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
+  .guard .g-res { font-size: 11px; font-weight: 600; }
+
+  /* 台账表 */
+  table.ledger { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.ledger th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px;
+    border-bottom: 1px solid var(--line); padding: 6px 8px; white-space: nowrap; }
+  table.ledger td { border-bottom: 1px solid var(--line-soft); padding: 7px 8px; vertical-align: top; }
+  table.ledger tr:last-child td { border-bottom: none; }
+  table.ledger code { font-family: var(--mono); font-size: 11px; }
+  .st { font-family: var(--mono); font-size: 10.5px; padding: 1px 6px; border-radius: 5px; }
+  .st.ok { color: var(--green); background: var(--green-soft); }
+  .st.warn { color: var(--amber); background: var(--amber-soft); }
+  .st.bad { color: var(--red); background: var(--red-soft); }
+
+  .health { display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0 4px; }
+  .health span { font-size: 11.5px; color: var(--muted); font-family: var(--mono); }
+  .health b { color: var(--ink); }
+
+  /* 复核意见 */
+  .review { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .review-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--surface);
+    border-bottom: 1px solid var(--line-soft); font-size: 12.5px; }
+  .review-body { padding: 12px; display: grid; gap: 8px; }
+  .issue { border-left: 3px solid var(--amber); background: #fffdfa; padding: 8px 10px; border-radius: 0 8px 8px 0; }
+  .issue.high { border-color: var(--red); background: #fffafa; }
+  .issue .i-title { font-size: 12.5px; font-weight: 600; }
+  .issue .i-why { color: var(--muted); font-size: 11.5px; margin-top: 3px; }
+  .issue .i-claim { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-top: 3px; }
+
+  /* 设置页 */
+  .field { display: grid; grid-template-columns: 190px 1fr; gap: 14px; padding: 12px 0;
+    border-bottom: 1px solid var(--line-soft); align-items: start; }
+  .field:last-child { border-bottom: none; }
+  .field .k { font-size: 12.5px; font-weight: 600; }
+  .field .k small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .field .v { font-size: 12.5px; }
+  select, input[type=text] { font: inherit; font-size: 12.5px; padding: 6px 8px; border: 1px solid var(--line);
+    border-radius: 7px; background: #fff; color: var(--ink); min-width: 200px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .hint { color: var(--muted); font-size: 11px; margin-top: 4px; }
+  .switch { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; }
+  .switch i { width: 32px; height: 18px; border-radius: 999px; background: var(--line); position: relative; transition: .15s; }
+  .switch i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+    border-radius: 50%; background: #fff; transition: .15s; }
+  .switch.on i { background: var(--blue); }
+  .switch.on i::after { left: 16px; }
+
+  .note { border: 1px solid var(--line); border-left: 3px solid var(--blue); background: var(--blue-soft);
+    border-radius: 0 8px 8px 0; padding: 10px 12px; font-size: 12px; color: #22314f; margin-bottom: 14px; }
+  .note b { font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>证据台账 · 确定性护栏 · 复核模型</h1>
+    <span class="sub">P0（台账 + 护栏，零模型成本） / P1（第二模型只做核对）</span>
+  </header>
+
+  <div class="tabs">
+    <button class="on" data-tab="chat">对话里的表现</button>
+    <button data-tab="ledger">证据台账（P0）</button>
+    <button data-tab="settings">复核设置（P1）</button>
+  </div>
+
+  <!-- ══════════ 1. 对话里的表现 ══════════ -->
+  <section class="panel on" id="tab-chat">
+    <div class="scen">
+      <button class="on" data-scen="pass">场景 A：证据齐全 → 通过</button>
+      <button data-scen="warn">场景 B：持仓快照被权限挡 → 存疑</button>
+      <button data-scen="block">场景 C：拟单依据缺失 → 拦截</button>
+    </div>
+
+    <div class="ai">
+      <div class="ai-head">
+        <span class="dot">✦</span><span class="name">AI Copilot</span>
+        <span class="spacer"></span>
+        <span class="meta" id="chat-meta">11 次工具 · 52 秒</span>
+      </div>
+      <div class="ai-body">
+        <p class="concl" id="cc-concl"></p>
+
+        <div id="cc-extras"></div>
+
+        <div class="verdict-bar">
+          <span class="pill" id="cc-conf"></span>
+          <span class="pill neutral mono" id="cc-refs"></span>
+          <span class="pill" id="cc-verdict"></span>
+          <span class="spacer"></span>
+          <span class="meta" id="cc-time">15:37:56</span>
+        </div>
+
+        <div class="guards" id="cc-guards"></div>
+      </div>
+    </div>
+
+    <div class="note" style="margin-top:14px">
+      <b>关键点：</b>「引用来源」现在是可追溯的调用（<code>call_00_…</code>），不再是一串工具名标签；
+      置信度由多重信号决定（模型自报 → 护栏 / 复核只能下调，不能上调）。
+    </div>
+  </section>
+
+  <!-- ══════════ 2. 证据台账 ══════════ -->
+  <section class="panel" id="tab-ledger">
+    <div class="scen">
+      <button class="on" data-scen="pass">场景 A：证据齐全</button>
+      <button data-scen="warn">场景 B：权限被挡</button>
+      <button data-scen="block">场景 C：拟单依据缺失</button>
+    </div>
+    <div class="card">
+      <h2>本轮证据台账 <span class="tag">L1 · 每轮生成</span></h2>
+      <div class="health" id="lg-health"></div>
+      <table class="ledger" id="lg-table"></table>
+      <p class="hint">
+        台账是护栏与复核的唯一输入：<b>只有这里记录过的事实才能被引用</b>。
+        <code>facts</code> 只留结论会引用到的数字，不放整段 JSON（控制复核成本）。
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>确定性护栏 <span class="tag">L0 · 不调用模型</span></h2>
+      <div class="guards" id="lg-guards"></div>
+      <p class="hint">
+        四条可计算的规则：引用可追溯 / 缺数据封顶 / 数字自洽 / 权重合规则。
+        任一失败 → 置信度封顶 + 结论顶部标注；涉及下单的结论额外 block。
+      </p>
+    </div>
+  </section>
+
+  <!-- ══════════ 3. 复核设置 ══════════ -->
+  <section class="panel" id="tab-settings">
+    <div class="card">
+      <h2>复核模型 <span class="tag">P1</span></h2>
+
+      <div class="field">
+        <div class="k">启用复核<small>只核对证据与结论，不重做任务</small></div>
+        <div class="v"><span class="switch on" data-switch><i></i>开启</span></div>
+      </div>
+
+      <div class="field">
+        <div class="k">复核模型<small>建议与主模型跨家族，避免相关失败</small></div>
+        <div class="v">
+          <div class="row">
+            <select>
+              <option>qwen-max（阿里云）</option>
+              <option>glm-4.6（智谱）</option>
+              <option>gpt-5-mini（OpenAI）</option>
+              <option>claude-haiku（Anthropic）</option>
+            </select>
+            <span class="pill neutral mono">主模型：deepseek-v4-flash</span>
+          </div>
+          <div class="hint">同 provider 同模型几乎无独立性，等价于自问自答；跨家族才有纠错能力。</div>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="k">触发策略<small>不是每轮都跑，控制成本与延迟</small></div>
+        <div class="v">
+          <div class="row">
+            <label class="switch on" data-switch><i></i>含交易动作词</label>
+            <label class="switch on" data-switch><i></i>要生成拟单 / 交易审查</label>
+            <label class="switch" data-switch><i></i>数据健康分低于阈值</label>
+            <label class="switch" data-switch><i></i>每轮都复核</label>
+          </div>
+          <div class="hint">当前配置下，预计只有 12% 的轮次会触发复核。</div>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="k">预算上限<small>超出则跳过复核并标注「未复核」</small></div>
+        <div class="v">
+          <div class="row">
+            <input type="text" value="4000" style="min-width:90px;width:90px" />
+            <span class="meta">tokens / 轮</span>
+            <span class="pill neutral mono">上月估算 ≈ $0.42</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="k">拦截边界<small>block 只拦下单类动作，不拦分析</small></div>
+        <div class="v">
+          <div class="row">
+            <label class="switch on" data-switch><i></i>禁止生成拟单</label>
+            <label class="switch on" data-switch><i></i>禁止一键确认</label>
+            <label class="switch" data-switch><i></i>禁止输出结论（仅提示）</label>
+          </div>
+          <div class="hint">分析类结论永远保留，只降置信度 + 顶部标注，避免「聊某只票」被卡死。</div>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="k">复核超时<small>超时按「未复核」处理，不阻塞主流程</small></div>
+        <div class="v"><div class="row"><input type="text" value="8" style="min-width:70px;width:70px" /><span class="meta">秒</span></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>复核结果长什么样 <span class="tag">结构化输出</span></h2>
+      <pre class="meta" style="background:var(--surface);border:1px solid var(--line-soft);border-radius:8px;padding:12px;overflow:auto;font-size:11.5px;line-height:1.6">{
+  "verdict": "warn",
+  "issues": [
+    { "code": "MISSING_EVIDENCE", "severity": "high",
+      "claim": "华东医药成本 26.15",
+      "why": "get_portfolio_snapshot 被 A3 权限拒绝，该数字来自记忆而非本轮数据" }
+  ],
+  "confidence_cap": "medium",
+  "requires_human": false,
+  "unchecked": []
+}</pre>
+      <p class="hint">verifier 只读「台账摘要 + 结论草稿」，不重跑到工具；输出固定 JSON，违规即视为未复核。</p>
+    </div>
+  </section>
+</div>
+
+<script>
+/* ────────── 数据：三个场景 ────────── */
+const GUARDS = [
+  { code: "REFS_TRACEABLE", name: "引用可追溯", why: "evidence_refs 必须指向本轮真实存在的调用" },
+  { code: "MISSING_EVIDENCE", name: "缺数据不得 high", why: "有 degraded / stale / 被权限拒绝 → 置信度封顶" },
+  { code: "NUMBERS_CONSISTENT", name: "数字自洽", why: "结论里的数字要能在台账 facts 里对上（容差 0.5%）" },
+  { code: "WEIGHT_WITHIN_POLICY", name: "权重合规则", why: "单票/板块权重不超过风控上限，且合计 ≤ 100%" },
+];
+
+const SCENES = {
+  pass: {
+    concl: '持仓 <b>¥3,166</b>，总资产 <b>¥7,206.53</b>，现金占比 <span class="num">56.6%</span>。<br/>'
+         + '今日无监控事件触发；加密合约资金费率 <span class="num">+0.0064%/8h</span>，年化 <span class="num">7.0%</span>，处于中性区间。'
+         + '建议维持现有配置，不追高。',
+    conf: { before: "high", after: "high" },
+    refs: 9, verdict: "pass", time: "15:37:56",
+    guards: { REFS_TRACEABLE: "pass", MISSING_EVIDENCE: "pass", NUMBERS_CONSISTENT: "pass", WEIGHT_WITHIN_POLICY: "pass" },
+    issues: [],
+    health: { ok: 9, degraded: 0, stale: 0, blocked: 0 },
+    calls: [
+      { id: "call_00_Ggcy", tool: "get_portfolio_snapshot", st: "ok", src: "local", as_of: "15:30", facts: "market_value 3166, total_value 7206.53, cash_pct 56.6" },
+      { id: "call_01_d7PI", tool: "get_monitor_events", st: "ok", src: "local", as_of: "15:30", facts: "items: 0（今日无触发）" },
+      { id: "call_02_VmkX", tool: "get_crypto_derivatives", st: "ok", src: "gate", as_of: "15:32", facts: "funding_rate_pct 0.0064, mark_price 79821.6" },
+    ],
+  },
+  warn: {
+    concl: '华东医药 <b>100 股，成本 26.15</b>，浮亏 <span class="num">-170 元（-5.96%）</span>；'
+         + '二六三 <b>100 股，成本 4.92</b>，浮亏 <span class="num">-30 元（-6.10%）</span>。<br/>'
+         + '两只合计浮亏 <span class="num">-200 元</span>，占总资产 <span class="num">2.8%</span>，未触及 8% 硬止损线；'
+         + '建议继续持有，跌破 25.63 再处理。',
+    conf: { before: "high", after: "medium" },
+    refs: 6, verdict: "warn", time: "15:37:56",
+    guards: {
+      REFS_TRACEABLE: "pass", MISSING_EVIDENCE: "fail", NUMBERS_CONSISTENT: "warn", WEIGHT_WITHIN_POLICY: "pass",
+    },
+    issues: [
+      { sev: "high", code: "MISSING_EVIDENCE", title: "持仓成本来自记忆，不是本轮数据",
+        why: "get_portfolio_snapshot 返回 A3 权限不足，本轮没有读到真实持仓", claim: "华东医药 100 股 @26.15" },
+      { sev: "mid", code: "NUMBERS_CONSISTENT", title: "「占总资产 2.8%」无法核对",
+        why: "台账里没有本轮 total_value（同一次调用失败），该比例来自上一轮缓存", claim: "-200 元 ≈ 2.8%" },
+    ],
+    health: { ok: 6, degraded: 1, stale: 0, blocked: 1 },
+    calls: [
+      { id: "call_00_iSsL", tool: "get_portfolio_snapshot", st: "bad", src: "—", as_of: "—", facts: "authority A3 required（未读到持仓）" },
+      { id: "call_01_XjDF", tool: "get_monitor_events", st: "ok", src: "local", as_of: "15:30", facts: "items: 0" },
+      { id: "call_02_ab12", tool: "get_stock_context", st: "warn", src: "eastmoney", as_of: "15:31", facts: "last 26.81（degraded=false）" },
+    ],
+  },
+  block: {
+    concl: '建议<b>减仓二六三 100 股</b>，参考价 <span class="num">4.62</span>，预计回笼 <span class="num">¥462</span>；'
+         + '同时把华东医药换成大盘宽基，理由是「板块集中度过高」。<br/>'
+         + '已为你准备调仓草案，可在右侧确认。',
+    conf: { before: "high", after: "low" },
+    refs: 4, verdict: "block", time: "15:37:56",
+    guards: {
+      REFS_TRACEABLE: "pass", MISSING_EVIDENCE: "fail",
+      NUMBERS_CONSISTENT: "fail", WEIGHT_WITHIN_POLICY: "warn",
+    },
+    issues: [
+      { sev: "high", code: "MISSING_EVIDENCE", title: "「板块集中度过高」没有数据支撑",
+        why: "本轮未调用行业/板块分布工具，口径无从核对", claim: "板块集中度过高" },
+      { sev: "high", code: "NUMBERS_CONSISTENT", title: "回笼金额与台账不符",
+        why: "台账 last=4.62，但结论按 4.62×100 得 462；缺少手续费与滑点口径", claim: "预计回笼 ¥462" },
+      { sev: "mid", code: "WEIGHT_WITHIN_POLICY", title: "换仓后单票权重将超上限",
+        why: "按现有持仓与 15% 单票上限，换到大盘宽基后权重约 62%", claim: "换成大盘宽基" },
+    ],
+    health: { ok: 4, degraded: 0, stale: 1, blocked: 0 },
+    calls: [
+      { id: "call_00_9Jca", tool: "get_stock_context", st: "ok", src: "eastmoney", as_of: "15:31", facts: "last 4.62（002467）" },
+      { id: "call_01_k8A7", tool: "get_daily_history", st: "warn", src: "eastmoney", as_of: "10/27", facts: "close 4.45（K 线只到 10/27，stale）" },
+    ],
+  },
+};
+
+/* ────────── 渲染 ────────── */
+const $ = (sel) => document.querySelector(sel);
+
+function renderGuards(host, state) {
+  host.innerHTML = GUARDS.map((g) => {
+    const st = state.guards[g.code] || "pass";
+    const map = {
+      pass: { icon: "✓", cls: "", resText: "通过", resColor: "var(--green)" },
+      warn: { icon: "!", cls: "", resText: "存疑", resColor: "var(--amber)" },
+      fail: { icon: "✕", cls: "fail", resText: "未通过", resColor: "var(--red)" },
+    }[st];
+    return `<div class="guard ${map.cls}">
+      <span class="icon" style="color:${map.resColor}">${map.icon}</span>
+      <div>
+        <div class="g-name">${g.name} <span class="g-code">${g.code}</span></div>
+        <div class="g-why">${g.why}</div>
+      </div>
+      <span class="g-res" style="color:${map.resColor}">${map.resText}</span>
+    </div>`;
+  }).join("");
+}
+
+function renderChat(key) {
+  const s = SCENES[key];
+  $("#cc-concl").innerHTML = s.concl;
+  $("#chat-meta").textContent = `本轮 ${s.calls.length} 次关键工具 · 52 秒`;
+  $("#cc-time").textContent = s.time;
+
+  const confCls = { high: "ok", medium: "warn", low: "bad" }[s.conf.after];
+  const confLabel = { high: "信心度 高", medium: "信心度 中", low: "信心度 低" }[s.conf.after];
+  const capped = s.conf.before !== s.conf.after;
+  $("#cc-conf").className = `pill ${confCls}`;
+  $("#cc-conf").innerHTML = confLabel + (capped ? ` <span class="meta" style="color:inherit;opacity:.75">（自报 ${s.conf.before}，已下调）</span>` : "");
+  $("#cc-refs").textContent = `引用来源 ${s.refs}`;
+
+  const v = { pass: ["ok", "复核 通过"], warn: ["warn", "复核 2 处存疑"], block: ["bad", "复核 已拦截"] }[s.verdict];
+  $("#cc-verdict").className = `pill ${v[0]}`;
+  $("#cc-verdict").textContent = v[1];
+
+  renderGuards($("#cc-guards"), s);
+
+  // 存疑/拦截时在结论上方插入提示 + 复核 issues
+  const extras = $("#cc-extras");
+  if (s.verdict === "pass") { extras.innerHTML = ""; return; }
+  const banner = s.verdict === "block"
+    ? `<div class="note" style="border-left-color:var(--red);background:var(--red-soft);color:#6b1f1c">
+         <b>已拦截：</b>本轮结论的证据不足以支持下单动作，已禁用「生成拟单」。分析内容仍保留。</div>`
+    : `<div class="note" style="border-left-color:var(--amber);background:var(--amber-soft);color:#6b4410">
+         <b>证据存疑：</b>置信度已下调，涉及的数字请自行核对后再决策。</div>`;
+  const issues = s.issues.map((i) => `
+    <div class="issue ${i.sev === "high" ? "high" : ""}">
+      <div class="i-title">${i.title} <span class="meta">${i.code}</span></div>
+      <div class="i-why">${i.why}</div>
+      <div class="i-claim">claim: ${i.claim}</div>
+    </div>`).join("");
+  extras.innerHTML = banner + `<div class="review">
+      <div class="review-head">🔍 复核意见 <span class="pill ${v[0]}" style="margin-left:6px">${v[1]}</span>
+        <span class="spacer"></span><span class="meta">qwen-max · 2.1s · 1.8k tokens</span></div>
+      <div class="review-body">${issues}</div>
+    </div>`;
+}
+
+function renderLedger(key) {
+  const s = SCENES[key];
+  $("#lg-health").innerHTML = `
+    <span>成功 <b>${s.health.ok}</b></span>
+    <span>降级 <b>${s.health.degraded}</b></span>
+    <span>过期 <b>${s.health.stale}</b></span>
+    <span>被拒绝 <b>${s.health.blocked}</b></span>`;
+  $("#lg-table").innerHTML = `
+    <thead><tr><th>call_id</th><th>工具</th><th>状态</th><th>来源 / as_of</th><th>facts（复核唯一依据）</th></tr></thead>
+    <tbody>${s.calls.map((c) => `
+      <tr>
+        <td><code>${c.id}</code></td>
+        <td><code>${c.tool}</code></td>
+        <td><span class="st ${c.st}">${c.st}</span></td>
+        <td class="meta">${c.src} · ${c.as_of}</td>
+        <td class="meta">${c.facts}</td>
+      </tr>`).join("")}</tbody>`;
+  renderGuards($("#lg-guards"), s);
+}
+
+/* ────────── 交互 ────────── */
+document.querySelectorAll(".tabs button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b === btn));
+    document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("on", p.id === `tab-${btn.dataset.tab}`));
+  });
+});
+
+let current = "pass";
+document.querySelectorAll(".scen button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".scen button").forEach((b) =>
+      b.classList.toggle("on", b.dataset.scen === btn.dataset.scen),
+    );
+    current = btn.dataset.scen;
+    renderChat(current);
+    renderLedger(current);
+  });
+});
+
+document.querySelectorAll("[data-switch]").forEach((el) => {
+  el.addEventListener("click", (e) => { e.preventDefault(); el.classList.toggle("on"); });
+});
+
+// 支持用 hash 直接定位：#warn / #block / #ledger / #settings（评审与截图用）
+const HASH = (location.hash || "").replace("#", "");
+if (["warn", "block"].includes(HASH)) {
+  current = HASH;
+  document.querySelectorAll(".scen button").forEach((b) => b.classList.toggle("on", b.dataset.scen === HASH));
+} else if (HASH.startsWith("ledger") || HASH.startsWith("settings")) {
+  const [tab, scen] = HASH.split("-");
+  if (["warn", "block"].includes(scen)) {
+    current = scen;
+    document.querySelectorAll(".scen button").forEach((b) => b.classList.toggle("on", b.dataset.scen === scen));
+  }
+  document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+  document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("on", p.id === `tab-${tab}`));
+}
+
+renderChat(current);
+renderLedger(current);
+</script>
+</body>
+</html>
