@@ -62,32 +62,40 @@ export function TrajectoryView({
         lastPrompt = promptOf(item.msg);
         turnNo += 1;
       }
-      const tools = item.tools ?? [];
-      if (tools.length > 0) {
+      // **优先用 steps**：它是「思考 + 工具」按正确顺序排好的序列（pairMessages 已经算过
+      // 落位）。只用 tools 重建会丢掉全部思考 —— 轨迹页看不到推理就是这么来的。
+      const steps = item.steps?.length ? item.steps : toolInfosToSteps(item.tools ?? []);
+      if (steps.length > 0) {
         turns.push({
           key: item.msg.message_id ?? `${item.msg.run_id}-${turns.length}`,
           index: turnNo || turns.length + 1,
           at: item.msg.created_at ?? "",
           prompt: lastPrompt,
-          steps: toolInfosToSteps(tools),
+          steps,
         });
       }
       continue;
     }
-    // t === "ai"：这一轮的收口消息，工具挂在这里
-    if (item.tools.length > 0) {
-      turns.push({
-        key: item.msg.message_id ?? `${item.msg.run_id}-${turns.length}`,
-        index: turnNo || turns.length + 1,
-        at: item.msg.created_at ?? "",
-        prompt: lastPrompt,
-        steps: toolInfosToSteps(item.tools),
-      });
+    // t === "ai"：这一轮的收口消息，工具与思考都挂在这里
+    {
+      const steps = item.steps?.length ? item.steps : toolInfosToSteps(item.tools);
+      if (steps.length > 0) {
+        turns.push({
+          key: item.msg.message_id ?? `${item.msg.run_id}-${turns.length}`,
+          index: turnNo || turns.length + 1,
+          at: item.msg.created_at ?? "",
+          prompt: lastPrompt,
+          steps,
+        });
+      }
     }
   }
 
   const liveSteps = streamMessage?.steps ?? [];
-  const totalSteps = turns.reduce((n, t) => n + t.steps.length, 0) + liveSteps.length;
+  const allSteps = [...turns.flatMap((t) => t.steps), ...liveSteps];
+  const totalSteps = allSteps.length;
+  const reasoningCount = allSteps.filter((s) => s.kind === "reasoning").length;
+  const toolCount = totalSteps - reasoningCount;
 
   if (turns.length === 0 && liveSteps.length === 0) {
     return (
@@ -97,9 +105,9 @@ export function TrajectoryView({
             <circle cx="6" cy="6" r="2" /><circle cx="6" cy="18" r="2" /><circle cx="18" cy="12" r="2" />
             <path d="M8 6h4a3 3 0 0 1 3 3v0M8 18h4a3 3 0 0 0 3-3v0" />
           </svg>
-          <div className="trajectory-empty-title">这一轮还没有工具调用</div>
+          <div className="trajectory-empty-title">这一轮还没有执行过程</div>
           <div className="trajectory-empty-desc">
-            问一个需要查数据的问题（比如「分析 600519」），这里会按轮次列出它调用了哪些工具、每步的结果。
+            问一个需要查数据的问题（比如「分析 600519」），这里会按轮次列出它的思考与工具调用、每步的结果。
           </div>
         </div>
       </div>
@@ -111,7 +119,7 @@ export function TrajectoryView({
       <div className="trajectory-head">
         <span className="trajectory-title">执行轨迹</span>
         <span className="trajectory-meta">
-          {turns.length} 轮 · {totalSteps} 步
+          {turns.length} 轮 · 思考 {reasoningCount} · 工具 {toolCount}
         </span>
       </div>
 

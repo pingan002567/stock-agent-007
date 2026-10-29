@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
+import { TrajectoryView } from "@/components/features/TrajectoryView";
 import { ThoughtTimeline } from "@/components/features/ThoughtTimeline";
 import { exitCodeOf, loopStats } from "@/lib/agentLoop";
 import type { StreamStep, StreamToolCall } from "@/hooks/useCopilotChat";
@@ -167,5 +168,47 @@ describe("loopStats", () => {
 
   it("没有工具时轮次为 0", () => {
     expect(loopStats([think("a")])).toEqual({ reasoning: 1, tools: 0, commands: 0, rounds: 0 });
+  });
+});
+
+describe("轨迹页：思考也要出现", () => {
+  it("GroupedItem 的 steps 被直接使用（不再只用 tools 重建）", () => {
+    const items = [
+      {
+        t: "ai" as const,
+        msg: {
+          message_id: "m1", role: "assistant" as const, kind: "final_answer" as const,
+          text: "结论", run_id: "run1", created_at: "2026-10-29T06:00:00Z", session_id: "s1",
+        },
+        tools: [],
+        steps: [think("先看费率，再判断拥挤度"), toolStep()],
+      },
+    ];
+    const { container } = render(
+      <TrajectoryView items={items as never} streamMessage={null} />,
+    );
+    const text = container.textContent ?? "";
+    // 思考正文必须出现；旧实现只渲染 tools，会把这段整条丢掉
+    expect(text).toContain("先看费率，再判断拥挤度");
+    expect(text).toContain("思考 1");
+    expect(text).toContain("工具 1");
+  });
+
+  it("只有思考没有工具的轮次也要列出来", () => {
+    const items = [
+      {
+        t: "ai" as const,
+        msg: {
+          message_id: "m2", role: "assistant" as const, kind: "final_answer" as const,
+          text: "结论", run_id: "run2", created_at: "2026-10-29T06:10:00Z", session_id: "s1",
+        },
+        tools: [],
+        steps: [think("这题不需要查数据，直接回答")],
+      },
+    ];
+    const { container } = render(
+      <TrajectoryView items={items as never} streamMessage={null} />,
+    );
+    expect(container.textContent ?? "").toContain("这题不需要查数据，直接回答");
   });
 });
