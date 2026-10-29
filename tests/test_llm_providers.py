@@ -56,9 +56,9 @@ def test_legacy_credentials_migrate_to_catalog_provider(tmp_path, monkeypatch):
     }), encoding="utf-8")
     data = load_llm_credentials()
     assert data["providers"]["deepseek"]["api_key"] == "sk-legacy-deepseek"
-    assert data["default_model"] == "deepseek/deepseek-chat"
+    assert data["default_model"] == "deepseek/deepseek-flash"
     saved = json.loads(cred.read_text(encoding="utf-8"))
-    assert saved["default_model"] == "deepseek/deepseek-chat"
+    assert saved["default_model"] == "deepseek/deepseek-flash"
 
 
 def test_legacy_unknown_url_becomes_custom(tmp_path, monkeypatch):
@@ -96,7 +96,7 @@ def test_connect_then_effective_runtime_writes_openai_env(tmp_path, monkeypatch)
     assert created.status_code == 200
     body = created.json()
     assert any(item["id"] == "deepseek" for item in body["connected"])
-    assert body["default_model"] == "deepseek/deepseek-v4-flash"
+    assert body["default_model"] == "deepseek/deepseek-flash"
     connected_model_refs = {
         f"{item['id']}/{model['id']}"
         for item in body["connected"]
@@ -113,9 +113,9 @@ def test_connect_then_effective_runtime_writes_openai_env(tmp_path, monkeypatch)
     cfg = effective_runtime_config(client.app.state.services.repo)
     assert cfg["api_key"] == "sk-connected"
     assert "deepseek.com" in (cfg.get("base_url") or "")
-    assert cfg["model_name"] == "deepseek-v4-flash"
+    assert cfg["model_name"] == "deepseek-flash"
     assert os.environ.get("OPENAI_API_KEY") == "sk-connected"
-    assert os.environ.get("WORKBENCH_AI_MODEL") == "deepseek-v4-flash"
+    assert os.environ.get("WORKBENCH_AI_MODEL") == "deepseek-flash"
 
 
 def test_custom_provider_validation(tmp_path):
@@ -187,7 +187,7 @@ def test_moonshot_credentials_migrate_to_kimi(tmp_path, monkeypatch):
     data = load_llm_credentials()
     assert "moonshot" not in data["providers"]
     assert data["providers"]["kimi"]["api_key"] == "sk-kimi"
-    assert data["default_model"] == "kimi/kimi-k2.5"
+    assert data["default_model"] == "kimi/kimi-k3.1-pro"
 
 
 def test_invalid_default_model_migrates_to_valid_ref(tmp_path, monkeypatch):
@@ -208,7 +208,7 @@ def test_invalid_default_model_migrates_to_valid_ref(tmp_path, monkeypatch):
         "default_model": "deepseek/mimo-v2.5",
     }), encoding="utf-8")
     data = load_llm_credentials()
-    assert data["default_model"] == "deepseek/deepseek-v4-flash"
+    assert data["default_model"] == "deepseek/deepseek-flash"
 
 
 def test_llm_snapshot_does_not_echo_secrets(tmp_path):

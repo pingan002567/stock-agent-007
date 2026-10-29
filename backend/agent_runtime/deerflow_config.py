@@ -19,7 +19,7 @@ import yaml
 from backend import paths
 from backend.agent_runtime.tools import get_all_workbench_tools
 
-DEFAULT_MODEL = os.getenv("WORKBENCH_AI_MODEL") or "gpt-4o"
+DEFAULT_MODEL = os.getenv("WORKBENCH_AI_MODEL") or "deepseek-flash"
 DEFAULT_FILENAME = "deerflow_generated_config.yaml"
 
 
@@ -33,8 +33,10 @@ def _resolve_env(val: str) -> str:
 # 常见多模态模型名特征：命中即默认开 vision（view_image 工具随之可用）。
 # WORKBENCH_AI_VISION=1/0 可显式覆盖。
 _VISION_MODEL_HINTS = (
-    "gpt-4o", "gpt-4.1", "gpt-5", "o3", "o4",
-    "claude", "gemini", "qwen-vl", "qwen2-vl", "qvq", "glm-4v", "vision",
+    # 2026-10 在售的多模态命名；DeepSeek V4.1 Flash 是原生多模态
+    "gpt-4o", "gpt-4.1", "gpt-5", "gpt-6", "o3", "o4",
+    "claude", "gemini", "qwen-vl", "qwen2-vl", "qvq", "glm-4v", "glm-5v",
+    "omni", "vision", "deepseek-flash", "v4.1-flash",
 )
 
 

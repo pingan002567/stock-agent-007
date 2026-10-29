@@ -1,6 +1,6 @@
 DEFAULT_MODELS = [
-    {"name": "gpt-5.4", "provider": "openai", "role": "copilot"},
-    {"name": "claude-sonnet-4.6", "provider": "anthropic", "role": "research"},
-    {"name": "gemini-2.5-pro", "provider": "gemini", "role": "vision"},
-    {"name": "deepseek-v3", "provider": "deepseek", "role": "fallback"},
+    {"name": "deepseek-flash", "provider": "deepseek", "role": "copilot"},
+    {"name": "kimi-k3.1-pro", "provider": "kimi", "role": "research"},
+    {"name": "gpt-6.1-terra", "provider": "openai", "role": "vision"},
+    {"name": "glm-5.3-flash", "provider": "zhipu", "role": "fallback"},
 ]
