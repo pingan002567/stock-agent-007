@@ -1,8 +1,10 @@
 /** 与 backend/agent_runtime/deerflow_config.py `_VISION_MODEL_HINTS` 对齐。 */
 export const VISION_MODEL_HINTS = [
+  // 2026-10 在售的多模态命名；DeepSeek V4.1 Flash 是原生多模态
   "gpt-4o",
   "gpt-4.1",
   "gpt-5",
+  "gpt-6",
   "o3",
   "o4",
   "claude",
@@ -11,7 +13,11 @@ export const VISION_MODEL_HINTS = [
   "qwen2-vl",
   "qvq",
   "glm-4v",
+  "glm-5v",
+  "omni",
   "vision",
+  "deepseek-flash",
+  "v4.1-flash",
 ] as const;
 
 export const IMAGE_UPLOAD_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
