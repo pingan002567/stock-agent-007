@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { StreamStep, StreamToolCall } from "@/hooks/useCopilotChat";
+import type { StreamStep } from "@/hooks/useCopilotChat";
 import { ThoughtTimeline } from "@/components/features/ThoughtTimeline";
 import type { ToolInfo } from "@/components/features/CopilotMessageItem";
 
@@ -9,7 +9,6 @@ type Props = {
   empty?: boolean;
   tools?: ToolInfo[];
   onRetry?: () => void;
-  onToolClick?: (tool: ToolInfo) => void;
   retryDisabled?: boolean;
   /** 后面已有新对话时降噪 */
   stale?: boolean;
@@ -21,7 +20,6 @@ export function TurnFailureStatus({
   empty = false,
   tools = [],
   onRetry,
-  onToolClick,
   retryDisabled,
   stale = false,
 }: Props) {
@@ -40,19 +38,6 @@ export function TurnFailureStatus({
       taskPrompt: t.taskPrompt,
     },
   }));
-  const handleClick = onToolClick
-    ? (t: StreamToolCall) => onToolClick({
-        id: t.callId,
-        name: t.name,
-        done: t.status === "done",
-        failed: t.status === "failed",
-        resultText: t.resultText,
-        subagentType: t.subagentType,
-        taskDescription: t.taskDescription,
-        taskPrompt: t.taskPrompt,
-      })
-    : undefined;
-
   return (
     <div
       className={`turn-failure${stale ? " stale" : ""}${empty ? " empty" : ""}`}
@@ -89,7 +74,7 @@ export function TurnFailureStatus({
       </div>
       {hasProcess && open ? (
         <div className="turn-failure-process">
-          <ThoughtTimeline steps={steps} active={false} onToolClick={handleClick} />
+          <ThoughtTimeline steps={steps} active={false} />
         </div>
       ) : null}
     </div>

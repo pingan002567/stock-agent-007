@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AppStateProvider, useAppState } from "@/hooks/useAppState";
 import { AppActionsProvider, type SettingsTabHint } from "@/hooks/useAppActions";
 import { CopilotChatProvider, useCopilotChat } from "@/hooks/useCopilotChat";
-import { ChatDetailProvider, useChatDetail } from "@/hooks/useChatDetail";
 import { TopBar } from "@/components/layout/TopBar";
 import { BottomBar } from "@/components/layout/BottomBar";
 import { LeftSidebar } from "@/components/layout/LeftSidebar";
@@ -31,7 +30,6 @@ import type { Screen } from "@/types";
 function AppShell({ onSwitchBackend }: { onSwitchBackend: () => void }) {
   const { showToast } = useToast();
   const { currentScreen, setCurrentScreen } = useAppState();
-  const { open: detailOpen, closeDetail } = useChatDetail();
   const { handleNewSession } = useCopilotChat();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTabHint | undefined>();
@@ -61,15 +59,14 @@ function AppShell({ onSwitchBackend }: { onSwitchBackend: () => void }) {
   const toggleDock = useCallback(() => setDockCollapsed((v) => {
     const next = !v;
     try { localStorage.setItem("func-dock-collapsed", next ? "1" : "0"); } catch { /* ignore */ }
-    if (next) { closeDetail(); setCurrentScreen("chat"); }
+    if (next) { setCurrentScreen("chat"); }
     return next;
-  }), [closeDetail, setCurrentScreen]);
+  }), [setCurrentScreen]);
   const openDockScreen = useCallback((screen: Screen) => {
     setDockCollapsed(false);
     try { localStorage.setItem("func-dock-collapsed", "0"); } catch { /* ignore */ }
-    closeDetail();
     setCurrentScreen(screen);
-  }, [closeDetail, setCurrentScreen]);
+  }, [setCurrentScreen]);
 
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
@@ -100,7 +97,7 @@ function AppShell({ onSwitchBackend }: { onSwitchBackend: () => void }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [handleNewSession, openDockScreen, toggleDock]);
 
-  const panelOpen = !dockCollapsed && (detailOpen || currentScreen !== "chat");
+  const panelOpen = !dockCollapsed && currentScreen !== "chat";
 
   // 窄窗 + 右栏展开时临时收起左栏（不写 localStorage）
   useEffect(() => {
@@ -259,11 +256,9 @@ function AppContent() {
   return (
     <AppStateProvider key={bootEpoch}>
       <CopilotChatProvider>
-        <ChatDetailProvider>
-          <SetupGate>
+                  <SetupGate>
             {mobile ? <MobileShell onSwitchBackend={switchBackend} /> : <AppShell onSwitchBackend={switchBackend} />}
           </SetupGate>
-        </ChatDetailProvider>
       </CopilotChatProvider>
     </AppStateProvider>
   );

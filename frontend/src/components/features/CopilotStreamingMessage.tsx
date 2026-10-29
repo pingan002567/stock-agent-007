@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { type StreamMessage, type StreamToolCall } from "@/hooks/useCopilotChat";
+import { type StreamMessage } from "@/hooks/useCopilotChat";
 import { CopilotFinalMeta, SkillTraceChain } from "@/components/features/CopilotFinalMeta";
 import { ThoughtTimeline } from "@/components/features/ThoughtTimeline";
 import { HumanInputCard } from "@/components/features/HumanInputCard";
@@ -26,7 +26,6 @@ function useElapsedMs(active: boolean, startedAt: number): number {
 interface Props {
   streamMessage: StreamMessage;
   /** 提供时流式工具卡可点击（聊天中心主区 → 右栏详情联动） */
-  onToolClick?: (tool: StreamToolCall) => void;
   /** Human Input Card 提交（选项 / 卡片内文本） */
   onClarifySubmit?: (response: HumanInputResponse, displayText: string) => void;
   clarifyPending?: boolean;
@@ -50,7 +49,6 @@ const PHASE_COLORS: Record<string, string> = {
 
 export function CopilotStreamingMessage({
   streamMessage,
-  onToolClick,
   onClarifySubmit,
   clarifyPending,
 }: Props) {
@@ -116,7 +114,7 @@ export function CopilotStreamingMessage({
           ))}
         </div>
       )}
-      <ThoughtTimeline steps={streamMessage.steps} active={streamingActive} onToolClick={onToolClick} />
+      <ThoughtTimeline steps={streamMessage.steps} active={streamingActive} />
       {clarificationRequest && (
         <HumanInputCard
           request={clarificationRequest}

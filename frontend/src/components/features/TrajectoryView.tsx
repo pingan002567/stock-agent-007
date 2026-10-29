@@ -1,7 +1,7 @@
 import { formatLocalTime } from "@/utils/format";
 import { ThoughtTimeline } from "@/components/features/ThoughtTimeline";
 import type { GroupedItem } from "@/components/features/CopilotPanel";
-import type { StreamMessage, StreamStep, StreamToolCall } from "@/hooks/useCopilotChat";
+import type { StreamMessage, StreamStep } from "@/hooks/useCopilotChat";
 import type { CopilotMessage } from "@/api/client";
 import type { ToolInfo } from "@/components/features/CopilotMessageItem";
 
@@ -46,11 +46,9 @@ function promptOf(msg: CopilotMessage): string {
 export function TrajectoryView({
   items,
   streamMessage,
-  onStreamToolClick,
 }: {
   items: GroupedItem[];
   streamMessage: StreamMessage | null;
-  onStreamToolClick?: (t: StreamToolCall) => void;
 }) {
   const turns: Turn[] = [];
   let lastPrompt = "";
@@ -132,7 +130,7 @@ export function TrajectoryView({
               <span className="trajectory-turn-count">{turn.steps.length} 步</span>
             </header>
             {turn.prompt ? <div className="trajectory-turn-prompt">{turn.prompt}</div> : null}
-            <ThoughtTimeline steps={turn.steps} active={false} onToolClick={onStreamToolClick} expandAll />
+            <ThoughtTimeline steps={turn.steps} active={false} expandAll />
           </section>
         ))}
 
@@ -148,7 +146,7 @@ export function TrajectoryView({
             <ThoughtTimeline
               steps={liveSteps}
               active
-              onToolClick={onStreamToolClick}
+             
               expandAll
             />
           </section>

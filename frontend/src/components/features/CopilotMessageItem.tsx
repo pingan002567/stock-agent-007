@@ -5,7 +5,7 @@ import { formatLocalTime } from "@/utils/format";
 import { CopilotFinalMeta } from "@/components/features/CopilotFinalMeta";
 import { ThoughtTimeline } from "@/components/features/ThoughtTimeline";
 import { isCommandTool } from "@/hooks/useCopilotChat";
-import type { StreamStep, StreamToolCall } from "@/hooks/useCopilotChat";
+import type { StreamStep } from "@/hooks/useCopilotChat";
 import { attachmentsFromMessagePayload } from "@/lib/sessionUploads";
 import { HumanInputCard } from "@/components/features/HumanInputCard";
 import {
@@ -43,7 +43,6 @@ interface Props {
   /** 历史轮次的有序步骤（思考 + 工具）；提供时用它还原完整 agent loop */
   steps?: StreamStep[];
   /** 提供时工具卡可点击（聊天中心主区 → 右栏详情联动） */
-  onToolClick?: (tool: ToolInfo) => void;
   /** 历史澄清卡的已答态（来自后续用户消息的 human_input_response） */
   clarifiedResponse?: HumanInputResponse | null;
   /** 未答澄清卡可交互（点选项 / 卡内提交） */
@@ -57,7 +56,6 @@ interface Props {
 export function CopilotMessageItem({
   msg,
   tools,
-  onToolClick,
   clarifiedResponse,
   onClarifySubmit,
   clarifyPending,
@@ -86,14 +84,6 @@ export function CopilotMessageItem({
       kind: isCommandTool(t.name) ? "command" : "tool",
     },
   }));
-  const handleTimelineClick = onToolClick
-    ? (t: StreamToolCall) => onToolClick({
-        id: t.callId, name: t.name, done: t.status === "done",
-        failed: t.status === "failed", resultText: t.resultText, subagentType: t.subagentType,
-        taskDescription: t.taskDescription, taskPrompt: t.taskPrompt, args: t.args,
-      })
-    : undefined;
-
 /** 定时任务等系统触发的轮次：用户消息正文其实是整段研究员提示词。
  *  直接铺在气泡里既长又全是内部指令，所以拆成「来源标签 + 用户任务 + 折叠详情」。 */
 function splitScheduledPrompt(text: string): { tag: string; task: string; rest: string } | null {
@@ -159,7 +149,7 @@ function splitScheduledPrompt(text: string): { tag: string; task: string; rest: 
       ?? parseHumanInputRequest({ question: msg.text, call_id: (msg.payload as { call_id?: string })?.call_id });
     body = (
       <>
-        {hasTools && <ThoughtTimeline steps={toolSteps} active={false} onToolClick={handleTimelineClick} durationMs={durationMs} />}
+        {hasTools && <ThoughtTimeline steps={toolSteps} active={false} durationMs={durationMs} />}
         {request ? (
           <HumanInputCard
             request={request}
@@ -192,7 +182,7 @@ function splitScheduledPrompt(text: string): { tag: string; task: string; rest: 
     const raw = (evPayload.conclusion as string) || msg.text || "";
     body = (
       <>
-        {hasTools && <ThoughtTimeline steps={toolSteps} active={false} onToolClick={handleTimelineClick} durationMs={durationMs} />}
+        {hasTools && <ThoughtTimeline steps={toolSteps} active={false} durationMs={durationMs} />}
         <MarkdownRenderer text={stripToolCallTags(raw)} />
         <CopilotFinalMeta payload={evPayload} durationMs={durationMs} completedAt={time} />
       </>
@@ -202,7 +192,7 @@ function splitScheduledPrompt(text: string): { tag: string; task: string; rest: 
     const evPayload = ev.payload as Record<string, unknown>;
     body = (
       <>
-        {hasTools && <ThoughtTimeline steps={toolSteps} active={false} onToolClick={handleTimelineClick} durationMs={durationMs} />}
+        {hasTools && <ThoughtTimeline steps={toolSteps} active={false} durationMs={durationMs} />}
         <>⚠️ {(evPayload.error as string) || msg.text || "error"}</>
       </>
     );

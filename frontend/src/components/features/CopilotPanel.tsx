@@ -6,9 +6,8 @@ import { parseCopilotEvent, EVENT_FINAL, EVENT_ERROR, EVENT_TOOL_CALL, EVENT_TOO
 import { parseTaskToolPayload } from "@/components/features/taskToolMeta";
 import { persistedToolResultText } from "@/lib/persistedToolResult";
 import type { CopilotMessage, HealthCheck } from "@/api/client";
-import { useCopilotChat, extractToolResultText, isCommandTool, type StreamToolCall } from "@/hooks/useCopilotChat";
-import { useChatDetail } from "@/hooks/useChatDetail";
-import { CopilotMessageItem, type ToolInfo } from "@/components/features/CopilotMessageItem";
+import { useCopilotChat, extractToolResultText, isCommandTool } from "@/hooks/useCopilotChat";
+import { CopilotMessageItem } from "@/components/features/CopilotMessageItem";
 import { CopilotStreamingMessage } from "@/components/features/CopilotStreamingMessage";
 import { TrajectoryView } from "@/components/features/TrajectoryView";
 import { ContextCard } from "@/components/features/ContextCard";
@@ -336,30 +335,6 @@ export function CopilotPanel() {
     return isModelReady(health);
   }, [appDataCache, globalLoading, lastRefreshTime]);
 
-  const { openDetail } = useChatDetail();
-  const handleToolClick = useMemo(() => {
-    return (t: ToolInfo) => openDetail({
-      id: t.id,
-      name: t.name,
-      status: t.failed ? "failed" : t.done ? "done" : "running",
-      resultText: t.resultText,
-      subagentType: t.subagentType,
-      taskDescription: t.taskDescription,
-      taskPrompt: t.taskPrompt,
-    });
-  }, [openDetail]);
-  const handleStreamToolClick = useMemo(() => {
-    return (t: StreamToolCall) => openDetail({
-      id: t.callId,
-      name: t.name,
-      status: t.status,
-      resultText: t.resultText,
-      subagentType: t.subagentType,
-      taskDescription: t.taskDescription,
-      taskPrompt: t.taskPrompt,
-    });
-  }, [openDetail]);
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -491,7 +466,7 @@ export function CopilotPanel() {
           <React.Fragment key={item.msg.message_id}>
             {showHeader && <div className="date-divider">{dateHeader(msgDate)}</div>}
             <div className="msg-block">
-              <CopilotMessageItem msg={item.msg} tools={item.tools} steps={item.steps} onToolClick={handleToolClick} runStartedAt={item.startedAt} />
+              <CopilotMessageItem msg={item.msg} tools={item.tools} steps={item.steps} runStartedAt={item.startedAt} />
               {renderActions({
                 msg: item.msg,
                 showRetry: canRetryFailure && isAiError,
@@ -520,7 +495,7 @@ export function CopilotPanel() {
               msg={item.msg}
               tools={item.incomplete ? undefined : toolInfos}
               steps={item.incomplete ? undefined : item.steps}
-              onToolClick={!item.incomplete && item.tools?.length ? handleToolClick : undefined}
+             
               clarifiedResponse={
                 item.msg.kind === "clarification"
                   ? answeredByRequestId.get(String(
@@ -554,14 +529,14 @@ export function CopilotPanel() {
               stale={failureStale}
               retryDisabled={sending || !canRetryFailure}
               onRetry={canRetryFailure ? () => void handleRetry(item.msg.run_id) : undefined}
-              onToolClick={handleToolClick}
+             
             />
           )}
         </React.Fragment>
       );
     });
   }, [
-    paired, handleToolClick, answeredByRequestId,
+    paired, answeredByRequestId,
     handleClarifySubmit, sending, renderActions, handleRetry,
   ]);
 
@@ -571,7 +546,6 @@ export function CopilotPanel() {
         <TrajectoryView
           items={paired}
           streamMessage={streamMessage ?? null}
-          onStreamToolClick={handleStreamToolClick}
         />
       </aside>
     );
@@ -615,7 +589,6 @@ export function CopilotPanel() {
           {streamMessage && (
             <CopilotStreamingMessage
               streamMessage={streamMessage}
-              onToolClick={handleStreamToolClick}
               onClarifySubmit={handleClarifySubmit}
               clarifyPending={sending}
             />

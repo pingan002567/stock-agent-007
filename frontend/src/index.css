@@ -801,13 +801,10 @@ html.resizing { cursor: col-resize; user-select: none; }
   cursor: pointer;
 }
 .func-close:hover { background: var(--selected); color: var(--ink-2); }
-.func-close.func-back {
-  width: auto; padding: 0 8px;
-  font-size: 13px; font-weight: 600; color: var(--ink-2);
-}
+.func-close
 .func-body { min-height: 0; overflow: auto; }
 .func-body .page { min-width: 0; }
-.detail-host { padding: 12px 14px; font-size: 13px; color: var(--ink); }
+
 
 /* 面板打开时原来会往条带顶部插一个 44px 撑块（并把 padding-top 归零），
    导致第一次点页面按钮（= 打开面板）时整排图标下移 37px。
@@ -1169,47 +1166,6 @@ html.resizing { cursor: col-resize; user-select: none; }
 /* 工具卡可点击态（仅聊天主区） */
 .tool-card.clickable { cursor: pointer; }
 .tool-card.clickable:hover { background: var(--soft); border-color: var(--blue); }
-
-/* 详情结构化视图 */
-.detail-empty { color: var(--muted); font-size: 13px; padding: 24px 0; text-align: center; }
-.detail-pre {
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 13px;
-  line-height: 1.5;
-  background: var(--soft);
-  border-radius: var(--radius);
-  padding: 10px;
-  margin: 0;
-}
-.detail-null { color: var(--msg-time); }
-.detail-num { font-variant-numeric: tabular-nums; color: var(--blue); }
-.detail-kv { display: grid; gap: 2px; }
-.detail-kv .detail-kv { margin-left: 12px; border-left: 1px solid var(--line); padding-left: 10px; }
-.detail-kv-row { display: grid; grid-template-columns: minmax(80px, auto) 1fr; gap: 10px; padding: 3px 0; }
-.detail-kv-key { color: var(--muted); word-break: break-all; }
-.detail-kv-val { min-width: 0; word-break: break-word; }
-.detail-list { margin: 0; padding-left: 18px; }
-.detail-table-wrap { overflow-x: auto; }
-.detail-table { border-collapse: collapse; font-size: 13px; width: 100%; }
-.detail-table th, .detail-table td {
-  border: 1px solid var(--line);
-  padding: 4px 8px;
-  text-align: left;
-  white-space: nowrap;
-}
-.detail-table th { color: var(--muted); font-weight: 600; background: var(--soft); }
-.detail-table td { font-variant-numeric: tabular-nums; }
-.detail-truncated { color: var(--muted); font-size: 12px; margin-top: 6px; }
-.detail-raw-toggle {
-  margin-top: 10px;
-  border: none;
-  background: transparent;
-  color: var(--blue);
-  font-size: 13px;
-  cursor: pointer;
-  padding: 0;
-}
 
 /* ===== rail: left sidebar ===== */
 .rail, .main, .copilot-panel { min-height: 0; overflow: hidden; background: var(--canvas); }
@@ -5016,8 +4972,8 @@ input, textarea { cursor: text; }
 /* ── 右栏防挤爆:面板宽度不越过视口余量,详情内容强制可折行 ── */
 .func-panel.open { max-width: calc(100vw - 440px); }
 .func-inner { min-width: 0; }
-.detail-host { overflow-wrap: anywhere; }
-.detail-host pre { white-space: pre-wrap; word-break: break-word; max-width: 100%; }
+
+
 
 /* ── 文本选择策略(桌面惯例):骨架默认禁选,内容白名单放行 ──
    判断标准 = 用户有没有理由复制它。白名单打在"内容渲染器"层,
@@ -5029,20 +4985,7 @@ body {
 /* 内容白名单 */
 .md-content,                 /* Markdown 渲染器(聊天正文/报告预览) */
 .msg,                        /* 聊天气泡(用户消息为纯文本,不经渲染器) */
-.detail-host,                /* 右栏工具详情 */
-.tool-result-detail,         /* 工具卡展开结果 */
-tbody td,                    /* 数据表格值(代码/价格/权重) */
-pre, code,                   /* 代码与原文块 */
-.tl-body,                    /* 情报时间线正文 */
-.intel-content, .event-content, /* 事件/情报文本 */
-.setting-card-body,          /* 设置值区(路径/密钥回显/模型名) */
-.toast-message,              /* 提醒文本 */
-.error-inline,               /* 错误信息 */
-.clarification-card,         /* AI 反问卡(legacy) */
-.human-input-card {          /* DeerFlow Human Input Card */
-  -webkit-user-select: text;
-  user-select: text;
-}
+
 /* 气泡与内容区里的"框架件"回收禁选 */
 .msg-label, .msg-time, .msg-ai-tools-header,
 .tool-card, .skill-trace-chain, .plan-todos,
@@ -5515,26 +5458,9 @@ html.mobile .turn-failure { padding: 0 4px; }
   font-size: 11px;
   color: var(--blue);
 }
-.subagent-detail-brief {
-  margin-bottom: 12px;
-  padding: 10px 12px;
-  border-radius: var(--radius);
-  background: var(--amber-soft);
-  border: 1px solid color-mix(in srgb, var(--amber) 25%, var(--line-soft));
-}
-.subagent-detail-desc {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink);
-  margin-bottom: 6px;
-}
-.subagent-detail-prompt {
-  font-size: 13px;
-  color: var(--muted);
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
+
+
+
 .shimmer {
   background: linear-gradient(90deg, var(--muted) 30%, var(--ink) 50%, var(--muted) 70%);
   background-size: 200% 100%;

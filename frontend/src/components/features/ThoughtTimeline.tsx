@@ -243,7 +243,7 @@ function paramOf(tool: StreamToolCall): string {
   return toolParamSummary(tool.args);
 }
 
-export function ThoughtTimeline({ steps, active, onToolClick, expandAll = false, durationMs }: {
+export function ThoughtTimeline({ steps, active, expandAll = false, durationMs }: {
   steps: StreamStep[];
   /** 流式进行中(尾步高亮/shimmer) */
   active: boolean;
@@ -298,9 +298,9 @@ export function ThoughtTimeline({ steps, active, onToolClick, expandAll = false,
               );
             }
             if (step.tool.kind === "command") {
-              return <CommandRow key={step.id} tool={step.tool} onClick={onToolClick} />;
+              return <CommandRow key={step.id} tool={step.tool} />;
             }
-            return <ToolStepRow key={step.id} tool={step.tool} onClick={onToolClick} />;
+            return <ToolStepRow key={step.id} tool={step.tool} />;
           })}
         </div>
       </div>
