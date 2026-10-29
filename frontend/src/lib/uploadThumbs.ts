@@ -1,49 +1,76 @@
-/** 会话附件的缩略图/预览：用 Bearer 取字节 → blob URL → <img>。
+/** 会话附件的缩略图/预览：用鉴权头取字节 → blob URL → <img>。
  *
- *  为什么不用 `<img src="/api/...">` 直接指过去：接口鉴权是 Authorization 头，
- *  `<img>` 带不上；把 token 拼进 URL 又会被历史/日志记录。所以 fetch + blob。
+ *  为什么不用 `<img src="/api/...?access_token=...">`：那个 query token 只对 SSE
+ *  路径开放，硬开等于把令牌写进 URL/浏览器历史。所以 fetch + blob。
  *
- *  同一张图多次渲染（输入区芯片 + 消息里的附件）共用缓存，避免重复下载。
+ *  **缓存策略：LRU，不在组件卸载时 revoke。**
+ *  早先按引用计数"最后一个卸载就撤销"，在 StrictMode / 快速重挂下会撤销掉
+ *  另一个实例正在用的 URL，`<img>` 就渲染成破图。改成保留最近 N 张、只在被
+ *  挤出缓存时撤销 —— 生命周期可预测，也不会泄漏。
  */
 import { apiUrl } from "@/api/client";
 import { authHeaders } from "@/lib/connection";
 
-export interface UploadBlobEntry {
-  url: string;
-  /** 引用计数：两个组件都用同一张图时，别一个卸载就把 URL 撤销了 */
-  refs: number;
-}
-
-const cache = new Map<string, UploadBlobEntry>();
+const MAX_CACHED = 24;
+const cache = new Map<string, string>(); // 插入顺序即 LRU 顺序
 const inflight = new Map<string, Promise<string | null>>();
 
 function keyOf(sessionId: string, filename: string): string {
   return `${sessionId}\u0000${filename}`;
 }
 
-async function download(sessionId: string, filename: string): Promise<string | null> {
-  const url = apiUrl(
+/** 附件直链（fetch 用；不含 token） */
+export function uploadApiUrl(sessionId: string, filename: string): string {
+  return apiUrl(
     `/api/copilot/sessions/${encodeURIComponent(sessionId)}/uploads/${encodeURIComponent(filename)}`,
   );
-  const res = await fetch(url, { headers: authHeaders() });
+}
+
+/** 附件文件的公开形态（用于分享/下载链接展示；调用方自己决定要不要带 token） */
+export function uploadFilePath(sessionId: string, filename: string): string {
+  return uploadApiUrl(sessionId, filename);
+}
+
+async function download(sessionId: string, filename: string): Promise<string | null> {
+  const res = await fetch(uploadApiUrl(sessionId, filename), { headers: authHeaders() });
   if (!res.ok) return null;
   const blob = await res.blob();
+  // 服务端偶尔会返回 HTML/JSON（网关页、错误页）：不是图片就别当图用
+  if (!blob.type.startsWith("image/")) return null;
   return URL.createObjectURL(blob);
 }
 
-/** 取附件的 blob URL（带缓存与并发去重）。失败返回 null，调用方回退到普通芯片。 */
+function remember(key: string, url: string): void {
+  const existing = cache.get(key);
+  if (existing) {
+    URL.revokeObjectURL(existing);
+    cache.delete(key);
+  }
+  cache.set(key, url);
+  while (cache.size > MAX_CACHED) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    const stale = cache.get(oldest);
+    cache.delete(oldest);
+    if (stale) URL.revokeObjectURL(stale);
+  }
+}
+
+/** 取附件的 blob URL（带 LRU 缓存 + 并发去重）。失败返回 null，调用方回退芯片。 */
 export async function uploadObjectUrl(sessionId: string, filename: string): Promise<string | null> {
   const key = keyOf(sessionId, filename);
   const hit = cache.get(key);
   if (hit) {
-    hit.refs += 1;
-    return hit.url;
+    // 命中即刷新 LRU 位置
+    cache.delete(key);
+    cache.set(key, hit);
+    return hit;
   }
   const pending = inflight.get(key);
   if (pending) return pending;
   const task = download(sessionId, filename)
     .then((url) => {
-      if (url) cache.set(key, { url, refs: 1 });
+      if (url) remember(key, url);
       return url;
     })
     .catch(() => null)
@@ -52,14 +79,9 @@ export async function uploadObjectUrl(sessionId: string, filename: string): Prom
   return task;
 }
 
-/** 释放一次引用；归零才真正 revoke，避免另一个组件还在显示时被撤销 */
-export function releaseUploadObjectUrl(sessionId: string, filename: string): void {
-  const key = keyOf(sessionId, filename);
-  const hit = cache.get(key);
-  if (!hit) return;
-  hit.refs -= 1;
-  if (hit.refs <= 0) {
-    URL.revokeObjectURL(hit.url);
-    cache.delete(key);
-  }
+/** 清空缓存（登出/换后端时用；测试里也用） */
+export function clearUploadThumbCache(): void {
+  for (const url of cache.values()) URL.revokeObjectURL(url);
+  cache.clear();
+  inflight.clear();
 }

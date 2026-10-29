@@ -6112,6 +6112,30 @@ html.pet-window-root body { margin: 0; }
   border-radius: 10px;
   background: #fff;
 }
+.img-lightbox-nav {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 64px;
+  border: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+}
+.img-lightbox-nav:hover { background: rgba(255, 255, 255, 0.22); }
+.img-lightbox-nav.prev { left: 18px; }
+.img-lightbox-nav.next { right: 18px; }
+.img-lightbox-count {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+}
+.img-lightbox-name { max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-attachments { display: flex; flex-wrap: wrap; gap: 8px; }
 .img-lightbox-meta {
   display: flex;
   align-items: center;

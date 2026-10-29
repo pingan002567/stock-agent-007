@@ -19,12 +19,8 @@ import {
   toolStatusesKey,
   workingDockCopy,
 } from "@/lib/chatShell";
-import {
-  UPLOADS_UNSUPPORTED_COPY,
-  isImageUploadFilename,
-  modelSupportsVision,
-} from "@/lib/sessionUploads";
-import { UploadThumb } from "@/components/features/UploadThumb";
+import { UPLOADS_UNSUPPORTED_COPY } from "@/lib/sessionUploads";
+import { AttachmentChips } from "@/components/features/AttachmentChips";
 import { isMobileLayout } from "@/lib/connection";
 
 function useOnline(onOnline?: () => void): boolean {
@@ -94,7 +90,6 @@ export function CopilotComposer() {
   }, [appDataCache, globalLoading, lastRefreshTime]);
 
   const canUpload = uploadsSupported && !runtimeStub;
-  const visionOk = modelSupportsVision(sessionModelRef);
 
   const draftKey = composerDraftKey(currentSession?.session_id);
   const input = drafts[draftKey] ?? "";
@@ -408,47 +403,17 @@ export function CopilotComposer() {
           onDrop={onDrop}
         >
           {(sessionFiles.length > 0 || uploading) && (
-            <div className="upload-chips">
-              {sessionFiles.map((f) => {
-                const imageNoVision = isImageUploadFilename(f.filename) && !visionOk;
-                if (isImageUploadFilename(f.filename)) {
-                  return (
-                    <UploadThumb
-                      key={f.filename}
-                      sessionId={currentSession?.session_id ?? null}
-                      filename={f.filename}
-                      onRemove={() => void handleRemove(f.filename)}
-                      title={imageNoVision ? "当前会话模型不能看图" : f.filename}
-                    />
-                  );
-                }
-                return (
-                  <span
-                    key={f.filename}
-                    className="upload-chip"
-                    title={
-                      imageNoVision
-                        ? "当前会话模型不能看图"
-                        : f.markdown_file
-                          ? `已转 Markdown：${f.markdown_file}`
-                          : f.filename
-                    }
-                  >
-                    <span className="upload-chip-name">{f.filename}</span>
-                    {f.markdown_file && <span className="upload-chip-ok">✓</span>}
-                    {imageNoVision && <span className="upload-chip-warn">模型不能看图</span>}
-                    <button
-                      type="button"
-                      className="upload-chip-del"
-                      aria-label={`移除 ${f.filename}`}
-                      onClick={() => void handleRemove(f.filename)}
-                    >
-                      ×
-                    </button>
-                  </span>
-                );
-              })}
-              {uploading && <span className="upload-chip">上传中…</span>}
+            <div className="composer-attachments">
+              <AttachmentChips
+                sessionId={currentSession?.session_id ?? null}
+                files={sessionFiles}
+                onRemove={(filename) => void handleRemove(filename)}
+              />
+              {uploading && (
+                <div className="upload-chips">
+                  <span className="upload-chip">上传中…</span>
+                </div>
+              )}
             </div>
           )}
           <textarea

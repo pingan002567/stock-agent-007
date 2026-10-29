@@ -1,15 +1,13 @@
 import { useState } from "react";
 import { useUploadThumb } from "@/lib/useUploadThumb";
-import { ImageLightbox } from "@/components/features/ImageLightbox";
 
-/** 图片附件缩略图：点击放大预览（对齐 DeepSeek 的观感）。
- *
- *  取不到图（接口 404 / 非图片）时返回 null，调用方回退成文件名芯片。
- */
+/** 图片附件缩略图（不含预览浮层：多图切换由 AttachmentChips 统一管理）。 */
 export function UploadThumb({
   sessionId,
   filename,
   size = 44,
+  onReady,
+  onOpen,
   onRemove,
   removeLabel,
   title,
@@ -17,13 +15,15 @@ export function UploadThumb({
   sessionId: string | null | undefined;
   filename: string;
   size?: number;
-  /** 给了才渲染删除按钮（输入区需要，历史消息不需要） */
+  /** 缩略图 URL 就绪时回调（父组件用它凑多图列表） */
+  onReady?: (filename: string, url: string) => void;
+  onOpen?: (filename: string) => void;
   onRemove?: () => void;
   removeLabel?: string;
   title?: string;
 }) {
   const url = useUploadThumb(sessionId, filename);
-  const [open, setOpen] = useState(false);
+  const [broken, setBroken] = useState(false);
 
   if (!url) {
     return (
@@ -38,24 +38,42 @@ export function UploadThumb({
     );
   }
 
-  return (
-    <>
-      <span className="upload-thumb" title={title ?? filename}>
-        <button type="button" className="upload-thumb-btn" onClick={() => setOpen(true)} aria-label={`预览 ${filename}`}>
-          <img src={url} alt={filename} style={{ width: size, height: size }} />
-        </button>
+  // 拿到了 URL 但解码失败（坏 blob / 被撤销）→ 也回退成芯片，别显示破图
+  if (broken) {
+    return (
+      <span className="upload-chip">
+        <span className="upload-chip-name">{filename}</span>
         {onRemove && (
-          <button
-            type="button"
-            className="upload-thumb-del"
-            aria-label={removeLabel ?? `移除 ${filename}`}
-            onClick={onRemove}
-          >
+          <button type="button" className="upload-chip-del" aria-label={removeLabel ?? `移除 ${filename}`} onClick={onRemove}>
             ×
           </button>
         )}
       </span>
-      {open && <ImageLightbox src={url} name={filename} onClose={() => setOpen(false)} />}
-    </>
+    );
+  }
+
+  onReady?.(filename, url);
+
+  return (
+    <span className="upload-thumb" title={title ?? filename}>
+      <button
+        type="button"
+        className="upload-thumb-btn"
+        onClick={() => onOpen?.(filename)}
+        aria-label={`预览 ${filename}`}
+      >
+        <img src={url} alt={filename} style={{ width: size, height: size }} onError={() => setBroken(true)} />
+      </button>
+      {onRemove && (
+        <button
+          type="button"
+          className="upload-thumb-del"
+          aria-label={removeLabel ?? `移除 ${filename}`}
+          onClick={onRemove}
+        >
+          ×
+        </button>
+      )}
+    </span>
   );
 }
