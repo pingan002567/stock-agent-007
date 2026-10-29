@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>双模型协作 · 非对称三拍（Analyst → Devil → 定稿）</title>
+<style>
+  :root {
+    --canvas:#fff; --surface:#fbfbfc; --ink:#191a1c; --muted:#6b7075; --faint:#9aa0a6;
+    --line:#e4e6e9; --line-soft:#eef0f2;
+    --blue:#2f6feb; --green:#17863a; --red:#c4302b; --amber:#b45309; --violet:#6f42c1;
+    --green-soft:#e9f6ee; --red-soft:#fdeceb; --amber-soft:#fdf3e4; --blue-soft:#eef4ff; --violet-soft:#f3efff;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    --r:12px;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:#f4f5f7; color:var(--ink);
+    font:14px/1.55 -apple-system,"PingFang SC","Helvetica Neue",sans-serif; }
+  .wrap { max-width:1200px; margin:0 auto; padding:26px 20px 90px; }
+  header.top { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  header.top h1 { font-size:19px; margin:0; }
+  header.top .sub { color:var(--muted); font-size:12.5px; }
+
+  .tabs { display:flex; gap:6px; margin:18px 0 14px; flex-wrap:wrap; }
+  .tabs button { border:1px solid var(--line); background:#fff; color:var(--muted);
+    padding:7px 13px; border-radius:999px; cursor:pointer; font-size:13px; }
+  .tabs button.on { background:var(--ink); border-color:var(--ink); color:#fff; }
+  .panel { display:none; } .panel.on { display:block; }
+
+  .card { background:var(--canvas); border:1px solid var(--line); border-radius:var(--r);
+    padding:16px 18px; margin-bottom:14px; }
+  .card > h2 { font-size:12.5px; margin:0 0 12px; color:var(--muted); font-weight:600;
+    display:flex; align-items:center; gap:8px; }
+  .tag { font-family:var(--mono); font-size:10.5px; color:var(--faint); border:1px solid var(--line);
+    border-radius:5px; padding:1px 5px; font-weight:500; }
+
+  .scen { display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
+  .scen button { border:1px solid var(--line); background:#fff; border-radius:8px; padding:8px 12px;
+    cursor:pointer; font-size:12.5px; color:var(--muted); }
+  .scen button.on { border-color:var(--blue); color:var(--blue); background:var(--blue-soft); font-weight:600; }
+
+  /* 时间线：让"两个模型"看得见 */
+  .beat { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px; }
+  .beat .b { border:1px solid var(--line); border-radius:10px; padding:10px 12px; background:#fff; position:relative; }
+  .beat .b.done { border-color:#cfe0ff; background:var(--blue-soft); }
+  .beat .b.active { border-color:var(--amber); background:var(--amber-soft); }
+  .beat .b .who { font-size:11px; font-weight:700; letter-spacing:.3px; }
+  .beat .b.m1 .who { color:var(--blue); }
+  .beat .b.m2 .who { color:var(--violet); }
+  .beat .b .what { font-size:12px; margin-top:3px; }
+  .beat .b .ts { font-family:var(--mono); font-size:10.5px; color:var(--faint); margin-top:4px; }
+
+  /* AI 卡片 */
+  .ai { border:1px solid var(--line); border-radius:var(--r); background:#fff; }
+  .ai-head { display:flex; align-items:center; gap:8px; padding:11px 16px; border-bottom:1px solid var(--line-soft); }
+  .ai-head .dot { width:18px; height:18px; border-radius:5px; background:var(--blue-soft); color:var(--blue);
+    display:grid; place-items:center; font-size:11px; }
+  .ai-head .name { font-weight:600; font-size:13px; }
+  .ai-body { padding:16px; }
+  .concl { margin:0 0 10px; line-height:1.8; }
+  .num { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+
+  /* claim 行：结论 → 证据 */
+  .claim { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:start;
+    padding:9px 0; border-bottom:1px dashed var(--line-soft); }
+  .claim:last-child { border-bottom:none; }
+  .claim .txt { font-size:13.5px; line-height:1.7; }
+  .claim .ev { display:flex; flex-direction:column; gap:4px; align-items:flex-end; }
+  .ev-chip { font-family:var(--mono); font-size:10.5px; color:var(--muted); background:var(--surface);
+    border:1px solid var(--line); border-radius:5px; padding:1px 6px; white-space:nowrap; }
+  .ev-chip.bad { color:var(--red); border-color:#f0c9c7; background:#fffafa; }
+  .flag { font-size:11px; font-weight:600; }
+  .fixed { border-bottom:1px dashed var(--amber); cursor:help; }
+
+  /* 状态条 */
+  .bar { display:flex; align-items:center; gap:9px; flex-wrap:wrap; border-top:1px dashed var(--line);
+    padding-top:12px; margin-top:8px; }
+  .pill { display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:999px;
+    font-size:11.5px; font-weight:600; }
+  .pill.ok { color:var(--green); background:var(--green-soft); }
+  .pill.warn { color:var(--amber); background:var(--amber-soft); }
+  .pill.bad { color:var(--red); background:var(--red-soft); }
+  .pill.violet { color:var(--violet); background:var(--violet-soft); }
+  .pill.neutral { color:var(--muted); background:var(--surface); border:1px solid var(--line); }
+  .pill.mono { font-family:var(--mono); font-weight:500; }
+  .spacer { margin-left:auto; }
+  .meta { color:var(--muted); font-size:11.5px; font-family:var(--mono); }
+  .spin { width:11px; height:11px; border:2px solid #e2c79a; border-top-color:var(--amber);
+    border-radius:50%; display:inline-block; animation:sp 900ms linear infinite; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+
+  /* findings */
+  .findings { margin-top:12px; display:grid; gap:8px; }
+  .fd { border:1px solid var(--line); border-left:3px solid var(--violet); border-radius:0 8px 8px 0;
+    padding:10px 12px; background:#fdfcff; }
+  .fd.adopted { border-left-color:var(--green); background:#fbfefc; }
+  .fd.rejected { border-left-color:var(--faint); background:var(--surface); }
+  .fd .fh { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .fd .ft { font-size:12.5px; font-weight:600; }
+  .fd .fw { color:var(--muted); font-size:11.5px; margin-top:4px; }
+  .fd .fr { margin-top:6px; font-size:11.5px; padding:6px 8px; border-radius:6px; background:#fff;
+    border:1px dashed var(--line); }
+  .fd .fr b { font-weight:600; }
+  .resp { font-size:10.5px; font-weight:700; border-radius:5px; padding:1px 6px; }
+  .resp.a { color:var(--green); background:var(--green-soft); }
+  .resp.r { color:var(--muted); background:var(--surface); border:1px solid var(--line); }
+
+  /* 分歧披露 */
+  .dispute { margin-top:12px; border:1px solid #f0c9c7; background:#fffafa; border-radius:10px; padding:12px; }
+  .dispute h4 { margin:0 0 8px; font-size:12.5px; color:var(--red); }
+  .dispute .d { display:grid; grid-template-columns:74px 1fr; gap:8px; font-size:12.5px; margin-bottom:6px; }
+  .dispute .d .who { font-weight:700; font-size:11.5px; }
+  .dispute .d.m1 .who { color:var(--blue); }
+  .dispute .d.m2 .who { color:var(--violet); }
+
+  /* 双盲对比 */
+  .dual { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .dual .col { border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .dual .col h3 { margin:0; padding:9px 12px; font-size:12px; background:var(--surface);
+    border-bottom:1px solid var(--line-soft); display:flex; gap:8px; align-items:center; }
+  .dual .col .body { padding:12px; font-size:12.5px; line-height:1.75; }
+  .m1c { color:var(--blue); } .m2c { color:var(--violet); }
+  .dt { width:100%; border-collapse:collapse; font-size:12px; }
+  .dt th { text-align:left; color:var(--muted); font-size:11px; font-weight:600; padding:6px 8px;
+    border-bottom:1px solid var(--line); white-space:nowrap; }
+  .dt td { padding:7px 8px; border-bottom:1px solid var(--line-soft); vertical-align:top; }
+  .dt tr:last-child td { border-bottom:none; }
+  .agree { color:var(--green); font-weight:600; }
+  .dis { color:var(--red); font-weight:600; }
+
+  .gate { margin-top:12px; border-left:3px solid var(--red); background:var(--red-soft); color:#6b1f1c;
+    border-radius:0 8px 8px 0; padding:10px 12px; font-size:12.5px; }
+  .note { border-left:3px solid var(--blue); background:var(--blue-soft); border-radius:0 8px 8px 0;
+    padding:10px 12px; font-size:12px; color:#22314f; }
+  .note b { font-weight:600; }
+
+  /* 触发矩阵 */
+  .mx { width:100%; border-collapse:collapse; font-size:12.5px; }
+  .mx th { text-align:left; color:var(--muted); font-size:11px; font-weight:600; padding:8px;
+    border-bottom:1px solid var(--line); }
+  .mx td { padding:9px 8px; border-bottom:1px solid var(--line-soft); }
+  .mx tr:last-child td { border-bottom:none; }
+  .on { color:var(--green); font-weight:600; }
+  .off { color:var(--faint); }
+  .sw { display:inline-flex; align-items:center; gap:6px; font-size:12px; cursor:pointer; }
+  .sw i { width:30px; height:17px; border-radius:999px; background:var(--line); position:relative; transition:.15s; }
+  .sw i::after { content:""; position:absolute; top:2px; left:2px; width:13px; height:13px; border-radius:50%;
+    background:#fff; transition:.15s; }
+  .sw.on i { background:var(--blue); } .sw.on i::after { left:15px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>双模型协作 · 非对称三拍</h1>
+    <span class="sub">Analyst（主模型，有工具） → Devil（异族模型，只核对与反驳） → 定稿（主模型回应 + 分歧披露）</span>
+  </header>
+
+  <div class="tabs">
+    <button class="on" data-tab="flow">① 三拍流程</button>
+    <button data-tab="dual">② 高风险双盲</button>
+    <button data-tab="matrix">③ 触发矩阵</button>
+  </div>
+
+  <!-- ═══════════ ① 三拍流程 ═══════════ -->
+  <section class="panel on" id="tab-flow">
+    <div class="scen">
+      <button class="on" data-state="pending">M2 复核中（草案已出）</button>
+      <button data-state="clean">已复核 · 无异议</button>
+      <button data-state="warn">已复核 · 2 条提醒</button>
+    </div>
+
+    <div class="beat" id="beat"></div>
+
+    <div class="ai">
+      <div class="ai-head">
+        <span class="dot">✦</span><span class="name">AI Copilot</span>
+        <span class="spacer"></span>
+        <span class="meta" id="head-meta">9 次调用 · 复核 +1.8k tokens</span>
+      </div>
+      <div class="ai-body">
+        <div id="claims"></div>
+        <div id="findings-host"></div>
+        <div id="dispute-host"></div>
+        <div class="bar">
+          <span class="pill" id="conf"></span>
+          <span class="pill neutral mono" id="refs"></span>
+          <span class="pill" id="rstate"></span>
+          <span class="spacer"></span>
+          <span class="meta" id="ts">15:37:52</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h2>这一轮发生了什么 <span class="tag">两个模型的分工</span></h2>
+      <div class="note">
+        <b>M1（主模型）</b>取数并给结论草案，每条结论挂上引用；<b>M2（异族模型）</b>不重做任务，
+        只核对数字、找出最强反例、检查口径与风控；<b>M1 必须逐条回应</b>，未解决的分歧写进结论。
+        决策权始终在 M1 —— M2 的作用是<b>减少 M1 的错</b>，不是替代它。
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ ② 高风险双盲 ═══════════ -->
+  <section class="panel" id="tab-dual">
+    <div class="card">
+      <h2>触发条件 <span class="tag">即将生成拟单</span></h2>
+      <div class="scen" style="margin:0">
+        <span class="pill warn">动作词「减仓」</span>
+        <span class="pill bad">数据过期 1 项</span>
+        <span class="pill neutral mono">单票权重 62% / 上限 15%</span>
+        <span class="pill violet">→ 双盲 + 人工闸门</span>
+      </div>
+    </div>
+
+    <div class="dual">
+      <div class="col">
+        <h3><span class="m1c">M1 · 主模型</span><span class="meta">deepseek-v4-flash</span></h3>
+        <div class="body">
+          建议<b>减仓二六三 100 股</b>至 4.62，回笼约 <span class="num">¥462</span>；<br/>
+          华东医药<b>维持</b>，跌破 25.63 再说。<br/>
+          <span class="meta">置信度 自报 high</span>
+        </div>
+      </div>
+      <div class="col">
+        <h3><span class="m2c">M2 · 异族模型</span><span class="meta">qwen-max（盲审：不知道出处）</span></h3>
+        <div class="body">
+          方向<b>一致</b>（减二六三、维持华东医药）；<br/>
+          但 <b>不认可</b>「回笼 ¥462」：未含手续费与滑点；<br/>
+          并指出 10/27 收盘价已 stale（今日盘前无 K 线）。<br/>
+          <span class="meta">置信度 自报 medium</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h2>按决策点比对（不比措辞，只比可核对的结论）</h2>
+      <table class="dt">
+        <thead><tr><th>决策点</th><th>M1</th><th>M2</th><th>一致性</th><th>证据支持</th></tr></thead>
+        <tbody>
+          <tr><td>二六三方向</td><td>减仓</td><td>减仓</td><td class="agree">一致</td><td class="meta">call_00_9Jca（last 4.62）</td></tr>
+          <tr><td>华东医药方向</td><td>维持</td><td>维持</td><td class="agree">一致</td><td class="meta">call_02_ab12, call_03_ee01</td></tr>
+          <tr><td>回笼金额口径</td><td class="num">¥462</td><td class="num">¥460.4（含费）</td><td class="dis">分歧</td><td class="meta">M2 侧有 2 个数据点支持</td></tr>
+          <tr><td>价格时效</td><td>未提及</td><td>stale（10/27）</td><td class="dis">分歧</td><td class="meta">call_01_k8A7.as_of</td></tr>
+          <tr><td>执行时点</td><td>今日开盘</td><td>今日开盘</td><td class="agree">一致</td><td class="meta">—</td></tr>
+        </tbody>
+      </table>
+      <p class="meta" style="margin:10px 0 0">
+        裁决规则：方向类一致即通过；金额/口径类分歧 → <b>按证据加权重算</b>（不投票）；时效类分歧 → 直接采纳更保守的一方。
+      </p>
+    </div>
+
+    <div class="gate">
+      <b>人工闸门：</b>本轮 M2 给 <code>block</code>（金额口径 + 价格过期），拟单不自动生成。
+      你可以「带瑕疵生成」并留痕，或先补齐数据再跑。
+    </div>
+  </section>
+
+  <!-- ═══════════ ③ 触发矩阵 ═══════════ -->
+  <section class="panel" id="tab-matrix">
+    <div class="card">
+      <h2>按场景选择性升级 <span class="tag">不每轮都跑双模型</span></h2>
+      <table class="mx">
+        <thead>
+          <tr><th>场景</th><th>M2 反方</th><th>双盲对比</th><th>人工闸门</th><th>预估占比</th><th>增量成本</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>闲聊 / 解释</td><td class="off">—</td><td class="off">—</td><td class="off">—</td><td class="meta">55%</td><td class="meta">0</td></tr>
+          <tr><td>分析类（问某只票）</td><td class="on">✓</td><td class="off">—</td><td class="off">—</td><td class="meta">30%</td><td class="meta">+1.2k tok</td></tr>
+          <tr><td>每日推荐</td><td class="on">✓</td><td class="on">高置信+数据降级时</td><td class="off">—</td><td class="meta">10%</td><td class="meta">+1.2k / 触发时 +2x</td></tr>
+          <tr><td>调仓草案 / 交易审查</td><td class="on">✓</td><td class="on">✓</td><td class="on">block 时</td><td class="meta">5%</td><td class="meta">+2x</td></tr>
+        </tbody>
+      </table>
+      <p class="meta" style="margin:10px 0 0">
+        触发信号都是<b>可计算</b>的：动作词、是否生成拟单、数据健康（degraded/stale/被拒）、
+        结论声称 high 但引用 &lt; 3 条、单票权重接近上限。
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>开关（草稿，等你定）</h2>
+      <div style="display:grid;gap:12px">
+        <label class="sw on" data-sw><i></i>含交易动作词时启用反方复核</label>
+        <label class="sw on" data-sw><i></i>数据有降级/过期时，置信度封顶为 medium</label>
+        <label class="sw" data-sw><i></i>每日推荐也跑双盲（成本翻倍）</label>
+        <label class="sw on" data-sw><i></i>M2 给 block 时禁止自动生成拟单</label>
+        <label class="sw on" data-sw><i></i>结论里保留「未解决分歧」（不抹平）</label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>怎么衡量“变好了” <span class="tag">别只看感觉</span></h2>
+      <table class="mx">
+        <thead><tr><th>指标</th><th>定义</th><th>目标</th></tr></thead>
+        <tbody>
+          <tr><td>事实一致率</td><td>结论里的数字能在台账对上</td><td>&gt; 98%</td></tr>
+          <tr><td><b>错误自信率</b></td><td>标 high 但事后被证伪的比例</td><td>下降 50%</td></tr>
+          <tr><td>分歧率</td><td>M2 提出且有数据支撑的异议占比</td><td>10–20%（太低说明走过场）</td></tr>
+          <tr><td>人工推翻率</td><td>人工闸门里被否决的比例</td><td>&lt; 20%</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+
+/* ── 时间线 ── */
+const BEATS = {
+  pending: [
+    { who: "M1 · 主模型", cls: "m1", what: "取数 + 结论草案（每条挂引用）", ts: "15:37:52 · 完成", state: "done" },
+    { who: "M2 · 异族模型", cls: "m2", what: "核对数字 / 找反例 / 查口径", ts: "15:37:55 · 进行中", state: "active" },
+    { who: "M1 · 定稿", cls: "m1", what: "逐条回应异议 → 输出结论", ts: "等待复核", state: "" },
+  ],
+  clean: [
+    { who: "M1 · 主模型", cls: "m1", what: "取数 + 结论草案", ts: "15:37:52 · 完成", state: "done" },
+    { who: "M2 · 异族模型", cls: "m2", what: "无异议（4 项核对全过）", ts: "15:37:56 · 2.1s", state: "done" },
+    { who: "M1 · 定稿", cls: "m1", what: "原样发布", ts: "15:37:56 · 完成", state: "done" },
+  ],
+  warn: [
+    { who: "M1 · 主模型", cls: "m1", what: "取数 + 结论草案", ts: "15:37:52 · 完成", state: "done" },
+    { who: "M2 · 异族模型", cls: "m2", what: "2 条异议（1 采纳 / 1 驳回）", ts: "15:37:56 · 2.3s", state: "done" },
+    { who: "M1 · 定稿", cls: "m1", what: "回应后发布（含分歧披露）", ts: "15:38:01 · 完成", state: "done" },
+  ],
+};
+
+/* ── 状态数据 ── */
+const STATES = {
+  pending: {
+    claims: [
+      { t: "持仓 <b>¥3,166</b>，总资产 <b>¥7,206.53</b>，现金占比 <span class='num'>56.6%</span>。", ev: ["call_00_Ggcy", "ok"] },
+      { t: "今日无监控事件触发；建议维持现有配置。", ev: ["call_01_d7PI", "ok"] },
+      { t: "加密合约资金费率 <span class='num'>+0.0064%/8h</span>，年化 <span class='num'>7.0%</span>，中性区间。", ev: ["call_02_VmkX", "ok"] },
+    ],
+    conf: ["warn", "信心度 复核中（自报 high）"],
+    refs: "引用来源 9",
+    rstate: ["warn", "M2 复核中…"],
+    findings: [],
+    dispute: null,
+  },
+  clean: {
+    claims: [
+      { t: "持仓 <b>¥3,166</b>，总资产 <b>¥7,206.53</b>，现金占比 <span class='num'>56.6%</span>。", ev: ["call_00_Ggcy", "ok"] },
+      { t: "今日无监控事件触发；建议维持现有配置。", ev: ["call_01_d7PI", "ok"] },
+      { t: "加密合约资金费率 <span class='num'>+0.0064%/8h</span>，年化 <span class='num'>7.0%</span>，中性区间。", ev: ["call_02_VmkX", "ok"] },
+    ],
+    conf: ["ok", "信心度 高"],
+    refs: "引用来源 9",
+    rstate: ["ok", "已复核 · 无异议"],
+    findings: [],
+    dispute: null,
+  },
+  warn: {
+    claims: [
+      { t: "华东医药 <b>100 股</b>，成本 <span class='fixed' title='该数字来自上一轮快照，本轮快照调用被拒绝'>26.15（上一轮快照）</span>，浮亏 <span class='num'>-170 元（-5.96%）</span>。", ev: ["call_00_iSsL", "bad"], flag: ["bad", "成本未核实"] },
+      { t: "二六三 <b>100 股，成本 4.92</b>，浮亏 <span class='num'>-30 元（-6.10%）</span>。", ev: ["call_02_ab12", "ok"] },
+      { t: "两只合计浮亏 <span class='num'>-200 元</span>，占总资产 <span class='num'>2.8%–6.3%</span>（分母口径待补），未触及 8% 硬止损；建议继续持有。", ev: ["call_02_ab12", "ok"], flag: ["warn", "分母已修正"] },
+    ],
+    conf: ["warn", "信心度 中（自报 high，已下调）"],
+    refs: "引用来源 6",
+    rstate: ["warn", "已复核 · 2 条提醒"],
+    findings: [
+      { title: "持仓成本来自记忆，不是本轮数据", code: "MISSING_EVIDENCE", sev: "high",
+        why: "get_portfolio_snapshot 返回 A3 权限不足，本轮没读到真实持仓。",
+        resp: "adopt", respText: "已采纳：成本标注为「上一轮快照」，并在结论上方提示需核对。" },
+      { title: "「占总资产 2.8%」分母取错", code: "NUMBER_MISMATCH", sev: "mid",
+        why: "本轮 total_value 缺失，2.8% 用的是缓存值；按当前 known 持仓应为 6.3%。",
+        resp: "adopt", respText: "已采纳：改用本轮可核算的分母，标注区间 2.8%–6.3%。" },
+      { title: "建议加一句「数据缺口」说明", code: "OVERCLAIM", sev: "low",
+        why: "结论口吻像数据齐全，但实际有一项被拒。",
+        resp: "reject", respText: "部分驳回：已在置信度与引用里体现，正文不再加段落（避免与免责声明重复）。" },
+    ],
+    dispute: {
+      m1: "继续持有，跌破 25.63 再处理。",
+      m2: "方向一致，但建议先补一次持仓快照再决定「继续持有」，因为当前成本未经本轮核实。",
+      status: "未解决 —— 已披露，主模型保留原建议",
+    },
+  },
+};
+
+function renderBeat(state) {
+  $("#beat").innerHTML = BEATS[state].map((b) => `
+    <div class="b ${b.cls} ${b.state}">
+      <div class="who">${b.who}</div>
+      <div class="what">${b.what}</div>
+      <div class="ts">${b.ts}</div>
+    </div>`).join("");
+}
+
+function renderFlow(state) {
+  const s = STATES[state];
+  renderBeat(state);
+
+  $("#claims").innerHTML = s.claims.map((c) => `
+    <div class="claim">
+      <div class="txt">${c.t}</div>
+      <div class="ev">
+        <span class="ev-chip ${c.ev[1] === "bad" ? "bad" : ""}">${c.ev[0]}</span>
+        ${c.flag ? `<span class="flag" style="color:${c.flag[0] === "bad" ? "var(--red)" : "var(--amber)"}">${c.flag[1]}</span>` : ""}
+      </div>
+    </div>`).join("");
+
+  $("#findings-host").innerHTML = s.findings.length ? `
+    <div class="findings">
+      ${s.findings.map((f) => `
+        <div class="fd ${f.resp === "adopt" ? "adopted" : "rejected"}">
+          <div class="fh">
+            <span class="ft">${f.title}</span>
+            <span class="meta">${f.code}</span>
+            <span class="spacer"></span>
+            <span class="resp ${f.resp === "adopt" ? "a" : "r"}">${f.resp === "adopt" ? "已采纳" : "部分驳回"}</span>
+          </div>
+          <div class="fw">M2：${f.why}</div>
+          <div class="fr"><b>M1 回应：</b>${f.respText}</div>
+        </div>`).join("")}
+    </div>` : "";
+
+  $("#dispute-host").innerHTML = s.dispute ? `
+    <div class="dispute">
+      <h4>未解决分歧（保留，不抹平）</h4>
+      <div class="d m1"><span class="who">M1</span><span>${s.dispute.m1}</span></div>
+      <div class="d m2"><span class="who">M2</span><span>${s.dispute.m2}</span></div>
+      <div class="meta" style="margin-top:6px">${s.dispute.status}</div>
+    </div>` : "";
+
+  const setPill = (sel, spec) => {
+    const el = $(sel);
+    el.className = `pill ${spec[0]}`;
+    el.innerHTML = spec[0] === "warn" && state === "pending" && sel === "#rstate"
+      ? `<span class="spin"></span>${spec[1]}` : spec[1];
+  };
+  setPill("#conf", s.conf);
+  setPill("#rstate", s.rstate);
+  $("#refs").textContent = s.refs;
+  $("#ts").textContent = state === "pending" ? "15:37:52（复核中）" : "15:38:01";
+  $("#head-meta").textContent = state === "pending"
+    ? "9 次调用 · 复核中"
+    : "9 次调用 · 复核 +1.8k tokens · 2.3s";
+}
+
+/* ── 交互 ── */
+document.querySelectorAll(".tabs button").forEach((b) => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
+    document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("on", p.id === `tab-${b.dataset.tab}`));
+  });
+});
+
+let state = "pending";
+document.querySelectorAll(".scen button[data-state]").forEach((b) => {
+  b.addEventListener("click", () => {
+    state = b.dataset.state;
+    document.querySelectorAll(".scen button").forEach((x) => x.classList.toggle("on", x === b));
+    renderFlow(state);
+  });
+});
+
+document.querySelectorAll("[data-sw]").forEach((el) => {
+  el.addEventListener("click", (e) => { e.preventDefault(); el.classList.toggle("on"); });
+});
+
+/* hash 定位：#clean / #warn / #dual / #matrix */
+const H = (location.hash || "").replace("#", "");
+if (["clean", "warn"].includes(H)) {
+  state = H;
+  document.querySelectorAll(".scen button").forEach((b) => b.classList.toggle("on", b.dataset.state === H));
+} else if (["dual", "matrix"].includes(H)) {
+  document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === H));
+  document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("on", p.id === `tab-${H}`));
+}
+renderFlow(state);
+</script>
+</body>
+</html>
