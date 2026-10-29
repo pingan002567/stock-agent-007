@@ -169,9 +169,28 @@ class LlmProviderService:
         问厂商要一份最新清单，前端把它和内置目录合并展示。
         失败不抛 500：转成可读错误，前端退回内置候选。
         """
-        extra = self.test_payload(payload)
-        base_url = str(extra.get("base_url") or "").strip().rstrip("/")
+        extra = dict(payload or {})
+        data = load_llm_credentials()
+        provider_id = str(extra.get("provider_id") or "").strip() or None
+        spec = get_provider_spec(provider_id) if provider_id else None
+        custom = custom_provider(data, provider_id) if provider_id else None
+
+        # 显式指定提供商时**不回落到默认槽位**：否则"预览未连接的 OpenRouter"会
+        # 被替换成当前连接的 DeepSeek 地址。未连接 → 用目录里的 base_url + 空 Key。
+        base_url = str(extra.get("base_url") or "").strip()
         api_key = str(extra.get("api_key") or "").strip()
+        headers: dict[str, str] = {}
+        if not base_url and provider_id:
+            base_url = str(spec.base_url if spec else ((custom or {}).get("base_url") or ""))
+            api_key = api_key or (resolve_provider_secret(data, provider_id) or "")
+            if custom and isinstance(custom.get("headers"), dict):
+                headers.update({str(k): str(v) for k, v in custom["headers"].items()})
+        if not base_url:
+            slot = resolve_slot(data, str(data.get("default_model") or "") or None)
+            base_url = str(slot.get("base_url") or "")
+            api_key = api_key or str(slot.get("api_key") or "")
+            headers.update({str(k): str(v) for k, v in (slot.get("headers") or {}).items()})
+        base_url = base_url.strip().rstrip("/")
         if not base_url:
             raise LlmProviderError("没有可用的 Base URL，先连接提供商或填自定义地址")
 
@@ -180,16 +199,13 @@ class LlmProviderService:
         if hit and time.time() - hit[0] < _MODEL_LIST_TTL_SECONDS:
             return {**hit[1], "cached": True}
 
-        headers = {"Accept": "application/json"}
+        request_headers = {"Accept": "application/json", **headers}
         if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        custom_headers = extra.get("headers")
-        if isinstance(custom_headers, dict):
-            headers.update({str(k): str(v) for k, v in custom_headers.items()})
+            request_headers["Authorization"] = f"Bearer {api_key}"
 
         url = f"{base_url}/models"
         try:
-            request = urllib.request.Request(url, headers=headers)
+            request = urllib.request.Request(url, headers=request_headers)
             with urllib.request.urlopen(request, timeout=_MODELS_TIMEOUT_SECONDS) as resp:
                 raw = resp.read()
         except urllib.error.HTTPError as exc:
@@ -236,7 +252,7 @@ class LlmProviderService:
 
         models.sort(key=lambda m: m["id"])
         result = {
-            "provider_id": extra.get("provider_id"),
+            "provider_id": provider_id,
             "base_url": base_url,
             "models": models,
             "count": len(models),

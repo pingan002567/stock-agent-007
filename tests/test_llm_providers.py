@@ -295,3 +295,30 @@ def test_list_models_maps_errors_to_readable_message(tmp_path, monkeypatch):
     resp = client.post("/api/settings/llm/models", json={"provider_id": "deepseek"})
     assert resp.status_code == 400
     assert "Key 无效" in resp.json()["detail"]
+
+
+def test_list_models_works_for_unconnected_public_provider(tmp_path, monkeypatch):
+    """未连接的 OpenRouter 也能拉：用目录里的 base_url、不带 Authorization。
+
+    这条防的是「显式 provider_id 被默认槽位覆盖」那个坑 —— 否则预览会变成
+    去问当前连接的 DeepSeek。
+    """
+    client = make_client(tmp_path)
+    client.post("/api/settings/llm/connect", json={"provider_id": "deepseek", "api_key": "sk-live"})
+
+    seen: list[tuple[str, dict]] = []
+
+    def fake_urlopen(request, timeout=None):
+        seen.append((request.full_url, dict(request.headers)))
+        return _FakeResp('{"data":[{"id":"openai/gpt-6.1-terra"},{"id":"anthropic/claude-opus-5.5"}]}')
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    resp = client.post("/api/settings/llm/models", json={"provider_id": "openrouter"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["provider_id"] == "openrouter"
+    assert body["base_url"] == "https://openrouter.ai/api/v1"
+    assert [m["id"] for m in body["models"]] == ["anthropic/claude-opus-5.5", "openai/gpt-6.1-terra"]
+    url, headers = seen[0]
+    assert url == "https://openrouter.ai/api/v1/models"
+    assert not any(k.lower() == "authorization" for k, v in headers.items()), "公开接口不应带 Key"

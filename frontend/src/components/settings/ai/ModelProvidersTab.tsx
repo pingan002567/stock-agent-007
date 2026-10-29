@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   disconnectLlmProvider,
+  fetchLlmModels,
   llmErrorMessage,
   sourceLabel,
   type LlmProvidersSnapshot,
@@ -20,6 +21,8 @@ export function ModelProvidersTab({
 }) {
   const [connectId, setConnectId] = useState<string | null>(null);
   const [customOpen, setCustomOpen] = useState(false);
+  /** 未连接提供商的模型预览：id → {models, loading, error} */
+  const [preview, setPreview] = useState<Record<string, { models?: string[]; loading?: boolean; error?: string }>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
@@ -28,6 +31,24 @@ export function ModelProvidersTab({
     () => new Set(snapshot.connected.map((item) => item.id)),
     [snapshot.connected],
   );
+  /** 可以免 Key 预览的提供商：接口公开（OpenRouter / Ollama 这类） */
+  const canPreview = (id: string) => id === "openrouter" || id === "ollama" || id === "siliconflow";
+
+  const togglePreview = async (providerId: string) => {
+    const current = preview[providerId];
+    if (current?.models) {
+      setPreview((prev) => ({ ...prev, [providerId]: {} }));
+      return;
+    }
+    setPreview((prev) => ({ ...prev, [providerId]: { loading: true } }));
+    try {
+      const result = await fetchLlmModels({ provider_id: providerId });
+      setPreview((prev) => ({ ...prev, [providerId]: { models: result.models.map((m) => m.id) } }));
+    } catch (err) {
+      setPreview((prev) => ({ ...prev, [providerId]: { error: llmErrorMessage(err) } }));
+    }
+  };
+
   const builtinProviders = useMemo(
     () => snapshot.catalog.filter((item) => !item.custom && !connectedIds.has(item.id)),
     [snapshot.catalog, connectedIds],
@@ -105,9 +126,36 @@ export function ModelProvidersTab({
                       <span className="llm-provider-name">{item.name}</span>
                     </div>
                     {item.note && <p className="llm-provider-desc">{item.note}</p>}
+                    {preview[item.id]?.models && (
+                      <div className="llm-provider-models">
+                        {preview[item.id].models!.length} 个模型 ·{" "}
+                        {preview[item.id].models!.slice(0, 6).join("、")}
+                        {preview[item.id].models!.length > 6 ? " …" : ""}
+                      </div>
+                    )}
+                    {preview[item.id]?.error && (
+                      <div className="llm-provider-desc" style={{ color: "var(--red)" }}>
+                        {preview[item.id]!.error}
+                      </div>
+                    )}
                   </div>
                 </div>
-                <button type="button" className="primary" onClick={() => setConnectId(item.id)}>连接</button>
+                <div className="llm-provider-actions">
+                  {canPreview(item.id) && (
+                    <button
+                      type="button"
+                      className="ghost"
+                      disabled={preview[item.id]?.loading}
+                      onClick={() => void togglePreview(item.id)}
+                      title="免 Key 预览该提供商此刻在售的模型"
+                    >
+                      {preview[item.id]?.loading
+                        ? "拉取中…"
+                        : preview[item.id]?.models ? "收起" : "预览模型"}
+                    </button>
+                  )}
+                  <button type="button" className="primary" onClick={() => setConnectId(item.id)}>连接</button>
+                </div>
               </div>
             ))}
           </div>
