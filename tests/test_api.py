@@ -3297,3 +3297,27 @@ def test_list_and_delete_session_uploads(tmp_path, monkeypatch):
     )
     assert blocked.status_code == 409
     assert "不支持读附件" in blocked.json()["detail"]
+
+
+def test_download_session_upload_serves_bytes(tmp_path, monkeypatch):
+    """附件下载：前端拿它做缩略图/预览。200 + 正确 bytes，非法名 400，不存在 404。"""
+    from deerflow.uploads.manager import get_uploads_dir
+
+    client = make_client(tmp_path)
+    session_id = client.post("/api/copilot/sessions", json={}).json()["session_id"]
+
+    uploads = Path(get_uploads_dir(session_id))
+    uploads.mkdir(parents=True, exist_ok=True)
+    png = b"\x89PNG\r\n\x1a\n" + bytes(16)
+    (uploads / "chart.png").write_bytes(png)
+
+    ok = client.get(f"/api/copilot/sessions/{session_id}/uploads/chart.png")
+    assert ok.status_code == 200
+    assert ok.content == png
+    assert ok.headers["content-type"].startswith("image/png")
+
+    missing = client.get(f"/api/copilot/sessions/{session_id}/uploads/none.png")
+    assert missing.status_code == 404
+
+    unsafe = client.get(f"/api/copilot/sessions/{session_id}/uploads/..%2Fsecret.txt")
+    assert unsafe.status_code in (400, 404)

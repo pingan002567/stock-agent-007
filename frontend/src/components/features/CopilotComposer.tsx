@@ -24,6 +24,7 @@ import {
   isImageUploadFilename,
   modelSupportsVision,
 } from "@/lib/sessionUploads";
+import { UploadThumb } from "@/components/features/UploadThumb";
 import { isMobileLayout } from "@/lib/connection";
 
 function useOnline(onOnline?: () => void): boolean {
@@ -410,6 +411,17 @@ export function CopilotComposer() {
             <div className="upload-chips">
               {sessionFiles.map((f) => {
                 const imageNoVision = isImageUploadFilename(f.filename) && !visionOk;
+                if (isImageUploadFilename(f.filename)) {
+                  return (
+                    <UploadThumb
+                      key={f.filename}
+                      sessionId={currentSession?.session_id ?? null}
+                      filename={f.filename}
+                      onRemove={() => void handleRemove(f.filename)}
+                      title={imageNoVision ? "当前会话模型不能看图" : f.filename}
+                    />
+                  );
+                }
                 return (
                   <span
                     key={f.filename}

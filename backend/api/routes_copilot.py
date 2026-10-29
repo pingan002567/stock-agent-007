@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from backend.agent_runtime.stream_adapter import SSE_HEADERS, to_sse
 from backend.api.deps import get_services
@@ -214,6 +214,28 @@ def list_session_uploads(
         raise HTTPException(status_code=500, detail=result)
     files = _present_uploads(list(result.get("files") or []))
     return {"supported": True, "files": files, "count": len(files)}
+
+
+@router.get("/sessions/{session_id}/uploads/{filename}")
+def download_session_upload(
+    session_id: str,
+    filename: str,
+    services: AppServices = Depends(get_services),
+):
+    """取回会话附件原始字节：前端用它做缩略图/点击预览。
+
+    鉴权沿用全局 Bearer；前端用 fetch + Authorization 取 blob，不把 token 放进 URL。
+    只服务 uploads 目录内的文件（文件名做了路径穿越校验）。
+    """
+    _require_session(services, session_id)
+    if not _is_safe_upload_filename(filename):
+        raise HTTPException(status_code=400, detail="invalid filename")
+    from deerflow.uploads.manager import get_uploads_dir
+
+    path = Path(get_uploads_dir(session_id)) / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="file not found")
+    return FileResponse(path, filename=filename)
 
 
 @router.delete("/sessions/{session_id}/uploads/{filename}")

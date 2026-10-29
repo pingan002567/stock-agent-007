@@ -6,7 +6,8 @@ import { CopilotFinalMeta } from "@/components/features/CopilotFinalMeta";
 import { ThoughtTimeline } from "@/components/features/ThoughtTimeline";
 import { isCommandTool } from "@/hooks/useCopilotChat";
 import type { StreamStep } from "@/hooks/useCopilotChat";
-import { attachmentsFromMessagePayload } from "@/lib/sessionUploads";
+import { attachmentsFromMessagePayload, isImageUploadFilename } from "@/lib/sessionUploads";
+import { UploadThumb } from "@/components/features/UploadThumb";
 import { HumanInputCard } from "@/components/features/HumanInputCard";
 import {
   parseHumanInputRequest,
@@ -128,16 +129,25 @@ function splitScheduledPrompt(text: string): { tag: string; task: string; rest: 
       <>
         {attachments.length > 0 && (
           <div className="upload-chips msg-attachments">
-            {attachments.map((f) => (
-              <span
-                key={f.filename}
-                className="upload-chip"
-                title={f.markdown_file ? `已转 Markdown：${f.markdown_file}` : f.filename}
-              >
-                <span className="upload-chip-name">{f.filename}</span>
-                {f.markdown_file ? <span className="upload-chip-ok">✓</span> : null}
-              </span>
-            ))}
+            {attachments.map((f) =>
+              isImageUploadFilename(f.filename) ? (
+                <UploadThumb
+                  key={f.filename}
+                  sessionId={msg.session_id}
+                  filename={f.filename}
+                  title={f.filename}
+                />
+              ) : (
+                <span
+                  key={f.filename}
+                  className="upload-chip"
+                  title={f.markdown_file ? `已转 Markdown：${f.markdown_file}` : f.filename}
+                >
+                  <span className="upload-chip-name">{f.filename}</span>
+                  {f.markdown_file ? <span className="upload-chip-ok">✓</span> : null}
+                </span>
+              ),
+            )}
           </div>
         )}
         <MarkdownRenderer text={msg.text || ""} />

@@ -6062,3 +6062,70 @@ html.pet-window-root body { margin: 0; }
   word-break: break-all;
   line-height: 1.5;
 }
+
+/* ── 图片附件缩略图 + 预览浮层 ── */
+.upload-thumb { position: relative; display: inline-flex; }
+.upload-thumb-btn {
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+  cursor: zoom-in;
+  line-height: 0;
+}
+.upload-thumb-btn:hover { border-color: var(--blue); }
+.upload-thumb-btn img { display: block; object-fit: cover; }
+.upload-thumb-del {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.upload-thumb-del:hover { color: var(--red); border-color: var(--red); }
+
+.img-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(15, 17, 20, 0.78);
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  cursor: zoom-out;
+}
+.img-lightbox-body { max-width: min(90vw, 1200px); max-height: 90vh; display: grid; gap: 10px; cursor: default; }
+.img-lightbox-body img {
+  max-width: 100%;
+  max-height: calc(90vh - 44px);
+  object-fit: contain;
+  border-radius: 10px;
+  background: #fff;
+}
+.img-lightbox-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #e6e8ea;
+  font-size: 12px;
+  font-family: var(--mono);
+}
+.img-lightbox-close {
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.12);
+  border: none;
+  color: #fff;
+  border-radius: 6px;
+  padding: 4px 9px;
+  cursor: pointer;
+}
