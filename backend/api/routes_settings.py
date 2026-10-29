@@ -197,6 +197,15 @@ def llm_providers(services: AppServices = Depends(get_services)):
     return services.llm_provider_service.snapshot()
 
 
+@router.post("/llm/models")
+def llm_models(payload: dict, services: AppServices = Depends(get_services)):
+    """用当前配置的 Key 向厂商拉取真实在售模型（目录会过期，这份不会）。"""
+    try:
+        return services.llm_provider_service.list_models(payload)
+    except LlmProviderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/llm/connect")
 def llm_connect(payload: dict, services: AppServices = Depends(get_services)):
     try:

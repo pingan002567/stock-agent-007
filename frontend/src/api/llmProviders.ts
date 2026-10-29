@@ -75,6 +75,21 @@ export function setDefaultLlmModel(defaultModel: string): Promise<LlmProvidersSn
   });
 }
 
+export interface LlmModelRow { id: string; name: string }
+export interface LlmModelListResult {
+  provider_id?: string | null;
+  base_url: string;
+  models: LlmModelRow[];
+  count: number;
+  fetched_at: string;
+  cached: boolean;
+}
+
+/** 用当前配置的 Key 向厂商拉取真实在售模型（内置目录只作兜底）。 */
+export function fetchLlmModels(payload: { provider_id?: string } = {}): Promise<LlmModelListResult> {
+  return apiPost<LlmModelListResult>("/api/settings/llm/models", payload);
+}
+
 export function testLlmConnection(payload: {
   provider_id?: string;
   api_key?: string;

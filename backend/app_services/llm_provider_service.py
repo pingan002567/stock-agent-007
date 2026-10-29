@@ -1,7 +1,12 @@
 """多 LLM 提供商：目录投影、连接/断开、自定义、合成 DeerFlow 单槽。"""
 from __future__ import annotations
 
+import json
 import re
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
 from typing import Any
 
 from backend.config.credentials import (
@@ -24,6 +29,11 @@ from backend.config.llm_catalog import (
 )
 
 _PROVIDER_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
+
+#: 「拉取可用模型」的进程内缓存：同一 base_url + key 10 分钟内不重复打厂商接口
+_MODEL_LIST_TTL_SECONDS = 600
+_MODELS_TIMEOUT_SECONDS = 8
+_models_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 class LlmProviderError(ValueError):
@@ -151,6 +161,90 @@ class LlmProviderService:
                 self.repo.set_config("runtime", workspace)
         self._reconnect()
         return self.snapshot()
+
+    def list_models(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """拉取提供商真实在售模型（OpenAI 兼容 `GET {base_url}/models`）。
+
+        目录（llm_catalog.py）会随厂商迭代过期，所以这里让用户用**自己的 Key**
+        问厂商要一份最新清单，前端把它和内置目录合并展示。
+        失败不抛 500：转成可读错误，前端退回内置候选。
+        """
+        extra = self.test_payload(payload)
+        base_url = str(extra.get("base_url") or "").strip().rstrip("/")
+        api_key = str(extra.get("api_key") or "").strip()
+        if not base_url:
+            raise LlmProviderError("没有可用的 Base URL，先连接提供商或填自定义地址")
+
+        cache_key = f"{base_url}|{api_key[-6:] if api_key else 'nokey'}"
+        hit = _models_cache.get(cache_key)
+        if hit and time.time() - hit[0] < _MODEL_LIST_TTL_SECONDS:
+            return {**hit[1], "cached": True}
+
+        headers = {"Accept": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        custom_headers = extra.get("headers")
+        if isinstance(custom_headers, dict):
+            headers.update({str(k): str(v) for k, v in custom_headers.items()})
+
+        url = f"{base_url}/models"
+        try:
+            request = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(request, timeout=_MODELS_TIMEOUT_SECONDS) as resp:
+                raw = resp.read()
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", "ignore")[:160]
+            except Exception:  # noqa: BLE001 - 读不到响应体不影响错误语义
+                detail = ""
+            if exc.code in (401, 403):
+                raise LlmProviderError("Key 无效或没有读取模型列表的权限（401/403）") from exc
+            raise LlmProviderError(f"厂商返回 {exc.code}：{detail or exc.reason}") from exc
+        except urllib.error.URLError as exc:
+            raise LlmProviderError(f"连不上 {base_url}：{exc.reason}") from exc
+        except TimeoutError as exc:
+            raise LlmProviderError(f"{base_url} 响应超时（>{_MODELS_TIMEOUT_SECONDS}s）") from exc
+
+        try:
+            data = json.loads(raw.decode("utf-8", "ignore"))
+        except ValueError as exc:
+            raise LlmProviderError("返回的不是 JSON，可能是 HTML 网关页面") from exc
+
+        rows = data.get("data") if isinstance(data, dict) else None
+        if rows is None and isinstance(data, dict):
+            rows = data.get("models")
+        if not isinstance(rows, list):
+            raise LlmProviderError("响应里没有 data/models 数组")
+
+        models: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for row in rows:
+            if isinstance(row, str):
+                model_id = row
+            elif isinstance(row, dict):
+                model_id = str(row.get("id") or row.get("name") or "").strip()
+            else:
+                continue
+            if not model_id or model_id in seen:
+                continue
+            seen.add(model_id)
+            label = row.get("name") if isinstance(row, dict) else None
+            models.append({"id": model_id, "name": str(label or model_id)})
+        if not models:
+            raise LlmProviderError("厂商返回了空模型列表")
+
+        models.sort(key=lambda m: m["id"])
+        result = {
+            "provider_id": extra.get("provider_id"),
+            "base_url": base_url,
+            "models": models,
+            "count": len(models),
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "cached": False,
+        }
+        _models_cache[cache_key] = (time.time(), result)
+        return result
 
     def test_payload(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         extra = dict(payload or {})

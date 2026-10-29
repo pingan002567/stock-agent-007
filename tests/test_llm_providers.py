@@ -237,3 +237,61 @@ def test_ambient_env_does_not_synthesize_runtime_without_provider(tmp_path, monk
     assert not cfg.get("api_key")
     assert not cfg.get("base_url")
     assert not cfg.get("model_name")
+
+
+class _FakeResp:
+    def __init__(self, payload: str):
+        self._payload = payload.encode()
+
+    def read(self):
+        return self._payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_list_models_fetches_from_provider_and_caches(tmp_path, monkeypatch):
+    """拉取真实模型清单：带 Bearer、解析 data[].id、10 分钟内走缓存。"""
+    client = make_client(tmp_path)
+    client.post("/api/settings/llm/connect", json={"provider_id": "deepseek", "api_key": "sk-live"})
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_urlopen(request, timeout=None):
+        calls.append((request.full_url, dict(request.headers)))
+        return _FakeResp('{"data":[{"id":"deepseek-flash"},{"id":"deepseek-v4-pro","name":"V4 Pro"},{"id":"deepseek-flash"}]}')
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    first = client.post("/api/settings/llm/models", json={"provider_id": "deepseek"})
+    assert first.status_code == 200
+    body = first.json()
+    assert [m["id"] for m in body["models"]] == ["deepseek-flash", "deepseek-v4-pro"]
+    assert body["models"][1]["name"] == "V4 Pro"
+    assert body["count"] == 2 and body["cached"] is False
+    url, headers = calls[0]
+    assert url.endswith("/models")
+    assert any(k.lower() == "authorization" and v == "Bearer sk-live" for k, v in headers.items())
+
+    second = client.post("/api/settings/llm/models", json={"provider_id": "deepseek"}).json()
+    assert second["cached"] is True, "10 分钟内应命中缓存，不重复打厂商接口"
+    assert len(calls) == 1
+
+
+def test_list_models_maps_errors_to_readable_message(tmp_path, monkeypatch):
+    """401 要给出可读原因（而不是 500），前端据此退回内置候选。"""
+    import urllib.error
+
+    client = make_client(tmp_path)
+    client.post("/api/settings/llm/connect", json={"provider_id": "deepseek", "api_key": "sk-bad"})
+
+    def fake_urlopen(request, timeout=None):
+        raise urllib.error.HTTPError(request.full_url, 401, "Unauthorized", {}, None)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    resp = client.post("/api/settings/llm/models", json={"provider_id": "deepseek"})
+    assert resp.status_code == 400
+    assert "Key 无效" in resp.json()["detail"]
