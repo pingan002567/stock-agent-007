@@ -71,7 +71,9 @@ export function UploadThumb({
           aria-label={removeLabel ?? `移除 ${filename}`}
           onClick={onRemove}
         >
-          ×
+          <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden>
+            <path d="M1 1l8 8M9 1L1 9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          </svg>
         </button>
       )}
     </span>
