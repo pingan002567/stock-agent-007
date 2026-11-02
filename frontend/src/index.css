@@ -3618,6 +3618,8 @@ html.resizing { cursor: col-resize; user-select: none; }
 .messages { display: grid; gap: 10px; }
 @keyframes thinking-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
 .msg {
+  /* 复制按钮是 absolute：气泡要自己成为定位上下文，否则按钮会跑到页面角落 */
+  position: relative;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   padding: 12px 14px;
@@ -4982,9 +4984,12 @@ body {
   -webkit-user-select: none;
   user-select: none;
 }
-/* 内容白名单 */
+/* 内容白名单：渲染器层放行，新页面复用渲染器即自动继承 */
 .md-content,                 /* Markdown 渲染器(聊天正文/报告预览) */
-.msg,                        /* 聊天气泡(用户消息为纯文本,不经渲染器) */
+.msg {                       /* 聊天气泡(用户消息为纯文本,不经渲染器) */
+  -webkit-user-select: text;
+  user-select: text;
+}
 
 /* 气泡与内容区里的"框架件"回收禁选 */
 .msg-label, .msg-time, .msg-ai-tools-header,

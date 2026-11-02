@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { parseCopilotEvent } from "@/api/copilot";
 import type { CopilotMessage } from "@/api/client";
 import { MarkdownRenderer } from "@/components/features/MarkdownRenderer";
@@ -103,6 +104,18 @@ function splitScheduledPrompt(text: string): { tag: string; task: string; rest: 
     isFinal && runStartedAt
       ? new Date(msg.created_at).getTime() - new Date(runStartedAt).getTime()
       : undefined;
+
+  /** 复制整条回复：选中文字仍然可用，这里只是省一次拖选 */
+  const [copied, setCopied] = useState(false);
+  const copyMessage = async () => {
+    try {
+      await navigator.clipboard.writeText(msg.text || "");
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
+  };
 
   let body: React.ReactNode;
   let cls = "msg";
@@ -211,6 +224,17 @@ function splitScheduledPrompt(text: string): { tag: string; task: string; rest: 
         </div>
       )}
       {body}
+      {!isUser && (msg.text ?? "").trim() ? (
+        <button
+          type="button"
+          className="msg-copy"
+          onClick={() => void copyMessage()}
+          title="复制这条回复"
+          aria-label="复制这条回复"
+        >
+          {copied ? "已复制" : "复制"}
+        </button>
+      ) : null}
       {isUser && <div className="msg-time">{time}</div>}
     </div>
   );

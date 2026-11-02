@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CopilotMessageItem } from "@/components/features/CopilotMessageItem";
 import { CopilotToolCard } from "@/components/features/CopilotToolCard";
 import { CopilotStreamingMessage } from "@/components/features/CopilotStreamingMessage";
@@ -567,5 +567,22 @@ describe("思考步落位（思考 → 工具）", () => {
     const ai = pairMessages(msgs).find((item) => item.t === "ai");
     if (ai?.t !== "ai") throw new Error("no ai");
     expect((ai.steps ?? []).map((s) => s.kind)).toEqual(["reasoning", "tool"]);
+  });
+});
+
+describe("AI 回复可复制", () => {
+  it("复制按钮存在，点击写入剪贴板并给出反馈", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const msg = makeMsg({
+      message_id: "m-copy", role: "assistant", kind: "final_answer",
+      text: "结论：维持现有配置", run_id: "run_c",
+      payload: { conclusion: "结论：维持现有配置" },
+    });
+    render(<CopilotMessageItem msg={msg} tools={[]} steps={[]} />);
+    const btn = screen.getByLabelText("复制这条回复");
+    fireEvent.click(btn);
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("结论：维持现有配置"));
+    await waitFor(() => expect(btn.textContent).toBe("已复制"));
   });
 });
