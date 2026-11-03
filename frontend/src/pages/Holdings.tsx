@@ -7,6 +7,8 @@ import { PageHead } from "@/components/ui/PageHead";
 import { useAppState } from "@/hooks/useAppState";
 import { AskAiButton } from "@/components/ui/AskAiButton";
 import { AddHoldingDialog } from "@/components/features/AddHoldingDialog";
+import { SellHoldingDialog } from "@/components/features/SellHoldingDialog";
+import { CashLedgerDialog } from "@/components/features/CashLedgerDialog";
 import { changeCls, computeWeights, currencyMoney, currencySign, inferMarket, pct, stockInitial } from "@/utils/market";
 
 // === Types ===
@@ -188,6 +190,8 @@ export default function Holdings() {
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [selling, setSelling] = useState<{ symbol: string; name?: string; currency: string; held: number } | null>(null);
+  const [ledgerOpen, setLedgerOpen] = useState(false);
 
   // 后端 weight_pct / max_weight_pct 恒为 0（未实现），按持仓市值占比自算兜底
   const derived = computeWeights(holdings?.items ?? []);
@@ -311,6 +315,7 @@ export default function Holdings() {
               prompt: "解读当前持仓风险扫描结果,并给出应对建议" },
           ]}
           actions={<>
+            <button className="small" onClick={() => setLedgerOpen(true)} type="button">资金流水</button>
             <button className="small" onClick={() => setAdding(true)} type="button">+ 新增持仓</button>
             <button className="small" disabled={scanning} onClick={() => void handleRiskScan()} type="button">
               {scanning ? "扫描中…" : "风险扫描"}
@@ -396,6 +401,7 @@ export default function Holdings() {
                       <th>盈亏</th>
                       <th>当日</th>
                       <th>权重</th>
+                      <th>操作</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -469,6 +475,23 @@ export default function Holdings() {
                             </div>
                           )}
                         </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="row-op"
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              setSelling({
+                                symbol: item.symbol,
+                                name: item.name,
+                                currency: item.currency || "CNY",
+                                held: Number(item.quantity ?? 0),
+                              });
+                            }}
+                          >
+                            卖出
+                          </button>
+                        </td>
                       </tr>
                       );
                     })}
@@ -527,6 +550,21 @@ export default function Holdings() {
           }}
         />
       ) : null}
+      {selling ? (
+        <SellHoldingDialog
+          symbol={selling.symbol}
+          name={selling.name}
+          currency={selling.currency}
+          held={selling.held}
+          onClose={() => setSelling(null)}
+          onSold={() => {
+            setSelling(null);
+            showToast("已卖出，现金已回补", "success");
+            void loadAll();
+          }}
+        />
+      ) : null}
+      {ledgerOpen ? <CashLedgerDialog onClose={() => setLedgerOpen(false)} /> : null}
     </PageContainer>
   );
 }
