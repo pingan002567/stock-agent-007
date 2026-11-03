@@ -118,3 +118,37 @@ def test_correction_api_does_not_touch_cash(tmp_path):
     resp = client.post("/api/holdings", json={"symbol": "600963", "quantity": 100, "cost": 26.15})
     assert resp.status_code == 200
     assert resp.json()["summary"]["available_cash"] == 5000.0
+
+
+def test_calibrate_multiple_currencies_writes_adjust_entries(tmp_path):
+    """一键校准：多个币种一次性写入，每个币种一条 adjust 流水。"""
+    client = make_client(tmp_path)
+    client.post("/api/holdings/clear-demo")
+
+    resp = client.post("/api/holdings/cash-calibration", json={
+        "amounts": {"CNY": 12345.68, "USDT": 500, "USD": 0},
+        "note": "对券商实况校准",
+    })
+    assert resp.status_code == 200, resp.text
+    buckets = resp.json()["cash_by_currency"]
+    assert buckets == {"CNY": 12345.68, "USDT": 500.0, "USD": 0.0}
+
+    ledger = client.get("/api/holdings/cash-ledger").json()
+    adjusts = [row for row in ledger["items"] if row["reason"] == "adjust"]
+    assert {row["currency"] for row in adjusts} == {"CNY", "USDT", "USD"}
+    assert all("对券商实况校准" in (row["note"] or "") for row in adjusts)
+
+
+def test_calibrate_rejects_negative_and_keeps_untouched(tmp_path):
+    client = make_client(tmp_path)
+    client.post("/api/holdings/clear-demo")
+    client.post("/api/holdings/cash-calibration", json={"amounts": {"CNY": 1000}})
+
+    bad = client.post("/api/holdings/cash-calibration", json={"amounts": {"CNY": -1}})
+    assert bad.status_code == 400
+    assert client.get("/api/holdings/cash-ledger").json()["cash_by_currency"]["CNY"] == 1000.0
+
+    # 只校准 USDT，CNY 保持不变
+    client.post("/api/holdings/cash-calibration", json={"amounts": {"USDT": 200}})
+    buckets = client.get("/api/holdings/cash-ledger").json()["cash_by_currency"]
+    assert buckets["CNY"] == 1000.0 and buckets["USDT"] == 200.0

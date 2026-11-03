@@ -286,6 +286,48 @@ def set_available_cash(payload: AvailableCashUpdate, request: Request, services:
     }
 
 
+class CashCalibration(BaseModel):
+    """多币种一次性校准（首次建账 / 与券商对账后修正）。"""
+
+    amounts: dict[str, float] = Field(
+        default_factory=dict, description="币种 → 金额；只写传入的币种，未传的保持不变"
+    )
+    note: str | None = Field(default=None, description="校准原因，写进流水，便于回溯")
+
+
+@router.post("/cash-calibration")
+def calibrate_cash(payload: CashCalibration, request: Request, services: AppServices = Depends(get_services)):
+    """把多个币种的可用现金一次性设成实际值，每个币种写一条 `adjust` 流水。"""
+    amounts = {
+        str(ccy).upper(): float(amount)
+        for ccy, amount in (payload.amounts or {}).items()
+        if amount is not None
+    }
+    if not amounts:
+        raise HTTPException(status_code=400, detail="没有要校准的币种")
+    for ccy, amount in amounts.items():
+        if amount < 0:
+            raise HTTPException(status_code=400, detail=f"{ccy} 可用资金不能为负")
+    try:
+        if hasattr(services.repo, "calibrate_cash"):
+            services.repo.calibrate_cash(amounts, note=payload.note or "manual calibrate")
+        else:
+            for ccy, amount in amounts.items():
+                write_available_cash(services.repo, amount)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    services.audit_service.record(
+        "holdings cash calibrated",
+        ", ".join(f"{ccy}={amount:.2f}" for ccy, amount in sorted(amounts.items())),
+    )
+    _items, valued, _degraded = _presented_holdings(services)
+    return {
+        "cash_by_currency": read_cash_buckets(services.repo) or {},
+        "summary": _portfolio_summary(services, valued),
+    }
+
+
 @router.get("/cash-ledger")
 def cash_ledger(limit: int = 100, services: AppServices = Depends(get_services)):
     """资金流水：每笔买入/卖出/校准的 delta 与余额，用来对账。"""

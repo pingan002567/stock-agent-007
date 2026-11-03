@@ -9,6 +9,7 @@ import { AskAiButton } from "@/components/ui/AskAiButton";
 import { AddHoldingDialog } from "@/components/features/AddHoldingDialog";
 import { SellHoldingDialog } from "@/components/features/SellHoldingDialog";
 import { CashLedgerDialog } from "@/components/features/CashLedgerDialog";
+import { CashCalibrationDialog } from "@/components/features/CashCalibrationDialog";
 import { changeCls, computeWeights, currencyMoney, currencySign, inferMarket, pct, stockInitial } from "@/utils/market";
 
 // === Types ===
@@ -192,6 +193,7 @@ export default function Holdings() {
   const [adding, setAdding] = useState(false);
   const [selling, setSelling] = useState<{ symbol: string; name?: string; currency: string; held: number } | null>(null);
   const [ledgerOpen, setLedgerOpen] = useState(false);
+  const [calibrating, setCalibrating] = useState(false);
 
   // 后端 weight_pct / max_weight_pct 恒为 0（未实现），按持仓市值占比自算兜底
   const derived = computeWeights(holdings?.items ?? []);
@@ -315,6 +317,7 @@ export default function Holdings() {
               prompt: "解读当前持仓风险扫描结果,并给出应对建议" },
           ]}
           actions={<>
+            <button className="small" onClick={() => setCalibrating(true)} type="button">校准现金</button>
             <button className="small" onClick={() => setLedgerOpen(true)} type="button">资金流水</button>
             <button className="small" onClick={() => setAdding(true)} type="button">+ 新增持仓</button>
             <button className="small" disabled={scanning} onClick={() => void handleRiskScan()} type="button">
@@ -565,6 +568,20 @@ export default function Holdings() {
         />
       ) : null}
       {ledgerOpen ? <CashLedgerDialog onClose={() => setLedgerOpen(false)} /> : null}
+      {calibrating ? (
+        <CashCalibrationDialog
+          current={(holdings?.summary as { cash_by_currency?: Array<{ currency: string; amount: number }> } | undefined)
+            ?.cash_by_currency?.reduce<Record<string, number>>((acc, row) => {
+              acc[row.currency] = row.amount;
+              return acc;
+            }, {})}
+          onClose={() => setCalibrating(false)}
+          onSaved={() => {
+            showToast("现金已校准", "success");
+            void loadAll();
+          }}
+        />
+      ) : null}
     </PageContainer>
   );
 }

@@ -146,45 +146,60 @@ class CashRepoMixin:
         )
         return ledger_id
 
-    def set_cash_bucket(self, currency: str, amount: float | None, *, note: str | None = None) -> Dict[str, Any]:
-        """把某个币种的现金设为指定值（写一条 adjust 流水，可解释）。
-
-        `amount=None` 表示"清空记录"（未记录），用于重置。
-        """
+    def _set_cash_bucket_locked(
+        self, currency: str, amount: float | None, *, note: str | None = None
+    ) -> Dict[str, Any]:
+        """调用方必须已持有 self._lock，且负责 commit。"""
         ccy = currency.upper()
-        with self._lock:
-            current = self.get_cash_bucket(ccy)
-            if amount is None:
-                self.conn.execute("DELETE FROM cash_bucket WHERE currency = ?", (ccy,))
-                self.conn.commit()
-                return {"currency": ccy, "amount": None, "ledger_id": None}
-            target = round(float(amount), 2)
-            if target < 0:
-                raise ValueError("可用资金不能为负")
+        current = self.get_cash_bucket(ccy)
+        if amount is None:
+            self.conn.execute("DELETE FROM cash_bucket WHERE currency = ?", (ccy,))
+            return {"currency": ccy, "amount": None, "ledger_id": None}
+        target = round(float(amount), 2)
+        if target < 0:
+            raise ValueError("可用资金不能为负")
 
-            if current is None:
-                # 首次记录：直接写入目标值 + 一条 delta=target 的 adjust 流水。
-                # 不能再走 _apply_cash_delta_locked（那会把 target 再加一遍）。
-                self.conn.execute(
-                    "INSERT INTO cash_bucket(currency, amount, updated_at) VALUES (?, ?, ?)",
-                    (ccy, target, now_iso()),
-                )
-                ledger_id = self._write_ledger_locked(
-                    currency=ccy, delta=target, balance_after=target,
-                    reason="adjust", ref_type="manual", note=note or "set cash",
-                )
-                self.conn.commit()
-                return {"currency": ccy, "ledger_id": ledger_id, "balance_after": target, "delta": target}
-
-            delta = round(target - current, 2)
-            if delta == 0:
-                return {"currency": ccy, "ledger_id": None, "balance_after": target, "delta": 0.0}
-            result = self._apply_cash_delta_locked(
-                currency=ccy, delta=delta, reason="adjust",
-                ref_type="manual", note=note, allow_missing=True,
+        if current is None:
+            # 首次记录：直接写入目标值 + 一条 delta=target 的 adjust 流水。
+            # 不能再走 _apply_cash_delta_locked（那会把 target 再加一遍）。
+            self.conn.execute(
+                "INSERT INTO cash_bucket(currency, amount, updated_at) VALUES (?, ?, ?)",
+                (ccy, target, now_iso()),
             )
+            ledger_id = self._write_ledger_locked(
+                currency=ccy, delta=target, balance_after=target,
+                reason="adjust", ref_type="manual", note=note or "set cash",
+            )
+            return {"currency": ccy, "ledger_id": ledger_id, "balance_after": target, "delta": target}
+
+        delta = round(target - current, 2)
+        if delta == 0:
+            return {"currency": ccy, "ledger_id": None, "balance_after": target, "delta": 0.0}
+        result = self._apply_cash_delta_locked(
+            currency=ccy, delta=delta, reason="adjust",
+            ref_type="manual", note=note, allow_missing=True,
+        )
+        return {"currency": ccy, **result}
+
+    def set_cash_bucket(self, currency: str, amount: float | None, *, note: str | None = None) -> Dict[str, Any]:
+        """把某个币种的现金设为指定值（写一条 adjust 流水，可解释）。"""
+        with self._lock:
+            result = self._set_cash_bucket_locked(currency, amount, note=note)
             self.conn.commit()
-            return {"currency": ccy, **result}
+            return result
+
+    def calibrate_cash(self, amounts: Dict[str, float], *, note: str | None = None) -> Dict[str, Any]:
+        """多币种一次性校准：同一把锁里全部写完再提交，账户不会停在"改了一半"的状态。"""
+        with self._lock:
+            results = []
+            for currency, amount in amounts.items():
+                if amount is None:
+                    continue
+                results.append(
+                    self._set_cash_bucket_locked(currency, float(amount), note=note or "calibrate")
+                )
+            self.conn.commit()
+            return {"calibrated": results, "cash_by_currency": self.list_cash_buckets()}
 
     # ── 写：买入/卖出（原子） ───────────────────────────────────────────
     def execute_trade(

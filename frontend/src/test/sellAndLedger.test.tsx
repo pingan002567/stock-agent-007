@@ -72,3 +72,28 @@ describe("资金流水弹窗", () => {
     expect(screen.getAllByText("USDT").length).toBeGreaterThan(0);
   });
 });
+
+describe("一键校准现金", () => {
+  it("填多个币种 → 提交 amounts，空值跳过", async () => {
+    apiPost.mockReset();
+    apiPost.mockResolvedValue({ cash_by_currency: { CNY: 1000, USDT: 200 }, summary: {} });
+    const onSaved = vi.fn();
+    const { CashCalibrationDialog } = await import("@/components/features/CashCalibrationDialog");
+    render(
+      <CashCalibrationDialog
+        current={{ CNY: 500, USDT: 100 }}
+        onClose={() => {}}
+        onSaved={onSaved}
+      />,
+    );
+    // 预填 CNY 500 / USDT 100，改 CNY 为 1000，再给 HKD 填 0
+    fireEvent.change(screen.getByLabelText("CNY 可用现金"), { target: { value: "1000" } });
+    fireEvent.change(screen.getByLabelText("HKD 可用现金"), { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存校准" }));
+
+    await waitFor(() => expect(apiPost).toHaveBeenCalled());
+    expect(apiPost.mock.calls[0][0]).toBe("/api/holdings/cash-calibration");
+    expect(apiPost.mock.calls[0][1]).toMatchObject({ amounts: { CNY: 1000, USDT: 100, HKD: 0 } });
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+  });
+});
