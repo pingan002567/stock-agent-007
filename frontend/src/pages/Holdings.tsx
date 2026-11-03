@@ -352,6 +352,22 @@ export default function Holdings() {
                 </>
               )}
             </div>
+            {/* 分币种现金：买入按币种扣款，这里要能看清各币种余额 */}
+            {(() => {
+              const cashBuckets = (holdings.summary as { cash_by_currency?: { currency: string; amount: number }[] } | undefined)?.cash_by_currency ?? [];
+              if (cashBuckets.length <= 1) return null;
+              return (
+                <div className="fx-line" style={{ marginTop: 6 }}>
+                  <span className="muted">现金：</span>
+                  {cashBuckets.map((row) => (
+                    <span key={row.currency} className="num">
+                      {row.currency} {row.amount.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  ))}
+                  <span className="muted">买入按币种扣减，不允许透支</span>
+                </div>
+              );
+            })()}
           </div>
         ) : null}
 

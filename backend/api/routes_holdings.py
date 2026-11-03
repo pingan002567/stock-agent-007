@@ -16,17 +16,24 @@ from backend.stock_domain import fx as fx_service
 from backend.stock_domain.portfolio_tools import (
     holding_currency,
     mark_to_market,
-    read_available_cash,
+    read_cash_buckets,
+    read_cash_for,
     summarize_portfolio,
     to_cny_amount,
     write_available_cash,
+)
+from backend.persistence.repo_cash import (
+    CashNotRecorded,
+    InsufficientCash,
+    InsufficientHolding,
 )
 
 router = APIRouter(prefix="/api/holdings", tags=["holdings"])
 
 
 class AvailableCashUpdate(BaseModel):
-    amount: float | None = Field(default=None, description="可用资金；null 表示未记录")
+    amount: float | None = Field(default=None, description="可用资金；null 表示清空该币种记录")
+    currency: str | None = Field(default=None, description="币种，缺省 CNY")
 
 
 def _fx_rates() -> tuple[dict | None, dict]:
@@ -39,7 +46,7 @@ def _portfolio_summary(services: AppServices, holdings: list[HoldingPosition]) -
     rates, payload = _fx_rates()
     return summarize_portfolio(
         holdings,
-        available_cash=read_available_cash(services.repo),
+        cash_buckets=read_cash_buckets(services.repo),
         rates=rates,
         fx=payload,
     )
@@ -163,18 +170,127 @@ def add_or_update_holding(
     return list_holdings(request=request, services=services)
 
 
+class TradeRequest(BaseModel):
+    """一笔买入/卖出。成交价必填（扣现金要按真实成交价，不是实时价）。"""
+
+    action: str = Field(pattern="^(buy|sell)$")
+    symbol: str
+    quantity: float = Field(gt=0, description="数量（股 / 枚）")
+    fill_price: float = Field(gt=0, description="成交价（原币）")
+    fee: float = Field(default=0.0, ge=0, description="手续费（原币）")
+    currency: str | None = Field(default=None, description="结算币种；留空按市场推断")
+    idempotency_key: str | None = Field(default=None, description="幂等键，重放不重复扣款")
+    note: str | None = None
+
+
+@router.post("/trades")
+def execute_trade(payload: TradeRequest, request: Request, services: AppServices = Depends(get_services)):
+    """买入/卖出：**原子地**改现金与持仓，现金不足直接拒绝（不允许透支）。
+
+    - 现金按币种扣：A 股扣 CNY，港股扣 HKD，美股扣 USD，加密扣 USDT
+    - 该币种现金没记录过 → 409（先设置可用现金，避免"看起来扣了其实没扣"）
+    - 持仓不足 → 409
+    - 带 `idempotency_key` 重放 → 原样返回上次结果，不重复扣
+    """
+    symbol = normalize_symbol(payload.symbol)
+    stock = get_stock(symbol)
+    if stock is None:
+        raise HTTPException(status_code=400, detail=f"未知标的：{payload.symbol}")
+    market = str(stock.get("market") or "")
+    currency = (payload.currency or "").upper() or _MARKET_CURRENCY.get(market, "CNY")
+
+    if not hasattr(services.repo, "execute_trade"):
+        raise HTTPException(status_code=501, detail="当前仓储不支持交易记账")
+
+    try:
+        result = services.repo.execute_trade(
+            symbol=symbol,
+            name=str(stock.get("name") or symbol),
+            quantity=payload.quantity,
+            fill_price=payload.fill_price,
+            currency=currency,
+            is_buy=payload.action == "buy",
+            fee=payload.fee,
+            idempotency_key=payload.idempotency_key,
+            note=payload.note,
+        )
+    except CashNotRecorded as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "cash_not_recorded",
+                "message": str(exc),
+                "currency": exc.currency,
+            },
+        ) from exc
+    except InsufficientCash as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "insufficient_cash",
+                "message": str(exc),
+                "currency": exc.currency,
+                "required": round(exc.required, 2),
+                "available": round(exc.available, 2),
+                "shortfall": round(exc.required - exc.available, 2),
+            },
+        ) from exc
+    except InsufficientHolding as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "insufficient_holding",
+                "message": str(exc),
+                "symbol": exc.symbol,
+                "held": exc.held,
+                "requested": exc.requested,
+            },
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    services.audit_service.record(
+        f"holding {payload.action}",
+        f"{symbol} qty={payload.quantity} @{payload.fill_price} fee={payload.fee} ccy={currency}",
+    )
+    _items, valued, _degraded = _presented_holdings(services)
+    return {
+        "trade": result,
+        "currency": currency,
+        "available_cash": read_cash_for(services.repo, currency),
+        "summary": _portfolio_summary(services, valued),
+    }
+
+
 @router.post("/available-cash")
 def set_available_cash(payload: AvailableCashUpdate, request: Request, services: AppServices = Depends(get_services)):
+    """设置某个币种的可用现金（会写一条 adjust 流水，可回溯）。"""
+    currency = (payload.currency or "CNY").upper()
     try:
-        amount = write_available_cash(services.repo, payload.amount)
+        if hasattr(services.repo, "set_cash_bucket"):
+            result = services.repo.set_cash_bucket(currency, payload.amount, note="manual set")
+            amount = result.get("balance_after")
+        else:  # 旧仓储兜底
+            amount = write_available_cash(services.repo, payload.amount)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     _items, valued, _degraded = _presented_holdings(services)
     services.audit_service.record(
         "holdings available cash updated",
-        "cleared" if amount is None else f"amount={amount}",
+        f"{currency} " + ("cleared" if amount is None else f"amount={amount}"),
     )
-    return {"available_cash": amount, "summary": _portfolio_summary(services, valued)}
+    return {
+        "available_cash": read_cash_for(services.repo, currency),
+        "currency": currency,
+        "summary": _portfolio_summary(services, valued),
+    }
+
+
+@router.get("/cash-ledger")
+def cash_ledger(limit: int = 100, services: AppServices = Depends(get_services)):
+    """资金流水：每笔买入/卖出/校准的 delta 与余额，用来对账。"""
+    rows = services.repo.list_cash_ledger(limit=limit) if hasattr(services.repo, "list_cash_ledger") else []
+    return {"items": rows, "cash_by_currency": read_cash_buckets(services.repo) or {}}
 
 
 @router.post("/import-preview")

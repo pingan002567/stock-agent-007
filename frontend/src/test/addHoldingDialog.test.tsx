@@ -68,7 +68,28 @@ describe("AddHoldingDialog", () => {
     expect(screen.queryByText(/折算 ¥/)).toBeNull();
   });
 
-  it("保存时提交原币数量与成本，不提交任何折算值", async () => {
+  it("买入模式提交成交价与手续费到 /trades（由后端扣现金）", async () => {
+    const onSaved = vi.fn();
+    apiPost.mockResolvedValue({ summary: { items: [] } });
+
+    render(<AddHoldingDialog fx={FX} bookCny={50000} onClose={() => {}} onSaved={onSaved} />);
+
+    fireEvent.change(screen.getByPlaceholderText("输入代码或名称搜索…"), { target: { value: "BT" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Bitcoin/ }));
+    fireEvent.change(await screen.findByPlaceholderText("0.08"), { target: { value: "0.1" } });
+    fireEvent.change(screen.getByPlaceholderText("按真实成交价填"), { target: { value: "76000" } });
+    fireEvent.change(screen.getByPlaceholderText("0"), { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(apiPost).toHaveBeenCalled());
+    const [url, body] = apiPost.mock.calls[0];
+    expect(url).toBe("/api/holdings/trades");
+    expect(body).toMatchObject({
+      action: "buy", symbol: "BTC", quantity: 0.1, fill_price: 76000, fee: 12, currency: "USDT",
+    });
+  });
+
+  it("修正持仓模式才走 /api/holdings，且不提交任何折算值", async () => {
     const onSaved = vi.fn();
     apiPost.mockResolvedValue({ items: [] });
 
@@ -77,7 +98,8 @@ describe("AddHoldingDialog", () => {
     fireEvent.change(screen.getByPlaceholderText("输入代码或名称搜索…"), { target: { value: "BT" } });
     fireEvent.click(await screen.findByRole("button", { name: /Bitcoin/ }));
     fireEvent.change(await screen.findByPlaceholderText("0.08"), { target: { value: "0.08" } });
-    fireEvent.change(screen.getByPlaceholderText("可留空"), { target: { value: "76200" } });
+    fireEvent.click(screen.getByRole("tab", { name: "修正持仓" }));
+    fireEvent.change(await screen.findByPlaceholderText("可留空"), { target: { value: "76200" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() => expect(apiPost).toHaveBeenCalled());

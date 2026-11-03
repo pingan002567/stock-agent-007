@@ -6186,3 +6186,16 @@ html.pet-window-root body { margin: 0; }
   padding: 4px 9px;
   cursor: pointer;
 }
+
+/* 持仓弹窗：买入 / 修正 模式切换 */
+.holding-modes { display: flex; gap: 6px; margin: 0 0 12px; }
+.holding-mode {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.holding-mode.on { border-color: var(--blue); color: var(--blue); background: var(--blue-soft); font-weight: 600; }

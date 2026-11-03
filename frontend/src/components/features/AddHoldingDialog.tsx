@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { apiGet, apiPost } from "@/api/client";
+import { executeHoldingTrade, parseTradeRejection, tradeRejectionMessage } from "@/api/cash";
 import { currencyMoney, currencySign, inferMarket } from "@/utils/market";
 
 /** 搜索接口返回的标的 */
@@ -60,8 +61,11 @@ export function AddHoldingDialog({
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
   const [picked, setPicked] = useState<SearchHit | null>(null);
+  /** buy = 买入（扣现金、必填成交价）；correct = 修正持仓（不动现金） */
+  const [mode, setMode] = useState<"buy" | "correct">("buy");
   const [quantity, setQuantity] = useState("");
   const [cost, setCost] = useState("");
+  const [fee, setFee] = useState("");
   const [price, setPrice] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -124,25 +128,61 @@ export function AddHoldingDialog({
     setBusy(true);
     setError(null);
     try {
-      const payload = await apiPost<unknown>("/api/holdings", {
-        symbol: picked.symbol,
-        quantity: Number(quantity),
-        cost: cost === "" ? null : Number(cost),
-      });
-      onSaved(payload);
+      if (mode === "buy") {
+        const filled = await executeHoldingTrade({
+          action: "buy",
+          symbol: picked.symbol,
+          quantity: Number(quantity),
+          fill_price: Number(cost),
+          fee: fee === "" ? 0 : Number(fee),
+          currency,
+        });
+        onSaved(filled.summary);
+      } else {
+        const payload = await apiPost<unknown>("/api/holdings", {
+          symbol: picked.symbol,
+          quantity: Number(quantity),
+          cost: cost === "" ? null : Number(cost),
+        });
+        onSaved(payload);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "保存失败");
+      const rej = parseTradeRejection(err);
+      setError(rej ? tradeRejectionMessage(rej) : err instanceof Error ? err.message : "保存失败");
     } finally {
       setBusy(false);
     }
   };
 
-  const canSubmit = Boolean(picked) && Number(quantity) > 0 && !busy;
+  const fillPriceOk = mode === "correct" || (cost !== "" && Number(cost) > 0);
+  const canSubmit = Boolean(picked) && Number(quantity) > 0 && fillPriceOk && !busy;
 
   return (
     <div className="session-delete-modal" role="dialog" aria-modal="true" aria-labelledby="add-holding-title">
       <div className="holding-dialog">
-        <div className="holding-dialog-title" id="add-holding-title">新增持仓</div>
+        <div className="holding-dialog-title" id="add-holding-title">
+          {mode === "buy" ? "买入（扣可用现金）" : "修正持仓（不动现金）"}
+        </div>
+        <div className="holding-modes" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "buy"}
+            className={mode === "buy" ? "holding-mode on" : "holding-mode"}
+            onClick={() => setMode("buy")}
+          >
+            买入
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "correct"}
+            className={mode === "correct" ? "holding-mode on" : "holding-mode"}
+            onClick={() => setMode("correct")}
+          >
+            修正持仓
+          </button>
+        </div>
 
         <div className="holding-field">
           <label>标的（股票代码、中文名或币种，如 600519 / 茅台 / BTC）</label>
@@ -189,15 +229,30 @@ export function AddHoldingDialog({
                 />
               </div>
               <div className="holding-field">
-                <label>成本（{currencySign(currency)}/{market === "CRYPTO" ? "枚" : "股"}，可空）</label>
+                <label>
+                  {mode === "buy" ? "成交价" : "成本"}（{currencySign(currency)}/{market === "CRYPTO" ? "枚" : "股"}
+                  {mode === "correct" ? "，可空" : "，必填"}）
+                </label>
                 <input
                   className="holding-input"
                   inputMode="decimal"
                   value={cost}
-                  placeholder="可留空"
+                  placeholder={mode === "buy" ? "按真实成交价填" : "可留空"}
                   onChange={(e) => setCost(e.target.value)}
                 />
               </div>
+              {mode === "buy" ? (
+                <div className="holding-field">
+                  <label>手续费（{currencySign(currency)}，可空）</label>
+                  <input
+                    className="holding-input"
+                    inputMode="decimal"
+                    value={fee}
+                    placeholder="0"
+                    onChange={(e) => setFee(e.target.value)}
+                  />
+                </div>
+              ) : null}
             </div>
 
             <div className="holding-preview">
@@ -209,6 +264,15 @@ export function AddHoldingDialog({
                   {quantity ? <> × {quantity} = <span className="num">{currencyMoney(preview?.native ?? null, currency)}</span></> : null}
                 </div>
               )}
+              {mode === "buy" && Number(quantity) > 0 && Number(cost) > 0 ? (
+                <div className="holding-hint">
+                  将从 <b>{currency}</b> 现金扣款{" "}
+                  <span className="num">
+                    {currencyMoney(Number(cost) * Number(quantity) + (Number(fee) || 0), currency)}
+                  </span>
+                  （含手续费）· 不足会被拒绝，不允许透支
+                </div>
+              ) : null}
               <div>
                 {rate == null ? (
                   <span className="holding-warn">汇率不可用，暂不折算 —— 市值会先按原币记</span>

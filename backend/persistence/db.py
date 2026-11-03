@@ -37,6 +37,27 @@ SCHEMA: Iterable[str] = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS cash_bucket (
+      currency TEXT PRIMARY KEY,
+      amount REAL NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS cash_ledger (
+      ledger_id TEXT PRIMARY KEY,
+      currency TEXT NOT NULL,
+      delta REAL NOT NULL,
+      balance_after REAL NOT NULL,
+      reason TEXT NOT NULL,
+      ref_type TEXT,
+      ref_id TEXT,
+      idempotency_key TEXT UNIQUE,
+      note TEXT,
+      created_at TEXT NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS monitor_event (
       event_id TEXT PRIMARY KEY,
       rule_id TEXT,

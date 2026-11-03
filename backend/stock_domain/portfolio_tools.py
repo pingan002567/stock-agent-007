@@ -6,8 +6,26 @@ from backend.schemas import HoldingPosition
 
 HOLDINGS_CASH_KEY = "holdings_available_cash"
 
+#: 记账币种（现金桶都以这些为单位；未知币种按原样存）
+CASH_CURRENCIES = ("CNY", "HKD", "USD", "USDT")
 
-def read_available_cash(repo: Any) -> float | None:
+
+def read_cash_buckets(repo: Any) -> dict[str, float] | None:
+    """多币种现金桶；`None` = 一笔都没记录过（**禁止买入**）。
+
+    兼容旧数据：迁移前现金是 config 里的一个 CNY 标量，这里读到时自动转成
+    `{CNY: 值}`（只读迁移，不写库；下一次写操作会把桶建起来）。
+    """
+    buckets = repo.list_cash_buckets() if hasattr(repo, "list_cash_buckets") else {}
+    if buckets:
+        return buckets
+    legacy = _read_legacy_cash(repo)
+    if legacy is None:
+        return None
+    return {"CNY": legacy}
+
+
+def _read_legacy_cash(repo: Any) -> float | None:
     raw = repo.get_config(HOLDINGS_CASH_KEY, {})
     amount = raw.get("amount") if isinstance(raw, dict) else None
     if amount is None or amount == "":
@@ -21,7 +39,27 @@ def read_available_cash(repo: Any) -> float | None:
     return round(value, 2)
 
 
+def read_cash_for(repo: Any, currency: str) -> float | None:
+    """某个币种的可用现金；未记录返回 None。"""
+    ccy = (currency or "CNY").upper()
+    if hasattr(repo, "get_cash_bucket"):
+        value = repo.get_cash_bucket(ccy)
+        if value is not None:
+            return value
+    legacy = _read_legacy_cash(repo) if ccy == "CNY" else None
+    return legacy
+
+
+def read_available_cash(repo: Any) -> float | None:
+    """兼容旧调用：返回 CNY 桶（没有桶时退回旧标量）。"""
+    return read_cash_for(repo, "CNY")
+
+
 def write_available_cash(repo: Any, amount: float | None) -> float | None:
+    """兼容旧接口：设置 CNY 桶（写一条 adjust 流水）。"""
+    if hasattr(repo, "set_cash_bucket"):
+        result = repo.set_cash_bucket("CNY", amount, note="manual set")
+        return result.get("balance_after")
     if amount is None:
         repo.set_config(HOLDINGS_CASH_KEY, {"amount": None})
         return None
@@ -30,6 +68,26 @@ def write_available_cash(repo: Any, amount: float | None) -> float | None:
         raise ValueError("可用资金不能为负")
     repo.set_config(HOLDINGS_CASH_KEY, {"amount": value})
     return value
+
+
+def cash_buckets_with_cny(
+    buckets: dict[str, float] | None,
+    rates: dict[str, float] | None,
+) -> tuple[list[dict[str, Any]], float | None]:
+    """把现金桶折成 CNY 合计。任一币种缺汇率 → 合计为 None（不按 1:1 硬算）。"""
+    if not buckets:
+        return [], None
+    rows: list[dict[str, Any]] = []
+    total = 0.0
+    convertible = True
+    for ccy, amount in sorted(buckets.items()):
+        cny = to_cny_amount(float(amount), ccy, rates)
+        if cny is None:
+            convertible = False
+        else:
+            total = round(total + cny, 2)
+        rows.append({"currency": ccy, "amount": round(float(amount), 2), "cny": cny})
+    return rows, (total if convertible else None)
 
 
 #: market → 该市场的原币币种
@@ -58,10 +116,17 @@ def to_cny_amount(
     currency: str,
     rates: dict[str, float] | None,
 ) -> float | None:
-    """原币金额 → 人民币；未拿到汇率返回 None（**不退化、不按 1:1 硬算**）。"""
+    """原币金额 → 人民币；未拿到汇率返回 None（**不退化、不按 1:1 硬算**）。
+
+    例外：CNY → CNY 是恒等变换，不需要汇率。否则汇率源一挂，**现金**也会凭空
+    变成"未知"，而人民币现金本来是完全可确定的。
+    """
+    ccy = str(currency or "CNY").upper()
+    if ccy == "CNY":
+        return round(float(amount or 0), 2)
     if rates is None:
         return None
-    rate = rates.get(str(currency or "CNY").upper())
+    rate = rates.get(ccy)
     if rate is None:
         return None
     return round(float(amount or 0) * rate, 2)
@@ -97,6 +162,7 @@ def summarize_portfolio(
     holdings: Iterable[HoldingPosition],
     *,
     available_cash: float | None = None,
+    cash_buckets: dict[str, float] | None = None,
     rates: dict[str, float] | None = None,
     fx: dict[str, Any] | None = None,
 ) -> dict:
@@ -124,7 +190,15 @@ def summarize_portfolio(
         else:
             bucket["cny"] = round(bucket["cny"] + cny, 2)
 
-    cash = None if available_cash is None else round(float(available_cash), 2)
+    # 现金：优先用多币种桶（B 方案）；退化时用单一 CNY 值（旧调用/旧数据）
+    cash_rows, cash_total_cny = cash_buckets_with_cny(cash_buckets, rates)
+    if cash_total_cny is not None:
+        cash = cash_total_cny
+    elif cash_rows:
+        # 有桶但缺汇率 → 合计未知，不能硬算
+        cash = None
+    else:
+        cash = None if available_cash is None else round(float(available_cash), 2)
     by_currency = [
         {
             "currency": b["currency"],
@@ -135,7 +209,9 @@ def summarize_portfolio(
         for b in sorted(buckets.values(), key=lambda x: -x["native"])
     ]
 
-    converted = bool(rates) and all(b["converted"] for b in buckets.values())
+    # 纯人民币组合不需要汇率：以前汇率源一挂，连 A 股组合的总资产都变"未知"
+    needs_fx = any(b["currency"] != "CNY" for b in buckets.values())
+    converted = (bool(rates) or not needs_fx) and all(b["converted"] for b in buckets.values())
     market_value_cny: float | None = None
     total_value: float | None = None
     cash_pct: float | None = None
@@ -160,6 +236,8 @@ def summarize_portfolio(
             max_weight = max(max_weight, pct)
 
     return {
+        # 现金：分币种 + 折合 CNY（缺汇率时 cny 为 None）
+        "cash_by_currency": cash_rows,
         # 折合口径（无汇率时为 None）
         "market_value": market_value_cny,
         "total_value": total_value,
