@@ -111,3 +111,30 @@ describe("AddHoldingDialog", () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
   });
 });
+
+describe("修正持仓不动现金的提示", () => {
+  it("改大数量时提示「加仓请用买入」并可一键切过去", async () => {
+    apiGet.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/stocks/search")) {
+        return { items: [{ symbol: "BTC", name: "Bitcoin", market: "CRYPTO", instrument_type: "crypto" }] };
+      }
+      if (url.includes("/context")) return { price: { last: 80000, degraded: false } };
+      if (url === "/api/holdings") return { items: [{ symbol: "BTC", quantity: 0.05 }] };
+      return {};
+    });
+
+    render(<AddHoldingDialog fx={FX} bookCny={50000} onClose={() => {}} onSaved={() => {}} />);
+    fireEvent.change(screen.getByPlaceholderText("输入代码或名称搜索…"), { target: { value: "BT" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Bitcoin/ }));
+
+    // 停用「修正持仓」，把数量从 0.05 改成 0.08（= 加仓）
+    fireEvent.click(screen.getByRole("tab", { name: "修正持仓" }));
+    fireEvent.change(await screen.findByPlaceholderText("0.08"), { target: { value: "0.08" } });
+
+    await waitFor(() => expect(screen.getByText(/修正不会动现金/)).toBeTruthy());
+    expect(screen.getByText(/加仓请用「买入」/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "切到「买入」" }));
+    expect(screen.getByRole("tab", { name: "买入" }).getAttribute("aria-selected")).toBe("true");
+  });
+});

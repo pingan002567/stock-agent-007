@@ -66,6 +66,8 @@ export function AddHoldingDialog({
   const [quantity, setQuantity] = useState("");
   const [cost, setCost] = useState("");
   const [fee, setFee] = useState("");
+  /** 该标的本轮已持有的数量（修正模式用来判断"改大/改小"） */
+  const [heldQty, setHeldQty] = useState<number | null>(null);
   const [price, setPrice] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -108,6 +110,26 @@ export function AddHoldingDialog({
     })();
     return () => { alive = false; };
   }, [picked]);
+
+  // 修正模式要提示"改数量不等于买卖"，所以先查一下当前持仓
+  useEffect(() => {
+    if (!picked || mode !== "correct") {
+      setHeldQty(null);
+      return undefined;
+    }
+    let alive = true;
+    void (async () => {
+      try {
+        const data = await apiGet<{ items?: { symbol?: string; quantity?: number }[] }>("/api/holdings");
+        if (!alive) return;
+        const found = (data.items ?? []).find((it) => String(it.symbol || "").toUpperCase() === picked.symbol.toUpperCase());
+        setHeldQty(found ? Number(found.quantity ?? 0) : 0);
+      } catch {
+        if (alive) setHeldQty(null);
+      }
+    })();
+    return () => { alive = false; };
+  }, [picked, mode]);
 
   const market = picked ? inferMarket(picked.symbol, picked.market) : "";
   const currency = market ? marketCurrency(market) : "CNY";
@@ -254,6 +276,31 @@ export function AddHoldingDialog({
                 </div>
               ) : null}
             </div>
+
+            {mode === "correct" ? (() => {
+              const next = Number(quantity);
+              if (heldQty == null || !Number.isFinite(next) || next <= 0) return null;
+              const delta = Number((next - heldQty).toFixed(6));
+              if (delta === 0) return null;
+              return (
+                <div className="holding-warn-block">
+                  <div>
+                    当前持有 <b className="num">{heldQty}</b>，修正为 <b className="num">{next}</b>
+                    （{delta > 0 ? `多 ${delta}` : `少 ${Math.abs(delta)}`}）。
+                    <b>修正不会动现金</b>：{delta > 0 ? "加仓请用「买入」" : "减仓请用「卖出」"}，
+                    这里只用于纠错（录错数量/成本）。
+                  </div>
+                  <button
+                    type="button"
+                    className="holding-warn-action"
+                    onClick={() => setMode(delta > 0 ? "buy" : "correct")}
+                    disabled={delta < 0}
+                  >
+                    {delta > 0 ? "切到「买入」" : "卖出请到持仓页操作"}
+                  </button>
+                </div>
+              );
+            })() : null}
 
             <div className="holding-preview">
               {price == null ? (
