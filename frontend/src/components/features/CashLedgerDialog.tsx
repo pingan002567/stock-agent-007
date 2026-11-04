@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CASH_REASON_LABEL, fetchCashLedger, type CashLedgerRow } from "@/api/cashLedger";
+import { CASH_REASON_LABEL, fetchCashLedger, downloadCashLedgerCsv, type CashLedgerRow } from "@/api/cashLedger";
 
 /** 资金流水：每笔买入/卖出/校准的变动与余额，用来对账。 */
 export function CashLedgerDialog({ onClose }: { onClose: () => void }) {
@@ -7,6 +7,7 @@ export function CashLedgerDialog({ onClose }: { onClose: () => void }) {
   const [cash, setCash] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -69,7 +70,20 @@ export function CashLedgerDialog({ onClose }: { onClose: () => void }) {
           </div>
         ) : null}
         <div className="holding-actions">
-          <button type="button" className="session-delete-cancel" onClick={onClose}>关闭</button>
+          <button
+            type="button"
+            className="session-delete-cancel"
+            disabled={exporting || rows.length === 0}
+            onClick={() => {
+              setExporting(true);
+              void downloadCashLedgerCsv()
+                .catch((err) => setError(err instanceof Error ? err.message : "导出失败"))
+                .finally(() => setExporting(false));
+            }}
+          >
+            {exporting ? "导出中…" : "导出 CSV"}
+          </button>
+          <button type="button" className="session-delete-confirm" onClick={onClose}>关闭</button>
         </div>
       </div>
     </div>

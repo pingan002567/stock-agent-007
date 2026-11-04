@@ -152,3 +152,43 @@ def test_calibrate_rejects_negative_and_keeps_untouched(tmp_path):
     client.post("/api/holdings/cash-calibration", json={"amounts": {"USDT": 200}})
     buckets = client.get("/api/holdings/cash-ledger").json()["cash_by_currency"]
     assert buckets["CNY"] == 1000.0 and buckets["USDT"] == 200.0
+
+
+def test_cash_ledger_csv_export(tmp_path):
+    client = make_client(tmp_path)
+    client.post("/api/holdings/clear-demo")
+    client.post("/api/holdings/cash-calibration", json={"amounts": {"CNY": 1000}, "note": "对账"})
+
+    resp = client.get("/api/holdings/cash-ledger.csv")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    text = resp.text
+    assert "created_at,currency,delta,balance_after" in text
+    assert '"CNY","1000.0","1000.0","adjust"' in text
+
+
+def test_portfolio_snapshot_tool_exposes_cash_buckets(tmp_path):
+    """模型看到的持仓快照必须带分币种现金，否则它在"没有人民币现金"时仍按总额给建议。"""
+    client = make_client(tmp_path)
+    client.post("/api/holdings/clear-demo")
+    client.post("/api/holdings/cash-calibration", json={"amounts": {"CNY": 800, "USDT": 100}})
+
+    from backend.agent_runtime.tool_bridge import WorkbenchToolBridge
+
+    bridge = WorkbenchToolBridge.__new__(WorkbenchToolBridge)  # 只测"快照带现金桶"，不装全套依赖
+    bridge.repo = client.app.state.services.repo
+    snap = bridge._get_portfolio_snapshot({})
+    cash = {row["currency"]: row["amount"] for row in snap["cash_by_currency"]}
+    assert cash["CNY"] == 800.0 and cash["USDT"] == 100.0
+
+
+def test_set_available_cash_tool_supports_currency(tmp_path):
+    client = make_client(tmp_path)
+    client.post("/api/holdings/clear-demo")
+    from backend.agent_runtime.tool_bridge import WorkbenchToolBridge
+
+    bridge = WorkbenchToolBridge.__new__(WorkbenchToolBridge)
+    bridge.repo = client.app.state.services.repo
+    bridge._set_available_cash({"amount": 250, "currency": "USDT"})
+    buckets = client.get("/api/holdings/cash-ledger").json()["cash_by_currency"]
+    assert buckets["USDT"] == 250.0

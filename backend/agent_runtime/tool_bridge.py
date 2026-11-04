@@ -31,6 +31,7 @@ from backend.stock_domain.history_tools import get_daily_history
 from backend.stock_domain.intel_tools import INTEL_DEFAULT_LIMIT, search_stock_intel
 from backend.stock_domain.portfolio_tools import (
     read_available_cash,
+    read_cash_buckets,
     summarize_portfolio,
     write_available_cash,
 )
@@ -761,7 +762,7 @@ class WorkbenchToolBridge:
                 AuthorityLevel.A3,
                 "medium",
                 True,
-                {"amount": "float?", "clear": "bool"},
+                {"amount": "float?", "currency": "str?", "clear": "bool"},
                 ["holdings_available_cash", "local_sqlite", "audit_log"],
             ),
             "remove_holding": ToolSpec(
@@ -1160,9 +1161,11 @@ class WorkbenchToolBridge:
         from backend.stock_domain import fx as fx_service
 
         payload = fx_service.get_rates()
+        # 现金是多币种桶（买入按币种扣），快照必须把桶一起给模型，
+        # 否则它在没有 CNY 现金时仍会按"总资产"给建议。
         return summarize_portfolio(
             self.repo.list_holdings(),
-            available_cash=read_available_cash(self.repo),
+            cash_buckets=read_cash_buckets(self.repo),
             rates=fx_service.rates_for_conversion(payload),
             fx=payload,
         )
@@ -1672,16 +1675,26 @@ class WorkbenchToolBridge:
         return model_to_dict(saved)
 
     def _set_available_cash(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """设置某个币种的可用现金（写 adjust 流水）。不传 currency 按 CNY。"""
+        currency = str(arguments.get("currency") or "CNY").upper()
         clear = bool(arguments.get("clear"))
+        raw = arguments.get("amount")
         if clear:
-            amount = write_available_cash(self.repo, None)
+            target: float | None = None
         else:
-            raw = arguments.get("amount")
             if raw is None:
                 raise ValueError("set_available_cash requires amount, or clear=true")
-            amount = write_available_cash(self.repo, float(raw))
-        summary = summarize_portfolio(self.repo.list_holdings(), available_cash=amount)
-        return {"available_cash": amount, "summary": summary}
+            target = float(raw)
+        if hasattr(self.repo, "set_cash_bucket"):
+            result = self.repo.set_cash_bucket(currency, target, note="agent set")
+            amount = result.get("balance_after")
+        else:
+            amount = write_available_cash(self.repo, target)
+        summary = summarize_portfolio(
+            self.repo.list_holdings(),
+            cash_buckets=read_cash_buckets(self.repo),
+        )
+        return {"currency": currency, "available_cash": amount, "summary": summary}
 
     def _remove_holding(self, arguments: dict[str, Any]) -> dict[str, Any]:
         clear_all = bool(arguments.get("clear_all"))

@@ -1,4 +1,5 @@
-import { apiGet } from "@/api/client";
+import { apiGet, apiUrl } from "@/api/client";
+import { authHeaders } from "@/lib/connection";
 
 export interface CashLedgerRow {
   ledger_id: string;
@@ -19,6 +20,21 @@ export interface CashLedgerResponse {
 
 export function fetchCashLedger(limit = 100): Promise<CashLedgerResponse> {
   return apiGet<CashLedgerResponse>(`/api/holdings/cash-ledger?limit=${limit}`);
+}
+
+/** 导出流水 CSV：用带鉴权头的 fetch 拿 blob 再触发下载（token 不进 URL）。 */
+export async function downloadCashLedgerCsv(): Promise<void> {
+  const res = await fetch(apiUrl("/api/holdings/cash-ledger.csv"), { headers: authHeaders() });
+  if (!res.ok) throw new Error(`导出失败：HTTP ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "cash-ledger.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export const CASH_REASON_LABEL: Record<string, string> = {

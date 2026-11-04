@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from backend.api.deps import get_services
 from backend.bootstrap import AppServices
@@ -326,6 +326,27 @@ def calibrate_cash(payload: CashCalibration, request: Request, services: AppServ
         "cash_by_currency": read_cash_buckets(services.repo) or {},
         "summary": _portfolio_summary(services, valued),
     }
+
+
+@router.get("/cash-ledger.csv")
+def cash_ledger_csv(limit: int = 500, services: AppServices = Depends(get_services)):
+    """资金流水导出（CSV，带 BOM 便于 Excel 直接打开）。"""
+    rows = services.repo.list_cash_ledger(limit=limit) if hasattr(services.repo, "list_cash_ledger") else []
+    header = ["created_at", "currency", "delta", "balance_after", "reason", "ref_type", "ref_id", "note"]
+    lines = [",".join(header)]
+    for row in rows:
+        values = []
+        for key in header:
+            raw = row.get(key)
+            text = "" if raw is None else str(raw)
+            values.append('"' + text.replace('"', '""') + '"')
+        lines.append(",".join(values))
+    body = "\ufeff" + "\n".join(lines) + "\n"
+    return Response(
+        content=body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="cash-ledger.csv"'},
+    )
 
 
 @router.get("/cash-ledger")
