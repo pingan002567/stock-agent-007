@@ -113,10 +113,8 @@ export function AddHoldingDialog({
 
   // 修正模式要提示"改数量不等于买卖"，所以先查一下当前持仓
   useEffect(() => {
-    if (!picked || mode !== "correct") {
-      setHeldQty(null);
-      return undefined;
-    }
+    // 不要在 effect 体内同步 setState（会触发级联渲染）；只在异步回调里写
+    if (!picked || mode !== "correct") return undefined;
     let alive = true;
     void (async () => {
       try {
