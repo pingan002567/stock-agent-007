@@ -454,7 +454,7 @@ function InvestorProfileCard({
     <div className="settings-stack">
       <SectionCard
         title="投资画像"
-        description="盘前机会发现会按风险承受等级筛选全市场候选；自述会原样注入 AI，用于细化偏好。"
+        description="每日机会发现会按风险承受等级筛选全市场候选；自述会原样注入 AI，用于细化偏好。"
       >
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
           {INVESTOR_RISK_OPTIONS.map((opt) => (

@@ -22,7 +22,7 @@ def _dt(s: str) -> datetime:
 
 def test_infer_ops_session_and_cap_duty_authority():
     assert infer_ops_session({"task_id": "sched_premarket", "name": "盘前简报"}) == "premarket"
-    assert infer_ops_session({"task_id": "sched_premarket_discovery", "name": "盘前机会发现"}) == "discovery"
+    assert infer_ops_session({"task_id": "sched_premarket_discovery", "name": "每日机会发现"}) == "discovery"
     assert infer_ops_session({"task_id": "sched_intraday", "name": "盘中报告"}) == "intraday"
     assert infer_ops_session({"task_id": "x", "name": "午间复盘"}) == "intraday"
     assert infer_ops_session({"task_id": "x", "name": "收盘复评"}) == "close"
@@ -65,7 +65,8 @@ def test_scheduled_tasks_api_roundtrip(tmp_path, monkeypatch):
     intraday = next(t for t in listed if t["task_id"] == "sched_intraday")
     close = next(t for t in listed if t["task_id"] == "sched_close")
     weekly = next(t for t in listed if t["task_id"] == "sched_weekly_review")
-    assert discovery["enabled"] is True and discovery["schedule"] == "daily@08:20"
+    assert discovery["enabled"] is True and discovery["schedule"] == "daily@18:00"
+    assert discovery["name"] == "每日机会发现"
     assert premarket["enabled"] is True and premarket["next_run_at"]
     assert intraday["enabled"] is True and intraday["schedule"] == "daily@11:45"
     assert "下午开盘" in intraday["prompt"]
@@ -189,7 +190,7 @@ def test_uses_cn_session_calendar_only_for_duty_or_explicit_cn():
     assert uses_cn_session_calendar({"task_id": "custom", "calendar": "CN"}) is True
     assert uses_cn_session_calendar({
         "task_id": "sched_premarket_discovery",
-        "name": "盘前机会发现",
+        "name": "每日机会发现",
         "calendar": "CN",
     }) is False
 
@@ -218,8 +219,8 @@ def test_next_duty_run_skips_weekend_and_cn_holiday(monkeypatch):
     discovery = {
         "task_id": "sched_premarket_discovery",
         "calendar": "CN",
-        "schedule": "daily@08:20",
-        "name": "盘前机会发现",
+        "schedule": "daily@18:00",
+        "name": "每日机会发现",
     }
 
     # 周五收盘后 → 跳过周末，落到下周一
@@ -229,8 +230,8 @@ def test_next_duty_run_skips_weekend_and_cn_holiday(monkeypatch):
     # 周度周日不跟 A 股休市
     assert next_duty_run(weekly, _dt("2026-10-03T10:00")) == _dt("2026-10-04T17:00")
     # 机会发现周末、节假日都不顺延
-    assert next_duty_run(discovery, _dt("2026-07-17T16:00")) == _dt("2026-07-18T08:20")
-    assert next_duty_run(discovery, _dt("2026-09-30T16:00")) == _dt("2026-10-01T08:20")
+    assert next_duty_run(discovery, _dt("2026-07-17T16:00")) == _dt("2026-07-17T18:00")
+    assert next_duty_run(discovery, _dt("2026-09-30T16:00")) == _dt("2026-09-30T18:00")
 
     assert skip_reason_for(close, _dt("2026-07-18T10:00")) == "休市"  # 周六
     assert skip_reason_for(close, _dt("2026-10-01T10:00")) == "休市"
@@ -389,7 +390,7 @@ def test_legacy_default_prompts_upgraded_on_list(tmp_path):
     assert listed["sched_weekly_review"]["prompt"] == seed["sched_weekly_review"]["prompt"]
     assert listed["sched_close"]["prompt"] == "我自己改过的收盘文案"
     assert "集合竞价前" in listed["sched_premarket"]["prompt"]
-    assert "不重复 08:20" in listed["sched_premarket"]["prompt"]
+    assert "不重复前一日 18:00" in listed["sched_premarket"]["prompt"]
     # 数据健康口径已收敛到统一四段契约（preamble 注入），prompt 只引用四段
     from backend.app_services.scheduler_service import DUTY_OUTPUT_CONTRACT
 
@@ -408,7 +409,7 @@ def test_structured_default_prompts_upgrade_data_health_rule(tmp_path):
 
     old_premarket = (
         "【任务】今日盘前简报（A股交易日 08:30，集合竞价前）。只做自选/持仓+隔夜要闻，"
-        "不重复 08:20 机会发现已述的全市场机会清单。\n"
+        "不重复前一日 18:00「每日机会发现」已述的全市场机会清单。\n"
         "【取数】自选/持仓/盯盘优先本地缓存；隔夜要闻与情报窗口＝上一交易日收盘后至今。\n"
         "【输出】≤600 字\n"
         "1. 隔夜要闻：≤5 条；每条含来源与对自选/持仓影响（利好/利空/中性）。\n"
@@ -482,3 +483,40 @@ def test_discovery_run_persists_session_and_overview_card(tmp_path):
     assert overview["latest_discovery_briefing"]["session"] == "discovery"
     # 仅有 discovery 时，值班简报槽应为空（互不抢占）
     assert overview.get("latest_ops_briefing") is None
+
+
+def test_legacy_premarket_discovery_is_migrated_to_evening(tmp_path):
+    """老安装里仍是旧默认的「盘前机会发现 08:20」要自动迁移成「每日机会发现 18:00」，
+    但用户改过的名字/时间不能被覆盖。"""
+    from backend.app_services.scheduler_service import CONFIG_KEY
+    from tests.test_api import make_client
+
+    client = make_client(tmp_path)
+    repo = client.app.state.services.repo
+    items = client.get("/api/scheduled-tasks").json()["items"]
+
+    legacy_prompt = "【任务】盘前机会发现（每日 08:20，含周末与节假日）。范围＝全市场，不限于自选/持仓。"
+    seeded = []
+    for item in items:
+        row = dict(item)
+        row.pop("next_run_at", None)
+        row.pop("skip_reason", None)
+        if row["task_id"] == "sched_premarket_discovery":
+            row.update({
+                "name": "盘前机会发现",
+                "schedule": "daily@08:20",
+                "prompt": legacy_prompt,
+            })
+        if row["task_id"] == "sched_intraday":
+            # 用户自己改过的任务，不能被迁移逻辑覆盖
+            row["name"] = "我的盘中自定义"
+        seeded.append(row)
+    repo.set_config(CONFIG_KEY, {"items": seeded})
+
+    listed = {t["task_id"]: t for t in client.get("/api/scheduled-tasks").json()["items"]}
+    discovery = listed["sched_premarket_discovery"]
+    assert discovery["name"] == "每日机会发现"
+    assert discovery["schedule"] == "daily@18:00"
+    assert "每日 18:00" in discovery["prompt"]
+    # 用户改过的名字保持不变
+    assert listed["sched_intraday"]["name"] == "我的盘中自定义"
