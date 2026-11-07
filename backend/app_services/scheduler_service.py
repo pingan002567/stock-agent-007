@@ -469,6 +469,10 @@ class SchedulerService:
                 if is_legacy and seed.get("prompt"):
                     item["prompt"] = seed["prompt"]
                     dirty = True
+                # 盘前简报里"不重复 08:20 机会发现"的旧指向，同步改成新任务名
+                if tid == "sched_premarket" and "不重复 08:20 机会发现已述" in prompt_text:
+                    item["prompt"] = seed["prompt"]
+                    dirty = True
                 if is_discovery_task(item):
                     if item.get("calendar"):
                         item.pop("calendar", None)

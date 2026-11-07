@@ -520,3 +520,28 @@ def test_legacy_premarket_discovery_is_migrated_to_evening(tmp_path):
     assert "每日 18:00" in discovery["prompt"]
     # 用户改过的名字保持不变
     assert listed["sched_intraday"]["name"] == "我的盘中自定义"
+
+
+def test_premarket_brief_prompt_reference_migrated(tmp_path):
+    """盘前简报里"不重复 08:20 机会发现"的旧指向要同步成新任务名。"""
+    from backend.app_services.scheduler_service import CONFIG_KEY
+    from tests.test_api import make_client
+
+    client = make_client(tmp_path)
+    repo = client.app.state.services.repo
+    items = client.get("/api/scheduled-tasks").json()["items"]
+    seeded = []
+    for item in items:
+        row = dict(item)
+        row.pop("next_run_at", None)
+        row.pop("skip_reason", None)
+        if row["task_id"] == "sched_premarket":
+            row["prompt"] = (
+                "【任务】今日盘前简报（A股交易日 08:30，集合竞价前）。只做自选/持仓+隔夜要闻，"
+                "不重复 08:20 机会发现已述的全市场机会清单。\n【输出】固定四段（见 preamble 的四段契约）。"
+            )
+        seeded.append(row)
+    repo.set_config(CONFIG_KEY, {"items": seeded})
+
+    listed = {t["task_id"]: t for t in client.get("/api/scheduled-tasks").json()["items"]}
+    assert "不重复前一日 18:00" in listed["sched_premarket"]["prompt"]
