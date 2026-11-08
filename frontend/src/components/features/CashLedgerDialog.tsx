@@ -57,7 +57,7 @@ export function CashLedgerDialog({ onClose }: { onClose: () => void }) {
                   <tr key={row.ledger_id}>
                     <td className="num">{row.created_at.slice(5, 16).replace("T", " ")}</td>
                     <td>{row.currency}</td>
-                    <td className="num" style={{ color: row.delta < 0 ? "var(--red)" : "var(--green)" }}>
+                    <td className="num" style={{ color: row.delta < 0 ? "var(--loss)" : "var(--gain)" }}>
                       {row.delta > 0 ? "+" : ""}{row.delta.toFixed(2)}
                     </td>
                     <td className="num">{row.balance_after.toFixed(2)}</td>
