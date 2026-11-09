@@ -1,3 +1,4 @@
+import { ModalPortal } from "@/components/ui/ModalPortal";
 import { useState } from "react";
 import { executeHoldingTrade, parseTradeRejection, tradeRejectionMessage } from "@/api/cash";
 import { currencyMoney, currencySign } from "@/utils/market";
@@ -52,6 +53,7 @@ export function SellHoldingDialog({
   };
 
   return (
+    <ModalPortal>
     <div className="session-delete-modal" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="holding-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="holding-dialog-title">卖出 {name ?? symbol}</div>
@@ -104,5 +106,6 @@ export function SellHoldingDialog({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

@@ -1,3 +1,4 @@
+import { ModalPortal } from "@/components/ui/ModalPortal";
 import { useState } from "react";
 import { apiPost } from "@/api/client";
 
@@ -53,6 +54,7 @@ export function CashCalibrationDialog({
   };
 
   return (
+    <ModalPortal>
     <div className="session-delete-modal" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="holding-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="holding-dialog-title">校准可用现金</div>
@@ -84,5 +86,6 @@ export function CashCalibrationDialog({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

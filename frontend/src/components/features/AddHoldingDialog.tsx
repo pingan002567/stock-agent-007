@@ -1,3 +1,4 @@
+import { ModalPortal } from "@/components/ui/ModalPortal";
 import { useEffect, useRef, useState } from "react";
 import { apiGet, apiPost } from "@/api/client";
 import { executeHoldingTrade, parseTradeRejection, tradeRejectionMessage } from "@/api/cash";
@@ -178,6 +179,7 @@ export function AddHoldingDialog({
   const canSubmit = Boolean(picked) && Number(quantity) > 0 && fillPriceOk && !busy;
 
   return (
+    <ModalPortal>
     <div className="session-delete-modal" role="dialog" aria-modal="true" aria-labelledby="add-holding-title">
       <div className="holding-dialog">
         <div className="holding-dialog-title" id="add-holding-title">
@@ -348,5 +350,6 @@ export function AddHoldingDialog({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

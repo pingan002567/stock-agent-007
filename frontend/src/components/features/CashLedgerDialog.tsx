@@ -1,3 +1,4 @@
+import { ModalPortal } from "@/components/ui/ModalPortal";
 import { useEffect, useState } from "react";
 import { CASH_REASON_LABEL, fetchCashLedger, downloadCashLedgerCsv, type CashLedgerRow } from "@/api/cashLedger";
 
@@ -27,6 +28,7 @@ export function CashLedgerDialog({ onClose }: { onClose: () => void }) {
   }, []);
 
   return (
+    <ModalPortal>
     <div className="session-delete-modal" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="holding-dialog cash-ledger-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="holding-dialog-title">资金流水</div>
@@ -87,5 +89,6 @@ export function CashLedgerDialog({ onClose }: { onClose: () => void }) {
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

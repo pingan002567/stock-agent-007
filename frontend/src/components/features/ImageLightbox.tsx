@@ -1,3 +1,4 @@
+import { ModalPortal } from "@/components/ui/ModalPortal";
 import { useCallback, useEffect } from "react";
 
 export interface LightboxImage {
@@ -43,6 +44,7 @@ export function ImageLightbox({
   const image = images[current];
 
   return (
+    <ModalPortal>
     <div className="img-lightbox" role="dialog" aria-label={`预览 ${image.name}`} onClick={onClose}>
       {total > 1 && (
         <button
@@ -85,5 +87,6 @@ export function ImageLightbox({
         </button>
       )}
     </div>
+    </ModalPortal>
   );
 }

@@ -3901,11 +3901,14 @@ html.resizing { cursor: col-resize; user-select: none; }
 
 /* ===== animations ===== */
 @keyframes fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+/* 页面级入场用**纯透明度**：fade-in 结束仍残留 transform，会把内部 position:fixed
+   的弹窗关进页面容器（弹窗错位/遮罩只盖半个屏）。 */
+@keyframes fade-in-plain { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slide-up { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
 .fade-in { animation: fade-in 0.3s ease both; }
 .slide-up { animation: slide-up 0.4s ease both; }
-.content > * { animation: fade-in 0.3s ease both; }
+.content > * { animation: fade-in-plain 0.3s ease both; }
 
 .skeleton { 
   background: var(--skeleton); 
