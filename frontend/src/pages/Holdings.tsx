@@ -176,7 +176,7 @@ function AvailableCashValue({
 
 export default function Holdings() {
   const { showToast } = useToast();
-  const { appDataCache, globalLoading, setStock, setCurrentScreen } = useAppState();
+  const { appDataCache, globalLoading, setStock, setCurrentScreen, lastRefreshTime } = useAppState();
   const openStock = (symbol: string) => {
     setStock(symbol);
     setCurrentScreen("research");
@@ -226,6 +226,18 @@ export default function Holdings() {
       setLoading(false);
     }
   };
+
+  // 全局轮询刷新 cache 后，页面要跟着重读，否则持仓/现价停在进页面那一刻
+  useEffect(() => {
+    const cache = appDataCache.current;
+    if (cache.holdings) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setHoldings(cache.holdings as HoldingsResponse);
+    }
+    if (cache.holdingsRisk) {
+      setRisk(cache.holdingsRisk as HoldingsRiskResponse);
+    }
+  }, [lastRefreshTime, appDataCache]);
 
   // === Cache-first + always refresh ===
   useEffect(() => {

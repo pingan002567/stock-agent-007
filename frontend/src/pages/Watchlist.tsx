@@ -29,7 +29,7 @@ interface WatchlistItem {
 interface WatchlistGroup { name: string; color: string; sort_order: number }
 
 export default function Watchlist() {
-  const { setStock, setCurrentScreen, appDataCache, globalLoading } = useAppState();
+  const { setStock, setCurrentScreen, appDataCache, globalLoading, lastRefreshTime } = useAppState();
   const openStock = (symbol: string) => {
     setStock(symbol);
     setCurrentScreen("research");
@@ -55,6 +55,30 @@ export default function Watchlist() {
     // eslint-disable-next-line react-hooks/immutability
     void loadAll();
   }, [globalLoading, appDataCache]);
+
+  /** 全局轮询（设置里的「刷新频率」，默认 60s）已经在刷 cache.watchlist，
+   *  但页面只在挂载时读一次，价格就停在进页面那一刻。这里跟着 lastRefreshTime 重读。
+   *  不发新请求：直接吃全局轮询的结果。 */
+  useEffect(() => {
+    const cached = appDataCache.current.watchlist;
+    if (cached) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setItems(cached as WatchlistItem[]);
+    }
+  }, [lastRefreshTime, appDataCache]);
+
+  /** 切回窗口时立刻拉一次（不缓存），不用等下一个轮询周期 */
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void loadAll();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
 
 
   const filteredItems = useMemo(() => {
@@ -121,8 +145,10 @@ export default function Watchlist() {
             { label: "今日上涨", value: items.filter(i => (i.price?.change_pct ?? 0) > 0).length, tone: "up" },
             { label: "今日下跌", value: items.filter(i => (i.price?.change_pct ?? 0) < 0).length, tone: "down" },
             { label: "盯盘开启", value: items.filter(i => i.monitored).length },
+            { label: "更新于", value: lastRefreshTime ? new Date(lastRefreshTime).toLocaleTimeString("zh-CN", { hour12: false }) : "—" },
           ]}
           actions={<>
+            <button className="small" onClick={() => void loadAll()} type="button">刷新行情</button>
             <AskAiButton prompt="点评我的自选池:近期哪些标的值得重点关注?" />
           </>}
         />
