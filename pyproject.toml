@@ -1,3 +1,13 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# 显式限定打包范围：否则 setuptools 的 flat-layout 自动发现会把
+# data/、log/、deploy/、frontend/ 也当成顶层包，
+# 一旦这些目录存在（安装过 / 跑过应用），`pip install -e .` 就会直接失败。
+[tool.setuptools.packages.find]
+include = ["backend*"]
+
 [project]
 name = "stock-agent-001"
 version = "0.1.0"

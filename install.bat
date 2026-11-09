@@ -143,7 +143,7 @@ if errorlevel 1 (
 )
 
 :: 安装项目依赖
-uv pip install -e ".[akshare,yfinance]"
+uv pip install -e ".[akshare]"
 if errorlevel 1 (
     echo [✗] 安装项目依赖失败
     echo [HINT] 请检查网络连接后重试
