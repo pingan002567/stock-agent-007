@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>流式思维链窗口 · 固定高度 + 自动跟随最新</title>
+<style>
+  :root {
+    --bg: #ffffff; --canvas: #f6f7f8; --paper: #fbfcfd;
+    --ink: #1f2328; --ink-2: #383c42; --muted: #6e7781; --faint: #8c959f;
+    --line: #eaeef2; --line-2: #dfe3e8;
+    --blue: #0969da; --green: #1a7f37; --red: #cf222e; --amber: #9a6700;
+    --hl: #f6f8fa;
+    --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    /* 涨跌配色沿用 A 股：红涨绿跌（本页无盈亏，仅保留 token 说明一致性） */
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--canvas); color: var(--ink);
+    font: 14px/1.72 -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+    padding: 40px 48px 90px;
+  }
+  .doc { max-width: 1080px; }
+  h1 { font-size: 21px; font-weight: 600; letter-spacing: -.01em; }
+  .sub { color: var(--muted); margin-top: 7px; font-size: 13px; }
+  code { font-family: var(--mono); font-size: 12px; background: var(--hl); padding: 1px 5px; border-radius: 4px; }
+
+  .note {
+    margin: 20px 0 34px; padding: 13px 15px; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 7px; font-size: 13px; color: var(--ink-2);
+    line-height: 1.9;
+  }
+  .note b { color: var(--ink); }
+  .note ol { margin: 8px 0 0 20px; }
+  .note li { margin: 3px 0; }
+
+  /* ── 控制条 ── */
+  .bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    padding: 10px 14px; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 8px; margin-bottom: 22px; position: sticky; top: 12px; z-index: 5;
+    box-shadow: 0 1px 2px rgba(31,35,40,.04);
+  }
+  .bar .sp { flex: 1; }
+  button {
+    font: inherit; font-size: 12.5px; padding: 5px 11px; border-radius: 6px;
+    border: 1px solid var(--line-2); background: var(--bg); color: var(--ink-2);
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--blue); color: var(--blue); }
+  button.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
+  button.primary:hover { background: #000; color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+  label.opt { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--muted); }
+  select { font: inherit; font-size: 12.5px; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line-2); background: #fff; color: var(--ink-2); }
+
+  /* ── 对比两栏 ── */
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+  .col-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+  .col-head b { font-size: 14px; }
+  .col-head span { font-size: 12px; color: var(--muted); }
+  .badge-bad { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #ffebe9; color: var(--red); border: 1px solid #ffd7d3; }
+  .badge-good { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #dafbe1; color: var(--green); border: 1px solid #c3f0cd; }
+
+  /* ── 气泡（与真实 UI 近似的容器） ── */
+  .bubble {
+    background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px 14px; font-size: 13px;
+  }
+  .bubble-head {
+    display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
+    color: var(--muted); margin-bottom: 8px;
+  }
+  .disc {
+    width: 16px; height: 16px; border-radius: 50%; background: var(--hl);
+    border: 1px solid var(--line-2); display: grid; place-items: center;
+    font-size: 9px; color: var(--blue);
+  }
+  .phase { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 500; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--blue); box-shadow: 0 0 8px var(--blue); }
+  .dot.pulse { animation: pulse 1.1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+  /* 现状：无高度限制 —— 用虚线框标出它会一直变长 */
+  .legacy {
+    border: 1px dashed #ffb3ad; border-radius: 10px; padding: 6px 10px;
+    background: #fff8f7; min-height: 120px; max-height: none;
+  }
+  .legacy .steps { display: flex; flex-direction: column; }
+
+  /* 新方案：固定高度 + 内部滚动 */
+  .thought {
+    border: 1px solid var(--line-2); border-radius: 10px; background: var(--paper);
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  .thought-head {
+    display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+    border-bottom: 1px solid var(--line); background: #fff; flex: none;
+    font-size: 12px; color: var(--ink-2); cursor: pointer; user-select: none;
+  }
+  .thought-head .chev { color: var(--faint); font-size: 9px; transition: transform .15s; }
+  .thought-head.collapsed .chev { transform: rotate(-90deg); }
+  .thought-head .t { font-weight: 600; }
+  .thought-head .meta { color: var(--muted); font-size: 11.5px; }
+  .thought-head .sp { flex: 1; }
+  .thought-head .live {
+    font-size: 10.5px; color: var(--blue); display: inline-flex; align-items: center; gap: 4px;
+  }
+  .thought-body {
+    position: relative;
+    height: 220px;              /* ← 固定高度，原型可切换 */
+    overflow: hidden;
+  }
+  .thought-scroll {
+    height: 100%; overflow-y: auto; overscroll-behavior: contain;
+    padding: 8px 11px 12px; scroll-behavior: auto;  /* 跟随必须瞬时，smooth 会触发一串中间 scroll 事件 */
+  }
+  .thought.collapsed .thought-body { display: none; }
+  .thought-scroll::-webkit-scrollbar { width: 8px; }
+  .thought-scroll::-webkit-scrollbar-thumb { background: #d8dde3; border-radius: 8px; }
+
+  /* 步骤流 */
+  .steps { position: relative; display: flex; flex-direction: column; }
+  .steps::before {
+    content: ""; position: absolute; left: 7px; top: 8px; bottom: 8px; width: 1px; background: var(--line-2);
+  }
+  .step { position: relative; display: flex; gap: 8px; padding: 4px 0; font-size: 12.5px; }
+  .step .ico {
+    flex: none; width: 15px; height: 15px; margin-top: 2px; border-radius: 50%;
+    background: #fff; border: 1px solid var(--line-2); display: grid; place-items: center;
+    font-size: 8.5px; color: var(--muted); font-family: var(--mono); z-index: 1;
+  }
+  .step.tool .ico { color: var(--amber); border-color: #f3dfae; background: #fffaf0; }
+  .step.ok .ico { color: var(--green); border-color: #c3f0cd; background: #f3fdf6; }
+  .step.run .ico { color: var(--blue); border-color: #cfe3ff; background: #f2f8ff; animation: pulse 1.2s infinite; }
+  .step .main { flex: 1; min-width: 0; }
+  .step .row { display: flex; align-items: center; gap: 7px; min-width: 0; }
+  .step .lbl { font-weight: 500; color: var(--ink-2); }
+  .step .param { font-family: var(--mono); font-size: 11px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .step .txt { color: var(--ink-2); }
+  .step .res { color: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+  .step.fresh { animation: slidein .26s ease both; }
+  @keyframes slidein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  /* 未读提示（用户上滚后新步骤到来） */
+  .jump {
+    position: absolute; left: 0; right: 0; bottom: 6px;
+    display: flex; justify-content: center; pointer-events: none;
+  }
+  .jump button {
+    pointer-events: auto; font-size: 11.5px; padding: 3px 10px; border-radius: 999px;
+    background: var(--ink); color: #fff; border: none; box-shadow: 0 2px 8px rgba(31,35,40,.18);
+    opacity: 0; transform: translateY(6px); transition: opacity .16s, transform .16s;
+  }
+  .jump.show button { opacity: 1; transform: none; }
+
+  /* 答案区（说明窗口不会把答案顶走） */
+  .answer { margin-top: 10px; color: var(--ink-2); font-size: 13px; }
+  .answer .caret { display: inline-block; width: 7px; height: 14px; background: var(--ink-2); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .spec { margin-top: 40px; }
+  .spec h2 { font-size: 15px; margin-bottom: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; background: #fff; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; padding: 8px 11px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--hl); font-weight: 600; color: var(--ink-2); font-size: 12px; }
+  tr:last-child td { border-bottom: none; }
+  .k { font-family: var(--mono); font-size: 11.5px; color: var(--ink); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .thought-body { scroll-behavior: auto; }
+    .step.fresh { animation: none; }
+    .dot.pulse, .step.run .ico, .answer .caret { animation: none; }
+  }
+</style>
+</head>
+<body>
+<div class="doc">
+  <h1>流式思维链窗口：固定高度 + 永远停在最新一步</h1>
+  <div class="sub">原型 · 对应 <code>CopilotStreamingMessage</code> 里的 <code>ThoughtTimeline</code> · 只改展示层，不动事件流</div>
+
+  <div class="note">
+    <b>要解决的问题</b>
+    <ol>
+      <li>现在 <code>.thought-timeline</code> 没有高度限制，步数一多气泡被无限拉长，答案被顶出视野</li>
+      <li>新步骤进来时，最新那条不保证可见（要靠整页滚动去追）</li>
+      <li>用户想回头看上文时，页面又被自动滚动抢走位置</li>
+    </ol>
+    <b>方案</b>：给思维链一个<strong>固定高度的内层窗口</strong>（默认 220px），新步骤进来时<strong>自动贴底</strong>；
+    用户一旦往上滚就<strong>暂停自动跟随</strong>，改用一个「N 条新思考 · 回到底部」的胶囊，点它再恢复。
+  </div>
+
+  <div class="bar">
+    <button class="primary" id="btn-play">▶ 开始流式</button>
+    <button id="btn-step">+1 步</button>
+    <button id="btn-done">结束本轮</button>
+    <button id="btn-reset">重置</button>
+    <button id="btn-scroll">模拟用户上滚</button>
+    <span class="sp"></span>
+    <label class="opt">速度
+      <select id="speed">
+        <option value="1400">慢（1.4s/步）</option>
+        <option value="700" selected>中（0.7s/步）</option>
+        <option value="260">快（0.26s/步）</option>
+      </select>
+    </label>
+    <label class="opt">窗口高度
+      <select id="height">
+        <option value="160">160px</option>
+        <option value="220" selected>220px</option>
+        <option value="300">300px</option>
+        <option value="9999">不限（现状）</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="grid">
+    <!-- 左：现状 -->
+    <div>
+      <div class="col-head">
+        <b>现状</b><span>无高度限制，随步数无限变长</span><span class="badge-bad">会顶走答案</span>
+      </div>
+      <div class="bubble">
+        <div class="bubble-head">
+          <span class="disc">✦</span> AI Copilot
+          <span class="phase"><span class="dot pulse" id="legacy-dot"></span>推理中</span>
+        </div>
+        <div class="legacy"><div class="steps" id="legacy-steps"></div></div>
+        <div class="answer">答案会从这里开始写，但被上面的思维链一路往下顶…</div>
+      </div>
+    </div>
+
+    <!-- 右：新方案 -->
+    <div>
+      <div class="col-head">
+        <b>方案</b><span>固定窗口 + 自动跟随最新</span><span class="badge-good">答案位置稳定</span>
+      </div>
+      <div class="bubble">
+        <div class="bubble-head">
+          <span class="disc">✦</span> AI Copilot
+          <span class="phase"><span class="dot pulse" id="new-dot"></span>推理中</span>
+        </div>
+
+        <div class="thought" id="thought">
+          <div class="thought-head" id="thought-head">
+            <span class="chev">▾</span>
+            <span class="t">思考过程</span>
+            <span class="meta" id="thought-meta">0 步</span>
+            <span class="sp"></span>
+            <span class="live" id="thought-live"><span class="dot pulse"></span>跟随最新</span>
+          </div>
+          <div class="thought-body" id="thought-body">
+            <div class="thought-scroll" id="thought-scroll">
+              <div class="steps" id="new-steps"></div>
+            </div>
+            <div class="jump" id="jump"><button id="jump-btn">↓ 3 条新思考</button></div>
+          </div>
+        </div>
+
+        <div class="answer" id="answer">正在生成结论…<span class="caret"></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="spec">
+    <h2>落地要点（给实现用的清单）</h2>
+    <table>
+      <thead><tr><th style="width:180px">项</th><th>做法</th></tr></thead>
+      <tbody>
+        <tr><td class="k">.thought-body</td><td><code>height: 220px; overflow-y: auto; overscroll-behavior: contain</code>（不用 <code>max-height</code>，避免"内容少时窗口塌下去"造成跳动）</td></tr>
+        <tr><td class="k">跟随判定</td><td>距底 ≤ 24px 视为"在底部"；<code>scroll</code> 事件里实时更新，不由定时器轮询</td></tr>
+        <tr><td class="k">新步骤处理</td><td>贴底状态 → 直接 <code>scrollTop = scrollHeight</code>；非贴底 → 只累加未读数并显示胶囊</td></tr>
+        <tr><td class="k">胶囊</td><td>「↓ N 条新思考」，点击后滚到底并把未读清零、恢复跟随</td></tr>
+        <tr><td class="k">折叠状态</td><td>头部可折叠；折叠期间不滚（省一次 layout），展开时一次贴底</td></tr>
+        <tr><td class="k">结束本轮</td><td>停止跟随动画，头部变为「已完成 · N 步 · 用时 1:42」，窗口保持原位不跳</td></tr>
+        <tr><td class="k">动效</td><td>新步骤 <code>slidein 260ms</code>；<code>prefers-reduced-motion</code> 下全部关闭</td></tr>
+        <tr><td class="k">移动端</td><td>窗口高度降到 160px，胶囊固定在窗口底部内缘</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+(() => {
+  const CATALOG = [
+    { t: "reason", text: "先确认用户问的是哪只票，再看今天有没有已有结论可以复用。" },
+    { t: "tool", lbl: "读取持仓", param: "get_portfolio_snapshot()", res: "3 只 · 现金 CNY 12,000" },
+    { t: "tool", lbl: "拉取行情", param: "get_stock_context(000963)", res: "27.72 · +1.68%" },
+    { t: "reason", text: "华东医药已经接近止盈位，但今天没有新的公告驱动，先不追加。" },
+    { t: "tool", lbl: "检索情报", param: "search_stock_intel(000963)", res: "3 条 · 中性 2 / 利空 1" },
+    { t: "tool", lbl: "子代理 · 行业对比", param: "sector-rotation-digest", res: "化学制药 +0.8%" },
+    { t: "reason", text: "结论的骨架有了：不追高、维持现有仓位、等回踩。先写数据健康。" },
+    { t: "tool", lbl: "读现金", param: "get_portfolio_snapshot().cash", res: "CNY 2,962.53 / USDT 已清" },
+    { t: "reason", text: "上次说的 12,000 已校准成 2,962.53，动作描述要按新口径改。" },
+    { t: "tool", lbl: "校验参数", param: "evaluate_policy_risk()", res: "无新增风险" },
+    { t: "reason", text: "把「最多 1 手」写进结论，避免用户误以为可以加两只。" },
+    { t: "tool", lbl: "生成草稿", param: "generate_draft_order(000963)", res: "已生成 · 待确认" },
+  ];
+
+  const legacySteps = document.getElementById("legacy-steps");
+  const newSteps = document.getElementById("new-steps");
+  const body = document.getElementById("thought-scroll");
+  const meta = document.getElementById("thought-meta");
+  const live = document.getElementById("thought-live");
+  const jump = document.getElementById("jump");
+  const jumpBtn = document.getElementById("jump-btn");
+  const answer = document.getElementById("answer");
+  const thought = document.getElementById("thought");
+  const head = document.getElementById("thought-head");
+  const btnPlay = document.getElementById("btn-play");
+  const btnStep = document.getElementById("btn-step");
+  const btnDone = document.getElementById("btn-done");
+  const btnReset = document.getElementById("btn-reset");
+  const speedSel = document.getElementById("speed");
+  const heightSel = document.getElementById("height");
+
+  let index = 0, timer = null, playing = false, follow = true, unread = 0, startedAt = 0;
+  let suppressUntil = 0;        // 程序化滚动（含浏览器夹紧）期间忽略 scroll 事件，别当成"用户上滚"
+  const NEAR = 24;
+
+  const atBottom = () => body.scrollHeight - body.scrollTop - body.clientHeight <= NEAR;
+
+  function stepHtml(item, fresh) {
+    const cls = item.t === "tool" ? (item.res ? "step ok" : "step tool") : "step";
+    const ico = item.t === "tool" ? (item.res ? "✓" : "…") : "·";
+    const main = item.t === "tool"
+      ? `<div class="row"><span class="lbl">${item.lbl}</span><span class="param">${item.param}</span></div>
+         ${item.res ? `<div class="res">→ ${item.res}</div>` : ""}`
+      : `<div class="row"><span class="txt">${item.text}</span></div>`;
+    const el = document.createElement("div");
+    el.className = `${cls}${fresh ? " fresh" : ""}`;
+    el.innerHTML = `<span class="ico">${ico}</span><div class="main">${main}</div>`;
+    return el;
+  }
+
+  function push(item) {
+    // 左侧"现状"：无限增长
+    legacySteps.appendChild(stepHtml(item, true));
+    // 右侧"方案"：固定窗口
+    newSteps.appendChild(stepHtml(item, true));
+
+    const total = newSteps.children.length;
+    meta.textContent = `${total} 步`;
+
+    if (follow) {
+      suppressUntil = performance.now() + 250;
+      body.scrollTop = body.scrollHeight;
+    } else {
+      unread += 1;
+      jump.classList.add("show");
+      jumpBtn.textContent = `↓ ${unread} 条新思考`;
+    }
+  }
+
+  function nextItem() {
+    const item = CATALOG[index % CATALOG.length];
+    index += 1;
+    return item;
+  }
+
+  function tick() {
+    push(nextItem());
+    if (index >= CATALOG.length) stopStreaming(true);
+  }
+
+  function startStreaming() {
+    if (playing) return;
+    playing = true;
+    startedAt = Date.now();
+    btnPlay.textContent = "⏸ 暂停";
+    live.innerHTML = '<span class="dot pulse"></span>跟随最新';
+    clearInterval(timer);
+    timer = setInterval(tick, Number(speedSel.value));
+    tick();
+  }
+
+  function pauseStreaming() {
+    playing = false;
+    clearInterval(timer);
+    timer = null;
+    btnPlay.textContent = "▶ 继续";
+  }
+
+  function stopStreaming(done) {
+    pauseStreaming();
+    btnPlay.textContent = "▶ 开始流式";
+    if (done) {
+      live.textContent = "已完成";
+      meta.textContent = `${newSteps.children.length} 步 · 用时 1:42`;
+      answer.innerHTML = "结论：不追高，维持现有仓位，等回踩再谈。<span class='caret'></span>";
+    }
+  }
+
+  function reset() {
+    pauseStreaming();
+    index = 0; unread = 0; follow = true;
+    legacySteps.innerHTML = "";
+    newSteps.innerHTML = "";
+    meta.textContent = "0 步";
+    live.innerHTML = '<span class="dot pulse"></span>跟随最新';
+    answer.innerHTML = "正在生成结论…<span class='caret'></span>";
+    jump.classList.remove("show");
+    btnPlay.textContent = "▶ 开始流式";
+    body.scrollTop = 0;
+  }
+
+  // 用户上滚 → 暂停跟随；回到底部 → 自动恢复
+  body.addEventListener("scroll", () => {
+    if (performance.now() < suppressUntil) return;
+    if (!playing) return;              // 结束后不再改"跟随"文案，避免覆盖"已完成"
+    if (atBottom()) {
+      follow = true;
+      if (unread > 0) { unread = 0; jump.classList.remove("show"); }
+      live.innerHTML = '<span class="dot pulse"></span>跟随最新';
+    } else {
+      follow = false;
+      live.textContent = "已暂停跟随";
+    }
+  }, { passive: true });
+
+  jumpBtn.addEventListener("click", () => {
+    follow = true;
+    unread = 0;
+    jump.classList.remove("show");
+    suppressUntil = performance.now() + 400;
+    body.scrollTo({ top: body.scrollHeight, behavior: "smooth" });
+    if (playing) live.innerHTML = '<span class="dot pulse"></span>跟随最新';
+  });
+
+  head.addEventListener("click", () => {
+    thought.classList.toggle("collapsed");
+    head.classList.toggle("collapsed");
+    if (!thought.classList.contains("collapsed")) {
+      suppressUntil = performance.now() + 250;
+      body.scrollTop = body.scrollHeight;
+    }
+  });
+
+  // 演示"用户往上翻 → 暂停跟随 → 新步骤只累加未读"
+  document.getElementById("btn-scroll").addEventListener("click", () => {
+    if (!playing) startStreaming();
+    follow = false;
+    suppressUntil = performance.now() + 250;
+    body.scrollTop = 0;
+    live.textContent = "已暂停跟随";
+    setTimeout(() => { push(nextItem()); }, 350);
+    setTimeout(() => { push(nextItem()); }, 900);
+  });
+
+  btnPlay.addEventListener("click", () => (playing ? pauseStreaming() : startStreaming()));
+  btnStep.addEventListener("click", () => push(nextItem()));
+  btnDone.addEventListener("click", () => stopStreaming(true));
+  btnReset.addEventListener("click", reset);
+  speedSel.addEventListener("change", () => { if (playing) { clearInterval(timer); timer = setInterval(tick, Number(speedSel.value)); } });
+
+  heightSel.addEventListener("change", () => {
+    const v = Number(heightSel.value);
+    body.style.height = v >= 9999 ? "auto" : v + "px";
+    body.style.overflowY = v >= 9999 ? "hidden" : "auto";
+  });
+
+  // 原型自动跑起来，打开就能看到效果
+  setTimeout(startStreaming, 350);
+
+  // 演示模式：?demo=scroll 直接进入"用户上滚 → 未读胶囊"状态（方便截图/评审）
+  if (new URLSearchParams(location.search).get("demo") === "scroll") {
+    setTimeout(() => document.getElementById("btn-scroll").click(), 1500);
+  }
+})();
+</script>
+</body>
+</html>
