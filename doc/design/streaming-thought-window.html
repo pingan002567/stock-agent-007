@@ -178,14 +178,6 @@
   .fb-link:hover { color: var(--blue); }
   .fb-spacer { flex: 1; }
   .fb-stats { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11px; }
-  .fb-model {
-    display: inline-flex; align-items: center; gap: 4px; max-width: 150px;
-    padding: 0 6px; height: 18px; border-radius: 5px;
-    background: var(--hl); border: 1px solid var(--line-2); color: var(--ink-2);
-    overflow: hidden;
-  }
-  .fb-model-tag { font-weight: 600; color: var(--blue); }
-  .fb-model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fb-sep { color: var(--faint); }
   .fb-usage b { font-weight: 600; color: var(--ink-2); }
 
@@ -219,8 +211,8 @@
     <b>方案</b>：给思维链一个<strong>固定高度的内层窗口</strong>（默认 220px），新步骤进来时<strong>自动贴底</strong>；
     用户一旦往上滚就<strong>暂停自动跟随</strong>，改用一个「N 条新思考 · 回到底部」的胶囊，点它再恢复。
     <br>
-    <b>本轮改动</b>：在回复气泡底部加一行元信息 —— <strong>模型 · 用时 · 结束时间</strong>，
-    与「信心度 / 引用来源」同排（左侧可点、右侧只读）。
+    气泡底部保留现有的元信息行（左侧可点：信心度 / 引用来源；右侧只读：<strong>用时 · 结束时间</strong>），
+    本原型不动这块，只改思维链窗口本身。
   </div>
 
   <div class="bar">
@@ -298,11 +290,6 @@
           <button class="fb-link" type="button">▶ 引用来源 4</button>
           <span class="fb-spacer"></span>
           <span class="fb-stats">
-            <span class="fb-model" id="fb-model" title="deepseek-flash · DeepSeek V4.1 Flash">
-              <span class="fb-model-tag">DS</span>
-              <span class="fb-model-name">V4.1 Flash</span>
-            </span>
-            <span class="fb-sep">·</span>
             <span class="fb-usage">用时 <b id="fb-duration">1 分 42 秒</b></span>
             <span class="fb-sep">·</span>
             <span class="fb-time" id="fb-time">23:31:30</span>
@@ -325,10 +312,7 @@
         <tr><td class="k">结束本轮</td><td>停止跟随动画，头部变为「已完成 · N 步 · 用时 1:42」，窗口保持原位不跳</td></tr>
         <tr><td class="k">动效</td><td>新步骤 <code>slidein 260ms</code>；<code>prefers-reduced-motion</code> 下全部关闭</td></tr>
         <tr><td class="k">移动端</td><td>窗口高度降到 160px，胶囊固定在窗口底部内缘</td></tr>
-        <tr><td class="k">模型字段来源</td><td><code>payload.model</code>：后端在 <code>final</code> 事件里写入本轮实际用的模型 ref（如 <code>deepseek/deepseek-flash</code>）。落库后历史消息也能显示。<b>旧消息没有该字段</b>时依次回退：会话模型 → 显示 <code>—</code>，不猜</td></tr>
-        <tr><td class="k">模型展示</td><td>复用 <code>compactModelLabelFromRef()</code> → <code>DS · V4.1 Flash</code>；<code>title</code> 给完整 <code>provider/model</code>；容器 <code>max-width:150px</code> + 省略号，长 id 不撑破一行</td></tr>
-        <tr><td class="k">行的分工</td><td>左侧：信心度徽章 / 引用来源 / 反方观点（可点）；右侧只读簇：<b>模型 · 用时 · 结束时间</b>（有 token 时再跟 token 成本），<code>flex:1</code> 分隔避免抢位</td></tr>
-        <tr><td class="k">出现时机</td><td>流式中不显示该行（没有"结束时间"）；<code>final</code> 之后出现，且历史消息默认就显示</td></tr>
+        <tr><td class="k">底部元信息</td><td><b>不动</b>：仍是现有的「信心度 / 引用来源（左，可点）· 用时 / 结束时间（右，只读）」。<b>不显示模型</b></td></tr>
       </tbody>
     </table>
   </div>
