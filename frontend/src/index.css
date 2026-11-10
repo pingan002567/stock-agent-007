@@ -6265,3 +6265,39 @@ html.pet-window-root body { margin: 0; }
   white-space: nowrap;
 }
 .holding-warn-action:disabled { opacity: 0.55; cursor: default; }
+
+/* ── 流式思维链：固定高度窗口 + 粘底 + 未读胶囊 ──
+   只在流式中启用（.agent-loop.live）；完成后回到原本的折叠全文。 */
+.agent-loop .loop-body { position: relative; }
+.agent-loop.live .tl-scroll {
+  /* 用 height 而不是 max-height：内容少时窗口不塌，避免高度来回跳 */
+  height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-behavior: auto;   /* 跟随必须瞬时；smooth 会产出串中间 scroll 事件 */
+  padding-right: 2px;
+}
+.agent-loop.live .tl-scroll::-webkit-scrollbar { width: 8px; }
+.agent-loop.live .tl-scroll::-webkit-scrollbar-thumb { background: var(--line-2, #d8dde3); border-radius: 8px; }
+.agent-loop .tl-jump {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  padding: 3px 10px;
+  border: none;
+  border-radius: 999px;
+  background: var(--ink, #1f2328);
+  color: #fff;
+  font-size: 11.5px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(31, 35, 40, 0.18);
+}
+.agent-loop .tl-jump:hover { background: #000; }
+
+@media (max-width: 860px) {
+  .agent-loop.live .tl-scroll { height: 160px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-loop.live .tl-scroll { scroll-behavior: auto; }
+}

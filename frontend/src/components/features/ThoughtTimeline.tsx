@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toolLabel, type StreamStep, type StreamToolCall } from "@/hooks/useCopilotChat";
 import { toolParamSummary } from "@/components/features/taskToolMeta";
 import { formatDuration } from "@/utils/format";
@@ -243,6 +243,64 @@ function paramOf(tool: StreamToolCall): string {
   return toolParamSummary(tool.args);
 }
 
+/** 流式期间的「粘底」滚动：新步骤进来贴到最底；用户往上翻就暂停跟随并计数。
+ *
+ *  两个坑（原型里验证过）：
+ *  1. `scrollTop = scrollHeight` 自己会触发 scroll 事件 → 用时间戳抑制，别当成"用户上滚"
+ *  2. `scroll-behavior: smooth` 会在动画期间产生一串中间位置 → 跟随必须瞬时
+ */
+function useStickyScroll(enabled: boolean, revision: number) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const followRef = useRef(true);
+  const suppressUntilRef = useRef(0);
+  const [unread, setUnread] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    // rAF 里再写 state：effect 体内同步 setState 会触发级联渲染告警
+    const frame = requestAnimationFrame(() => {
+      if (followRef.current) {
+        suppressUntilRef.current = performance.now() + 250;
+        el.scrollTop = el.scrollHeight;
+        setUnread(0);
+      } else {
+        setUnread((n) => n + 1);
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [enabled, revision]);
+
+  // 结束后把状态收回去，下一次流式从"跟随"开始
+  useEffect(() => {
+    if (enabled) return;
+    followRef.current = true;
+    const frame = requestAnimationFrame(() => setUnread(0));
+    return () => cancelAnimationFrame(frame);
+  }, [enabled]);
+
+  const onScroll = () => {
+    if (performance.now() < suppressUntilRef.current) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 24;
+    followRef.current = atBottom;
+    if (atBottom) setUnread(0);
+  };
+
+  const jumpToBottom = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    followRef.current = true;
+    suppressUntilRef.current = performance.now() + 400;
+    setUnread(0);
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  };
+
+  return { scrollRef, unread, onScroll, jumpToBottom };
+}
+
 export function ThoughtTimeline({ steps, active, expandAll = false, durationMs }: {
   steps: StreamStep[];
   /** 流式进行中(尾步高亮/shimmer) */
@@ -255,10 +313,16 @@ export function ThoughtTimeline({ steps, active, expandAll = false, durationMs }
 }) {
   // 用户手动折叠/展开优先；没动过就跟着流式状态走（流式展开、完成收起）
   const [manual, setManual] = useState<boolean | null>(null);
+  const open = expandAll || (manual ?? active);
+  // 只固定"流式中"的窗口；完成后回到折叠全文（事后回看是想读完整推理）
+  // 必须在 early return 之前调用，保证 hooks 顺序稳定
+  const { scrollRef, unread, onScroll, jumpToBottom } = useStickyScroll(
+    active && !expandAll && open,
+    steps.length,
+  );
   if (steps.length === 0) return null;
 
   const stats = loopStats(steps);
-  const open = expandAll || (manual ?? active);
 
   const parts: string[] = [];
   if (stats.reasoning) parts.push(`思考 ${stats.reasoning} 步`);
@@ -268,7 +332,7 @@ export function ThoughtTimeline({ steps, active, expandAll = false, durationMs }
   const title = parts.length ? parts.join(" · ") : `执行 ${steps.length} 步`;
 
   return (
-    <div className={`thought-timeline agent-loop${open ? " open" : ""}`}>
+    <div className={`thought-timeline agent-loop${open ? " open" : ""}${active && !expandAll ? " live" : ""}`}>
       {expandAll ? null : (
         <button
           type="button"
@@ -285,6 +349,7 @@ export function ThoughtTimeline({ steps, active, expandAll = false, durationMs }
         </button>
       )}
       <div className="loop-body">
+        <div className="tl-scroll" ref={scrollRef} onScroll={onScroll}>
         <div className="tl-steps">
           {steps.map((step, i) => {
             const isLast = i === steps.length - 1;
@@ -303,6 +368,12 @@ export function ThoughtTimeline({ steps, active, expandAll = false, durationMs }
             return <ToolStepRow key={step.id} tool={step.tool} />;
           })}
         </div>
+        </div>
+        {unread > 0 ? (
+          <button type="button" className="tl-jump" onClick={jumpToBottom}>
+            ↓ {unread} 条新思考
+          </button>
+        ) : null}
       </div>
     </div>
   );
