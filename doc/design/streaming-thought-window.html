@@ -160,6 +160,35 @@
   .answer .caret { display: inline-block; width: 7px; height: 14px; background: var(--ink-2); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
 
+  /* ── 完成后的元信息行 ── */
+  .final-bar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--line-2);
+    font-size: 11.5px; color: var(--muted);
+  }
+  .final-bar[hidden] { display: none; }
+  .fb-badge {
+    font-size: 11px; padding: 1px 7px; border-radius: 999px;
+    background: #fff8e6; color: var(--amber); border: 1px solid #f0dfae;
+  }
+  .fb-link {
+    font: inherit; font-size: 11.5px; padding: 0; border: none; background: none;
+    color: var(--muted); cursor: pointer;
+  }
+  .fb-link:hover { color: var(--blue); }
+  .fb-spacer { flex: 1; }
+  .fb-stats { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11px; }
+  .fb-model {
+    display: inline-flex; align-items: center; gap: 4px; max-width: 150px;
+    padding: 0 6px; height: 18px; border-radius: 5px;
+    background: var(--hl); border: 1px solid var(--line-2); color: var(--ink-2);
+    overflow: hidden;
+  }
+  .fb-model-tag { font-weight: 600; color: var(--blue); }
+  .fb-model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fb-sep { color: var(--faint); }
+  .fb-usage b { font-weight: 600; color: var(--ink-2); }
+
   .spec { margin-top: 40px; }
   .spec h2 { font-size: 15px; margin-bottom: 10px; }
   table { width: 100%; border-collapse: collapse; font-size: 12.5px; background: #fff; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
@@ -189,6 +218,9 @@
     </ol>
     <b>方案</b>：给思维链一个<strong>固定高度的内层窗口</strong>（默认 220px），新步骤进来时<strong>自动贴底</strong>；
     用户一旦往上滚就<strong>暂停自动跟随</strong>，改用一个「N 条新思考 · 回到底部」的胶囊，点它再恢复。
+    <br>
+    <b>本轮改动</b>：在回复气泡底部加一行元信息 —— <strong>模型 · 用时 · 结束时间</strong>，
+    与「信心度 / 引用来源」同排（左侧可点、右侧只读）。
   </div>
 
   <div class="bar">
@@ -259,6 +291,23 @@
         </div>
 
         <div class="answer" id="answer">正在生成结论…<span class="caret"></span></div>
+
+        <!-- 完成后才出现：信心度 · 引用来源 · 模型 · 用时 · 结束时间（同一行，右对齐） -->
+        <div class="final-bar" id="final-bar" hidden>
+          <span class="fb-badge fb-confidence">信心度 中</span>
+          <button class="fb-link" type="button">▶ 引用来源 4</button>
+          <span class="fb-spacer"></span>
+          <span class="fb-stats">
+            <span class="fb-model" id="fb-model" title="deepseek-flash · DeepSeek V4.1 Flash">
+              <span class="fb-model-tag">DS</span>
+              <span class="fb-model-name">V4.1 Flash</span>
+            </span>
+            <span class="fb-sep">·</span>
+            <span class="fb-usage">用时 <b id="fb-duration">1 分 42 秒</b></span>
+            <span class="fb-sep">·</span>
+            <span class="fb-time" id="fb-time">23:31:30</span>
+          </span>
+        </div>
       </div>
     </div>
   </div>
@@ -276,6 +325,10 @@
         <tr><td class="k">结束本轮</td><td>停止跟随动画，头部变为「已完成 · N 步 · 用时 1:42」，窗口保持原位不跳</td></tr>
         <tr><td class="k">动效</td><td>新步骤 <code>slidein 260ms</code>；<code>prefers-reduced-motion</code> 下全部关闭</td></tr>
         <tr><td class="k">移动端</td><td>窗口高度降到 160px，胶囊固定在窗口底部内缘</td></tr>
+        <tr><td class="k">模型字段来源</td><td><code>payload.model</code>：后端在 <code>final</code> 事件里写入本轮实际用的模型 ref（如 <code>deepseek/deepseek-flash</code>）。落库后历史消息也能显示。<b>旧消息没有该字段</b>时依次回退：会话模型 → 显示 <code>—</code>，不猜</td></tr>
+        <tr><td class="k">模型展示</td><td>复用 <code>compactModelLabelFromRef()</code> → <code>DS · V4.1 Flash</code>；<code>title</code> 给完整 <code>provider/model</code>；容器 <code>max-width:150px</code> + 省略号，长 id 不撑破一行</td></tr>
+        <tr><td class="k">行的分工</td><td>左侧：信心度徽章 / 引用来源 / 反方观点（可点）；右侧只读簇：<b>模型 · 用时 · 结束时间</b>（有 token 时再跟 token 成本），<code>flex:1</code> 分隔避免抢位</td></tr>
+        <tr><td class="k">出现时机</td><td>流式中不显示该行（没有"结束时间"）；<code>final</code> 之后出现，且历史消息默认就显示</td></tr>
       </tbody>
     </table>
   </div>
@@ -388,7 +441,11 @@
     if (done) {
       live.textContent = "已完成";
       meta.textContent = `${newSteps.children.length} 步 · 用时 1:42`;
-      answer.innerHTML = "结论：不追高，维持现有仓位，等回踩再谈。<span class='caret'></span>";
+      answer.textContent = "结论：不追高，维持现有仓位，等回踩再谈。";
+      document.getElementById("fb-time").textContent =
+        new Date().toLocaleTimeString("zh-CN", { hour12: false });
+      document.getElementById("final-bar").hidden = false;
+      document.getElementById("answer").classList.remove("caret-blink");
     }
   }
 
@@ -403,6 +460,7 @@
     jump.classList.remove("show");
     btnPlay.textContent = "▶ 开始流式";
     body.scrollTop = 0;
+    document.getElementById("final-bar").hidden = true;
   }
 
   // 用户上滚 → 暂停跟随；回到底部 → 自动恢复
