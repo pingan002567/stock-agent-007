@@ -128,7 +128,7 @@ export function SettingsOverview({
           <div className="ov-field">
             <div>
               <div className="ov-field-label">定时任务</div>
-              <div className="ov-field-sub">盘前简报 / 盘中报告 / 收盘体检等</div>
+              <div className="ov-field-sub">盘前报告 / 盘中报告 / 盘后报告等</div>
             </div>
             <div className="ov-field-value">{tasksLoaded ? `${enabledTasks} 个启用` : "—"}</div>
           </div>

@@ -21,7 +21,7 @@ def _dt(s: str) -> datetime:
 
 
 def test_infer_ops_session_and_cap_duty_authority():
-    assert infer_ops_session({"task_id": "sched_premarket", "name": "盘前简报"}) == "premarket"
+    assert infer_ops_session({"task_id": "sched_premarket", "name": "盘前报告"}) == "premarket"
     assert infer_ops_session({"task_id": "sched_premarket_discovery", "name": "每日机会发现"}) == "discovery"
     assert infer_ops_session({"task_id": "sched_intraday", "name": "盘中报告"}) == "intraday"
     assert infer_ops_session({"task_id": "x", "name": "午间复盘"}) == "intraday"
@@ -214,7 +214,7 @@ def test_next_duty_run_skips_weekend_and_cn_holiday(monkeypatch):
         return True
 
     monkeypatch.setattr("backend.stock_domain.trading_calendar.is_trading_day", fake_is_trading_day)
-    close = {"task_id": "sched_close", "calendar": "CN", "schedule": "daily@15:15", "name": "收盘体检"}
+    close = {"task_id": "sched_close", "calendar": "CN", "schedule": "daily@15:15", "name": "盘后报告"}
     weekly = {"task_id": "sched_weekly_review", "schedule": "weekly@7@17:00", "name": "周度复盘"}
     discovery = {
         "task_id": "sched_premarket_discovery",
@@ -545,3 +545,36 @@ def test_premarket_brief_prompt_reference_migrated(tmp_path):
 
     listed = {t["task_id"]: t for t in client.get("/api/scheduled-tasks").json()["items"]}
     assert "不重复前一日 18:00" in listed["sched_premarket"]["prompt"]
+
+
+def test_legacy_task_names_are_renamed(tmp_path):
+    """盘前简报 → 盘前报告、收盘体检 → 盘后报告；用户改过名字的不动。"""
+    from backend.app_services.scheduler_service import CONFIG_KEY
+    from tests.test_api import make_client
+
+    client = make_client(tmp_path)
+    repo = client.app.state.services.repo
+    items = client.get("/api/scheduled-tasks").json()["items"]
+    seeded = []
+    for item in items:
+        row = dict(item)
+        row.pop("next_run_at", None)
+        row.pop("skip_reason", None)
+        if row["task_id"] == "sched_premarket":
+            row["name"] = "盘前简报"
+            row["prompt"] = "【任务】今日盘前简报（A股交易日 08:30，集合竞价前）。只做自选/持仓+隔夜要闻。"
+        if row["task_id"] == "sched_close":
+            row["name"] = "收盘体检"
+            row["prompt"] = "【任务】收盘体检（A股交易日 15:15）。"
+        if row["task_id"] == "sched_intraday":
+            row["name"] = "我的午间自定义"
+        seeded.append(row)
+    repo.set_config(CONFIG_KEY, {"items": seeded})
+
+    listed = {t["task_id"]: t for t in client.get("/api/scheduled-tasks").json()["items"]}
+    assert listed["sched_premarket"]["name"] == "盘前报告"
+    assert "【任务】今日盘前报告" in listed["sched_premarket"]["prompt"]
+    assert listed["sched_close"]["name"] == "盘后报告"
+    assert "【任务】盘后报告" in listed["sched_close"]["prompt"]
+    # 用户自定义名字不被覆盖
+    assert listed["sched_intraday"]["name"] == "我的午间自定义"

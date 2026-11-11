@@ -147,7 +147,7 @@ export default function ChannelsTab() {
           <div>
             <div style={{ fontSize: 13 }}>完成时推送（IM）</div>
             <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
-              盘前简报、机会发现等任务成功后通知；失败始终推送。
+              盘前报告、机会发现等任务成功后通知；失败始终推送。
             </div>
           </div>
           <ToggleSwitch
