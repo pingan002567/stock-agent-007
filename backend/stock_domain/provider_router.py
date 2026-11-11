@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, TypeVar
 
 from backend.app_services.runtime_observer import runtime_observer
@@ -139,12 +139,38 @@ def _is_trading_hours(market: str) -> bool:
     if now.weekday() >= 5:  # Sat=5, Sun=6
         return False
     if market == "CN" or market is None:
-        return 9 <= now.hour < 15 or (now.hour == 9 and now.minute >= 30)
+        # 9:30–11:30、13:00–15:00；原来写成 `9 <= hour < 15`，
+        # 把集合竞价前和午休都算成盘中，会让缓存新鲜度判断失真。
+        minute_of_day = now.hour * 60 + now.minute
+        return (9 * 60 + 30) <= minute_of_day <= (11 * 60 + 30) or (13 * 60) <= minute_of_day <= (15 * 60)
     if market == "US":
         et_offset = -4  # EDT, simplified
         et_hour = (now.hour + et_offset) % 24
         return 9 <= et_hour < 16
     return True  # unknown market: always consider trading
+
+
+def _last_close_boundary(market: str, now: datetime | None = None) -> datetime | None:
+    """最近一次收盘时刻（naive 本地时间）。
+
+    用途：**盘后不该无条件信任 SQLite 里的快照**。
+    11:45 存下的快照如果 24 小时内都算"新鲜"，收盘后就会一直显示午间价
+    （实测：000963 18:00 还显示 26.87，而当日收盘是 26.56）。
+    """
+    now = now or datetime.now()
+    if market not in ("CN", None):
+        return None  # 其它市场暂不定义，保持旧行为
+    close = now.replace(hour=15, minute=0, second=0, microsecond=0)
+    day = now
+    if now < close or now.weekday() >= 5:
+        # 还没到收盘，或今天是周末 → 取上一个工作日
+        day = now - timedelta(days=1)
+        while day.weekday() >= 5:
+            day = day - timedelta(days=1)
+        if now < close and day == now:
+            day = now - timedelta(days=1)
+        close = day.replace(hour=15, minute=0, second=0, microsecond=0)
+    return close
 
 
 def should_run_market_warmup(now: datetime | None = None) -> bool:
@@ -342,6 +368,48 @@ class ProviderRouter:
             provider_name=provider_name or str(snapshot.source or ""),
         )
 
+    def _kline_close_pair(self, symbol: str) -> tuple[float, float, str] | None:
+        """最近两根日K的 (今收, 昨收, bar日期)，用于盘后补全涨跌幅。"""
+        try:
+            hist = self.get_history(symbol, days=3)
+        except Exception:
+            return None
+        items = (hist or {}).get("items") or []
+        if len(items) < 2:
+            return None
+        try:
+            today_close = float(items[0].get("close") or 0)
+            prev_close = float(items[1].get("close") or 0)
+        except (TypeError, ValueError):
+            return None
+        if today_close <= 0 or prev_close <= 0:
+            return None
+        return today_close, prev_close, str(items[0].get("date") or "")
+
+    def _fill_after_close_from_kline(self, snapshot: PriceSnapshot, symbol: str, market: str) -> PriceSnapshot:
+        """盘后：用日K的"今收/昨收"补 last 与 change_pct。
+
+        为什么需要：provider 的 quote 在收盘后经常给"昨收 + change_pct=0"
+        （实测 000963：quote 26.87 / 0.0%，而当日 K 是 26.56，真实 -1.15%）。
+        直接展示会变成"今日 0.00%"，比显示不出来更误导。
+        """
+        if snapshot.degraded or _is_trading_hours(market):
+            return snapshot
+        pair = self._kline_close_pair(symbol)
+        if pair is None:
+            return snapshot
+        close, prev, bar_date = pair
+        expected = expected_bar_date(market)
+        if bar_date and bar_date != expected.strftime("%Y%m%d"):
+            return snapshot  # 最新一根不是"应有交易日"，别拿昨天的K冒充今天
+        snapshot.last = close
+        snapshot.change_pct = round((close / prev - 1) * 100, 2)
+        coverage = dict(snapshot.coverage or {})
+        coverage["change_from"] = "daily_kline"
+        coverage["bar_date"] = bar_date
+        snapshot.coverage = coverage
+        return snapshot
+
     def get_quote(self, symbol: str, *, force: bool = False) -> PriceSnapshot:
         normalized = normalize_symbol(symbol)
         ck = self._cache_key("quote", normalized)
@@ -352,13 +420,19 @@ class ProviderRouter:
                 return _annotate_quote(cached, market)
             trading = _is_trading_hours(market)
             sqlite_age_limit = _SQLITE_CACHE_TTL["quote"] if trading else _SQLITE_CACHE_TTL["history"]
+            # 盘后：只有"收盘后写入"的快照才可信；午间快照直接当作过期（否则会挂一整天）
+            boundary = None if trading else _last_close_boundary(market)
             if self.repo is not None:
                 try:
                     persisted = self.repo.get_stock_quote(normalized)
                     if persisted is not None and persisted.updated_at and (persisted.last or 0) > 0:
                         cache_time = datetime.fromisoformat(persisted.updated_at)
                         age = (datetime.now(timezone.utc) - cache_time).total_seconds()
-                        if age < sqlite_age_limit:
+                        fresh_after_close = True
+                        if boundary is not None:
+                            b = boundary if boundary.tzinfo else boundary.astimezone()
+                            fresh_after_close = cache_time >= b
+                        if age < sqlite_age_limit and fresh_after_close:
                             result = PriceSnapshot(
                                 last=persisted.last, change_pct=persisted.change_pct or 0.0,
                                 updated_at=persisted.updated_at, source=persisted.source,
@@ -373,6 +447,7 @@ class ProviderRouter:
                                     },
                                 },
                             )
+                            result = self._fill_after_close_from_kline(result, normalized, market)
                             result = _annotate_quote(result, market)
                             self._mem_cache.set(ck, result, ttl=_CACHE_TTL["quote"])
                             return result
@@ -389,6 +464,7 @@ class ProviderRouter:
             symbol=normalized,
         )
         if isinstance(result, PriceSnapshot):
+            result = self._fill_after_close_from_kline(result, normalized, market)
             result = _annotate_quote(result, market)
             if not result.degraded:
                 self._mem_cache.set(ck, result, ttl=_CACHE_TTL["quote"])
