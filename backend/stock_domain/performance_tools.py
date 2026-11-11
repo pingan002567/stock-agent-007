@@ -48,6 +48,72 @@ def _today_key() -> str:
     return datetime.now().strftime("%Y%m%d")
 
 
+def build_triage(services: Any) -> dict[str, Any]:
+    """待办分诊：把"必须处理"和"可暂时忽略"分开，而不是把 17 条全列出来。
+
+    判据（故意保守，宁可少报"必须处理"）：
+    - 必须：inbox 里 priority=high 且仍 open，或监控事件 severity=high
+    - 其余：可忽略（计入计数，不逐条展开）
+    """
+    must: list[dict[str, Any]] = []
+    counts = {"inbox_open": 0, "inbox_high": 0, "monitor_events": 0, "monitor_high": 0}
+
+    try:
+        items = services.review_inbox_service.list_items(limit=200)
+    except Exception:
+        items = []
+    for item in items:
+        status = str(getattr(item, "status", "") or "")
+        if status not in ("open", "Open", "OPEN"):
+            continue
+        counts["inbox_open"] += 1
+        priority = str(getattr(item, "priority", "") or "").lower()
+        if priority == "high":
+            counts["inbox_high"] += 1
+            must.append({
+                "kind": "inbox",
+                "id": getattr(item, "item_key", ""),
+                "title": getattr(item, "title", ""),
+                "reason": f"高优先待办 · {getattr(item, 'item_type', '')}",
+            })
+
+    try:
+        events = services.monitor_service.list_events(limit=100)
+    except Exception:
+        events = []
+    for ev in events or []:
+        counts["monitor_events"] += 1
+        severity = str(getattr(ev, "severity", "") or "").lower()
+        if severity == "high":
+            counts["monitor_high"] += 1
+            must.append({
+                "kind": "monitor",
+                "id": getattr(ev, "event_id", ""),
+                "title": getattr(ev, "title", "") or getattr(ev, "message", ""),
+                "reason": f"高严重度监控事件 · {getattr(ev, 'symbol', '')}",
+            })
+
+    # 去重 + 截断：报告里最多点名 5 条，其余只给数字
+    seen: set[str] = set()
+    deduped = []
+    for row in must:
+        key = f"{row['kind']}:{row['id']}"
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+
+    return {
+        "must_handle": deduped[:5],
+        "must_count": len(deduped),
+        "can_ignore_count": max(
+            0, (counts["inbox_open"] - counts["inbox_high"]) + (counts["monitor_events"] - counts["monitor_high"])
+        ),
+        "counts": counts,
+        "hint": "报告里只写 must_handle 的前 3 条 + 汇总数字，不要把全部待办罗列出来",
+    }
+
+
 def build_daily_performance(services: Any) -> dict[str, Any]:
     """一次性算出盘后报告需要的事实，避免模型自己拼公式算错。"""
     repo = services.repo
@@ -176,6 +242,7 @@ def build_daily_performance(services: Any) -> dict[str, Any]:
         "cash_flows": flows,
         "benchmarks": benchmarks,
         "distance_to_cost": distance,
+        "triage": build_triage(services),
         "cash_by_currency": cash_rows,
         "degraded_symbols": degraded,
         "data_health": {

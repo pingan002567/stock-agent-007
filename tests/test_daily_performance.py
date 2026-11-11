@@ -61,3 +61,31 @@ def test_drawdown_uses_nav_snapshot_series(tmp_path):
     assert data["portfolio"]["peak_nav"] is not None
     assert data["portfolio"]["drawdown_pct"] is not None
     assert data["portfolio"]["drawdown_pct"] <= 0
+
+
+def test_triage_splits_must_handle_from_noise(tmp_path, monkeypatch):
+    """17 条待办不能全列：高优先/高严重度进 must_handle，其余只计数。"""
+    client = make_client(tmp_path)
+    services = client.app.state.services
+
+    from types import SimpleNamespace
+
+    inbox = [
+        SimpleNamespace(item_key="a", status="open", priority="high", title="医保降价", item_type="intel"),
+        SimpleNamespace(item_key="b", status="open", priority="medium", title="普通提醒", item_type="intel"),
+        SimpleNamespace(item_key="c", status="done", priority="high", title="已完成", item_type="intel"),
+    ]
+    events = [
+        SimpleNamespace(event_id="e1", severity="high", title="跌破止损", symbol="000963"),
+        SimpleNamespace(event_id="e2", severity="low", title="常规波动", symbol="600977"),
+    ]
+    monkeypatch.setattr(services.review_inbox_service, "list_items", lambda **kw: inbox)
+    monkeypatch.setattr(services.monitor_service, "list_events", lambda **kw: events)
+
+    from backend.stock_domain.performance_tools import build_triage
+
+    triage = build_triage(services)
+    assert triage["counts"] == {"inbox_open": 2, "inbox_high": 1, "monitor_events": 2, "monitor_high": 1}
+    assert triage["must_count"] == 2
+    assert {row["kind"] for row in triage["must_handle"]} == {"inbox", "monitor"}
+    assert triage["can_ignore_count"] == 2  # 1 条普通待办 + 1 条低严重度事件
