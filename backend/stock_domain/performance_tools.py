@@ -16,6 +16,7 @@ from backend.stock_domain.portfolio_tools import (
     read_cash_buckets,
 )
 from backend.stock_domain.provider_router import provider_router
+from backend.stock_domain.trading_calendar import expected_bar_date
 
 #: 组合对比的基准（sina 指数代码）
 BENCHMARKS = (("sh000300", "沪深300"), ("sh000905", "中证500"))
@@ -123,6 +124,10 @@ def build_daily_performance(services: Any) -> dict[str, Any]:
     buckets = read_cash_buckets(repo)
     cash_rows, cash_cny = cash_buckets_with_cny(buckets, rates)
 
+    # 15:15 跑盘后报告时，今日日K常常还没落地。这时**不能**把"昨天 vs 前天"当成今日收益，
+    # 必须标成未更新（宁缺毋假）。
+    expected = expected_bar_date("CN").strftime("%Y%m%d")
+
     # ── 逐只：今收/昨收日K口径 ──
     contributors: list[dict[str, Any]] = []
     market_value_cny = 0.0
@@ -133,6 +138,8 @@ def build_daily_performance(services: Any) -> dict[str, Any]:
         ccy = holding_currency(item)
         rate = (rates or {}).get(ccy, 1.0 if ccy == "CNY" else None)
         pair = _last_two_closes(item.symbol)
+        if pair is not None and pair[2] != expected:
+            pair = None  # 最新一根不是"应有交易日" → 今日收益未知
         if pair is None or rate is None:
             degraded.append(item.symbol)
             # 拿不到日K就退化成"当前市值"，不参与当日盈亏
@@ -161,8 +168,13 @@ def build_daily_performance(services: Any) -> dict[str, Any]:
 
     cash_total = cash_cny if cash_cny is not None else 0.0
     nav = round(market_value_cny + cash_total, 2)
-    prev_nav = round(prev_value_cny + cash_total, 2)
-    day_return_pct = round(day_pnl_cny / prev_nav * 100, 2) if prev_nav > 0 else None
+    # 一只能对上日K都没有 → 今日收益整体不可用（不能拿 0 或昨天的数据充数）
+    day_available = bool(contributors)
+    prev_nav = round(prev_value_cny + cash_total, 2) if day_available else None
+    day_pnl = round(day_pnl_cny, 2) if day_available else None
+    day_return_pct = (
+        round(day_pnl_cny / prev_nav * 100, 2) if (day_available and prev_nav and prev_nav > 0) else None
+    )
 
     contributors.sort(key=lambda r: r["day_pnl"])
     negatives = [c for c in contributors if c["day_pnl"] < 0][:3]
@@ -233,8 +245,10 @@ def build_daily_performance(services: Any) -> dict[str, Any]:
             "market_value": round(market_value_cny, 2),
             "cash": round(cash_total, 2),
             "cash_pct": round(cash_total / nav * 100, 2) if nav > 0 else None,
-            "day_pnl": round(day_pnl_cny, 2),
+            "day_pnl": day_pnl,
             "day_return_pct": day_return_pct,
+            "day_pnl_available": day_available,
+            "expected_bar": expected,
             "drawdown_pct": drawdown_pct,
             "peak_nav": peak,
         },
@@ -246,7 +260,9 @@ def build_daily_performance(services: Any) -> dict[str, Any]:
         "cash_by_currency": cash_rows,
         "degraded_symbols": degraded,
         "data_health": {
-            "price_basis": "daily_kline_close" if not degraded else "mixed(缺失标的退化为当前市值)",
+            "price_basis": "daily_kline_close" if day_available and not degraded else (
+                "mixed(部分标的缺当日日K)" if day_available else "today_bar_missing(今日日K未更新)"
+            ),
             "fx_degraded": cash_cny is None or not rates,
             "benchmark_available": bool(benchmarks),
         },

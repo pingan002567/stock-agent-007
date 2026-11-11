@@ -89,3 +89,29 @@ def test_triage_splits_must_handle_from_noise(tmp_path, monkeypatch):
     assert triage["must_count"] == 2
     assert {row["kind"] for row in triage["must_handle"]} == {"inbox", "monitor"}
     assert triage["can_ignore_count"] == 2  # 1 条普通待办 + 1 条低严重度事件
+
+
+def test_missing_today_bar_reports_unknown_not_yesterday(tmp_path, monkeypatch):
+    """15:15 跑报告时今日日K可能还没落地：今日收益必须为 None，不能拿昨天的充数。"""
+    from datetime import date
+
+    client = make_client(tmp_path)
+    services = client.app.state.services
+    client.post("/api/holdings/clear-demo")
+    from backend.schemas import HoldingPosition
+    services.repo.upsert_holding(HoldingPosition(
+        symbol="000963", name="华东医药", quantity=100, market_value=2656.0,
+        weight_pct=0, cost=26.74, currency="CNY",
+    ))
+
+    from backend.stock_domain import performance_tools as perf
+
+    # 最新一根是昨天 → 与 expected_bar 不符
+    monkeypatch.setattr(perf, "_last_two_closes", lambda symbol: (26.87, 27.05, "20260101"))
+    monkeypatch.setattr(perf, "expected_bar_date", lambda market: date(2026, 11, 11))
+
+    data = client.get("/api/holdings/performance").json()
+    assert data["portfolio"]["day_pnl"] is None
+    assert data["portfolio"]["day_return_pct"] is None
+    assert data["portfolio"]["day_pnl_available"] is False
+    assert "today_bar_missing" in data["data_health"]["price_basis"]
