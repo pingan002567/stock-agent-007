@@ -150,6 +150,7 @@ class WorkbenchToolBridge:
             "get_daily_history": self._get_daily_history,
             "search_stock_intel": self._search_stock_intel,
             "get_portfolio_snapshot": self._get_portfolio_snapshot,
+            "get_daily_performance": self._get_daily_performance,
             "get_active_risk_policy": self._get_active_risk_policy,
             "list_risk_policies": self._list_risk_policies,
             "update_risk_policy": self._update_risk_policy,
@@ -266,6 +267,15 @@ class WorkbenchToolBridge:
                 True,
                 {},
                 ["holding_position", "local_sqlite"],
+            ),
+            "get_daily_performance": ToolSpec(
+                "get_daily_performance",
+                "portfolio",
+                AuthorityLevel.A2,
+                "low",
+                True,
+                {},
+                ["holding_position", "portfolio_nav_daily", "cash_ledger", "market_review"],
             ),
             "analyze_portfolio_risk": ToolSpec(
                 "analyze_portfolio_risk",
@@ -1169,6 +1179,13 @@ class WorkbenchToolBridge:
             rates=fx_service.rates_for_conversion(payload),
             fx=payload,
         )
+
+    def _get_daily_performance(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """盘后表现：今日收益（日K口径）、逐只贡献、现金变动、基准、回撤、距成本。"""
+        from backend.stock_domain.performance_tools import build_daily_performance
+
+        return build_daily_performance(self)
+        # self 只需要 .repo，保留签名一致
 
     def _get_active_risk_policy(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return model_to_dict(self.risk_policy_service.get_active_policy())

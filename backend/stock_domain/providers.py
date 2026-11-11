@@ -1112,7 +1112,8 @@ class AkShareMarketDataProvider:
             loader=lambda: self._ak().stock_zh_index_spot_sina(),
         )
         rows = _frame_tail(frame, 1000)
-        picks = {"sh000001", "sz399001", "sz399006"}
+        # 沪深300(sh000300) / 中证500(sh000905) 供"组合 vs 基准"用
+        picks = {"sh000001", "sz399001", "sz399006", "sh000300", "sh000905"}
         items = []
         for row in rows:
             code = str(row.get("代码") or "").lower()

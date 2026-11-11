@@ -44,6 +44,15 @@ SCHEMA: Iterable[str] = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS portfolio_nav_daily (
+      day TEXT PRIMARY KEY,
+      nav REAL NOT NULL,
+      market_value REAL NOT NULL,
+      cash REAL NOT NULL,
+      created_at TEXT NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS cash_ledger (
       ledger_id TEXT PRIMARY KEY,
       currency TEXT NOT NULL,

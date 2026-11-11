@@ -328,6 +328,17 @@ def calibrate_cash(payload: CashCalibration, request: Request, services: AppServ
     }
 
 
+@router.get("/performance")
+def daily_performance(services: AppServices = Depends(get_services)):
+    """盘后表现：今日收益（日K口径）/ 贡献 / 现金变动 / 基准对比 / 回撤 / 距成本。
+
+    给盘后报告和前端用；**不看 quote.change_pct**（盘后它常是 0）。
+    """
+    from backend.stock_domain.performance_tools import build_daily_performance
+
+    return build_daily_performance(services)
+
+
 @router.get("/cash-ledger.csv")
 def cash_ledger_csv(limit: int = 500, services: AppServices = Depends(get_services)):
     """资金流水导出（CSV，带 BOM 便于 Excel 直接打开）。"""

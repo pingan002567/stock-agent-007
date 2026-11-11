@@ -118,6 +118,7 @@ A2_TOOLS = [
     "list_skills", "list_mcp_servers",
     "list_scheduled_tasks",
     "get_investor_profile", "get_notification_prefs", "list_memory_facts",
+    "get_daily_performance",
 ]
 
 A3_TOOLS = [

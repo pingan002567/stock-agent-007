@@ -51,6 +51,7 @@ from backend.persistence.repo_trading import TradingRepoMixin
 from backend.persistence.repo_reports import ReportsRepoMixin
 from backend.persistence.repo_config import ConfigRepoMixin
 from backend.persistence.repo_cash import CashRepoMixin
+from backend.persistence.repo_performance import PerformanceRepoMixin
 
 
 class WorkbenchRepository(
@@ -63,6 +64,7 @@ class WorkbenchRepository(
     ReportsRepoMixin,
     ConfigRepoMixin,
     CashRepoMixin,
+    PerformanceRepoMixin,
 ):
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn

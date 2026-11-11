@@ -41,6 +41,7 @@ TOOL_LABELS: dict[str, str] = {
     "get_notification_prefs": "通知偏好",
     "get_paper_portfolio": "Paper 组合",
     "get_portfolio_snapshot": "持仓快照",
+    "get_daily_performance": "盘后表现",
     "get_rebalance_draft": "草案详情",
     "get_report_quality": "报告质量",
     "get_stock_context": "个股分析",
