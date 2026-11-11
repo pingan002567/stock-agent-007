@@ -368,6 +368,15 @@ class ProviderRouter:
             provider_name=provider_name or str(snapshot.source or ""),
         )
 
+    @staticmethod
+    def _bar_date_key(value: Any) -> str:
+        """把日K的 date 统一成 YYYYMMDD（date 对象 / 'YYYY-MM-DD' / 'YYYYMMDD' 都有）。"""
+        if value is None:
+            return ""
+        if hasattr(value, "strftime"):
+            return value.strftime("%Y%m%d")
+        return str(value).replace("-", "").strip()
+
     def _kline_close_pair(self, symbol: str) -> tuple[float, float, str] | None:
         """最近两根日K的 (今收, 昨收, bar日期)，用于盘后补全涨跌幅。"""
         try:
@@ -377,14 +386,16 @@ class ProviderRouter:
         items = (hist or {}).get("items") or []
         if len(items) < 2:
             return None
+        # 顺序不保证：按日期排序后取最后两根（曾因 items[0] 是最旧一根而取错）
+        rows = sorted(items, key=lambda r: self._bar_date_key(r.get("date")))
         try:
-            today_close = float(items[0].get("close") or 0)
-            prev_close = float(items[1].get("close") or 0)
+            today_close = float(rows[-1].get("close") or 0)
+            prev_close = float(rows[-2].get("close") or 0)
         except (TypeError, ValueError):
             return None
         if today_close <= 0 or prev_close <= 0:
             return None
-        return today_close, prev_close, str(items[0].get("date") or "")
+        return today_close, prev_close, self._bar_date_key(rows[-1].get("date"))
 
     def _fill_after_close_from_kline(self, snapshot: PriceSnapshot, symbol: str, market: str) -> PriceSnapshot:
         """盘后：用日K的"今收/昨收"补 last 与 change_pct。

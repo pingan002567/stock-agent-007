@@ -93,3 +93,24 @@ def test_after_close_cache_before_boundary_is_refetched(monkeypatch):
     quote = router.get_quote("000963")
     assert calls["n"] == 1, "午间快照应被判定过期并重新取价"
     assert quote.last == 26.56
+
+
+def test_kline_pair_takes_latest_by_date_not_by_position(monkeypatch):
+    """日K 顺序不保证，date 还可能是 date 对象：必须按日期取最后两根。"""
+    from datetime import date
+
+    from backend.stock_domain import provider_router as pr_mod
+
+    router = pr_mod.ProviderRouter()
+    monkeypatch.setattr(
+        router,
+        "get_history",
+        lambda symbol, days=3: {
+            "items": [
+                {"date": "20261109", "close": 27.05},
+                {"date": "20261110", "close": 26.87},
+                {"date": date(2026, 11, 11), "close": 26.56},  # provider 返回的是 date 对象
+            ]
+        },
+    )
+    assert router._kline_close_pair("000963") == (26.56, 26.87, "20261111")
