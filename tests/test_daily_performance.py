@@ -92,7 +92,7 @@ def test_triage_splits_must_handle_from_noise(tmp_path, monkeypatch):
 
 
 def test_missing_today_bar_reports_unknown_not_yesterday(tmp_path, monkeypatch):
-    """15:15 跑报告时今日日K可能还没落地：今日收益必须为 None，不能拿昨天的充数。"""
+    """数据源延迟、当日日K还没落地时：今日收益必须为 None，不能拿昨天的充数。"""
     from datetime import date
 
     client = make_client(tmp_path)

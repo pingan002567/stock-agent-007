@@ -124,7 +124,8 @@ def build_daily_performance(services: Any) -> dict[str, Any]:
     buckets = read_cash_buckets(repo)
     cash_rows, cash_cny = cash_buckets_with_cny(buckets, rates)
 
-    # 15:15 跑盘后报告时，今日日K常常还没落地。这时**不能**把"昨天 vs 前天"当成今日收益，
+    # 盘后报告已改到 16:10（Tushare daily 15:00–16:00 入库），但仍要守：数据源偶发延迟时，
+    # **不能**把"昨天 vs 前天"当成今日收益，
     # 必须标成未更新（宁缺毋假）。
     expected = expected_bar_date("CN").strftime("%Y%m%d")
 

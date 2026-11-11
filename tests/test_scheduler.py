@@ -70,7 +70,7 @@ def test_scheduled_tasks_api_roundtrip(tmp_path, monkeypatch):
     assert premarket["enabled"] is True and premarket["next_run_at"]
     assert intraday["enabled"] is True and intraday["schedule"] == "daily@11:45"
     assert "下午开盘" in intraday["prompt"]
-    assert close["enabled"] is True and close["schedule"] == "daily@15:15"
+    assert close["enabled"] is True and close["schedule"] == "daily@16:10"
     assert weekly["enabled"] is False
 
     # 新建 + 校验非法日程被拒
@@ -214,7 +214,7 @@ def test_next_duty_run_skips_weekend_and_cn_holiday(monkeypatch):
         return True
 
     monkeypatch.setattr("backend.stock_domain.trading_calendar.is_trading_day", fake_is_trading_day)
-    close = {"task_id": "sched_close", "calendar": "CN", "schedule": "daily@15:15", "name": "盘后报告"}
+    close = {"task_id": "sched_close", "calendar": "CN", "schedule": "daily@16:10", "name": "盘后报告"}
     weekly = {"task_id": "sched_weekly_review", "schedule": "weekly@7@17:00", "name": "周度复盘"}
     discovery = {
         "task_id": "sched_premarket_discovery",
@@ -223,10 +223,13 @@ def test_next_duty_run_skips_weekend_and_cn_holiday(monkeypatch):
         "name": "每日机会发现",
     }
 
-    # 周五收盘后 → 跳过周末，落到下周一
-    assert next_duty_run(close, _dt("2026-07-17T16:00")) == _dt("2026-07-20T15:15")
-    # 国庆前一晚 → 跳过 10/1–10/8，落到 10/9
-    assert next_duty_run(close, _dt("2026-09-30T16:00")) == _dt("2026-10-09T15:15")
+    # 周五 16:00 → 当天 16:10 还没到，就是今天
+    assert next_duty_run(close, _dt("2026-07-17T16:00")) == _dt("2026-07-17T16:10")
+    # 周五 17:00（已过 16:10）→ 跳过周末，落到下周一
+    assert next_duty_run(close, _dt("2026-07-17T17:00")) == _dt("2026-07-20T16:10")
+    # 国庆前一晚 16:00 → 当天 16:10 仍可跑；17:00 之后才顺延到 10/9
+    assert next_duty_run(close, _dt("2026-09-30T16:00")) == _dt("2026-09-30T16:10")
+    assert next_duty_run(close, _dt("2026-09-30T17:00")) == _dt("2026-10-09T16:10")
     # 周度周日不跟 A 股休市
     assert next_duty_run(weekly, _dt("2026-10-03T10:00")) == _dt("2026-10-04T17:00")
     # 机会发现周末、节假日都不顺延
@@ -375,7 +378,7 @@ def test_legacy_default_prompts_upgraded_on_list(tmp_path):
                     "task_id": "sched_close",
                     "name": "收盘体检",
                     "prompt": "我自己改过的收盘文案",
-                    "schedule": "daily@15:15",
+                    "schedule": "daily@16:10",
                     "enabled": True,
                     "page": "chat",
                     "authority_level": "A3",
@@ -578,3 +581,26 @@ def test_legacy_task_names_are_renamed(tmp_path):
     assert "【任务】盘后报告" in listed["sched_close"]["prompt"]
     # 用户自定义名字不被覆盖
     assert listed["sched_intraday"]["name"] == "我的午间自定义"
+
+
+def test_close_task_schedule_migrated_to_1610(tmp_path):
+    """老安装里 15:15 的盘后任务要迁到 16:10（Tushare daily 15:00–16:00 入库）。"""
+    from backend.app_services.scheduler_service import CONFIG_KEY
+    from tests.test_api import make_client
+
+    client = make_client(tmp_path)
+    repo = client.app.state.services.repo
+    items = client.get("/api/scheduled-tasks").json()["items"]
+    seeded = []
+    for item in items:
+        row = dict(item)
+        row.pop("next_run_at", None)
+        row.pop("skip_reason", None)
+        if row["task_id"] == "sched_close":
+            row["schedule"] = "daily@15:15"
+            row["name"] = "盘后报告"
+        seeded.append(row)
+    repo.set_config(CONFIG_KEY, {"items": seeded})
+
+    listed = {t["task_id"]: t for t in client.get("/api/scheduled-tasks").json()["items"]}
+    assert listed["sched_close"]["schedule"] == "daily@16:10"
