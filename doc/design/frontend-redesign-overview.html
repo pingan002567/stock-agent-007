@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock Agent · 首页改版设计（frontend-design 流程）</title>
+<style>
+  /* ─────────────────────────────────────────────
+     设计 token（新方向）
+     语义色不可挪用：红绿只表示涨跌/盈亏，结构强调用墨青
+     ───────────────────────────────────────────── */
+  :root{
+    --paper:#FBFAF7;        /* 纸面：暖白，不是纯白，也不是模板奶油 #F4F1EA */
+    --paper-2:#F4F2EC;      /* 次级纸面：表头/边注 */
+    --ink:#14181C;          /* 墨 */
+    --ink-2:#3D444B;
+    --ink-3:#6B737B;        /* 次要文字 */
+    --rule:#E2DED4;         /* 纸上的线，偏暖 */
+    --rule-strong:#CFC9BB;
+    --accent:#1F5C55;       /* 墨青：结构强调/链接/选中，绝不用于涨跌 */
+    --accent-soft:#E7F0EE;
+    --up:#C0352B;           /* 印泥红：涨/盈 */
+    --down:#2E7D5B;         /* 墨绿：跌/损 */
+    --flat:#8A8F94;
+    --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    --serif:"Songti SC","Source Han Serif SC","Noto Serif SC","SimSun",serif;
+    --sans:-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  }
+  .new-ui[data-mode="dark"]{
+    --paper:#14171A; --paper-2:#1B1F23; --ink:#E9E6DF; --ink-2:#C3C7CB; --ink-3:#8D949B;
+    --rule:#2A2F33; --rule-strong:#3A4045; --accent:#6FB3A8; --accent-soft:#1B2C2A;
+    --up:#E8726A; --down:#57B98C; --flat:#7D848B;
+  }
+
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#f2f3f4;color:#14181C;font:14px/1.7 var(--sans);padding:36px 40px 90px}
+  .doc{max-width:1240px;margin:0 auto}
+  h1{font-size:20px;font-weight:600;letter-spacing:-.01em}
+  .sub{color:#6B737B;font-size:13px;margin-top:6px}
+  code{font-family:var(--mono);font-size:12px;background:#fff;border:1px solid #e6e3db;padding:1px 5px;border-radius:4px}
+  .sec-title{font-size:13px;font-weight:600;color:#3D444B;margin:30px 0 10px;display:flex;align-items:center;gap:8px}
+  .sec-title::before{content:"";width:14px;height:1px;background:#CFC9BB}
+
+  /* ── 设计计划卡 ── */
+  .plan{display:grid;grid-template-columns:1.05fr .95fr;gap:16px}
+  @media(max-width:1000px){.plan{grid-template-columns:1fr}}
+  .box{background:#fff;border:1px solid #e6e3db;border-radius:10px;padding:14px 16px}
+  .box h3{font-size:12.5px;font-weight:600;color:#3D444B;margin-bottom:9px}
+  .swatches{display:flex;flex-wrap:wrap;gap:8px}
+  .sw{display:flex;align-items:center;gap:7px;font-size:11.5px;font-family:var(--mono);color:#3D444B}
+  .sw i{width:26px;height:26px;border-radius:5px;border:1px solid rgba(0,0,0,.08);display:block}
+  .kv{display:grid;grid-template-columns:74px 1fr;gap:4px 10px;font-size:12.5px;margin-top:8px}
+  .kv dt{color:#6B737B}
+  .kv dd{color:#14181C}
+  pre.wf{font-family:var(--mono);font-size:11px;line-height:1.5;color:#3D444B;background:#FBFAF7;border:1px dashed #CFC9BB;border-radius:8px;padding:11px;overflow:auto}
+  .principles{list-style:none;display:flex;flex-direction:column;gap:7px;font-size:12.5px}
+  .principles li{display:flex;gap:8px}
+  .principles b{flex:none;width:16px;color:#1F5C55;font-family:var(--mono);font-size:11px;padding-top:2px}
+  .selfcrit{border-left:2px solid #1F5C55;padding:2px 0 2px 12px;font-size:12.5px;color:#3D444B;line-height:1.8}
+  .selfcrit em{font-style:normal;color:#C0352B}
+
+  /* ── 对比区 ── */
+  .bar{display:flex;align-items:center;gap:8px;margin:26px 0 12px;flex-wrap:wrap}
+  .bar .sp{flex:1}
+  button{font:inherit;font-size:12.5px;padding:5px 11px;border-radius:6px;border:1px solid #d5d2c9;background:#fff;color:#3D444B;cursor:pointer}
+  button:hover{border-color:#1F5C55;color:#1F5C55}
+  button.on{background:#14181C;border-color:#14181C;color:#fff}
+  .compare{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+  .compare.solo{grid-template-columns:1fr}
+  .compare.solo > div:first-child{display:none}
+  @media(max-width:1080px){.compare{grid-template-columns:1fr}}
+  .col-head{display:flex;align-items:baseline;gap:8px;margin-bottom:8px}
+  .col-head b{font-size:13px}
+  .col-head span{font-size:11.5px;color:#6B737B}
+  .badge{font-size:10.5px;padding:1px 7px;border-radius:999px;border:1px solid}
+  .badge.old{color:#C0352B;border-color:#f0c9c4;background:#fdf3f1}
+  .badge.new{color:#1F5C55;border-color:#bcd7d1;background:#eef5f3}
+
+  /* ══════════ 现状（复刻现在风格：卡片+阴影+统一圆角+eyebrow）══════════ */
+  .old-ui{background:#fff;border:1px solid #eaeef2;border-radius:12px;padding:16px;font-family:var(--sans)}
+  .old-kicker{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#8c959f;margin-bottom:6px}
+  .old-h{font-size:18px;font-weight:600;color:#1f2328}
+  .old-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:14px 0}
+  .old-kpi{background:#fff;border:1px solid #eaeef2;border-radius:12px;padding:12px;box-shadow:0 1px 3px rgba(0,0,0,.1);transition:all .2s}
+  .old-kpi:hover{box-shadow:0 4px 14px rgba(0,0,0,.12);transform:translateY(-1px)}
+  .old-kpi .k{font-size:11px;color:#8c959f}
+  .old-kpi .v{font-size:22px;font-weight:600;font-family:var(--mono);margin-top:2px}
+  .old-card{background:#fff;border:1px solid #eaeef2;border-radius:12px;padding:14px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+  .old-card h4{font-size:13px;font-weight:600;margin-bottom:8px;color:#1f2328}
+  .old-meta{font-size:11.5px;color:#8c959f;font-family:var(--mono);margin-bottom:8px}
+  .old-row{display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;border-bottom:1px solid #f2f4f6}
+  .old-row:last-child{border-bottom:none}
+  .old-tag{font-size:10.5px;color:#0969da;background:#eef5ff;border:1px solid #cfe3ff;border-radius:999px;padding:0 6px}
+  .old-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .old-chip{font-size:11.5px;border:1px solid #eaeef2;border-radius:999px;padding:2px 9px;color:#3D444B;background:#fafbfc}
+
+  /* ══════════ 新方向（一张纸 + 账本线 + 宋体头条）══════════ */
+  .new-ui{background:var(--paper);color:var(--ink);border:1px solid var(--rule);border-radius:4px;padding:26px 30px 30px;font-family:var(--sans);transition:background .2s,color .2s}
+  .nu-top{display:flex;align-items:baseline;gap:10px;border-bottom:1px solid var(--rule-strong);padding-bottom:9px}
+  .nu-brand{font-family:var(--serif);font-size:15px;letter-spacing:.02em}
+  .nu-date{font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+  .nu-day{margin-left:auto;font-size:11.5px;color:var(--ink-3)}
+
+  /* 头条：全页唯一"响亮"的地方 */
+  .nu-lead{display:flex;flex-wrap:wrap;gap:16px 26px;align-items:flex-end;justify-content:space-between;padding:20px 0 18px;border-bottom:1px solid var(--rule)}
+  .nu-lead > div:first-child{flex:1 1 300px;min-width:0}
+  .nu-lead h2{font-family:var(--serif);font-size:clamp(21px,2.1vw,27px);line-height:1.5;font-weight:600;letter-spacing:.01em;text-wrap:balance}
+  .nu-lead .note{color:var(--ink-3);font-size:12.5px;margin-top:7px}
+  .nu-nums{display:flex;align-items:flex-end;gap:0}
+  .nu-num{padding:0 15px;border-left:1px solid var(--rule)}
+  .nu-num:first-child{border-left:none;padding-left:0}
+  .nu-num .k{font-size:10.5px;color:var(--ink-3);white-space:nowrap}
+  .nu-num .v{font-family:var(--mono);font-size:19px;font-weight:500;font-variant-numeric:tabular-nums;letter-spacing:-.01em;margin-top:1px;white-space:nowrap}
+  .nu-num .d{font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+  .up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--flat)}
+
+  /* 账本线：左侧竖线，条目挂在线上 */
+  .nu-body{display:grid;grid-template-columns:1.55fr 1fr;gap:26px;margin-top:18px}
+  @media(max-width:980px){.nu-body{grid-template-columns:1fr}}
+  .nu-sec{margin-bottom:20px}
+  .nu-sec h3{font-size:11.5px;font-weight:600;color:var(--ink-3);margin-bottom:9px;display:flex;align-items:center;gap:7px}
+    .ledger{position:relative;padding-left:16px}
+  .ledger::before{content:"";position:absolute;left:3px;top:4px;bottom:4px;width:1px;background:var(--rule-strong)}
+  .entry{position:relative;padding:6px 0}
+  .entry::before{content:"";position:absolute;left:-16px;top:13px;width:7px;height:1px;background:var(--rule-strong)}
+  .entry .t{font-family:var(--mono);font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+  .entry .h{font-size:13px;margin-top:1px}
+  .entry .m{font-size:11.5px;color:var(--ink-3);margin-top:1px}
+  .entry.todo .h{color:var(--accent)}
+
+  /* 持仓：交割单式表格，数字右对齐 */
+  table.nu-tab{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.nu-tab th{font-size:10.5px;font-weight:500;color:var(--ink-3);text-align:right;padding:0 0 6px;border-bottom:1px solid var(--rule-strong);white-space:nowrap}
+  table.nu-tab th:first-child{text-align:left}
+  table.nu-tab td{padding:7px 0;border-bottom:1px solid var(--rule);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  table.nu-tab td:first-child{text-align:left;font-variant-numeric:normal}
+  table.nu-tab tr:hover td{background:var(--paper-2)}
+  .sym{font-size:12.5px}
+  .sym i{display:block;font-style:normal;font-size:10.5px;color:var(--ink-3);font-family:var(--mono)}
+  .num{font-family:var(--mono);font-size:12px}
+
+  /* 边注：数据健康 / 基准 / 现金 */
+  .aside{font-size:12px;color:var(--ink-2)}
+  .aside .line{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--rule)}
+  .aside .line:last-child{border-bottom:none}
+  .aside .line span:first-child{color:var(--ink-3)}
+  .aside .line b{font-family:var(--mono);font-weight:500;font-variant-numeric:tabular-nums}
+  .aside .hint{font-size:11.5px;color:var(--ink-3);line-height:1.7;margin-top:8px;padding-top:8px;border-top:1px dashed var(--rule-strong)}
+  .aside .hint em{font-style:normal;color:var(--accent)}
+
+  /* 待决 */
+  .decide{display:flex;flex-direction:column;gap:0}
+  .decide .item{padding:9px 0;border-bottom:1px solid var(--rule)}
+  .decide .item:last-child{border-bottom:none}
+  .decide .why{font-size:11.5px;color:var(--ink-3);margin-top:2px}
+  .decide .acts{display:flex;gap:6px;margin-top:6px}
+  .decide .acts button{font-size:11.5px;padding:2px 9px;border-radius:4px;border:1px solid var(--rule-strong);background:transparent;color:var(--ink-2)}
+  .decide .acts button.go{border-color:var(--accent);color:var(--accent)}
+  .decide .acts button:hover{border-color:var(--accent);color:var(--accent)}
+
+  /* 页脚：一条印刷式细线 + 免责 */
+  .nu-foot{margin-top:20px;padding-top:9px;border-top:1px solid var(--rule-strong);font-size:10.5px;color:var(--ink-3);display:flex;gap:12px;flex-wrap:wrap}
+  .nu-foot .sp{flex:1}
+
+  /* ── 说明表 ── */
+  table.doc-tab{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #e6e3db;border-radius:9px;overflow:hidden}
+  table.doc-tab th,table.doc-tab td{text-align:left;padding:8px 11px;border-bottom:1px solid #eeeae1;vertical-align:top}
+  table.doc-tab th{background:#f7f5ef;font-size:11.5px;font-weight:600;color:#3D444B}
+  table.doc-tab tr:last-child td{border-bottom:none}
+  .del{color:#C0352B}
+  .keep{color:#2E7D5B}
+</style>
+</head>
+<body>
+<div class="doc">
+  <h1>Stock Agent 首页改版 · 设计计划与原型</h1>
+  <div class="sub">按 <code>frontend-design</code> 的流程：先定 token 与版式 → 对照"通用默认"自评 → 再出图。改动只在呈现层。</div>
+
+  <!-- ══════ 1. 设计计划 ══════ -->
+  <div class="sec-title">一、设计计划（先定，再画）</div>
+  <div class="plan">
+    <div class="box">
+      <h3>色彩 · 6 个命名色</h3>
+      <div class="swatches">
+        <span class="sw"><i style="background:#FBFAF7"></i>paper #FBFAF7</span>
+        <span class="sw"><i style="background:#14181C"></i>ink #14181C</span>
+        <span class="sw"><i style="background:#E2DED4"></i>rule #E2DED4</span>
+        <span class="sw"><i style="background:#1F5C55"></i>accent #1F5C55</span>
+        <span class="sw"><i style="background:#C0352B"></i>up #C0352B</span>
+        <span class="sw"><i style="background:#2E7D5B"></i>down #2E7D5B</span>
+      </div>
+      <div class="kv">
+        <dt>为什么不用</dt><dd>奶油底 #F4F1EA + 陶土红 #D97757 —— 这是当下最典型的"AI 生成感"，而且和 A 股红涨冲突。</dd>
+        <dt>为什么用墨青</dt><dd>红绿已被盈亏语义占满，结构强调必须退出这套语义，否则"强调"和"涨"分不清。</dd>
+        <dt>纸面偏暖</dt><dd>因为它承载的是"交割单 / 研报 / 晨报"这类纸面物件，不是 SaaS 后台。</dd>
+      </div>
+    </div>
+
+    <div class="box">
+      <h3>字体 · 三种角色，不是三种性格</h3>
+      <div class="kv">
+        <dt>结论/标题</dt><dd><b>宋体</b>（Songti SC）。研报、公告、晨报的印刷语汇——这是本产品的"母语"，不是装饰。</dd>
+        <dt>正文/界面</dt><dd>系统黑体 PingFang SC，1.75 行高，行宽 ≤ 78 字。</dd>
+        <dt>数字</dt><dd>等宽 + tabular numerals，<b>只用于表格与金额</b>；不用它做小标签（那是模板感来源之一）。</dd>
+        <dt>字号阶梯</dt><dd>10.5 / 11.5 / 12.5 / 13 / 19 / 27（只有头条用 27）</dd>
+      </div>
+    </div>
+  </div>
+
+  <div class="plan" style="margin-top:16px">
+    <div class="box">
+      <h3>版式 · 一张纸 + 一条账本线</h3>
+      <pre class="wf">┌──────────────────────────────────────────────┐
+│ Stock Agent            2026-11-14  周五      │ ← 报头
+├──────────────────────────────────────────────┤
+│  结论（宋体 27）                  ┌────┬────┐│ ← 头条：全页唯一响亮处
+│  不追高，维持现有仓位…            │净值│今日││
+│  一句补充说明                     └────┴────┘│
+├───────────────────────────┬──────────────────┤
+│ 今日日程（挂账本线）      │ 待你决定         │
+│  ·08:30 盘前报告 ✓        │  权重超限 36.8%  │
+│  ·11:45 盘中报告 ✓        │  [执行][忽略]    │
+│  ·16:10 盘后报告 ✓        │ ──────────────  │
+│  ·18:00 机会发现 待生成   │  数据健康 / 基准 │
+│                           │  回撤 / 现金     │
+│ 持仓（交割单式表格）      │                  │
+├───────────────────────────┴──────────────────┤
+│ 免责声明 · 数据口径                          │ ← 页脚
+└──────────────────────────────────────────────┘
+左对齐。所有金额右对齐、等宽、同一行基线。</pre>
+      <div class="kv"><dt>分层方式</dt><dd>用<b>线、缩进、字号</b>，不用卡片阴影。阴影只留给真正浮起的层（弹窗、浮层）。</dd></div>
+    </div>
+
+    <div class="box">
+      <h3>五条原则</h3>
+      <ul class="principles">
+        <li><b>1</b><span><b>语义色不可挪用</b>：红绿只表示涨跌与盈亏，结构强调一律用墨青。</span></li>
+        <li><b>2</b><span><b>一张纸，不是一堆卡</b>：取消卡片网格与统一阴影，靠线与留白分层。</span></li>
+        <li><b>3</b><span><b>数字优先</b>：金额/比例等宽右对齐，单位做小字后缀，不重复写"元/股"。</span></li>
+        <li><b>4</b><span><b>每天只有一个头条</b>：结论一句话最大，其余信息降到 12–13px。</span></li>
+        <li><b>5</b><span><b>按中文排版</b>：1.75 行高、行宽 ≤78 字、数字与中文之间留 1/4 空隙、标点不占行首。</span></li>
+      </ul>
+      <h3 style="margin-top:14px">自评（对照"通用默认"）</h3>
+      <div class="selfcrit">
+        初版我准备做：<em>大数字 + 三张 KPI 卡 + 渐变强调 + 每个区块 fade-up</em> ——
+        这换成任何一个 dashboard 都成立，属于 skill 明确点名的默认解。
+        <br>改版后：用<b>晨报头条</b>替代 KPI 卡组，用<b>账本线</b>替代卡片网格，
+        把"响亮"只花在头条一处，其余全部安静；动效只保留"数字更新时的一次跳动"，不做入场动画。
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════ 2. 对比原型 ══════ -->
+  <div class="sec-title">二、原型对比：现状 vs 新方向</div>
+  <div class="bar">
+    <span class="badge old">现状：卡片 + 阴影 + 统一圆角</span>
+    <span class="badge new">新方向：一张纸 + 账本线 + 宋体头条</span>
+    <span class="sp"></span>
+    <button id="btn-theme">切换深色</button>
+    <button id="btn-full">只看新方向</button>
+  </div>
+
+  <div class="compare">
+    <!-- 现状 -->
+    <div>
+      <div class="col-head"><b>现状</b><span>每个模块都是同样的圆角卡片 + 同样阴影</span></div>
+      <div class="old-ui">
+        <div class="old-kicker">Stock Agent</div>
+        <div class="old-h">今天该做什么？</div>
+        <div class="old-kpis">
+          <div class="old-kpi"><div class="k">总资产</div><div class="v">7,215.53</div></div>
+          <div class="old-kpi"><div class="k">今日盈亏</div><div class="v" style="color:#cf222e">-47.00</div></div>
+          <div class="old-kpi"><div class="k">可用资金</div><div class="v">2,962.53</div></div>
+        </div>
+        <div class="old-card">
+          <h4>今日日程</h4>
+          <div class="old-meta">08:30 · 11:45 · 16:10 · 18:00</div>
+          <div class="old-row"><span>盘前报告</span><span class="old-tag">已完成</span></div>
+          <div class="old-row"><span>盘中报告</span><span class="old-tag">已完成</span></div>
+          <div class="old-row"><span>盘后报告</span><span class="old-tag">已完成</span></div>
+        </div>
+        <div class="old-card">
+          <h4>持仓</h4>
+          <div class="old-row"><span>华东医药 000963</span><span style="color:#2E7D5B">-18.00</span></div>
+          <div class="old-row"><span>中国电影 600977</span><span style="color:#C0352B">+71.00</span></div>
+          <div class="old-chips">
+            <span class="old-chip">权重超限</span>
+            <span class="old-chip">账实待核对</span>
+            <span class="old-chip">待办 7 条</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新方向 -->
+    <div>
+      <div class="col-head"><b>新方向</b><span>纸面、账本线、交割单式表格</span></div>
+      <div class="new-ui" id="newui" data-mode="light">
+        <div class="nu-top">
+          <span class="nu-brand">Stock Agent</span>
+          <span class="nu-date">2026-11-14 · 周五</span>
+          <span class="nu-day">收盘后 · 16:11 已更新</span>
+        </div>
+
+        <div class="nu-lead">
+          <div>
+            <h2>不追高，维持现有仓位，等回踩再谈。</h2>
+            <div class="note">今日组合跑输沪深 300 1.06 个百分点；单票权重仍超上限，是今天唯一必须处理的事。</div>
+          </div>
+          <div class="nu-nums">
+            <div class="nu-num"><div class="k">净值</div><div class="v">7,215.53</div><div class="d">昨日 7,262.53</div></div>
+            <div class="nu-num"><div class="k">今日</div><div class="v down">−47.00</div><div class="d down">−0.65%</div></div>
+            <div class="nu-num"><div class="k">可用</div><div class="v">2,962.53</div><div class="d">41.1%</div></div>
+          </div>
+        </div>
+
+        <div class="nu-body">
+          <div>
+            <div class="nu-sec">
+              <h3>今日日程</h3>
+              <div class="ledger">
+                <div class="entry"><div class="t">08:30</div><div class="h">盘前报告 <span class="flat" style="font-size:11px">已完成</span></div><div class="m">隔夜要闻 3 条 · 今日重点 2 只</div></div>
+                <div class="entry"><div class="t">11:45</div><div class="h">盘中报告 <span class="flat" style="font-size:11px">已完成</span></div><div class="m">上午 −0.4%，主线走弱</div></div>
+                <div class="entry"><div class="t">16:10</div><div class="h">盘后报告 <span class="flat" style="font-size:11px">已完成</span></div><div class="m">−0.65%，负贡献 2 只</div></div>
+                <div class="entry todo"><div class="t">18:00</div><div class="h">每日机会发现 <span class="down" style="font-size:11px">待生成</span></div><div class="m">下一开市日 3–5 个机会</div></div>
+              </div>
+            </div>
+
+            <div class="nu-sec">
+              <h3>持仓</h3>
+              <table class="nu-tab">
+                <thead><tr><th>标的</th><th>数量</th><th>成本</th><th>现价</th><th>盈亏</th><th>权重</th></tr></thead>
+                <tbody>
+                  <tr><td class="sym">华东医药<i>000963</i></td><td class="num">100</td><td class="num">26.74</td><td class="num">26.56</td><td class="num down">−18.00</td><td class="num">36.8%</td></tr>
+                  <tr><td class="sym">中国电影<i>600977</i></td><td class="num">100</td><td class="num">15.26</td><td class="num">15.97</td><td class="num up">+71.00</td><td class="num">22.1%</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="aside">
+            <div class="nu-sec">
+              <h3>待你决定</h3>
+              <div class="decide">
+                <div class="item">
+                  <div class="h" style="font-size:12.5px">华东医药权重 36.8% > 上限 15%</div>
+                  <div class="why">超 21.8 个百分点，需减 ≥¥1,570 才回到合规</div>
+                  <div class="acts"><button class="go">按建议减仓</button><button>今天不动</button></div>
+                </div>
+                <div class="item">
+                  <div class="h" style="font-size:12.5px">1 笔成交未记录</div>
+                  <div class="why">数量 +100 股，现金无对应流水；推断成交价 26.15</div>
+                  <div class="acts"><button class="go">一键补记</button><button>稍后</button></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="nu-sec">
+              <h3>参照</h3>
+              <div class="aside">
+                <div class="line"><span>沪深 300</span><b class="up">+0.41%</b></div>
+                <div class="line"><span>中证 500</span><b class="up">+1.01%</b></div>
+                <div class="line"><span>超额</span><b class="down">−1.06%</b></div>
+                <div class="line"><span>回撤（近 3 日）</span><b>−0.9%</b></div>
+                <div class="line"><span>数据口径</span><b style="font-family:var(--sans)">日K收盘</b></div>
+                <div class="hint">日K 16:05 入库；若当日缺失，这里会写<em>「未更新」</em>，不会显示 0。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="nu-foot">
+          <span>数据：日K收盘 · 汇率 2026-11-14</span>
+          <span class="sp"></span>
+          <span>仅供研究参考，不构成投资建议</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════ 3. 具体改什么 ══════ -->
+  <div class="sec-title">三、具体改什么（都是呈现层，不动信息架构）</div>
+  <table class="doc-tab">
+    <thead><tr><th style="width:210px">元素</th><th style="width:250px">现在</th><th>改成</th><th style="width:70px">判断</th></tr></thead>
+    <tbody>
+      <tr><td>品牌 eyebrow</td><td>空状态/首页顶部一行大写 "STOCK AGENT"</td><td>删掉；品牌只出现在报头一行宋体字里</td><td class="del">删</td></tr>
+      <tr><td>KPI 卡片组</td><td>3 张同圆角同阴影的卡</td><td>合并成头条右侧三个数字，用竖线分隔</td><td class="del">删</td></tr>
+      <tr><td>模块容器</td><td>每块一张卡片（圆角 12 + 阴影）</td><td>取消卡片；用 1px 线与缩进分层，阴影只留弹窗</td><td class="del">删</td></tr>
+      <tr><td>统计串中点号</td><td>"思考 3 步 · 调用 3 个工具 · 1 分 10 秒"</td><td>保留（是统计语义，不是装饰）；只清理纯装饰性串联</td><td class="keep">留</td></tr>
+      <tr><td>等宽小标签</td><td>大量小标签用等宽</td><td>只在表格数字与代码用等宽；标签改回黑体</td><td class="del">收</td></tr>
+      <tr><td>入场动效</td><td>页面每块 fade-up、卡片 hover 位移</td><td>不做入场；只在数字变化时跳一次，hover 只给可点击行</td><td class="del">收</td></tr>
+      <tr><td>圆角</td><td>6/8/10/12 + 999 混用</td><td>收敛三档：4（表格/线框）、6（按钮）、12（弹窗）</td><td class="del">收</td></tr>
+      <tr><td>表格数字</td><td>部分左对齐、部分等宽</td><td>统一右对齐 + tabular numerals + 单位小字后缀</td><td class="keep">留</td></tr>
+    </tbody>
+  </table>
+
+  <div class="sec-title">四、边界与不做什么</div>
+  <div class="box" style="font-size:12.5px;line-height:1.85">
+    <b>不动</b>：信息架构、路由、三栏骨架、A 股红涨绿跌语义、表格密度、键盘流、宠物浮层。<br>
+    <b>不做</b>：换全套字体文件（用系统宋体/黑体，零加载成本）、改暗色主题的整体色相、加装饰性渐变或插图。<br>
+    <b>验收</b>：同一屏信息量下，扫读时间更短、数字更好比、结论一眼可见；深色模式对比度不降级。
+  </div>
+</div>
+
+<script>
+(() => {
+  const full = document.getElementById("btn-full");
+  full.addEventListener("click", () => {
+    document.querySelector(".compare").classList.toggle("solo");
+    full.textContent = document.querySelector(".compare").classList.contains("solo") ? "并排对比" : "只看新方向";
+  });
+  const btn = document.getElementById("btn-theme");
+  const ui = document.getElementById("newui");
+  btn.addEventListener("click", () => {
+    const dark = ui.dataset.mode === "dark";
+    ui.dataset.mode = dark ? "light" : "dark";
+    btn.textContent = dark ? "切换深色" : "切换浅色";
+  });
+
+  // ?full=1 / ?dark=1：放在监听器之后，截图和评审用
+  const qs = new URLSearchParams(location.search);
+  if (qs.get("full") === "1") document.getElementById("btn-full").click();
+  if (qs.get("dark") === "1") document.getElementById("btn-theme").click();
+})();
+</script>
+</body>
+</html>
