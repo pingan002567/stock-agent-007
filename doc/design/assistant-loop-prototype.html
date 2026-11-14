@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>助理机器人 · 一天闭环原型（人只负责「执行/不执行」）</title>
+<style>
+  :root {
+    --bg:#fff; --canvas:#f6f7f8; --paper:#fbfcfd;
+    --ink:#1f2328; --ink2:#383c42; --muted:#6e7781; --faint:#8c959f;
+    --line:#eaeef2; --line2:#dfe3e8;
+    --blue:#0969da; --blue-soft:#eef5ff;
+    --green:#1a7f37; --green-soft:#e9f6ee;
+    --red:#cf222e; --red-soft:#ffebe9;
+    --amber:#9a6700; --amber-soft:#fff8e6;
+    --gain:#cf222e; --loss:#1a7f37;   /* A 股：红涨绿跌 */
+    --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--canvas);color:var(--ink);font:14px/1.7 -apple-system,"PingFang SC","Segoe UI",sans-serif;padding:38px 44px 90px}
+  .doc{max-width:1180px}
+  h1{font-size:21px;font-weight:600;letter-spacing:-.01em}
+  .sub{color:var(--muted);margin-top:7px;font-size:13px}
+  code{font-family:var(--mono);font-size:12px;background:#f6f8fa;padding:1px 5px;border-radius:4px}
+  .note{margin:18px 0 26px;padding:13px 15px;background:var(--bg);border:1px solid var(--line);border-radius:8px;font-size:13px;color:var(--ink2);line-height:1.85}
+  .note b{color:var(--ink)}
+
+  .bar{display:flex;flex-wrap:wrap;align-items:center;gap:9px;padding:10px 14px;background:var(--bg);border:1px solid var(--line);border-radius:9px;margin-bottom:20px;position:sticky;top:10px;z-index:9;box-shadow:0 1px 2px rgba(31,35,40,.05)}
+  .bar .sp{flex:1}
+  button{font:inherit;font-size:12.5px;padding:5px 11px;border-radius:6px;border:1px solid var(--line2);background:#fff;color:var(--ink2);cursor:pointer}
+  button:hover{border-color:var(--blue);color:var(--blue)}
+  button.primary{background:var(--ink);border-color:var(--ink);color:#fff}
+  button.primary:hover{background:#000;color:#fff}
+  button:disabled{opacity:.45;cursor:default}
+  label.opt{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
+  select{font:inherit;font-size:12.5px;padding:4px 6px;border-radius:6px;border:1px solid var(--line2);background:#fff;color:var(--ink2)}
+
+  .cols{display:grid;grid-template-columns:400px 1fr;gap:20px;align-items:start}
+  @media (max-width:1080px){.cols{grid-template-columns:1fr}}
+
+  .panel{background:var(--bg);border:1px solid var(--line);border-radius:11px;overflow:hidden}
+  .panel-head{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--line);font-size:13px;font-weight:600}
+  .panel-head .badge{margin-left:auto;font-size:11px;font-weight:500;padding:1px 8px;border-radius:999px;background:#f6f8fa;color:var(--muted);border:1px solid var(--line2)}
+  .panel-body{padding:10px 14px 14px}
+
+  /* ── 时间轴 ── */
+  .tl{position:relative;display:flex;flex-direction:column;gap:0;padding-left:6px}
+  .tl::before{content:"";position:absolute;left:19px;top:8px;bottom:8px;width:1px;background:var(--line2)}
+  .slot{position:relative;display:flex;gap:10px;padding:7px 0}
+  .slot .dot{flex:none;width:27px;height:27px;border-radius:50%;background:#fff;border:1px solid var(--line2);display:grid;place-items:center;font-size:10.5px;font-family:var(--mono);color:var(--muted);z-index:1}
+  .slot.auto .dot{color:var(--blue);border-color:#cfe3ff;background:var(--blue-soft)}
+  .slot.human .dot{color:var(--amber);border-color:#f0dfae;background:var(--amber-soft)}
+  .slot .main{flex:1;min-width:0}
+  .slot .row{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .slot .t{font-size:11.5px;font-family:var(--mono);color:var(--faint);width:38px;flex:none}
+  .slot .name{font-weight:600;font-size:13px}
+  .slot .desc{color:var(--muted);font-size:12px;margin-top:1px}
+  .tag{font-size:10.5px;padding:0 6px;border-radius:999px;border:1px solid var(--line2);color:var(--muted);background:#fafbfc}
+  .tag.a{color:var(--blue);border-color:#cfe3ff;background:var(--blue-soft)}
+  .tag.h{color:var(--amber);border-color:#f0dfae;background:var(--amber-soft)}
+  .tag.done{color:var(--green);border-color:#c3f0cd;background:var(--green-soft)}
+
+  /* ── 待决卡片 ── */
+  .cards{display:flex;flex-direction:column;gap:10px}
+  .card{border:1px solid var(--line2);border-radius:10px;padding:11px 12px;background:#fff;transition:opacity .18s}
+  .card.done{opacity:.55}
+  .card-top{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .kind{font-size:10.5px;font-weight:600;padding:1px 7px;border-radius:5px}
+  .kind.buy{color:var(--gain);background:var(--red-soft);border:1px solid #ffd7d3}
+  .kind.sell{color:var(--loss);background:var(--green-soft);border:1px solid #c3f0cd}
+  .kind.risk{color:var(--amber);background:var(--amber-soft);border:1px solid #f0dfae}
+  .kind.book{color:var(--blue);background:var(--blue-soft);border:1px solid #cfe3ff}
+  .kind.triage{color:var(--muted);background:#f6f8fa;border:1px solid var(--line2)}
+  .card-title{font-weight:600;font-size:13.5px}
+  .card-why{color:var(--muted);font-size:12px;margin-top:3px;line-height:1.65}
+  .card-facts{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+  .fact{font-size:11.5px;font-family:var(--mono);color:var(--ink2);background:#f6f8fa;border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+  .fact b{font-weight:600}
+  .fact.gain{color:var(--gain);background:var(--red-soft);border-color:#ffd7d3}
+  .fact.loss{color:var(--loss);background:var(--green-soft);border-color:#c3f0cd}
+  .card-actions{display:flex;gap:7px;margin-top:9px;align-items:center}
+  .card-actions .sp{flex:1}
+  .btn-exec{background:var(--ink);border-color:var(--ink);color:#fff}
+  .btn-exec:hover{background:#000;color:#fff}
+  .btn-skip:hover{border-color:var(--faint);color:var(--ink2)}
+  .status{font-size:11.5px;color:var(--green);font-weight:600}
+  .status.skip{color:var(--faint)}
+  .status.later{color:var(--amber)}
+
+  /* ── 执行记录 ── */
+  .log{margin-top:12px;border-top:1px dashed var(--line2);padding-top:9px}
+  .log h4{font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px}
+  .log ul{list-style:none;display:flex;flex-direction:column;gap:4px}
+  .log li{font-size:12px;color:var(--ink2);display:flex;gap:7px}
+  .log li .tm{font-family:var(--mono);color:var(--faint);font-size:11px;flex:none;width:38px}
+  .log .empty{color:var(--faint);font-size:12px}
+
+  /* ── 权限矩阵 ── */
+  table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid var(--line);border-radius:9px;overflow:hidden;margin-top:10px}
+  th,td{text-align:left;padding:8px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:#f6f8fa;font-size:12px;font-weight:600;color:var(--ink2)}
+  tr:last-child td{border-bottom:none}
+  .yes{color:var(--green);font-weight:600}
+  .ask{color:var(--amber);font-weight:600}
+  .no{color:var(--red);font-weight:600}
+  .mono{font-family:var(--mono);font-size:11.5px}
+
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+  .kpi{background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 11px}
+  .kpi .k{font-size:11px;color:var(--muted)}
+  .kpi .v{font-size:17px;font-weight:600;font-family:var(--mono);margin-top:2px}
+  .kpi.hot .v{color:var(--amber)}
+  @media (max-width:720px){.kpis{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="doc">
+  <h1>助理机器人：一天闭环，人只做「执行 / 不执行」</h1>
+  <div class="sub">原型 · 对应 Stock Agent 现有能力（定时报告 / 盯盘规则 / 交易 API / 现金流水 / 待办分诊）</div>
+
+  <div class="note">
+    <b>设计原则</b>：机器负责<b>看、算、记、催</b>；人只负责<b>下单这一件事</b>（以及少数不可逆的决定）。
+    任何真实下单仍然禁止（A5 blocked），机器人只能生成「提案」，等你点执行 —— 你在券商侧成交后回来记一笔，机器人负责对账和回检。
+  </div>
+
+  <div class="bar">
+    <button class="primary" id="btn-run">▶ 模拟推进一天</button>
+    <button id="btn-reset">重置</button>
+    <span class="sp"></span>
+    <label class="opt">自动化程度
+      <select id="mode">
+        <option value="report">只报告（现状）</option>
+        <option value="confirm" selected>提议 + 人工确认（推荐）</option>
+        <option value="auto-small">小额自动执行（≤¥500）</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi hot"><div class="k">待你决定</div><div class="v" id="kpi-pending">5</div></div>
+    <div class="kpi"><div class="k">今日已执行</div><div class="v" id="kpi-done">0</div></div>
+    <div class="kpi"><div class="k">已忽略 / 稍后</div><div class="v" id="kpi-skip">0</div></div>
+    <div class="kpi"><div class="k">机器人自动完成</div><div class="v" id="kpi-auto">12</div></div>
+  </div>
+
+  <div class="cols">
+    <!-- 左：一天时间轴 -->
+    <div class="panel">
+      <div class="panel-head">一天的时间轴 <span class="badge" id="tl-badge">机器 8 步 · 你 5 次决定</span></div>
+      <div class="panel-body">
+        <div class="tl" id="timeline"></div>
+      </div>
+    </div>
+
+    <!-- 右：待决 -->
+    <div>
+      <div class="panel">
+        <div class="panel-head">待你决定 <span class="badge" id="cards-badge">5 项</span></div>
+        <div class="panel-body">
+          <div class="cards" id="cards"></div>
+          <div class="log">
+            <h4>执行记录（机器人自动记账 + 回检）</h4>
+            <ul id="log"><li class="empty">还没有执行动作</li></ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:16px">
+        <div class="panel-head">权限边界（写死的规则，不靠提示词）</div>
+        <div class="panel-body">
+          <table>
+            <thead><tr><th style="width:200px">动作</th><th style="width:110px">谁来做</th><th>说明</th></tr></thead>
+            <tbody id="perm"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const timeline = [
+    { t: "08:00", name: "隔夜数据 + 情报抓取", auto: true,  desc: "日K、公告、情报；校验数据是否就绪（缺就标未更新，不写 0）" },
+    { t: "08:30", name: "盘前报告", auto: true, desc: "隔夜要闻 + 今日重点价位 → 推送一句话结论" },
+    { t: "09:15", name: "盘前执行清单", auto: true, desc: "把昨晚机会发现 + 今早要闻合成一页：做不做 / 什么价 / 多少手" },
+    { t: "09:20", name: "⚠ 你：确认今天做不做", auto: false, desc: "点「按清单执行」或「今天不动」，机器人据此挂盯盘条件" },
+    { t: "09:30", name: "盯盘规则自动布防", auto: true, desc: "价位、异动、关键词规则自动生成并启用" },
+    { t: "10:40", name: "盘中触发 → 提案", auto: true, desc: "触价即生成「买入/减仓」提案，附证据与影响，推送给你" },
+    { t: "11:45", name: "盘中报告", auto: true, desc: "上午总结 + 下午预案（含未决提案提醒）" },
+    { t: "13:05", name: "⚠ 你：处理触发提案", auto: false, desc: "执行 / 忽略 / 稍后；执行后机器人在券商侧…（你下单，回来点已成交）" },
+    { t: "15:05", name: "账实核对", auto: true, desc: "持仓/现金 vs 快照；发现“数量变了但没记录”直接问你要补记" },
+    { t: "15:10", name: "⚠ 你：确认补记", auto: false, desc: "一键补记成交（价格/数量/手续费），写现金流水" },
+    { t: "16:10", name: "盘后报告", auto: true, desc: "今日收益（日K口径）、贡献、基准超额、回撤、待办分诊" },
+    { t: "16:15", name: "待办分诊 + 自动关闭", auto: true, desc: "medium 情报类自动归档；只有高优先/高风险留给你" },
+    { t: "18:00", name: "每日机会发现", auto: true, desc: "下一开市日 3–5 个机会（入场区间/止损/仓位上限）" },
+    { t: "20:00", name: "次日作战单", auto: true, desc: "合成「明天做什么」一页纸，推送到手机" },
+    { t: "周日 17:00", name: "周度复盘 + 回检", auto: true, desc: "本周提案命中率、执行率、账实差异、最大回撤" },
+  ];
+
+  const cardsData = [
+    {
+      id: "buy1", kind: "buy", kindLabel: "买入提案",
+      title: "华东医药 000963 · 回踩买入 100 股",
+      why: "现价 26.87 回落到 25.63–25.80 区间（MA20 支撑），触发盘前清单条件；风险策略单票上限 15%，买后 25.6% 仍超限。",
+      facts: [["价格", "25.70"], ["数量", "100 股"], ["金额", "≈¥2,570"], ["现金后", "≈¥392"], ["影响", "仓位 25.6%"]],
+      warn: "买入后单票权重仍超 15% 上限 → 建议只买 60 股（¥1,542），或先减仓再加",
+    },
+    {
+      id: "sell1", kind: "sell", kindLabel: "减仓提案",
+      title: "中国电影 600977 · 冲高未破 16.20，减 50 股",
+      why: "今日两次触及 16.18 未站上 16.20 阻力；权重 22.3% 超单票上限 15%；报告建议“冲高不过就减半”。",
+      facts: [["现价", "16.01"], ["减仓", "50 股"], ["回款", "≈¥800"], ["权重后", "11.2%"], ["盈亏", "+¥37.5"]],
+    },
+    {
+      id: "risk1", kind: "risk", kindLabel: "风控提醒",
+      title: "单票权重 37.4% > 上限 15%",
+      why: "按风险策略硬限，华东医药 37.4% 已超 22 个百分点。这不是“要不要做”的判断题，是必须处理的合规项。",
+      facts: [["当前", "37.4%"], ["上限", "15%"], ["需减", "≥¥1,600"], ["剩余空间", "-22.4pp"]],
+    },
+    {
+      id: "book1", kind: "book", kindLabel: "账实核对",
+      title: "发现 1 笔未记录的成交",
+      why: "持仓数量比昨日多 100 股，但现金流水没有对应 buy 记录。机器人按市值差额推断成交价 ≈¥26.15。",
+      facts: [["差额", "+100 股"], ["推断价", "26.15"], ["金额", "¥2,615"], ["现金差额", "-¥2,620"]],
+    },
+    {
+      id: "triage1", kind: "triage", kindLabel: "待办分诊",
+      title: "7 条待办：建议关闭 5 条，保留 2 条",
+      why: "5 条是 medium 情报提醒（无价格触发的关键词命中），2 条与持仓减持相关（华东医药/二六三），建议保留观察。",
+      facts: [["必须处理", "0"], ["建议保留", "2"], ["可忽略", "5"], ["最旧", "3 天"]],
+    },
+  ];
+
+  const MODE_AUTO_SMALL = 500; // 小额自动执行的阈值
+
+  let state = {};   // id -> "pending" | "done" | "skip" | "later"
+  let logEntries = [];
+  let autoCount = 12;
+  let mode = "confirm";
+
+  const el = (id) => document.getElementById(id);
+  const fmt = (n) => n.toLocaleString("zh-CN");
+
+  function renderTimeline() {
+    el("timeline").innerHTML = timeline.map((s) => `
+      <div class="slot ${s.auto ? "auto" : "human"}">
+        <span class="dot">${s.auto ? "⚙" : "你"}</span>
+        <div class="main">
+          <div class="row">
+            <span class="t">${s.t}</span>
+            <span class="name">${s.name}</span>
+            <span class="tag ${s.auto ? "a" : "h"}">${s.auto ? "机器自动" : "需要你"}</span>
+          </div>
+          <div class="desc">${s.desc}</div>
+        </div>
+      </div>`).join("");
+  }
+
+  function amountsOf(card) {
+    // 从 facts 里粗略取金额（用于小额自动执行判定）
+    const m = card.facts.find((f) => f[0] === "金额");
+    if (!m) return Infinity;
+    return Number(String(m[1]).replace(/[^\d.]/g, "")) || Infinity;
+  }
+
+  function renderCards() {
+    el("cards").innerHTML = cardsData.map((c) => {
+      const st = state[c.id] || "pending";
+      const disabled = st !== "pending";
+      const auto = mode === "auto-small" && amountsOf(c) <= MODE_AUTO_SMALL;
+      return `
+      <div class="card ${st !== "pending" ? "done" : ""}">
+        <div class="card-top">
+          <span class="kind ${c.kind}">${c.kindLabel}</span>
+          <span class="card-title">${c.title}</span>
+          ${auto ? '<span class="tag done">已按规则自动执行</span>' : ""}
+        </div>
+        <div class="card-why">${c.why}</div>
+        ${c.warn ? `<div class="card-why" style="color:var(--amber);margin-top:4px">⚠ ${c.warn}</div>` : ""}
+        <div class="card-facts">
+          ${c.facts.map(([k, v]) => `<span class="fact">${k} <b>${v}</b></span>`).join("")}
+        </div>
+        <div class="card-actions">
+          ${st === "pending" ? `
+            <button class="btn-exec" data-act="done" data-id="${c.id}">执行</button>
+            <button class="btn-skip" data-act="skip" data-id="${c.id}">不执行</button>
+            <button class="btn-skip" data-act="later" data-id="${c.id}">稍后</button>
+          ` : `<span class="status ${st}">${
+            st === "done" ? "✓ 已执行（机器人已记账）" : st === "skip" ? "已忽略" : "已稍后提醒"
+          }</span>`}
+          <span class="sp"></span>
+          <span class="fact" style="background:none;border:none;color:var(--faint)">#${c.id}</span>
+        </div>
+      </div>`;
+    }).join("");
+
+    el("cards").querySelectorAll("button[data-act]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const id = b.dataset.id;
+        const act = b.dataset.act;
+        state[id] = act;
+        const card = cardsData.find((c) => c.id === id);
+        if (act === "done") addLog(`已执行：${card.title} → 机器人写入流水并更新持仓`);
+        if (act === "skip") addLog(`已忽略：${card.title}（记录原因供回检）`);
+        if (act === "later") addLog(`稍后提醒：${card.title} → 2 小时后重提`);
+        render();
+      });
+    });
+  }
+
+  function addLog(text) {
+    const now = new Date();
+    const tm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    logEntries.unshift({ tm, text });
+    logEntries = logEntries.slice(0, 8);
+  }
+
+  function renderLog() {
+    if (logEntries.length === 0) {
+      el("log").innerHTML = '<li class="empty">还没有执行动作</li>';
+      return;
+    }
+    el("log").innerHTML = logEntries.map((e) => `<li><span class="tm">${e.tm}</span><span>${e.text}</span></li>`).join("");
+  }
+
+  function renderKpis() {
+    const vals = Object.values(state);
+    const pending = cardsData.filter((c) => !state[c.id]).length;
+    el("kpi-pending").textContent = String(pending);
+    el("kpi-done").textContent = String(vals.filter((v) => v === "done").length);
+    el("kpi-skip").textContent = String(vals.filter((v) => v === "skip" || v === "later").length);
+    el("kpi-auto").textContent = String(autoCount);
+    el("cards-badge").textContent = `${pending} 项`;
+  }
+
+  function renderPerm() {
+    const rows = [
+      ["取数 / 算指标 / 生成报告", "机器", "只读，全部自动", "yes"],
+      ["盯盘规则布防与触发", "机器", "按你的价位自动生成规则", "yes"],
+      ["记录成交 / 写现金流水", "机器", "你点「已成交」后自动记账", "yes"],
+      ["账实核对与提醒", "机器", "差异>阈值就问你，不擅自改历史", "yes"],
+      ["待办分诊 / 归档低优先", "机器", "medium 情报类自动归档，可撤销", "yes"],
+      ["生成买入 / 卖出提案", "机器", "只生成提案，永不自己下单", "yes"],
+      ["真实下单", "禁止", "A5 blocked，任何角色都不能调用", "no"],
+      ["执行已批准的提案", "你", "在券商 App 下单，回来点「已成交」", "ask"],
+      ["修改风险阈值 / 现金冻结", "你", "不可逆或影响全局，必须人工确认", "ask"],
+      ["调整止盈止损价", "你", "改了就影响后续自动触发，必须确认", "ask"],
+    ];
+    el("perm").innerHTML = rows.map(([a, who, why, cls]) => `
+      <tr><td>${a}</td><td class="${cls}">${who}</td><td style="color:var(--muted)">${why}</td></tr>`).join("");
+  }
+
+  function render() {
+    renderCards();
+    renderLog();
+    renderKpis();
+  }
+
+  function applyMode() {
+    mode = el("mode").value;
+    if (mode === "auto-small") {
+      // 小额提案自动执行（演示）
+      cardsData.forEach((c) => {
+        if (amountsOf(c) <= MODE_AUTO_SMALL && !state[c.id]) {
+          state[c.id] = "done";
+          addLog(`自动执行（≤¥${MODE_AUTO_SMALL}）：${c.title}`);
+        }
+      });
+    }
+    if (mode === "report") {
+      el("btn-run").textContent = "▶ 模拟推进一天";
+    }
+    render();
+  }
+
+  function advanceDay() {
+    // 模拟推进：自动步骤计数 + 把「稍后」的重新提上来
+    autoCount += 6;
+    Object.keys(state).forEach((k) => { if (state[k] === "later") delete state[k]; });
+    addLog("机器人完成：数据校验 / 盘前清单 / 盯盘布防 / 盘后收益 / 机会发现 / 次日作战单");
+    render();
+  }
+
+  el("btn-run").addEventListener("click", advanceDay);
+  el("btn-reset").addEventListener("click", () => {
+    state = {}; logEntries = []; autoCount = 12; el("mode").value = "confirm"; mode = "confirm";
+    render();
+  });
+  el("mode").addEventListener("change", applyMode);
+
+  renderTimeline();
+  renderPerm();
+  render();
+})();
+</script>
+</body>
+</html>
