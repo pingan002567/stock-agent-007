@@ -408,6 +408,7 @@ export default function Holdings() {
             </div>
             <div className="panel-body" style={{ padding: 0 }}>
               {holdings && holdings.items.length > 0 ? (
+                <>
                 <table className="data-table">
                   <thead>
                     <tr>
@@ -521,6 +522,11 @@ export default function Holdings() {
                     })}
                   </tbody>
                 </table>
+                <div className="table-foot">
+                  <span>账实核对：以现金流水为准 · 数据口径 日K收盘</span>
+                  <span>现金 {(holdings?.summary?.available_cash ?? 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · 共 {holdings?.items.length ?? 0} 只</span>
+                </div>
+                </>
               ) : (
                 <div className="muted" style={{ padding: 24 }}>暂无持仓记录</div>
               )}

@@ -311,6 +311,10 @@ export default function Watchlist() {
                 })}
               </tbody>
             </table>
+            <div className="table-foot">
+              <span>行情：日K收盘 · 盘中 60s 轮询</span>
+              <span>{filteredItems.length} 只 · {items.filter((i) => i.monitored).length} 只开盯盘</span>
+            </div>
           </div>
         </div>
       </div>

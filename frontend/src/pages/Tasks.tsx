@@ -123,6 +123,10 @@ function ScheduledTasksCard() {
             </div>
           ))}
         </div>
+        <div className="table-foot">
+          <span>共 {tasks.length} 项定时任务 · {tasks.filter((t) => t.enabled).length} 项启用</span>
+          <span>失败会推送 · 报告自动落盘</span>
+        </div>
       </div>
       {pendingDelete && (
         <ConfirmDialog

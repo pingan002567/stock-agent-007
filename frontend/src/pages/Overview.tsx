@@ -41,6 +41,12 @@ interface OpsBriefingCard {
 }
 interface IndexInfo { code?: string; name?: string; last?: number; change_pct?: number }
 interface ReportItem { report_id: string; title?: string; status?: string; created_at?: string }
+interface PerformanceData {
+  portfolio?: { nav?: number; day_pnl?: number | null; day_return_pct?: number | null;
+    cash?: number; cash_pct?: number | null; drawdown_pct?: number | null; day_pnl_available?: boolean };
+  benchmarks?: Array<{ code: string; name: string; change_pct: number; excess_pct: number }>;
+  triage?: { must_handle?: Array<{ kind: string; title: string; reason: string }>; must_count?: number; can_ignore_count?: number };
+}
 
 export default function Overview() {
   const { appDataCache, globalLoading, setCurrentScreen, setStock } = useAppState();
@@ -52,6 +58,7 @@ export default function Overview() {
   const [events, setEvents] = useState<MonitorEvent[]>([]);
   const [indices, setIndices] = useState<IndexInfo[]>([]);
   const [reports, setReports] = useState<ReportItem[]>([]);
+  const [perf, setPerf] = useState<PerformanceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,14 +68,16 @@ export default function Overview() {
   const loadAll = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const [ov, ev, mr, rp] = await Promise.all([
+      const [ov, ev, mr, rp, pf] = await Promise.all([
         apiGet<OverviewData>("/api/overview"),
         apiGet<{ items: MonitorEvent[] }>("/api/monitor/events").catch(() => ({ items: [] })),
         apiGet<{ indices?: IndexInfo[] }>("/api/market/review").catch(() => ({ indices: [] })),
         apiGet<{ items: ReportItem[] }>("/api/reports").catch(() => ({ items: [] })),
+        apiGet<PerformanceData>("/api/holdings/performance").catch(() => null),
       ]);
       setData(ov); setEvents(ev.items ?? []); setIndices(mr.indices ?? []);
       setReports((rp.items ?? []).slice(0, 3));
+      setPerf((pf as PerformanceData | null) ?? null);
     } catch (err) { setError(err instanceof Error ? err.message : "加载总览失败"); } finally { setLoading(false); }
   }, []);
 
@@ -119,6 +128,107 @@ export default function Overview() {
             ]}
             actions={<AskAiButton prompt="今天我的组合表现如何?有什么需要关注的风险或机会?" />}
           />
+
+          {/* 头条：全页唯一"响亮"的地方——一句话结论 + 三个数字 */}
+          {(() => {
+            const conclusion = stripInlineMarkdown(
+              data.latest_ops_briefing?.conclusion || data.latest_discovery_briefing?.conclusion || "",
+            );
+            const pf = perf?.portfolio;
+            const dayPnl = pf?.day_pnl;
+            const dayCls = dayPnl == null ? "" : dayPnl > 0 ? "up" : dayPnl < 0 ? "down" : "";
+            return (
+              <div className="page-lead">
+                <div className="lead-main">
+                  <h2 className="lead-title">{conclusion || "今天先看清数据，再决定动不动。"}</h2>
+                </div>
+                <div className="lead-nums">
+                  <div className="lead-num">
+                    <span className="k">净值</span>
+                    <b className="v">{marketMoney(pf?.nav ?? data.portfolio_summary?.total_value, "CN")}</b>
+                  </div>
+                  <div className="lead-num">
+                    <span className="k">今日</span>
+                    <b className={`v ${dayCls}`}>
+                      {dayPnl == null ? "—" : `${dayPnl > 0 ? "+" : ""}${marketMoney(dayPnl ?? undefined, "CN")}`}
+                    </b>
+                    <span className={`d ${dayCls}`}>
+                      {pf?.day_return_pct == null ? "未更新" : `${pf.day_return_pct > 0 ? "+" : ""}${pf.day_return_pct}%`}
+                    </span>
+                  </div>
+                  <div className="lead-num">
+                    <span className="k">可用</span>
+                    <b className="v">{marketMoney(pf?.cash ?? data.portfolio_summary?.available_cash ?? undefined, "CN")}</b>
+                    <span className="d">{pf?.cash_pct == null ? "" : `${pf.cash_pct}%`}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* 参照 + 待你决定（对应原型右栏） */}
+          {(() => {
+            const bms = perf?.benchmarks ?? [];
+            const must = perf?.triage?.must_handle ?? [];
+            const holdings = data.holdings ?? [];
+            const overLimit = holdings
+              .map((h, i) => ({ h, w: derived.weights[i] ?? 0 }))
+              .filter((x) => x.w > 15);
+            if (bms.length === 0 && must.length === 0 && overLimit.length === 0 &&
+                perf?.portfolio?.drawdown_pct == null) return null;
+            return (
+              <div className="page-aside-grid">
+                <div className="aside-block">
+                  <div className="aside-title">参照</div>
+                  {bms.map((b) => (
+                    <div className="aside-line" key={b.code}>
+                      <span>{b.name}</span>
+                      <b className={b.change_pct >= 0 ? "up" : "down"}>
+                        {b.change_pct >= 0 ? "+" : ""}{b.change_pct}%
+                      </b>
+                    </div>
+                  ))}
+                  {bms.length > 0 ? (
+                    <div className="aside-line">
+                      <span>超额</span>
+                      <b className={bms[0].excess_pct >= 0 ? "up" : "down"}>
+                        {bms[0].excess_pct >= 0 ? "+" : ""}{bms[0].excess_pct}%
+                      </b>
+                    </div>
+                  ) : null}
+                  <div className="aside-line">
+                    <span>回撤</span>
+                    <b>{perf?.portfolio?.drawdown_pct == null ? "—" : `${perf.portfolio.drawdown_pct}%`}</b>
+                  </div>
+                </div>
+
+                <div className="aside-block">
+                  <div className="aside-title">待你决定</div>
+                  {overLimit.map(({ h, w }) => (
+                    <div className="aside-line" key={`w-${h.symbol}`}>
+                      <span>{h.name ?? h.symbol} 权重超限</span>
+                      <b className="warn">{w.toFixed(1)}%</b>
+                    </div>
+                  ))}
+                  {must.map((m, i) => (
+                    <div className="aside-line" key={`m-${i}`}>
+                      <span>{m.title}</span>
+                      <b className="warn">{m.reason}</b>
+                    </div>
+                  ))}
+                  {overLimit.length + must.length === 0 ? (
+                    <div className="aside-line">
+                      <span>没有必须处理的事</span>
+                      <b>可忽略 {perf?.triage?.can_ignore_count ?? 0} 条</b>
+                    </div>
+                  ) : null}
+                  <button className="aside-link" type="button" onClick={() => setCurrentScreen("holdings")}>
+                    去持仓页处理 →
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
 
           <div className="panel">
             <div className="panel-header">

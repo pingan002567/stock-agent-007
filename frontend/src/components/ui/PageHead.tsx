@@ -20,9 +20,21 @@ export interface KpiItem {
 
 export function PageHead({ kpis, actions }: { kpis: KpiItem[]; actions?: ReactNode }) {
   const { handleSend, sending } = useCopilotChat();
-  const { setCurrentScreen } = useAppState();
+  const { setCurrentScreen, lastRefreshTime } = useAppState();
+  const now = new Date();
+  const dateline = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const weekday = "日一二三四五六"[now.getDay()];
+  const updated = lastRefreshTime
+    ? new Date(lastRefreshTime).toLocaleTimeString("zh-CN", { hour12: false })
+    : null;
   return (
     <div className="page-head">
+      <div className="page-dateline">
+        <span className="brand">Stock Agent</span>
+        <span className="sep">·</span>
+        <span>{dateline} 周{weekday}</span>
+        {updated ? (<><span className="sep">·</span><span>{updated} 已更新</span></>) : null}
+      </div>
       {kpis.length > 0 && (
       <div className="page-kpis">
         {kpis.map((k) => (
