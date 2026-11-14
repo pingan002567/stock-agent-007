@@ -6678,3 +6678,43 @@ html.pet-window-root body { margin: 0; }
   margin-bottom: 0;
 }
 .setting-card:last-child { border-bottom: 1px solid var(--line); }
+
+/* ═══ 对齐收尾 · 设置目录 / 空状态 / 窄屏 ═══ */
+
+/* 设置：左目录做成"纸上的目录"，选中项用左侧竖线 + 墨青，而不是填充块 */
+.settings-nav { background: transparent; border-right: 1px solid var(--line); padding: 12px 10px; }
+.settings-nav-item {
+  border-radius: 0;
+  border-left: 2px solid transparent;
+  padding: 7px 10px;
+  color: var(--muted);
+}
+.settings-nav-item:hover { background: transparent; color: var(--ink); }
+.settings-nav-item.active {
+  background: transparent;
+  border-left-color: var(--accent);
+  color: var(--ink);
+  font-weight: 600;
+}
+.settings-nav-group-label { font-size: 10.5px; color: var(--faint); padding: 10px 10px 4px; }
+
+/* 空状态：标题走宋体，正文放宽行宽 */
+.empty-state { gap: 10px; }
+.empty-state .empty-title {
+  font-family: var(--serif);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+.empty-state .empty-desc { font-size: 12.5px; max-width: 400px; line-height: 1.8; color: var(--muted); }
+
+/* 窄屏：头条与两栏都不挤 */
+@media (max-width: 860px) {
+  .page-lead { gap: 12px; padding: 12px 0; }
+  .lead-nums { width: 100%; }
+  .lead-num { flex: 1; padding: 0 10px; }
+  .lead-num .v { font-size: 17px; }
+  .page-aside-grid { gap: 14px; }
+  .settings-layout { grid-template-columns: 1fr; }
+  .settings-nav { flex-direction: row; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--line); }
+}
