@@ -174,6 +174,9 @@ function AvailableCashValue({
   );
 }
 
+/** 单票权重上限（与风险策略默认值一致；后端 max_weight_pct 恒为 0，只能本地兜底） */
+const WEIGHT_LIMIT_PCT = 15;
+
 export default function Holdings() {
   const { showToast } = useToast();
   const { appDataCache, globalLoading, setStock, setCurrentScreen, lastRefreshTime } = useAppState();
@@ -416,6 +419,7 @@ export default function Holdings() {
                       <th>盈亏</th>
                       <th>当日</th>
                       <th>权重</th>
+                      <th>备注</th>
                       <th>操作</th>
                     </tr>
                   </thead>
@@ -489,6 +493,11 @@ export default function Holdings() {
                               <span className="num" style={{ fontSize: 12 }}>{weightPct.toFixed(2)}%</span>
                             </div>
                           )}
+                        </td>
+                        <td className="hold-note">
+                          {!weightBad && weightPct > WEIGHT_LIMIT_PCT ? (
+                            <span className="over-limit">超限 {Math.round((weightPct - WEIGHT_LIMIT_PCT) * 10) / 10}pp</span>
+                          ) : null}
                         </td>
                         <td>
                           <button

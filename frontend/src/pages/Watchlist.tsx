@@ -165,23 +165,23 @@ export default function Watchlist() {
               <button className="small" onClick={() => mgr.openPanel()} type="button">管理分组</button>
             </div>
             <div className="panel-body">
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div className="group-tabs">
                 <button
-                  className={`followup-chip${activeGroup === null ? " active" : ""}`}
+                  type="button"
+                  className={`group-tab${activeGroup === null ? " on" : ""}`}
                   onClick={() => setActiveGroup(null)}
-                  style={activeGroup === null ? { background: "var(--blue-soft)", borderColor: "var(--blue)", color: "var(--blue)" } : {}}
                 >
-                  全部 ({items.length})
+                  全部 <span className="group-tab-n">{items.length}</span>
                 </button>
                 {groups.map(g => (
                   <button
                     key={g.name}
-                    className={`followup-chip${activeGroup === g.name ? " active" : ""}`}
+                    type="button"
+                    className={`group-tab${activeGroup === g.name ? " on" : ""}`}
                     onClick={() => setActiveGroup(g.name === activeGroup ? null : g.name)}
-                    style={activeGroup === g.name ? { background: "var(--blue-soft)", borderColor: "var(--blue)", color: "var(--blue)" } : {}}
                   >
-                    <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: g.color, marginRight: 4 }} />
-                    {g.name} ({items.filter(i => (i.group ?? "默认") === g.name).length})
+                    <span className="group-dot" style={{ background: g.color }} />
+                    {g.name} <span className="group-tab-n">{items.filter(i => (i.group ?? "默认") === g.name).length}</span>
                   </button>
                 ))}
               </div>
