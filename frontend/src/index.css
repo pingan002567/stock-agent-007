@@ -6301,3 +6301,128 @@ html.pet-window-root body { margin: 0; }
 @media (prefers-reduced-motion: reduce) {
   .agent-loop.live .tl-scroll { scroll-behavior: auto; }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   设计改版 v2 · 纸面 / 账本线 / 宋体标题
+   依据 doc/design/frontend-redesign.html
+   - 语义色：涨=印泥红、跌=墨绿、warn=琥珀（"需要处理"，不借涨跌语义）
+   - 结构强调统一用 accent（墨青），不再用蓝
+   - 扁平化：取消卡片阴影与悬浮位移，用发丝线与留白分层
+   ══════════════════════════════════════════════════════════════ */
+:root {
+  --serif: "Songti SC", "Source Han Serif SC", "Noto Serif SC", "SimSun", serif;
+  --warn: var(--amber);
+  --warn-soft: var(--amber-soft);
+}
+:root.light {
+  --canvas: #f2f2ef;
+  --sidebar: #efeee9;
+  --surface: #fbfaf7;
+  --surface-2: #f4f2ec;
+  --ink: #14181c;
+  --ink-2: #3d444b;
+  --muted: #6b737b;
+  --faint: #8d9199;
+  --line: #dfdace;
+  --line-soft: #e9e5da;
+  --blue: #1f5c55;
+  --blue-hover: #174842;
+  --blue-soft: rgba(31, 92, 85, 0.10);
+  --blue-glow: rgba(31, 92, 85, 0.12);
+  --red: #c0352b;
+  --red-soft: rgba(192, 53, 43, 0.10);
+  --green: #2e7d5b;
+  --green-soft: rgba(46, 125, 91, 0.10);
+  --amber: #a8761a;
+  --amber-soft: rgba(168, 118, 26, 0.12);
+  --msg-user: #f1eee6;
+  --elev-panel: none;
+  --shadow-sm: none;
+  --composer-shadow: none;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-panel: 12px;
+}
+:root.dark {
+  --canvas: #101315;
+  --sidebar: #15181b;
+  --surface: #171b1e;
+  --surface-2: #1d2226;
+  --ink: #e9e6df;
+  --ink-2: #c3c7cb;
+  --muted: #8d949b;
+  --faint: #747b82;
+  --line: #2a2f33;
+  --line-soft: #22272b;
+  --blue: #6fb3a8;
+  --blue-hover: #8ac9be;
+  --blue-soft: rgba(111, 179, 168, 0.14);
+  --red: #e8726a;
+  --red-soft: rgba(232, 114, 106, 0.14);
+  --green: #57b98c;
+  --green-soft: rgba(87, 185, 140, 0.14);
+  --amber: #d9a441;
+  --amber-soft: rgba(217, 164, 65, 0.14);
+  --msg-user: #1d2226;
+  --elev-panel: none;
+  --shadow-sm: none;
+  --composer-shadow: none;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-panel: 12px;
+}
+
+/* 面板：纸面 + 发丝线，去掉阴影这个"卡片积木"的证据 */
+.panel,
+.page-hero { box-shadow: none; background: var(--panel); border-color: var(--line); }
+.panel:hover,
+.page-hero:hover { box-shadow: none; border-color: var(--line); transform: none; }
+.panel-header { background: transparent; }
+
+/* 标题走宋体：研报/晨报的印刷语汇，不是装饰 */
+.md-content h1,
+.md-content h2,
+.md-content h3,
+.empty-title,
+.page-title { font-family: var(--serif); letter-spacing: 0.01em; }
+.panel-title { font-family: var(--serif); font-weight: 600; letter-spacing: 0.02em; }
+
+/* 表格＝交割单：数字右对齐、同列可比 */
+.data-table th {
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 11px;
+  border-bottom: 1px solid var(--line);
+}
+.data-table td { border-bottom: 1px solid var(--line-soft); }
+.data-table td.num,
+.data-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.data-table tbody tr:hover { background: var(--hover-row); }
+.num { font-variant-numeric: tabular-nums; }
+
+/* 聊天：回复是"纸面条目"，不是一张卡 */
+.msg.ai {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+  border-radius: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
+.msg { box-shadow: none; }
+.msg.user { border-radius: 10px 10px 3px 10px; }
+
+/* 动效克制：只保留"状态变了"的那一下，去掉悬浮位移 */
+.kpi-item:hover { transform: none; }
+.kpi-item,
+.panel,
+.msg,
+.data-table tbody tr { transition-duration: 0.12s; }
+@media (prefers-reduced-motion: reduce) {
+  .kpi-item, .panel, .msg, .data-table tbody tr { transition: none; }
+}

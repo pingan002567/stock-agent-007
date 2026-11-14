@@ -433,7 +433,7 @@ export default function Holdings() {
                       <tr
                         key={item.symbol}
                         className="row"
-                        style={{ cursor: "pointer", ...(weightPct >= 15 && !weightBad ? { boxShadow: "inset 2px 0 0 var(--red)" } : {}) }}
+                        style={{ cursor: "pointer", ...(weightPct >= 15 && !weightBad ? { boxShadow: "inset 2px 0 0 var(--warn)" } : {}) }}
                         onClick={() => openStock(item.symbol)}
                       >
                         <td>

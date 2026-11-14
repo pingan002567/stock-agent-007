@@ -564,7 +564,6 @@ export function CopilotPanel() {
 
           {messages.length === 0 && !sending && (
             <div className="empty-state">
-              <div className="empty-kicker">Stock Agent</div>
               <div className="empty-title">{mobile ? "有什么可以帮你？" : EMPTY_CHAT_COPY.title}</div>
               <div className="empty-desc">{EMPTY_CHAT_COPY.desc}</div>
               <div className="starter-chips">
