@@ -6502,3 +6502,63 @@ html.pet-window-root body { margin: 0; }
 .watch-monitor.on { color: var(--ink-2); }
 .watch-monitor.on i { background: var(--accent); }
 .watch-monitor:hover { color: var(--accent); }
+
+/* ═══ 扁平化收口 · 第二轮 ═══ */
+/* 1) 悬停不再发光/位移：--shadow-md 直接归零（浮层用 --elev-prominent） */
+:root { --shadow-md: none; }
+.kpi-card:hover,
+.card:hover,
+.config-card:hover,
+.index-card:hover,
+.page-hero:hover,
+.panel:hover { box-shadow: none !important; transform: none !important; border-color: var(--line); }
+
+/* 2) 卡片顶部的装饰渐变条：删掉（纯装饰，不承载信息） */
+.kpi-card::after { display: none; }
+
+/* 3) 卡片统一成"纸面 + 发丝线"，去掉阴影与过大圆角 */
+.card,
+.kpi-card,
+.config-card,
+.index-card,
+.chart {
+  box-shadow: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--panel);
+}
+.setting-card { border-radius: var(--radius-panel); }
+
+/* 4) 标签/徽章：不再是"胶囊堆"，改成小方角描边或纯文字 */
+.tag {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+  padding: 0 5px;
+  font-size: 11px;
+}
+.panel-badge {
+  background: transparent;
+  border: none;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 0;
+}
+.followup-chip,
+.suggestion-chip,
+.starter-chips button {
+  border-radius: 6px;
+  box-shadow: none;
+}
+.suggestion-chip:hover,
+.followup-chip:hover { box-shadow: none; }
+
+/* 5) 输入焦点只保留描边，不加光晕 */
+.search-wrapper input:focus,
+.topbar-search input:focus { box-shadow: none; border-color: var(--accent); }
+.session-model-menu,
+.search-dropdown,
+.llm-dialog,
+.settings-modal { border-radius: var(--radius-panel); }
