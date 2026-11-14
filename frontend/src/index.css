@@ -6562,3 +6562,30 @@ html.pet-window-root body { margin: 0; }
 .search-dropdown,
 .llm-dialog,
 .settings-modal { border-radius: var(--radius-panel); }
+
+/* ═══ 页面级 KPI：从"四张卡"收成"一行数字"（策略/任务等页共用 .kpi-grid）═══ */
+.kpi-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 12px 0;
+}
+.kpi-grid > .kpi-card {
+  flex: 1 1 auto;
+  min-width: 120px;
+  border: none;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  padding: 0 18px;
+  box-shadow: none;
+}
+.kpi-grid > .kpi-card:first-child { border-left: none; padding-left: 0; }
+.kpi-card .kpi-header { margin: 0; }
+.kpi-card .kpi-icon { display: none; }          /* 图标不承载信息，删掉 */
+.kpi-card .kpi-label { font-size: 11px; color: var(--muted); }
+.kpi-card .kpi-value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.kpi-card .kpi-change { font-size: 11px; color: var(--faint); }
