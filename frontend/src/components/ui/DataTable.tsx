@@ -4,7 +4,7 @@ interface DataTableProps<T> { columns: Column<T>[]; data: T[]; keyField: keyof T
 export function DataTable<T extends Record<string, unknown>>({ columns, data, keyField, emptyText = "暂无数据" }: DataTableProps<T>) {
   if (!data.length) return <div className="muted" style={{ textAlign: "center", padding: "16px 0" }}>{emptyText}</div>;
   return (
-    <table>
+    <table className="data-table">
       <thead><tr>{columns.map((col) => (<th key={String(col.key)} className={col.className || ""}>{col.label}</th>))}</tr></thead>
       <tbody>{data.map((row) => (
         <tr key={String(row[keyField])} className="row">

@@ -665,7 +665,7 @@ export default function Research() {
                           );
                         })}
                       </div>
-                      <table>
+                      <table className="data-table">
                         <thead>
                           <tr><th>报告期</th><th>营收</th><th>净利润</th><th>类型</th></tr>
                         </thead>

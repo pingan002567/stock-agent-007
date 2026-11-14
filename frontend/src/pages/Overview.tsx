@@ -231,7 +231,7 @@ export default function Overview() {
                 </div>
               </div>
               <div className="panel-body" style={{ padding: 0 }}>
-                <table>
+                <table className="data-table">
                   <thead>
                     <tr>
                       <th>股票</th>

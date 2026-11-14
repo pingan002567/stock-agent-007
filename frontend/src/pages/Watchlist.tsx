@@ -245,12 +245,12 @@ export default function Watchlist() {
             </div>
           </div>
           <div className="panel-body" style={{ padding: 0 }}>
-            <table>
+            <table className="data-table">
               <thead>
                 <tr>
                   <th>标的</th>
-                  <th>现价</th>
-                  <th>涨跌幅</th>
+                  <th className="num">现价</th>
+                  <th className="num">涨跌幅</th>
                   <th>分组</th>
                   <th>盯盘</th>
                   <th>操作</th>
@@ -291,16 +291,16 @@ export default function Watchlist() {
                           </div>
                         </div>
                       </td>
-                      <td className="price-value">{item.price?.last != null ? marketMoney(item.price.last, market) : "-"}</td>
-                      <td><span className={`change-badge ${changeCls(cp)}`}>{pct(cp)}</span></td>
-                      <td><span className="tag">{item.group ?? "默认"}</span></td>
+                      <td className="price-value num">{item.price?.last != null ? marketMoney(item.price.last, market) : "-"}</td>
+                      <td className={`num ${changeCls(cp)}`}>{pct(cp)}</td>
+                      <td className="muted">{item.group ?? "默认"}</td>
                       <td>
                         <span
-                          className={`tag ${item.monitored ? "green" : ""}`}
-                          style={{ cursor: "pointer" }}
+                          className={`watch-monitor${item.monitored ? " on" : ""}`}
+                          title={item.monitored ? "点击关闭盯盘" : "点击开启盯盘"}
                           onClick={(ev) => { ev.stopPropagation(); void handleToggleMonitor(item.symbol); }}
                         >
-                          {item.monitored ? "开启" : "关闭"}
+                          <i aria-hidden />{item.monitored ? "开启" : "关闭"}
                         </span>
                       </td>
                       <td>

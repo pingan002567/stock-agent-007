@@ -6483,3 +6483,22 @@ html.pet-window-root body { margin: 0; }
 /* ── 持仓：备注列（超限用 warn，不借涨跌语义） ── */
 .hold-note { white-space: nowrap; font-size: 11.5px; }
 .over-limit { color: var(--warn); font-family: var(--sans); }
+
+/* ── 表格统一成交割单：表头不再是"大写小标签" ── */
+.data-table th {
+  text-transform: none;
+  letter-spacing: 0.01em;
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-weight: 500;
+}
+.data-table td.num { text-align: right; }
+.data-table td.muted { color: var(--muted); }
+
+/* 盯盘开关：状态点 + 小字，不用胶囊 */
+.watch-monitor { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--faint); cursor: pointer; }
+.watch-monitor i { width: 6px; height: 6px; border-radius: 50%; background: var(--line); display: inline-block; }
+.watch-monitor.on { color: var(--ink-2); }
+.watch-monitor.on i { background: var(--accent); }
+.watch-monitor:hover { color: var(--accent); }
