@@ -21,6 +21,14 @@ interface ScheduledTask {
   last_report_id?: string | null; last_run_id?: string | null; skip_reason?: string | null;
 }
 
+const TASK_TIME = (s: string): string => {
+  const [kind, ...rest] = s.split("@");
+  if (kind === "daily") return rest[0] ?? "—";
+  if (kind === "weekly") return `周${"一二三四五六日"[Number(rest[0]) - 1] ?? "?"} ${rest[1] ?? ""}`;
+  if (kind === "every") return rest[0] ?? "—";
+  return s;
+};
+
 const SCHEDULE_LABEL = (s: string): string => {
   const [kind, ...rest] = s.split("@");
   if (kind === "daily") return `每天 ${rest[0] ?? ""}`;
@@ -78,47 +86,43 @@ function ScheduledTasksCard() {
           <span className="panel-badge">{tasks.filter((t) => t.enabled).length}/{tasks.length} 启用</span>
         </div>
       </div>
-      <div className="panel-body" style={{ padding: 0 }}>
-        <table className="data-table">
-          <thead>
-            <tr><th>任务</th><th>周期</th><th>上次结果</th><th style={{ width: 114 }}></th></tr>
-          </thead>
-          <tbody>
-            {tasks.map((t) => (
-              <tr key={t.task_id}>
-                <td title={t.prompt}>{t.name}</td>
-                <td>
-                  <div>{SCHEDULE_LABEL(t.schedule)}</div>
-                  <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
-                    下次 {t.enabled ? ((t.next_run_at ?? "").slice(5, 16).replace("T", " ")) : "—"}
-                  </div>
-                </td>
-                <td>
+      <div className="panel-body" style={{ padding: "4px 16px 12px" }}>
+        {/* 任务＝一天的时间表：时间在最左，状态在名字后面，操作靠右 */}
+        <div className="task-ledger">
+          {tasks.map((t) => (
+            <div className={`task-entry${t.enabled ? "" : " off"}`} key={t.task_id}>
+              <span className="task-time">{TASK_TIME(t.schedule)}</span>
+              <div className="task-main" title={t.prompt}>
+                <div className="task-name">
+                  {t.name}
                   {t.last_status === "running" ? <StatusDot tone="busy">运行中</StatusDot>
                     : t.last_status === "completed" ? <StatusDot tone="ok">成功 {formatTimeAgo(t.last_run_at ?? undefined)}</StatusDot>
                     : t.last_status === "failed" ? <StatusDot tone="bad">失败{t.last_error ? ` ${t.last_error}` : ""}</StatusDot>
                     : t.last_status === "skipped" ? <StatusDot tone="off">已跳过 {t.last_error?.replace("已跳过：", "") || "休市"}</StatusDot>
-                    : t.skip_reason ? <span className="muted" style={{ fontSize: 12 }}>今日{t.skip_reason}</span>
-                    : <span className="muted" style={{ fontSize: 12 }}>未运行</span>}
-                </td>
-                <td>
-                  <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end", paddingRight: 2 }}>
-                    {t.last_report_id ? (
-                      <button className="small icon-btn" title="查看报告" onClick={() => setCurrentScreen("reports")} type="button">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
-                      </button>
-                    ) : null}
-                    <button className="small icon-btn" title="立即运行" disabled={busyId === t.task_id} onClick={() => void runNow(t)} type="button">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5.5l11 6.5-11 6.5z"/></svg>
-                    </button>
-                    <button className="small icon-btn" title="删除" style={{ color: "var(--red)" }} onClick={() => setPendingDelete(t)} type="button">✕</button>
-                    <ToggleSwitch checked={t.enabled} disabled={busyId === t.task_id} onChange={() => void toggle(t)} />
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                    : t.skip_reason ? <span className="task-state muted">今日{t.skip_reason}</span>
+                    : <span className="task-state muted">未运行</span>}
+                </div>
+                <div className="task-sub">
+                  {SCHEDULE_LABEL(t.schedule)}
+                  <span className="task-sep">·</span>
+                  下次 {t.enabled ? ((t.next_run_at ?? "").slice(5, 16).replace("T", " ")) : "—"}
+                </div>
+              </div>
+              <div className="task-ops">
+                {t.last_report_id ? (
+                  <button className="small icon-btn" title="查看报告" onClick={() => setCurrentScreen("reports")} type="button">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+                  </button>
+                ) : null}
+                <button className="small icon-btn" title="立即运行" disabled={busyId === t.task_id} onClick={() => void runNow(t)} type="button">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5.5l11 6.5-11 6.5z"/></svg>
+                </button>
+                <button className="small icon-btn" title="删除" style={{ color: "var(--red)" }} onClick={() => setPendingDelete(t)} type="button">✕</button>
+                <ToggleSwitch checked={t.enabled} disabled={busyId === t.task_id} onChange={() => void toggle(t)} />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
       {pendingDelete && (
         <ConfirmDialog

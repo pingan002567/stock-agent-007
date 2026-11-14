@@ -6426,3 +6426,44 @@ html.pet-window-root body { margin: 0; }
 @media (prefers-reduced-motion: reduce) {
   .kpi-item, .panel, .msg, .data-table tbody tr { transition: none; }
 }
+
+/* ── 任务＝一天的时间表（账本线） ── */
+.task-ledger { position: relative; padding-left: 22px; }
+.task-ledger::before {
+  content: "";
+  position: absolute; left: 6px; top: 10px; bottom: 10px;
+  width: 1px; background: var(--line);
+}
+.task-entry {
+  position: relative;
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.task-entry:last-child { border-bottom: none; }
+.task-entry::before {
+  content: ""; position: absolute; left: -16px; top: 20px;
+  width: 9px; height: 1px; background: var(--line);
+}
+.task-entry.off { opacity: 0.55; }
+.task-time {
+  flex: none; width: 62px;
+  font-family: var(--mono); font-size: 12px; color: var(--muted);
+  font-variant-numeric: tabular-nums; padding-top: 1px;
+}
+.task-main { flex: 1; min-width: 0; }
+.task-name {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--serif); font-size: 13.5px; font-weight: 600;
+}
+.task-state { font-family: var(--sans); font-size: 11.5px; font-weight: 400; }
+.task-sub { margin-top: 2px; font-size: 11.5px; color: var(--muted); }
+.task-sep { margin: 0 5px; color: var(--faint); }
+.task-ops { flex: none; display: flex; align-items: center; gap: 6px; padding-top: 1px; }
+
+/* ── 设置页：栏目名走宋体，卡片去掉阴影（与全站扁平化保持一致） ── */
+.setting-card-title,
+.settings-section-title,
+.settings-nav-group-label { font-family: var(--serif); letter-spacing: 0.02em; }
+.setting-card { box-shadow: none; border-color: var(--line); }
+.settings-nav-item.active { background: var(--blue-soft); color: var(--ink); }
