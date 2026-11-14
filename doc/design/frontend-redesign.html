@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Stock Agent · 首页改版设计（frontend-design 流程）</title>
+<title>Stock Agent · 前端改版设计（5 个页面 · frontend-design 流程）</title>
 <style>
   /* ─────────────────────────────────────────────
      设计 token（新方向）
@@ -22,6 +22,8 @@
     --up:#C0352B;           /* 印泥红：涨/盈 */
     --down:#2E7D5B;         /* 墨绿：跌/损 */
     --flat:#8A8F94;
+    --warn:#A8761A;         /* 第四个语义色：需要处理（超限/逾期），刻意不用红绿 */
+    --warn-soft:#FBF3E2;
     --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
     --serif:"Songti SC","Source Han Serif SC","Noto Serif SC","SimSun",serif;
     --sans:-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
@@ -29,7 +31,7 @@
   .new-ui[data-mode="dark"]{
     --paper:#14171A; --paper-2:#1B1F23; --ink:#E9E6DF; --ink-2:#C3C7CB; --ink-3:#8D949B;
     --rule:#2A2F33; --rule-strong:#3A4045; --accent:#6FB3A8; --accent-soft:#1B2C2A;
-    --up:#E8726A; --down:#57B98C; --flat:#7D848B;
+    --up:#E8726A; --down:#57B98C; --flat:#7D848B; --warn:#D9A441; --warn-soft:#2A2418;
   }
 
   *{margin:0;padding:0;box-sizing:border-box}
@@ -162,6 +164,70 @@
   .nu-foot{margin-top:20px;padding-top:9px;border-top:1px solid var(--rule-strong);font-size:10.5px;color:var(--ink-3);display:flex;gap:12px;flex-wrap:wrap}
   .nu-foot .sp{flex:1}
 
+
+  /* ══════════ 多页面小样（现状/新方向 各 1 屏）══════════ */
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 14px}
+  .tabs button{font-size:12.5px;padding:4px 12px;border-radius:999px}
+  .tabs button.on{background:#14181C;border-color:#14181C;color:#fff}
+  .page-panel{display:none}
+  .page-panel.show{display:block}
+  .mini-old,.mini-new{border-radius:10px;overflow:hidden}
+  .mini-old{background:#fff;border:1px solid #eaeef2;padding:14px;font-family:var(--sans)}
+  .mini-new{background:var(--paper);border:1px solid var(--rule);border-radius:4px;padding:16px 18px;color:var(--ink);font-family:var(--sans)}
+  .mini-cap{font-size:11px;color:#8c959f;margin:2px 0 6px}
+  .mini-new .mini-cap{color:var(--ink-3)}
+
+  /* 小样内部：现状风格 */
+  .m-card{background:#fff;border:1px solid #eaeef2;border-radius:12px;padding:11px;margin-bottom:9px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+  .m-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
+  .m-kpi{background:#fff;border:1px solid #eaeef2;border-radius:10px;padding:8px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .m-kpi .k{font-size:10px;color:#8c959f}
+  .m-kpi .v{font-family:var(--mono);font-size:15px;font-weight:600;margin-top:1px}
+  .m-row{display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:5px 0;border-bottom:1px solid #f2f4f6}
+  .m-row:last-child{border-bottom:none}
+  .m-chip{font-size:10.5px;border:1px solid #eaeef2;border-radius:999px;padding:0 7px;color:#3D444B;background:#fafbfc}
+
+  /* 小样内部：新方向风格 */
+  .n-head{display:flex;align-items:baseline;gap:9px;border-bottom:1px solid var(--rule-strong);padding-bottom:7px;margin-bottom:12px}
+  .n-head .b{font-family:var(--serif);font-size:14px}
+  .n-head .d{font-size:11px;color:var(--ink-3)}
+  .n-nums{display:flex;gap:0;margin-bottom:12px}
+  .n-nums > div{padding:0 13px;border-left:1px solid var(--rule)}
+  .n-nums > div:first-child{border-left:none;padding-left:0}
+  .n-nums .k{font-size:10px;color:var(--ink-3)}
+  .n-nums .v{font-family:var(--mono);font-size:15px;font-variant-numeric:tabular-nums}
+  .n-sec{font-size:10.5px;font-weight:600;color:var(--ink-3);margin:12px 0 6px}
+  .n-ledger{position:relative;padding-left:14px}
+  .n-ledger::before{content:"";position:absolute;left:3px;top:4px;bottom:4px;width:1px;background:var(--rule-strong)}
+  .n-line{position:relative;display:flex;gap:10px;font-size:12px;padding:5px 0}
+  .n-line::before{content:"";position:absolute;left:-14px;top:11px;width:6px;height:1px;background:var(--rule-strong)}
+  .n-line .t{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);width:34px;flex:none;padding-top:1px}
+  .n-line .body{flex:1;min-width:0}
+  .n-line .sub{font-size:10.5px;color:var(--ink-3);margin-top:1px}
+  .n-tab{width:100%;border-collapse:collapse;font-size:12px}
+  .n-tab th{font-size:10px;font-weight:500;color:var(--ink-3);text-align:right;padding-bottom:5px;border-bottom:1px solid var(--rule-strong)}
+  .n-tab th:first-child{text-align:left}
+  .n-tab td{padding:6px 0;border-bottom:1px solid var(--rule);text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .n-tab td:first-child{text-align:left;font-family:var(--sans)}
+  .n-tab td.first i{display:block;font-style:normal;font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+  .n-tab tr.alert td:first-child{box-shadow:inset 2px 0 0 var(--warn);padding-left:7px}
+  .n-tab tr.alert td:last-child{color:var(--warn)}
+  .n-foot{display:flex;justify-content:space-between;gap:10px;font-size:10.5px;color:var(--ink-3);border-top:1px solid var(--rule-strong);margin-top:10px;padding-top:6px;flex-wrap:wrap}
+  .n-btn{font-size:11px;padding:2px 9px;border-radius:4px;border:1px solid var(--rule-strong);background:transparent;color:var(--ink-2);cursor:pointer}
+  .n-btn.go{border-color:var(--accent);color:var(--accent)}
+  .n-reply{font-size:12px;line-height:1.75;color:var(--ink-2)}
+  .n-reply .lead{font-family:var(--serif);font-size:14px;color:var(--ink);margin-bottom:4px}
+  .n-meta{font-size:10.5px;color:var(--ink-3);margin-top:7px;padding-top:6px;border-top:1px dashed var(--rule)}
+  .n-composer{display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--rule-strong);padding:7px 0 5px;margin-top:12px}
+  .n-composer .ph{flex:1;font-size:12px;color:var(--ink-3)}
+  .n-composer .send{width:22px;height:22px;border-radius:50%;background:var(--ink);color:#fff;display:grid;place-items:center;font-size:11px}
+  .n-config{display:grid;grid-template-columns:118px 1fr;gap:9px 14px;font-size:12px}
+  .n-config .lbl{color:var(--ink-3)}
+  .n-config .val{color:var(--ink)}
+  .n-config .val .hint{font-size:10.5px;color:var(--ink-3);margin-top:2px}
+  .n-nav{display:flex;gap:14px;font-size:11.5px;color:var(--ink-3);border-bottom:1px solid var(--rule);padding-bottom:7px;margin-bottom:11px}
+  .n-nav b{color:var(--accent);font-weight:600;border-bottom:2px solid var(--accent);padding-bottom:6px}
+
   /* ── 说明表 ── */
   table.doc-tab{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #e6e3db;border-radius:9px;overflow:hidden}
   table.doc-tab th,table.doc-tab td{text-align:left;padding:8px 11px;border-bottom:1px solid #eeeae1;vertical-align:top}
@@ -173,14 +239,14 @@
 </head>
 <body>
 <div class="doc">
-  <h1>Stock Agent 首页改版 · 设计计划与原型</h1>
-  <div class="sub">按 <code>frontend-design</code> 的流程：先定 token 与版式 → 对照"通用默认"自评 → 再出图。改动只在呈现层。</div>
+  <h1>Stock Agent 前端改版 · 设计计划与 6 屏原型</h1>
+  <div class="sub">按 <code>frontend-design</code> 的流程：先定 token 与版式 → 对照"通用默认"自评 → 再出图。覆盖 首页 / 对话 / 持仓 / 自选 / 任务 / 设置，改动只在呈现层。</div>
 
   <!-- ══════ 1. 设计计划 ══════ -->
   <div class="sec-title">一、设计计划（先定，再画）</div>
   <div class="plan">
     <div class="box">
-      <h3>色彩 · 6 个命名色</h3>
+      <h3>色彩 · 6 个命名色 + 1 个警示色</h3>
       <div class="swatches">
         <span class="sw"><i style="background:#FBFAF7"></i>paper #FBFAF7</span>
         <span class="sw"><i style="background:#14181C"></i>ink #14181C</span>
@@ -188,10 +254,12 @@
         <span class="sw"><i style="background:#1F5C55"></i>accent #1F5C55</span>
         <span class="sw"><i style="background:#C0352B"></i>up #C0352B</span>
         <span class="sw"><i style="background:#2E7D5B"></i>down #2E7D5B</span>
+        <span class="sw"><i style="background:#A8761A"></i>warn #A8761A</span>
       </div>
       <div class="kv">
         <dt>为什么不用</dt><dd>奶油底 #F4F1EA + 陶土红 #D97757 —— 这是当下最典型的"AI 生成感"，而且和 A 股红涨冲突。</dd>
         <dt>为什么用墨青</dt><dd>红绿已被盈亏语义占满，结构强调必须退出这套语义，否则"强调"和"涨"分不清。</dd>
+        <dt>为什么有 warn</dt><dd>“权重超限 / 逾期”既不是涨也不是跌，用红或绿都会借走盈亏的语义，所以单独给一个琥珀色，只表示“需要处理”。</dd>
         <dt>纸面偏暖</dt><dd>因为它承载的是"交割单 / 研报 / 晨报"这类纸面物件，不是 SaaS 后台。</dd>
       </div>
     </div>
@@ -379,7 +447,242 @@
   </div>
 
   <!-- ══════ 3. 具体改什么 ══════ -->
-  <div class="sec-title">三、具体改什么（都是呈现层，不动信息架构）</div>
+
+  <!-- ══════ 3. 其他页面 新旧对比 ══════ -->
+  <div class="sec-title">三、其他页面：新旧对比（同一套 token，只换呈现）</div>
+
+  <div class="tabs" id="tabs">
+    <button data-page="chat" class="on">对话</button>
+    <button data-page="holdings">持仓</button>
+    <button data-page="watch">自选</button>
+    <button data-page="tasks">任务</button>
+    <button data-page="settings">设置</button>
+  </div>
+
+  <!-- ── 对话 ── -->
+  <div class="page-panel show" id="page-chat">
+    <div class="compare">
+      <div>
+        <div class="col-head"><b>现状</b><span>每条回复一张卡，元信息用徽章串起来</span></div>
+        <div class="mini-old">
+          <div class="m-card">
+            <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#8c959f;margin-bottom:6px">
+              <span style="width:14px;height:14px;border-radius:50%;background:#f6f8fa;border:1px solid #eaeef2;display:grid;place-items:center;font-size:8px">✦</span>
+              AI Copilot <span style="margin-left:auto;color:#0969da">推理中</span>
+            </div>
+            <div class="m-row" style="border:none;padding:0 0 6px;color:#3D444B;font-size:11.5px">▸ 思考 12 步 · 调用 14 个工具 · 1 分 42 秒</div>
+            <div style="font-size:12px;color:#1f2328;line-height:1.7">结论：不追高，维持现有仓位，等回踩再谈。</div>
+            <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+              <span class="m-chip">信心度 中</span><span class="m-chip">▶ 引用来源 4</span>
+              <span class="m-chip">1 分 42 秒</span><span class="m-chip">16:11:30</span>
+            </div>
+          </div>
+          <div style="border:1px solid #eaeef2;border-radius:12px;padding:9px 11px;box-shadow:0 1px 3px rgba(0,0,0,.08);font-size:12px;color:#8c959f">
+            输入追问，或描述你想做的事… <span style="float:right;background:#1f2328;color:#fff;border-radius:50%;width:20px;height:20px;display:inline-grid;place-items:center;font-size:10px">↑</span>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="col-head"><b>新方向</b><span>回复是"纸面条目"：宋体结论 + 脚注元信息</span></div>
+        <div class="mini-new">
+          <div class="n-head"><span class="b">AI Copilot</span><span class="d">16:11 · 本轮 1 分 42 秒</span></div>
+          <div class="n-reply">
+            <div class="lead">不追高，维持现有仓位，等回踩再谈。</div>
+            今日组合跑输沪深 300 1.06 个百分点；华东医药权重 36.8% 仍超上限，是今天唯一必须处理的事。
+          </div>
+          <div class="n-meta">信心度 中 · 引用 4 条 · 思考 12 步 · 工具 14 次　　数据口径：日K收盘</div>
+          <div class="n-composer">
+            <span class="ph">输入追问，或描述你想做的事…</span>
+            <span class="send">↑</span>
+          </div>
+          <div class="n-foot"><span>模型：deepseek-flash</span><span>不构成投资建议</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="box" style="margin-top:12px;font-size:12px;line-height:1.8">
+      <b>为什么这样改</b>：现在每条 AI 回复是一个圆角卡片 + 4 个徽章，滚起来像"消息流"；
+      改成纸面条目后，<b>结论用宋体当标题</b>，元信息降为一行脚注，长对话里更容易扫读。
+      输入框去掉圆角边框，改成一条底线——它只是"写字的横线"，不需要再抢一个卡片的视觉重量。
+    </div>
+  </div>
+
+  <!-- ── 持仓 ── -->
+  <div class="page-panel" id="page-holdings">
+    <div class="compare">
+      <div>
+        <div class="col-head"><b>现状</b><span>4 张 KPI 卡 + 面板表格 + 按钮组</span></div>
+        <div class="mini-old">
+          <div class="m-kpis">
+            <div class="m-kpi"><div class="k">总资产</div><div class="v">7,215.53</div></div>
+            <div class="m-kpi"><div class="k">今日</div><div class="v" style="color:#2E7D5B">-47.00</div></div>
+            <div class="m-kpi"><div class="k">现金</div><div class="v">2,962.53</div></div>
+            <div class="m-kpi"><div class="k">最大权重</div><div class="v" style="color:#A8761A">36.8%</div></div>
+          </div>
+          <div class="m-card">
+            <div class="m-row" style="font-size:10.5px;color:#8c959f;border-bottom:1px solid #eaeef2"><span>标的</span><span>现价 / 盈亏 / 权重</span></div>
+            <div class="m-row"><span>华东医药 000963</span><span><b>26.56</b> · <span style="color:#2E7D5B">-18.00</span> · 36.8%</span></div>
+            <div class="m-row"><span>中国电影 600977</span><span><b>15.97</b> · <span style="color:#C0352B">+71.00</span> · 22.1%</span></div>
+            <div style="display:flex;gap:6px;margin-top:8px"><span class="m-chip">校准现金</span><span class="m-chip">资金流水</span><span class="m-chip">+ 新增持仓</span></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="col-head"><b>新方向</b><span>数字行 + 交割单表格，超限行左侧标线</span></div>
+        <div class="mini-new">
+          <div class="n-head"><span class="b">持仓</span><span class="d">收盘后 · 16:11 更新</span></div>
+          <div class="n-nums">
+            <div><div class="k">总资产</div><div class="v">7,215.53</div></div>
+            <div><div class="k">今日</div><div class="v down">-47.00</div></div>
+            <div><div class="k">现金</div><div class="v">2,962.53</div></div>
+            <div><div class="k">最大权重</div><div class="v" style="color:var(--up)">36.8%</div></div>
+          </div>
+          <table class="n-tab">
+            <thead><tr><th>标的</th><th>数量</th><th>成本</th><th>现价</th><th>盈亏</th><th>权重</th><th>备注</th></tr></thead>
+            <tbody>
+              <tr class="alert"><td class="first">华东医药<i>000963</i></td><td>100</td><td>26.74</td><td>26.56</td><td class="down">-18.00</td><td>36.8%</td><td style="color:var(--warn);font-family:var(--sans)">超限 21.8pp</td></tr>
+              <tr><td class="first">中国电影<i>600977</i></td><td>100</td><td>15.26</td><td>15.97</td><td class="up">+71.00</td><td>22.1%</td><td style="color:var(--ink-3);font-family:var(--sans)">超限 7.1pp</td></tr>
+            </tbody>
+          </table>
+          <div class="n-foot">
+            <span>1 笔成交未记录 · <span style="color:var(--accent)">一键补记</span></span>
+            <span>现金 CNY 2,962.53 · USDT 已清</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="box" style="margin-top:12px;font-size:12px;line-height:1.8">
+      <b>为什么这样改</b>：4 个 KPI 卡把"总资产/今日/现金/权重"拆成四个同等视觉重量的盒子，
+      但它们的重要度并不相同。改成一行数字后，<b>今日盈亏和超限权重自然跳出来</b>；
+      权重超限不再靠"红色百分比"，而是<b>整行左侧一道琥珀细线 + 备注列</b>（琥珀是专门的"需要处理"色，不借用涨跌语义），扫一眼就知道哪行有问题。
+    </div>
+  </div>
+
+  <!-- ── 自选 ── -->
+  <div class="page-panel" id="page-watch">
+    <div class="compare">
+      <div>
+        <div class="col-head"><b>现状</b><span>分组 chips + 卡片列表</span></div>
+        <div class="mini-old">
+          <div style="display:flex;gap:6px;margin-bottom:9px"><span class="m-chip" style="background:#1f2328;color:#fff;border-color:#1f2328">全部</span><span class="m-chip">A股</span><span class="m-chip">港股</span><span class="m-chip">加密</span></div>
+          <div class="m-card">
+            <div class="m-row"><span>华东医药 000963</span><span><b>26.56</b> <span style="color:#2E7D5B">-1.15%</span></span></div>
+            <div class="m-row"><span>中国电影 600977</span><span><b>15.97</b> <span style="color:#2E7D5B">-0.99%</span></span></div>
+            <div class="m-row"><span>贵州茅台 600519</span><span><b>1,642.00</b> <span style="color:#C0352B">+0.62%</span></span></div>
+            <div class="m-row"><span>BTC</span><span><b>73,904</b> <span style="color:#2E7D5B">-0.28%</span></span></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="col-head"><b>新方向</b><span>分组是宋体小标，标的是行，不是卡</span></div>
+        <div class="mini-new">
+          <div class="n-head"><span class="b">自选</span><span class="d">4 只 · 更新于 16:11</span></div>
+          <div class="n-sec">A 股</div>
+          <table class="n-tab">
+            <thead><tr><th>标的</th><th>现价</th><th>今日</th><th>成本</th><th>盯盘</th></tr></thead>
+            <tbody>
+              <tr><td class="first">华东医药<i>000963</i></td><td>26.56</td><td class="down">-1.15%</td><td>26.74</td><td style="font-family:var(--sans);color:var(--ink-3)">异动 ±5%</td></tr>
+              <tr><td class="first">中国电影<i>600977</i></td><td>15.97</td><td class="down">-0.99%</td><td>15.26</td><td style="font-family:var(--sans);color:var(--ink-3)">异动 ±4%</td></tr>
+              <tr><td class="first">贵州茅台<i>600519</i></td><td>1,642.00</td><td class="up">+0.62%</td><td>—</td><td style="font-family:var(--sans);color:var(--ink-3)">—</td></tr>
+            </tbody>
+          </table>
+          <div class="n-sec">加密</div>
+          <table class="n-tab">
+            <thead><tr><th>标的</th><th>现价</th><th>今日</th><th>成本</th><th>盯盘</th></tr></thead>
+            <tbody><tr><td class="first">BTC</td><td>73,904</td><td class="down">-0.28%</td><td>—</td><td style="font-family:var(--sans);color:var(--ink-3)">—</td></tr></tbody>
+          </table>
+          <div class="n-foot"><span>行情：日K收盘 / 盘中 60s 轮询</span><span>4 只 · 2 只开盯盘</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="box" style="margin-top:12px;font-size:12px;line-height:1.8">
+      <b>为什么这样改</b>：自选本质是"一张行情表"，现在被拆成 chips + 卡片；
+      改成按分组的小节 + 行式表格后，<b>同一列的数字可以纵向比较</b>（这正是看盘时在做的事），
+      而分组 chip 那种"筛选器长得像标签"的问题也消失了。
+    </div>
+  </div>
+
+  <!-- ── 任务 ── -->
+  <div class="page-panel" id="page-tasks">
+    <div class="compare">
+      <div>
+        <div class="col-head"><b>现状</b><span>卡片列表 + 开关 + 上次结果</span></div>
+        <div class="mini-old">
+          <div class="m-kpis" style="grid-template-columns:repeat(4,1fr)">
+            <div class="m-kpi"><div class="k">总任务</div><div class="v">8</div></div>
+            <div class="m-kpi"><div class="k">运行中</div><div class="v">0</div></div>
+            <div class="m-kpi"><div class="k">已完成</div><div class="v">7</div></div>
+            <div class="m-kpi"><div class="k">失败</div><div class="v">0</div></div>
+          </div>
+          <div class="m-card">
+            <div class="m-row"><span>盘前报告 · 每天 08:30</span><span class="m-chip">成功</span></div>
+            <div class="m-row"><span>盘中报告 · 每天 11:45</span><span class="m-chip">成功</span></div>
+            <div class="m-row"><span>盘后报告 · 每天 16:10</span><span class="m-chip">成功</span></div>
+            <div class="m-row"><span>每日机会发现 · 每天 18:00</span><span class="m-chip">成功</span></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="col-head"><b>新方向</b><span>任务表＝一天的时间表（账本线）</span></div>
+        <div class="mini-new">
+          <div class="n-head"><span class="b">任务</span><span class="d">7/8 启用 · 今天全部完成</span></div>
+          <div class="n-ledger">
+            <div class="n-line"><span class="t">08:30</span><div class="body">盘前报告<div class="sub">隔夜要闻 + 今日重点 · 用时 2 分 13 秒</div></div><span class="n-btn">查看</span></div>
+            <div class="n-line"><span class="t">11:45</span><div class="body">盘中报告<div class="sub">上午总结 + 下午预案 · 用时 1 分 58 秒</div></div><span class="n-btn">查看</span></div>
+            <div class="n-line"><span class="t">16:10</span><div class="body">盘后报告<div class="sub">今日 −0.65% · 权重超限 1 项</div></div><span class="n-btn">查看</span></div>
+            <div class="n-line"><span class="t">18:00</span><div class="body">每日机会发现<div class="sub" style="color:var(--accent)">待生成 · 下一开市日 3–5 个机会</div></div><span class="n-btn go">立即跑</span></div>
+            <div class="n-line"><span class="t">周日</span><div class="body">周度复盘<div class="sub">本周提案命中率 / 账实差异 / 回撤</div></div></div>
+          </div>
+          <div class="n-foot"><span>明天 4 份报告，全部启用</span><span>失败会推送</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="box" style="margin-top:12px;font-size:12px;line-height:1.8">
+      <b>为什么这样改</b>：任务页现在先是 4 个统计卡、再是列表——但用户来这页只想知道"<b>今天几点跑什么、跑完没有</b>"。
+      改成时间表后，"一天"这个结构直接由版式表达，统计数字降级为一行说明。
+    </div>
+  </div>
+
+  <!-- ── 设置 ── -->
+  <div class="page-panel" id="page-settings">
+    <div class="compare">
+      <div>
+        <div class="col-head"><b>现状</b><span>卡片分区 + 表单堆叠</span></div>
+        <div class="mini-old">
+          <div class="m-card">
+            <div style="font-size:12px;font-weight:600;margin-bottom:7px">模型与提供商</div>
+            <div class="m-row"><span>主模型</span><span class="m-chip">deepseek-flash</span></div>
+            <div class="m-row"><span>备用模型</span><span class="m-chip">未配置</span></div>
+          </div>
+          <div class="m-card">
+            <div style="font-size:12px;font-weight:600;margin-bottom:7px">通知</div>
+            <div class="m-row"><span>报告完成推送</span><span class="m-chip">已开</span></div>
+            <div class="m-row"><span>推送渠道</span><span class="m-chip">未绑定</span></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="col-head"><b>新方向</b><span>左目录 + 右表单，行式设置项</span></div>
+        <div class="mini-new">
+          <div class="n-head"><span class="b">设置</span><span class="d">单用户 · 本机</span></div>
+          <div class="n-nav"><b>模型</b><span>数据源</span><span>通知</span><span>工作区</span></div>
+          <div class="n-config">
+            <span class="lbl">主模型</span><span class="val">deepseek-flash<div class="hint">当前会话默认；可被单次会话覆盖</div></span>
+            <span class="lbl">备用模型</span><span class="val" style="color:var(--ink-3)">未配置</span>
+            <span class="lbl">推理强度</span><span class="val">中</span>
+            <span class="lbl">报告推送</span><span class="val">已开启 · <span style="color:var(--accent)">尚未绑定渠道</span><div class="hint">绑定后，报告完成与失败都会推送到手机</div></span>
+          </div>
+          <div class="n-foot"><span>改动即时生效</span><span>配置文件：~/.stockagent/settings.json</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="box" style="margin-top:12px;font-size:12px;line-height:1.8">
+      <b>为什么这样改</b>：设置页的核心是"<b>找到那一项并改掉</b>"。卡片把每项都包成一块，反而增加了横向扫描成本；
+      改成左目录 + 右侧 label/value 两栏后，视线只需要沿一条竖线走。
+      顺带把"报告推送已开但渠道未绑定"这种<b>半配置状态</b>直接写成一句话，而不是两个并列的 chip。
+    </div>
+  </div>
+
+  <div class="sec-title">四、具体改什么（都是呈现层，不动信息架构）</div>
   <table class="doc-tab">
     <thead><tr><th style="width:210px">元素</th><th style="width:250px">现在</th><th>改成</th><th style="width:70px">判断</th></tr></thead>
     <tbody>
@@ -394,7 +697,7 @@
     </tbody>
   </table>
 
-  <div class="sec-title">四、边界与不做什么</div>
+  <div class="sec-title">五、边界与不做什么</div>
   <div class="box" style="font-size:12.5px;line-height:1.85">
     <b>不动</b>：信息架构、路由、三栏骨架、A 股红涨绿跌语义、表格密度、键盘流、宠物浮层。<br>
     <b>不做</b>：换全套字体文件（用系统宋体/黑体，零加载成本）、改暗色主题的整体色相、加装饰性渐变或插图。<br>
@@ -417,8 +720,31 @@
     btn.textContent = dark ? "切换深色" : "切换浅色";
   });
 
+  document.querySelectorAll("#tabs button").forEach((b) => {
+    b.addEventListener("click", () => {
+      document.querySelectorAll("#tabs button").forEach((x) => x.classList.remove("on"));
+      b.classList.add("on");
+      document.querySelectorAll(".page-panel").forEach((p) => p.classList.remove("show"));
+      document.getElementById(`page-${b.dataset.page}`).classList.add("show");
+    });
+  });
+
   // ?full=1 / ?dark=1：放在监听器之后，截图和评审用
   const qs = new URLSearchParams(location.search);
+  const pg = qs.get("page");
+  if (pg) {
+    const tab = document.querySelector(`#tabs button[data-page="${pg}"]`);
+    if (tab) tab.click();
+    if (qs.get("only") === "1") {
+      const doc = document.querySelector(".doc");
+      [...doc.children].forEach((ch) => {
+        const isPageTitle = ch.classList.contains("sec-title") && ch.textContent.includes("其他页面");
+        const keep = ch.id === "tabs" || ch.id === `page-${pg}` || isPageTitle ||
+          ch.tagName === "H1" || ch.classList.contains("sub");
+        if (!keep) ch.style.display = "none";
+      });
+    }
+  }
   if (qs.get("full") === "1") document.getElementById("btn-full").click();
   if (qs.get("dark") === "1") document.getElementById("btn-theme").click();
 })();
