@@ -6729,3 +6729,15 @@ html.pet-window-root body { margin: 0; }
 }
 .watch-group-title .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
 .watch-group-n { font-family: var(--mono); font-size: 11px; color: var(--faint); font-weight: 400; }
+
+/* ═══ 字号/行高对齐原型（原型：行高 44、表格 13.5、KPI 20）═══ */
+.data-table td { height: 44px; font-size: 13.5px; padding-left: 12px; padding-right: 12px; }
+.data-table th { font-size: 11px; padding: 8px 12px; letter-spacing: .01em; }
+.data-table td.num { font-size: 13.5px; }
+.page-kpis .kpi-item .k { font-size: 11px; }
+.page-kpis .kpi-item .v { font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
+/* 表格里的标的：原型是"名称 + 代码"两行文字，没有彩色图标块 */
+.data-table .stock-icon { display: none; }
+.data-table .stock-info { display: block; }
+.data-table .stock-name { font-size: 13.5px; font-weight: 500; }
+.data-table .stock-code { font-size: 11px; color: var(--muted); font-family: var(--mono); }
