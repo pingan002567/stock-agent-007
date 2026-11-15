@@ -129,43 +129,6 @@ export default function Overview() {
             actions={<AskAiButton prompt="今天我的组合表现如何?有什么需要关注的风险或机会?" />}
           />
 
-          {/* 头条：全页唯一"响亮"的地方——一句话结论 + 三个数字 */}
-          {(() => {
-            const conclusion = stripInlineMarkdown(
-              data.latest_ops_briefing?.conclusion || data.latest_discovery_briefing?.conclusion || "",
-            );
-            const pf = perf?.portfolio;
-            const dayPnl = pf?.day_pnl;
-            const dayCls = dayPnl == null ? "" : dayPnl > 0 ? "up" : dayPnl < 0 ? "down" : "";
-            return (
-              <div className="page-lead">
-                <div className="lead-main">
-                  <h2 className="lead-title">{conclusion || "今天先看清数据，再决定动不动。"}</h2>
-                </div>
-                <div className="lead-nums">
-                  <div className="lead-num">
-                    <span className="k">净值</span>
-                    <b className="v">{marketMoney(pf?.nav ?? data.portfolio_summary?.total_value, "CN")}</b>
-                  </div>
-                  <div className="lead-num">
-                    <span className="k">今日</span>
-                    <b className={`v ${dayCls}`}>
-                      {dayPnl == null ? "—" : `${dayPnl > 0 ? "+" : ""}${marketMoney(dayPnl ?? undefined, "CN")}`}
-                    </b>
-                    <span className={`d ${dayCls}`}>
-                      {pf?.day_return_pct == null ? "未更新" : `${pf.day_return_pct > 0 ? "+" : ""}${pf.day_return_pct}%`}
-                    </span>
-                  </div>
-                  <div className="lead-num">
-                    <span className="k">可用</span>
-                    <b className="v">{marketMoney(pf?.cash ?? data.portfolio_summary?.available_cash ?? undefined, "CN")}</b>
-                    <span className="d">{pf?.cash_pct == null ? "" : `${pf.cash_pct}%`}</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-
           {/* 参照 + 待你决定（对应原型右栏） */}
           {(() => {
             const bms = perf?.benchmarks ?? [];

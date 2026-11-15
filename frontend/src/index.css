@@ -6760,3 +6760,15 @@ html.pet-window-root body { margin: 0; }
 }
 /* 页面直接挂在 .func-body 下时同理 */
 .func-body > .page-stack { min-height: 0; }
+
+
+/* 报头压成一行，不再占一块空白 */
+.page-head { align-items: flex-start; row-gap: 8px; }
+.page-dateline {
+  flex: 1 1 100%;
+  order: -1;
+  margin-bottom: 2px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.page-kpis { align-items: flex-end; }
