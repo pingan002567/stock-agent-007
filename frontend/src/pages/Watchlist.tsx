@@ -35,6 +35,7 @@ export default function Watchlist() {
     setCurrentScreen("research");
   };
   const [items, setItems] = useState<WatchlistItem[]>([]);
+  const [costMap, setCostMap] = useState<Map<string, number>>(new Map());
   const [, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
@@ -101,6 +102,14 @@ export default function Watchlist() {
       appDataCache.current.watchlist = response; // eslint-disable-line react-hooks/immutability
       const gs = await apiGet<WatchlistGroup[]>("/api/watchlist/groups").catch(() => [] as WatchlistGroup[]);
       setGroups(gs);
+      // 成本只来自持仓；未持有的标的显示「—」，不编造
+      const hld = await apiGet<{ items?: Array<{ symbol: string; cost?: number | null }> }>("/api/holdings")
+        .catch(() => ({ items: [] }));
+      const cm = new Map<string, number>();
+      for (const h of hld.items ?? []) {
+        if (h.cost != null) cm.set(h.symbol, h.cost);
+      }
+      setCostMap(cm);
     } catch (err) { setError(err instanceof Error ? err.message : "加载自选失败"); } finally { setLoading(false); }
   };
 
@@ -245,72 +254,87 @@ export default function Watchlist() {
             </div>
           </div>
           <div className="panel-body" style={{ padding: 0 }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>标的</th>
-                  <th className="num">现价</th>
-                  <th className="num">涨跌幅</th>
-                  <th>分组</th>
-                  <th>盯盘</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredItems.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} style={{ padding: 28, textAlign: "center" }}>
-                      <div className="muted" style={{ fontSize: 13 }}>还没有自选股</div>
-                      <div className="muted" style={{ fontSize: 12, marginTop: 6, lineHeight: 18 }}>
-                        去「个股」页搜索并点「☆ 添加自选」；也可以在对话里让 Agent 帮你挑几只。
-                      </div>
-                      <button
-                        className="small"
-                        type="button"
-                        style={{ marginTop: 12 }}
-                        onClick={() => setCurrentScreen("research")}
-                      >
-                        去个股页添加
-                      </button>
-                    </td>
-                  </tr>
-                ) : filteredItems.map((item) => {
-                  const cp = item.price?.change_pct ?? 0;
-                  const market = inferMarket(item.symbol, item.market);
-                  return (
-                    <tr key={item.symbol} className="row" style={{ cursor: "pointer" }} onClick={() => openStock(item.symbol)}>
-                      <td>
-                        <div className="stock-info">
-                          <div className="stock-icon default">{stockInitial(item.name, item.symbol)}</div>
-                          <div>
-                            <div className="stock-name">
-                              {item.name ?? item.symbol}
-                              <span className={`mkt-badge mkt-${market}`}>{market}</span>
-                            </div>
-                            <div className="stock-code">{item.symbol}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="price-value num">{item.price?.last != null ? marketMoney(item.price.last, market) : "-"}</td>
-                      <td className={`num ${changeCls(cp)}`}>{pct(cp)}</td>
-                      <td className="muted">{item.group ?? "默认"}</td>
-                      <td>
-                        <span
-                          className={`watch-monitor${item.monitored ? " on" : ""}`}
-                          title={item.monitored ? "点击关闭盯盘" : "点击开启盯盘"}
-                          onClick={(ev) => { ev.stopPropagation(); void handleToggleMonitor(item.symbol); }}
-                        >
-                          <i aria-hidden />{item.monitored ? "开启" : "关闭"}
-                        </span>
-                      </td>
-                      <td>
-                        <button className="small" style={{ color: "var(--red)" }} onClick={(ev) => { ev.stopPropagation(); void handleRemove(item.symbol); }} type="button">删除</button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            {(() => {
+              // 按分组分节：每组一张表（原型：分组是宋体小标，标的是行）
+              const order = ["默认", ...groups.map((g) => g.name)];
+              const buckets = new Map<string, typeof filteredItems>();
+              for (const it of filteredItems) {
+                const g = it.group && it.group.length > 0 ? it.group : "默认";
+                if (!buckets.has(g)) buckets.set(g, []);
+                buckets.get(g)!.push(it);
+              }
+              const keys = [...buckets.keys()].sort(
+                (a, b) => (order.indexOf(a) < 0 ? 99 : order.indexOf(a)) - (order.indexOf(b) < 0 ? 99 : order.indexOf(b)),
+              );
+              if (filteredItems.length === 0) {
+                return (
+                  <div className="empty-state" style={{ padding: "32px 16px" }}>
+                    <div className="empty-title">还没有自选</div>
+                    <div className="empty-desc">去「个股」页搜索后点「☆ 添加自选」；也可以在对话里让 Agent 帮你挑几只。</div>
+                    <button className="small" type="button" onClick={() => setCurrentScreen("research")}>去个股页添加</button>
+                  </div>
+                );
+              }
+              return keys.map((g) => (
+                <div className="watch-group" key={g}>
+                  <div className="watch-group-title">
+                    <span className="dot" style={{ background: groups.find((x) => x.name === g)?.color ?? "var(--line)" }} />
+                    {g}
+                    <span className="watch-group-n">{buckets.get(g)!.length}</span>
+                  </div>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>标的</th>
+                        <th className="num">现价</th>
+                        <th className="num">今日</th>
+                        <th className="num">成本</th>
+                        <th>盯盘</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {buckets.get(g)!.map((item) => {
+                        const cp = item.price?.change_pct ?? 0;
+                        const market = inferMarket(item.symbol, item.market);
+                        const cost = costMap.get(item.symbol);
+                        return (
+                          <tr key={item.symbol} className="row" style={{ cursor: "pointer" }} onClick={() => openStock(item.symbol)}>
+                            <td>
+                              <div className="stock-info">
+                                <div className="stock-icon default">{stockInitial(item.name, item.symbol)}</div>
+                                <div>
+                                  <div className="stock-name">
+                                    {item.name ?? item.symbol}
+                                    <span className={`mkt-badge mkt-${market}`}>{market}</span>
+                                  </div>
+                                  <div className="stock-code">{item.symbol}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="price-value num">{item.price?.last != null ? marketMoney(item.price.last, market) : "-"}</td>
+                            <td className={`num ${changeCls(cp)}`}>{pct(cp)}</td>
+                            <td className="num muted">{cost == null ? "—" : marketMoney(cost, market)}</td>
+                            <td>
+                              <span
+                                className={`watch-monitor${item.monitored ? " on" : ""}`}
+                                title={item.monitored ? "点击关闭盯盘" : "点击开启盯盘"}
+                                onClick={(ev) => { ev.stopPropagation(); void handleToggleMonitor(item.symbol); }}
+                              >
+                                <i aria-hidden />{item.monitored ? "开启" : "关闭"}
+                              </span>
+                            </td>
+                            <td>
+                              <button className="small" style={{ color: "var(--red)" }} onClick={(ev) => { ev.stopPropagation(); void handleRemove(item.symbol); }} type="button">删除</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ));
+            })()}
             <div className="table-foot">
               <span>行情：日K收盘 · 盘中 60s 轮询</span>
               <span>{filteredItems.length} 只 · {items.filter((i) => i.monitored).length} 只开盯盘</span>

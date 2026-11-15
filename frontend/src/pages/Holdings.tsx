@@ -188,6 +188,7 @@ export default function Holdings() {
   // Primary data
   const [holdings, setHoldings] = useState<HoldingsResponse | null>(null);
   const [risk, setRisk] = useState<HoldingsRiskResponse | null>(null);
+  const [perf, setPerf] = useState<{ portfolio?: { day_pnl?: number | null; day_return_pct?: number | null; cash?: number } } | null>(null);
 
   // UI state
   const [loading, setLoading] = useState(true);
@@ -207,10 +208,14 @@ export default function Holdings() {
     if (!hasData) setLoading(true);
     setError(null);
     try {
-      const [hld, rsk] = await Promise.allSettled([
+      const [hld, rsk, pf] = await Promise.allSettled([
         apiGet<HoldingsResponse>("/api/holdings"),
         apiGet<HoldingsRiskResponse>("/api/holdings/risk"),
+        apiGet<{ portfolio?: { day_pnl?: number | null; day_return_pct?: number | null; cash?: number } }>(
+          "/api/holdings/performance",
+        ),
       ]);
+      if (pf.status === "fulfilled") setPerf(pf.value);
 
       if (hld.status === "fulfilled") {
         setHoldings(hld.value);
@@ -307,6 +312,14 @@ export default function Holdings() {
             { label: "总资产（折合）", value: money(holdings?.summary?.total_value ?? undefined),
               hint: holdings?.summary?.total_value == null ? "无当日汇率，暂不折算" : undefined,
               prompt: "我的持仓总资产构成如何?分币种分别是多少?" },
+            { label: "今日", value: perf?.portfolio?.day_pnl == null
+                ? "—"
+                : `${perf.portfolio.day_pnl > 0 ? "+" : ""}${money(perf.portfolio.day_pnl)}`,
+              tone: (perf?.portfolio?.day_pnl ?? 0) > 0 ? "up" : (perf?.portfolio?.day_pnl ?? 0) < 0 ? "down" : undefined,
+              hint: perf?.portfolio?.day_return_pct == null
+                ? undefined
+                : `${perf.portfolio.day_return_pct > 0 ? "+" : ""}${perf.portfolio.day_return_pct}%`,
+              prompt: "今天我的持仓为什么涨/跌?主要贡献来自哪只?" },
             { label: "持仓", value: `${holdings?.summary?.positions ?? holdings?.items.length ?? 0} 只` },
             { label: "最大权重", value: holdings?.summary?.converted === false
                 ? "—"
